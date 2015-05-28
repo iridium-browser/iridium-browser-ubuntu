@@ -24,6 +24,7 @@ except ImportError:
 from chromite.cbuildbot import constants
 from chromite.lib import retry_stats
 from chromite.lib import clactions
+from chromite.lib import factory
 
 CIDB_MIGRATIONS_DIR = os.path.join(constants.CHROMITE_DIR, 'cidb',
                                    'migrations')
@@ -497,6 +498,9 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
       'SELECT c.id, b.id, action, c.reason, build_config, '
       'change_number, patch_number, change_source, timestamp FROM '
       'clActionTable c JOIN buildTable b ON build_id = b.id ')
+  _DATE_FORMAT = '%Y-%m-%d'
+
+  NUM_RESULTS_NO_LIMIT = -1
 
   def __init__(self, db_credentials_dir):
     super(CIDBConnection, self).__init__('cidb', CIDB_MIGRATIONS_DIR,
@@ -618,7 +622,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
                                             'status': status})
 
   @minimum_schema(29)
-  def InsertFailure(self, build_stage_id, exception,
+  def InsertFailure(self, build_stage_id, exception_type, exception_message,
                     exception_category=constants.EXCEPTION_CATEGORY_UNKNOWN,
                     outer_failure_id=None,
                     extra_info=None):
@@ -627,7 +631,8 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     Args:
       build_stage_id: primary key, in buildStageTable, of the stage where
                       failure occured.
-      exception: Exception instance that occured.
+      exception_type: str name of the exception class.
+      exception_message: str description of the failure.
       exception_category: (Optional) one of
                           constants.EXCEPTION_CATEGORY_ALL_CATEGORIES,
                           Default: 'unknown'.
@@ -637,13 +642,14 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
       extra_info: (Optional) extra category-specific string description giving
                   failure details. Used for programmatic triage.
     """
+    if exception_message:
+      exception_message = exception_message[:240]
     values = {'build_stage_id': build_stage_id,
-              'exception_type': type(exception).__name__,
-              'exception_message': exception.message,
+              'exception_type': exception_type,
+              'exception_message': exception_message,
               'exception_category': exception_category,
               'outer_failure_id': outer_failure_id,
               'extra_info': extra_info}
-
     return self._Insert('failureTable', values)
 
   @minimum_schema(2)
@@ -795,11 +801,11 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
       build_id: build id to fetch.
 
     Returns:
-      A dictionary with keys (id, build_config, start_time, finish_time,
-      status, waterfall, build_number, builder_name), or None if no build
-      with this id was found.
+      Dictionary for a single build (see GetBuildStatuses for keys) or
+      None if no build with this id was found.
     """
-    return self.GetBuildStatuses([build_id])[0]
+    statuses = self.GetBuildStatuses([build_id])
+    return statuses[0] if statuses else None
 
   @minimum_schema(2)
   def GetBuildStatuses(self, build_ids):
@@ -810,14 +816,14 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
 
     Returns:
       A list of dictionary with keys (id, build_config, start_time,
-      finish_time, status, waterfall, build_number, builder_name), or
-      None if no build with this id was found.
+      finish_time, status, waterfall, build_number, builder_name, full_version),
+      or None if no build with this id was found.
     """
     return self._SelectWhere(
         'buildTable',
         'id IN (%s)' % ','.join(str(x) for x in build_ids),
         ['id', 'build_config', 'start_time', 'finish_time', 'status',
-         'waterfall', 'build_number', 'builder_name'])
+         'waterfall', 'build_number', 'builder_name', 'full_version'])
 
   @minimum_schema(2)
   def GetSlaveStatuses(self, master_build_id):
@@ -869,26 +875,90 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     return 0 if deadline_past else abs(time_remaining.total_seconds())
 
   @minimum_schema(2)
-  def GetLastBuildStatuses(self, build_config, number):
+  def GetBuildHistory(self, build_config, num_results,
+                      ignore_build_id=None, start_date=None, end_date=None,
+                      starting_build_number=None):
     """Returns basic information about most recent builds.
+
+    By default this function returns the most recent builds. Some arguments can
+    restrict the result to older builds.
 
     Args:
       build_config: config name of the build.
-      number: number of builds to search back.
+      num_results: Number of builds to search back. Set this to
+          CIDBConnection.NUM_RESULTS_NO_LIMIT to request no limit on the number
+          of results.
+      ignore_build_id: (Optional) Ignore a specific build. This is most useful
+          to ignore the current build when querying recent past builds from a
+          build in flight.
+      start_date: (Optional, type: datetime.date) Get builds that occured on or
+          after this date.
+      end_date: (Optional, type:datetime.date) Get builds that occured on or
+          before this date.
+      starting_build_number: (Optional) The minimum build_number on the CQ
+          master for which data should be retrieved.
 
     Returns:
       A sorted list of dicts containining up to |number| dictionaries for
-      build statuses in descending order. Dictionaries contain
-      id, build_config, start_time, finish_time, full_version and status.
+      build statuses in descending order. Valid keys in the dictionary are
+      [id, build_config, buildbot_generation, waterfall, build_number,
+      start_time, finish_time, full_version, status].
     """
-    results = self._Execute(
-        'SELECT id, build_config, start_time, finish_time, full_version, status'
+    columns = ['id', 'build_config', 'buildbot_generation', 'waterfall',
+               'build_number', 'start_time', 'finish_time', 'full_version',
+               'status']
+
+    where_clauses = ['build_config = "%s"' % build_config]
+    if start_date is not None:
+      where_clauses.append('date(start_time) >= date("%s")' %
+                           start_date.strftime(self._DATE_FORMAT))
+    if end_date is not None:
+      where_clauses.append('date(start_time) <= date("%s")' %
+                           end_date.strftime(self._DATE_FORMAT))
+    if starting_build_number is not None:
+      where_clauses.append('build_number >= %d' % starting_build_number)
+    if ignore_build_id is not None:
+      where_clauses.append('id != %s' % ignore_build_id)
+    query = (
+        'SELECT %s'
         ' FROM buildTable'
-        ' WHERE build_config = "%s"'
-        ' ORDER BY id DESC LIMIT %d' % (build_config, number)).fetchall()
-    columns = ['id', 'build_config', 'start_time', 'finish_time',
-               'full_version', 'status']
+        ' WHERE %s'
+        ' ORDER BY id DESC' %
+        (', '.join(columns), ' AND '.join(where_clauses)))
+    if num_results != self.NUM_RESULTS_NO_LIMIT:
+      query += ' LIMIT %d' % num_results
+
+    results = self._Execute(query).fetchall()
     return [dict(zip(columns, values)) for values in results]
+
+  @minimum_schema(26)
+  def GetAnnotationsForBuilds(self, build_ids):
+    """Returns the annotations for given build_ids.
+
+    Args:
+      build_ids: list of build_ids for which annotations are requested.
+
+    Returns:
+      {id: annotations} where annotations is itself a list of dicts containing
+      annotations. Valid keys in annotations are [failure_category,
+      failure_message, blame_url, notes].
+    """
+    columns_to_report = ['failure_category', 'failure_message',
+                         'blame_url', 'notes']
+    where_or_clauses = []
+    for build_id in build_ids:
+      where_or_clauses.append('build_id = %s' % build_id)
+    annotations = self._SelectWhere('annotationsTable',
+                                    ' OR '.join(where_or_clauses),
+                                    ['build_id'] + columns_to_report)
+
+    results = {}
+    for annotation in annotations:
+      build_id = annotation['build_id']
+      if build_id not in results:
+        results[build_id] = []
+      results[build_id].append(annotation)
+    return results
 
   @minimum_schema(11)
   def GetActionsForChanges(self, changes):
@@ -930,16 +1000,18 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     outside the time range.
 
     Args:
-      start_date: The first date on which you want action history.
-      end_date: The last date on which you want action history.
+      start_date: (Type: datetime.date) The first date on which you want action
+          history.
+      end_date: (Type: datetime.date) The last date on which you want action
+          history.
     """
-    values = {'start_date': str(start_date),
-              'end_date': str(end_date)}
+    values = {'start_date': start_date.strftime(self._DATE_FORMAT),
+              'end_date': end_date.strftime(self._DATE_FORMAT)}
 
     # Enforce start and end date.
-    conds = 'timestamp >= %(start_date)s'
+    conds = 'DATE(timestamp) >= %(start_date)s'
     if end_date:
-      conds += ' AND timestamp <= %(end_date)s'
+      conds += ' AND DATE(timestamp) <= %(end_date)s'
 
     changes = ('SELECT DISTINCT change_number, patch_number, change_source '
                'FROM clActionTable WHERE %s' % conds)
@@ -947,84 +1019,106 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     results = self._Execute(query, values).fetchall()
     return [clactions.CLAction(*values) for values in results]
 
+  @minimum_schema(29)
+  def HasBuildStageFailed(self, build_stage_id):
+    """Determine whether a build stage has failed according to cidb.
 
-class CIDBConnectionFactory(object):
+    Args:
+      build_stage_id: The id of the build_stage to query for.
+
+    Returns:
+      True if there is a failure reported for this build stage to cidb.
+    """
+    failures = self._SelectWhere('failureTable',
+                                 'build_stage_id = %s' % build_stage_id,
+                                 ['id'])
+    return bool(failures)
+
+
+def _INV():
+  raise AssertionError('CIDB connection factory has been invalidated.')
+
+CONNECTION_TYPE_PROD = 'prod'   # production database
+CONNECTION_TYPE_DEBUG = 'debug' # debug database, used by --debug builds
+CONNECTION_TYPE_MOCK = 'mock'   # mock connection, not backed by database
+CONNECTION_TYPE_NONE = 'none'   # explicitly no connection
+CONNECTION_TYPE_INV = 'invalid' # invalidated connection
+
+class CIDBConnectionFactoryClass(factory.ObjectFactory):
   """Factory class used by builders to fetch the appropriate cidb connection"""
 
-  # A call to one of the Setup methods below is necessary before using the
-  # GetCIDBConnectionForBuilder Factory. This ensures that unit tests do not
-  # accidentally use one of the live database instances.
+  _CIDB_CONNECTION_TYPES = {
+      CONNECTION_TYPE_PROD: factory.CachedFunctionCall(
+          lambda: CIDBConnection(constants.CIDB_PROD_BOT_CREDS)),
+      CONNECTION_TYPE_DEBUG: factory.CachedFunctionCall(
+          lambda: CIDBConnection(constants.CIDB_DEBUG_BOT_CREDS)),
+      CONNECTION_TYPE_MOCK: None,
+      CONNECTION_TYPE_NONE: lambda: None,
+      CONNECTION_TYPE_INV: _INV,
+      }
 
-  _ConnectionIsSetup = False
-  _ConnectionType = None
-  _ConnectionCredsPath = None
-  _MockCIDB = None
-  _CachedCIDB = None
+  def _allowed_cidb_transition(self, from_setup, to_setup):
+    # Always allow factory to be invalidated.
+    if to_setup == CONNECTION_TYPE_INV:
+      return True
 
-  _CONNECTION_TYPE_PROD = 'prod'   # production database
-  _CONNECTION_TYPE_DEBUG = 'debug' # debug database, used by --debug builds
-  _CONNECTION_TYPE_MOCK = 'mock'   # mock connection, not backed by database
-  _CONNECTION_TYPE_NONE = 'none'   # explicitly no connection
-  _CONNECTION_TYPE_INV = 'invalid' # invalidated connection
+    # Allow transition invalid - > mock
+    if from_setup == CONNECTION_TYPE_INV and to_setup == CONNECTION_TYPE_MOCK:
+      return True
 
+    # Otherwise, only allow transitions between none -> none, mock -> mock, and
+    # mock -> none.
+    if from_setup == CONNECTION_TYPE_MOCK:
+      if to_setup in (CONNECTION_TYPE_NONE, CONNECTION_TYPE_MOCK):
+        return True
+    if from_setup == CONNECTION_TYPE_NONE and to_setup == from_setup:
+      return True
+    return False
 
-  @classmethod
-  def IsCIDBSetup(cls):
+  def __init__(self):
+    super(CIDBConnectionFactoryClass, self).__init__(
+        'cidb connection', self._CIDB_CONNECTION_TYPES,
+        self._allowed_cidb_transition)
+
+  def IsCIDBSetup(self):
     """Returns True iff GetCIDBConnectionForBuilder is ready to be called."""
-    return cls._ConnectionIsSetup
+    return self.is_setup
 
-  @classmethod
-  def GetCIDBConnectionType(cls):
+  def GetCIDBConnectionType(self):
     """Returns the type of db connection that is set up.
 
     Returns:
       One of ('prod', 'debug', 'mock', 'none', 'invalid', None)
     """
-    return cls._ConnectionType
+    return self.setup_type
 
-  @classmethod
-  def InvalidateCIDBSetup(cls):
+  def InvalidateCIDBSetup(self):
     """Invalidate the CIDB connection factory.
 
     This method may be called at any time, even after a setup method. Once
     this is called, future calls to GetCIDBConnectionForBuilder will raise
     an assertion error.
     """
-    cls._ConnectionType = cls._CONNECTION_TYPE_INV
-    cls._CachedCIDB = None
+    self.Setup(CONNECTION_TYPE_INV)
 
-  @classmethod
-  def SetupProdCidb(cls):
+  def SetupProdCidb(self):
     """Sets up CIDB to use the prod instance of the database.
 
     May be called only once, and may not be called after any other CIDB Setup
     method, otherwise it will raise an AssertionError.
     """
-    assert not cls._ConnectionIsSetup, 'CIDB is already set up.'
-    assert not cls._ConnectionType == cls._CONNECTION_TYPE_MOCK, (
-        'CIDB set for mock use.')
-    cls._ConnectionType = cls._CONNECTION_TYPE_PROD
-    cls._ConnectionCredsPath = constants.CIDB_PROD_BOT_CREDS
-    cls._ConnectionIsSetup = True
+    self.Setup(CONNECTION_TYPE_PROD)
 
 
-  @classmethod
-  def SetupDebugCidb(cls):
+  def SetupDebugCidb(self):
     """Sets up CIDB to use the debug instance of the database.
 
     May be called only once, and may not be called after any other CIDB Setup
     method, otherwise it will raise an AssertionError.
     """
-    assert not cls._ConnectionIsSetup, 'CIDB is already set up.'
-    assert not cls._ConnectionType == cls._CONNECTION_TYPE_MOCK, (
-        'CIDB set for mock use.')
-    cls._ConnectionType = cls._CONNECTION_TYPE_DEBUG
-    cls._ConnectionCredsPath = constants.CIDB_DEBUG_BOT_CREDS
-    cls._ConnectionIsSetup = True
+    self.Setup(CONNECTION_TYPE_DEBUG)
 
-
-  @classmethod
-  def SetupMockCidb(cls, mock_cidb=None):
+  def SetupMockCidb(self, mock_cidb=None):
     """Sets up CIDB to use a mock object. May be called more than once.
 
     Args:
@@ -1033,45 +1127,25 @@ class CIDBConnectionFactory(object):
                  considered not set up, but future calls to set up a
                  non-(mock or None) connection will fail.
     """
-    if cls._ConnectionIsSetup:
-      assert cls._ConnectionType == cls._CONNECTION_TYPE_MOCK, (
-          'A non-mock CIDB is already set up.')
-    cls._ConnectionType = cls._CONNECTION_TYPE_MOCK
-    if mock_cidb:
-      cls._ConnectionIsSetup = True
-      cls._MockCIDB = mock_cidb
+    self.Setup(CONNECTION_TYPE_MOCK, mock_cidb)
 
-
-  @classmethod
-  def SetupNoCidb(cls):
+  def SetupNoCidb(self):
     """Sets up CIDB to use an explicit None connection.
 
     May be called more than once, or after SetupMockCidb.
     """
-    if cls._ConnectionIsSetup:
-      assert (cls._ConnectionType == cls._CONNECTION_TYPE_MOCK or
-              cls._ConnectionType == cls._CONNECTION_TYPE_NONE), (
-                  'A non-mock CIDB is already set up.')
-    cls._ConnectionType = cls._CONNECTION_TYPE_NONE
-    cls._ConnectionIsSetup = True
+    self.Setup(CONNECTION_TYPE_NONE)
 
-
-  @classmethod
-  def ClearMock(cls):
+  def ClearMock(self):
     """Clear a mock CIDB object.
 
     This method clears a cidb mock object, but leaves the connection factory
     in _CONNECTION_TYPE_MOCK, so that future calls to set up a non-mock
     cidb will fail.
     """
-    assert cls._ConnectionType == cls._CONNECTION_TYPE_MOCK, (
-        'CIDB is not set for mock use.')
-    cls._ConnectionIsSetup = False
-    cls._MockCIDB = None
+    self.SetupMockCidb()
 
-
-  @classmethod
-  def GetCIDBConnectionForBuilder(cls):
+  def GetCIDBConnectionForBuilder(self):
     """Get a CIDBConnection.
 
     A call to one of the CIDB Setup methods must have been made before calling
@@ -1083,25 +1157,10 @@ class CIDBConnectionFactory(object):
       Setup method was called. Returns None if CIDB has been explicitly
       set up for that using SetupNoCidb.
     """
-    assert cls._ConnectionIsSetup, 'CIDB has not be set up with a Setup call.'
-    assert cls._ConnectionType != cls._CONNECTION_TYPE_INV, (
-        'CIDB Connection factory has been invalidated.')
-    if cls._ConnectionType == cls._CONNECTION_TYPE_MOCK:
-      return cls._MockCIDB
-    elif cls._ConnectionType == cls._CONNECTION_TYPE_NONE:
-      return None
-    else:
-      if not cls._CachedCIDB:
-        cls._CachedCIDB = CIDBConnection(cls._ConnectionCredsPath)
-      return cls._CachedCIDB
+    return self.GetInstance()
 
-  @classmethod
-  def _ClearCIDBSetup(cls):
+  def _ClearCIDBSetup(self):
     """Clears the CIDB Setup state. For testing purposes only."""
-    cls._ConnectionIsSetup = False
-    cls._ConnectionType = None
-    cls._ConnectionCredsPath = None
-    cls._MockCIDB = None
-    cls._CachedCIDB = None
+    self._clear_setup()
 
-
+CIDBConnectionFactory = CIDBConnectionFactoryClass()

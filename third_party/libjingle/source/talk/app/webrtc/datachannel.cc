@@ -1,6 +1,6 @@
 /*
  * libjingle
- * Copyright 2012, Google Inc.
+ * Copyright 2012 Google Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -24,6 +24,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 #include "talk/app/webrtc/datachannel.h"
 
 #include <string>
@@ -329,8 +330,8 @@ void DataChannel::OnDataReceived(cricket::DataChannel* channel,
   if (was_ever_writable_ && observer_) {
     observer_->OnMessage(*buffer.get());
   } else {
-    if (queued_received_data_.byte_count() + payload.length() >
-            kMaxQueuedReceivedDataBytes) {
+    if (queued_received_data_.byte_count() + payload.size() >
+        kMaxQueuedReceivedDataBytes) {
       LOG(LS_ERROR) << "Queued received data exceeds the max buffer size.";
 
       queued_received_data_.Clear();

@@ -36,7 +36,6 @@ class ClientSocketFactory;
 class ClientSocketPoolManager;
 class CTVerifier;
 class HostResolver;
-class HpackHuffmanAggregator;
 class HttpAuthHandlerFactory;
 class HttpNetworkSessionPeer;
 class HttpProxyClientSocketPool;
@@ -79,7 +78,6 @@ class NET_EXPORT HttpNetworkSession
     base::WeakPtr<HttpServerProperties> http_server_properties;
     NetLog* net_log;
     HostMappingRules* host_mapping_rules;
-    bool enable_ssl_connect_job_waiting;
     bool ignore_certificate_errors;
     bool use_stale_while_revalidate;
     uint16 testing_fixed_http_port;
@@ -113,13 +111,17 @@ class NET_EXPORT HttpNetworkSession
     double alternate_protocol_probability_threshold;
 
     bool enable_quic;
+    bool enable_quic_for_proxies;
     bool enable_quic_port_selection;
     bool quic_always_require_handshake_confirmation;
     bool quic_disable_connection_pooling;
-    int quic_load_server_info_timeout_ms;
-    bool quic_disable_loading_server_info_for_new_servers;
     float quic_load_server_info_timeout_srtt_multiplier;
-    bool quic_enable_truncated_connection_ids;
+    bool quic_enable_connection_racing;
+    bool quic_enable_non_blocking_io;
+    bool quic_disable_disk_cache;
+    int quic_max_number_of_lossy_connections;
+    float quic_packet_loss_threshold;
+    int quic_socket_receive_buffer_size;
     HostPortPair origin_to_force_quic_on;
     QuicClock* quic_clock;  // Will be owned by QuicStreamFactory.
     QuicRandom* quic_random;
@@ -184,9 +186,6 @@ class NET_EXPORT HttpNetworkSession
   NetLog* net_log() {
     return net_log_;
   }
-  HpackHuffmanAggregator* huffman_aggregator() {
-    return huffman_aggregator_.get();
-  }
 
   // Creates a Value summary of the state of the socket pools. The caller is
   // responsible for deleting the returned value.
@@ -242,9 +241,6 @@ class NET_EXPORT HttpNetworkSession
   scoped_ptr<HttpStreamFactory> http_stream_factory_;
   scoped_ptr<HttpStreamFactory> http_stream_factory_for_websocket_;
   std::set<HttpResponseBodyDrainer*> response_drainers_;
-
-  // TODO(jgraettinger): Remove when Huffman collection is complete.
-  scoped_ptr<HpackHuffmanAggregator> huffman_aggregator_;
 
   NextProtoVector next_protos_;
   bool enabled_protocols_[NUM_VALID_ALTERNATE_PROTOCOLS];

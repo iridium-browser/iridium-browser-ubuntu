@@ -9,7 +9,7 @@
 #include "base/process/process_handle.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_listener.h"
-#include "mojo/edk/embedder/scoped_platform_handle.h"
+#include "third_party/mojo/src/mojo/edk/embedder/scoped_platform_handle.h"
 
 namespace IPC {
 
@@ -45,6 +45,9 @@ class IPC_MOJO_EXPORT MojoBootstrap : public Listener {
 
   // Start the handshake over the underlying platform channel.
   bool Connect();
+
+  // GetSelfPID returns the PID associated with |channel_|.
+  base::ProcessId GetSelfPID() const;
 
   // Each client should call this once the process handle becomes known.
   virtual void OnClientLaunched(base::ProcessHandle process) = 0;

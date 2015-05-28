@@ -55,7 +55,7 @@ typedef EventSender<HTMLLinkElement> LinkEventSender;
 // sticking current way so far.
 //
 class LinkStyle final : public LinkResource, ResourceOwner<StyleSheetResource> {
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(LinkStyle);
 public:
     static PassOwnPtrWillBeRawPtr<LinkStyle> create(HTMLLinkElement* owner);
 
@@ -66,10 +66,10 @@ public:
     virtual void process() override;
     virtual void ownerRemoved() override;
     virtual bool hasLoaded() const override { return m_loadedSheet; }
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     void startLoadingDynamicSheet();
-    void notifyLoadedSheetAndAllCriticalSubresources(bool errorOccurred);
+    void notifyLoadedSheetAndAllCriticalSubresources(Node::LoadedSheetErrorStatus);
     bool sheetLoaded();
 
     void setDisabledState(bool);
@@ -104,12 +104,20 @@ private:
     void removePendingSheet();
     Document& document();
 
+    void setCrossOriginStylesheetStatus(CSSStyleSheet*);
+    void setFetchFollowingCORS()
+    {
+        ASSERT(!m_fetchFollowingCORS);
+        m_fetchFollowingCORS = true;
+    }
+
     RefPtrWillBeMember<CSSStyleSheet> m_sheet;
     DisabledState m_disabledState;
     PendingSheetType m_pendingSheetType;
     bool m_loading;
     bool m_firedLoad;
     bool m_loadedSheet;
+    bool m_fetchFollowingCORS;
 };
 
 
@@ -164,7 +172,7 @@ public:
     // visible for testing purpose.
     static void parseSizesAttribute(const AtomicString& value, Vector<IntSize>& iconSizes);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     virtual void attributeWillChange(const QualifiedName&, const AtomicString& oldValue, const AtomicString& newValue) override;
@@ -184,7 +192,7 @@ private:
     virtual bool hasLegalLinkAttribute(const QualifiedName&) const override;
     virtual const QualifiedName& subResourceAttributeName() const override;
     virtual bool sheetLoaded() override;
-    virtual void notifyLoadedSheetAndAllCriticalSubresources(bool errorOccurred) override;
+    virtual void notifyLoadedSheetAndAllCriticalSubresources(LoadedSheetErrorStatus) override;
     virtual void startLoadingDynamicSheet() override;
     virtual void finishParsingChildren() override;
 

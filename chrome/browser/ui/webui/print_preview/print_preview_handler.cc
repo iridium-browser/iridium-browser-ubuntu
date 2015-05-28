@@ -37,7 +37,7 @@
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/printing/printer_manager_dialog.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/account_reconcilor_factory.h"
+#include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -45,6 +45,7 @@
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
+#include "chrome/browser/ui/webui/print_preview/printer_handler.h"
 #include "chrome/browser/ui/webui/print_preview/sticky_settings.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -52,11 +53,11 @@
 #include "chrome/common/cloud_print/cloud_print_constants.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/print_messages.h"
 #include "components/cloud_devices/common/cloud_device_description.h"
 #include "components/cloud_devices/common/cloud_devices_urls.h"
 #include "components/cloud_devices/common/printer_description.h"
-#include "components/signin/core/browser/account_reconcilor.h"
+#include "components/printing/common/print_messages.h"
+#include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
@@ -106,6 +107,7 @@ enum UserActionBuckets {
   INITIATOR_CLOSED,
   PRINT_WITH_CLOUD_PRINT,
   PRINT_WITH_PRIVET,
+  PRINT_WITH_EXTENSION,
   USERACTION_BUCKET_BOUNDARY
 };
 
@@ -578,7 +580,7 @@ PrintPreviewHandler::PrintPreviewHandler()
       manage_cloud_printers_dialog_request_count_(0),
       reported_failed_preview_(false),
       has_logged_printers_count_(false),
-      reconcilor_(NULL),
+      gaia_cookie_manager_service_(NULL),
       weak_factory_(this) {
   ReportUserActionHistogram(PREVIEW_STARTED);
 }
@@ -587,7 +589,7 @@ PrintPreviewHandler::~PrintPreviewHandler() {
   if (select_file_dialog_.get())
     select_file_dialog_->ListenerDestroyed();
 
-  UnregisterForMergeSession();
+  UnregisterForGaiaCookieChanges();
 }
 
 void PrintPreviewHandler::RegisterMessages() {
@@ -647,7 +649,15 @@ void PrintPreviewHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("getPrivetPrinterCapabilities",
       base::Bind(&PrintPreviewHandler::HandleGetPrivetPrinterCapabilities,
                  base::Unretained(this)));
-  RegisterForMergeSession();
+  web_ui()->RegisterMessageCallback(
+      "getExtensionPrinters",
+      base::Bind(&PrintPreviewHandler::HandleGetExtensionPrinters,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "getExtensionPrinterCapabilities",
+      base::Bind(&PrintPreviewHandler::HandleGetExtensionPrinterCapabilities,
+                 base::Unretained(this)));
+  RegisterForGaiaCookieChanges();
 }
 
 bool PrintPreviewHandler::PrivetPrintingEnabled() {
@@ -704,6 +714,29 @@ void PrintPreviewHandler::HandleGetPrivetPrinterCapabilities(
       base::Bind(&PrintPreviewHandler::PrivetCapabilitiesUpdateClient,
                  base::Unretained(this)));
 #endif
+}
+
+void PrintPreviewHandler::HandleGetExtensionPrinters(
+    const base::ListValue* args) {
+  EnsureExtensionPrinterHandlerSet();
+  // Make sure all in progress requests are canceled before new printer search
+  // starts.
+  extension_printer_handler_->Reset();
+  extension_printer_handler_->StartGetPrinters(base::Bind(
+      &PrintPreviewHandler::OnGotPrintersForExtension, base::Unretained(this)));
+}
+
+void PrintPreviewHandler::HandleGetExtensionPrinterCapabilities(
+    const base::ListValue* args) {
+  std::string printer_id;
+  bool ok = args->GetString(0, &printer_id);
+  DCHECK(ok);
+
+  EnsureExtensionPrinterHandlerSet();
+  extension_printer_handler_->StartGetCapability(
+      printer_id,
+      base::Bind(&PrintPreviewHandler::OnGotExtensionPrinterCapabilities,
+                 base::Unretained(this)));
 }
 
 void PrintPreviewHandler::HandleGetPreview(const base::ListValue* args) {
@@ -798,6 +831,7 @@ void PrintPreviewHandler::HandlePrint(const base::ListValue* args) {
   bool print_to_pdf = false;
   bool is_cloud_printer = false;
   bool print_with_privet = false;
+  bool print_with_extension = false;
 
   bool open_pdf_in_preview = false;
 #if defined(OS_MACOSX)
@@ -807,6 +841,8 @@ void PrintPreviewHandler::HandlePrint(const base::ListValue* args) {
   if (!open_pdf_in_preview) {
     settings->GetBoolean(printing::kSettingPrintToPDF, &print_to_pdf);
     settings->GetBoolean(printing::kSettingPrintWithPrivet, &print_with_privet);
+    settings->GetBoolean(printing::kSettingPrintWithExtension,
+                         &print_with_extension);
     is_cloud_printer = settings->HasKey(printing::kSettingCloudPrintId);
   }
 
@@ -847,6 +883,44 @@ void PrintPreviewHandler::HandlePrint(const base::ListValue* args) {
     return;
   }
 #endif
+
+  if (print_with_extension) {
+    UMA_HISTOGRAM_COUNTS("PrintPreview.PageCount.PrintWithExtension",
+                         page_count);
+    ReportUserActionHistogram(PRINT_WITH_EXTENSION);
+
+    std::string destination_id;
+    std::string print_ticket;
+    std::string capabilities;
+    int width = 0;
+    int height = 0;
+    if (!settings->GetString(printing::kSettingDeviceName, &destination_id) ||
+        !settings->GetString(printing::kSettingTicket, &print_ticket) ||
+        !settings->GetString(printing::kSettingCapabilities, &capabilities) ||
+        !settings->GetInteger(printing::kSettingPageWidth, &width) ||
+        !settings->GetInteger(printing::kSettingPageHeight, &height) ||
+        width <= 0 || height <= 0) {
+      NOTREACHED();
+      OnExtensionPrintResult(false, "FAILED");
+      return;
+    }
+
+    base::string16 title;
+    scoped_refptr<base::RefCountedBytes> data;
+    if (!GetPreviewDataAndTitle(&data, &title)) {
+      LOG(ERROR) << "Nothing to print; no preview available.";
+      OnExtensionPrintResult(false, "NO_DATA");
+      return;
+    }
+
+    EnsureExtensionPrinterHandlerSet();
+    extension_printer_handler_->StartPrint(
+        destination_id, capabilities, title, print_ticket,
+        gfx::Size(width, height), data,
+        base::Bind(&PrintPreviewHandler::OnExtensionPrintResult,
+                   base::Unretained(this)));
+    return;
+  }
 
   scoped_refptr<base::RefCountedBytes> data;
   base::string16 title;
@@ -1236,13 +1310,19 @@ void PrintPreviewHandler::OnPrintDialogShown() {
   ClosePreviewDialog();
 }
 
-void PrintPreviewHandler::MergeSessionCompleted(
+void PrintPreviewHandler::OnAddAccountToCookieCompleted(
     const std::string& account_id,
     const GoogleServiceAuthError& error) {
   OnSigninComplete();
 }
 
 void PrintPreviewHandler::SelectFile(const base::FilePath& default_filename) {
+  ChromeSelectFilePolicy policy(GetInitiator());
+  if (!policy.CanOpenSelectFileDialog()) {
+    policy.SelectFileDenied();
+    return ClosePreviewDialog();
+  }
+
   ui::SelectFileDialog::FileTypeInfo file_type_info;
   file_type_info.extensions.resize(1);
   file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("pdf"));
@@ -1261,8 +1341,8 @@ void PrintPreviewHandler::SelectFile(const base::FilePath& default_filename) {
         preview_web_contents()->GetBrowserContext())->GetPrefs());
   }
 
-  select_file_dialog_ = ui::SelectFileDialog::Create(
-      this, new ChromeSelectFilePolicy(preview_web_contents())),
+  select_file_dialog_ =
+      ui::SelectFileDialog::Create(this, nullptr /*policy already checked*/);
   select_file_dialog_->SelectFile(
       ui::SelectFileDialog::SELECT_SAVEAS_FILE,
       base::string16(),
@@ -1542,11 +1622,9 @@ bool PrintPreviewHandler::CreatePrivetHTTP(
 
   privet_http_factory_ =
       local_discovery::PrivetHTTPAsynchronousFactory::CreateInstance(
-          service_discovery_client_.get(),
           Profile::FromWebUI(web_ui())->GetRequestContext());
-  privet_http_resolution_ = privet_http_factory_->CreatePrivetHTTP(
-      name, device_description->address, callback);
-  privet_http_resolution_->Start();
+  privet_http_resolution_ = privet_http_factory_->CreatePrivetHTTP(name);
+  privet_http_resolution_->Start(device_description->address, callback);
 
   return true;
 }
@@ -1582,19 +1660,61 @@ void PrintPreviewHandler::FillPrinterDescription(
 
 #endif  // defined(ENABLE_SERVICE_DISCOVERY)
 
-void PrintPreviewHandler::RegisterForMergeSession() {
-  DCHECK(!reconcilor_);
+void PrintPreviewHandler::EnsureExtensionPrinterHandlerSet() {
+  if (extension_printer_handler_.get())
+    return;
+
+  extension_printer_handler_ =
+      PrinterHandler::CreateForExtensionPrinters(Profile::FromWebUI(web_ui()));
+}
+
+void PrintPreviewHandler::OnGotPrintersForExtension(
+    const base::ListValue& printers,
+    bool done) {
+  web_ui()->CallJavascriptFunction("onExtensionPrintersAdded", printers,
+                                   base::FundamentalValue(done));
+}
+
+void PrintPreviewHandler::OnGotExtensionPrinterCapabilities(
+    const std::string& printer_id,
+    const base::DictionaryValue& capabilities) {
+  if (capabilities.empty()) {
+    web_ui()->CallJavascriptFunction("failedToGetExtensionPrinterCapabilities",
+                                     base::StringValue(printer_id));
+    return;
+  }
+
+  web_ui()->CallJavascriptFunction("onExtensionCapabilitiesSet",
+                                   base::StringValue(printer_id), capabilities);
+}
+
+void PrintPreviewHandler::OnExtensionPrintResult(bool success,
+                                                 const std::string& status) {
+  if (success) {
+    ClosePreviewDialog();
+    return;
+  }
+
+  // TODO(tbarzic): This function works for extension printers case too, but it
+  // should be renamed to something more generic.
+  web_ui()->CallJavascriptFunction("onPrivetPrintFailed",
+                                   base::StringValue(status));
+}
+
+void PrintPreviewHandler::RegisterForGaiaCookieChanges() {
+  DCHECK(!gaia_cookie_manager_service_);
   Profile* profile = Profile::FromWebUI(web_ui());
   if (switches::IsEnableAccountConsistency() && !profile->IsOffTheRecord()) {
-    reconcilor_ = AccountReconcilorFactory::GetForProfile(profile);
-    if (reconcilor_)
-      reconcilor_->AddMergeSessionObserver(this);
+    gaia_cookie_manager_service_ =
+        GaiaCookieManagerServiceFactory::GetForProfile(profile);
+    if (gaia_cookie_manager_service_)
+      gaia_cookie_manager_service_->AddObserver(this);
   }
 }
 
-void PrintPreviewHandler::UnregisterForMergeSession() {
-  if (reconcilor_)
-    reconcilor_->RemoveMergeSessionObserver(this);
+void PrintPreviewHandler::UnregisterForGaiaCookieChanges() {
+  if (gaia_cookie_manager_service_)
+    gaia_cookie_manager_service_->RemoveObserver(this);
 }
 
 void PrintPreviewHandler::SetPdfSavedClosureForTesting(

@@ -33,7 +33,7 @@ namespace blink {
 class LocalDOMWindow;
 class ExceptionState;
 class Frame;
-class RenderPart;
+class LayoutPart;
 class Widget;
 
 class HTMLFrameOwnerElement : public HTMLElement, public FrameOwner {
@@ -50,10 +50,10 @@ public:
 
     virtual void disconnectContentFrame();
 
-    // Most subclasses use RenderPart (either RenderEmbeddedObject or RenderIFrame)
+    // Most subclasses use LayoutPart (either LayoutEmbeddedObject or LayoutIFrame)
     // except for HTMLObjectElement and HTMLEmbedElement which may return any
-    // RenderObject when using fallback content.
-    RenderPart* renderPart() const;
+    // LayoutObject when using fallback content.
+    LayoutPart* layoutPart() const;
 
     Document* getSVGDocument(ExceptionState&) const;
 
@@ -77,22 +77,22 @@ public:
         void performDeferredWidgetTreeOperations();
     };
 
-    virtual void trace(Visitor*) override;
+    // FrameOwner overrides:
+    virtual bool isLocal() const { return true; }
+    virtual void dispatchLoad() override;
+    virtual SandboxFlags sandboxFlags() const override { return m_sandboxFlags; }
+
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     HTMLFrameOwnerElement(const QualifiedName& tagName, Document&);
     void setSandboxFlags(SandboxFlags);
 
-    bool loadOrRedirectSubframe(const KURL&, const AtomicString& frameName, bool lockBackForwardList, ContentSecurityPolicyDisposition shouldCheckContentSecurityPolicy);
+    bool loadOrRedirectSubframe(const KURL&, const AtomicString& frameName, bool lockBackForwardList);
 
 private:
     virtual bool isKeyboardFocusable() const override;
     virtual bool isFrameOwnerElement() const override final { return true; }
-
-    // FrameOwner overrides:
-    virtual bool isLocal() const { return true; }
-    virtual SandboxFlags sandboxFlags() const override;
-    virtual void dispatchLoad() override;
 
     RawPtrWillBeMember<Frame> m_contentFrame;
     RefPtrWillBeMember<Widget> m_widget;

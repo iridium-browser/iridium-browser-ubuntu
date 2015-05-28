@@ -198,6 +198,7 @@ TEST_F(Html5FsTest, Remove) {
   ASSERT_TRUE(fs->Exists(kPath));
   ASSERT_EQ(0, fs->Remove(path));
   EXPECT_FALSE(fs->Exists(kPath));
+  ASSERT_EQ(ENOENT, fs->Remove(path));
 }
 
 TEST_F(Html5FsTest, Unlink) {
@@ -213,6 +214,7 @@ TEST_F(Html5FsTest, Unlink) {
   ASSERT_EQ(EISDIR, fs->Unlink(Path("/dir")));
   EXPECT_FALSE(fs->Exists("/file"));
   EXPECT_TRUE(fs->Exists("/dir"));
+  ASSERT_EQ(ENOENT, fs->Unlink(Path("/file")));
 }
 
 TEST_F(Html5FsTest, Rmdir) {
@@ -226,6 +228,7 @@ TEST_F(Html5FsTest, Rmdir) {
   EXPECT_EQ(0, fs->Rmdir(Path("/dir")));
   EXPECT_FALSE(fs->Exists("/dir"));
   EXPECT_TRUE(fs->Exists("/file"));
+  EXPECT_EQ(ENOENT, fs->Rmdir(Path("/dir")));
 }
 
 TEST_F(Html5FsTest, Rename) {
@@ -506,7 +509,6 @@ TEST_F(Html5FsTest, GetDents) {
 
     std::multiset<std::string> dirnames;
     for (size_t i = 0; i < num_dirents; ++i) {
-      EXPECT_EQ(sizeof(dirent), dirents[i].d_off);
       EXPECT_EQ(sizeof(dirent), dirents[i].d_reclen);
       dirnames.insert(dirents[i].d_name);
     }
@@ -535,7 +537,6 @@ TEST_F(Html5FsTest, GetDents) {
 
     std::multiset<std::string> dirnames;
     for (size_t i = 0; i < num_dirents; ++i) {
-      EXPECT_EQ(sizeof(dirent), dirents[i].d_off);
       EXPECT_EQ(sizeof(dirent), dirents[i].d_reclen);
       dirnames.insert(dirents[i].d_name);
 

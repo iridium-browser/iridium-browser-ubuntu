@@ -4,6 +4,7 @@
 
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
+import("//testing/test.gni")
 
 gypi_values = exec_script("//build/gypi_to_gn.py",
                           [ rebase_path("ash.gyp") ],
@@ -24,6 +25,7 @@ component("ash") {
     "//base:i18n",
     "//base/third_party/dynamic_annotations",
     "//cc",
+    "//components/device_event_log",
     "//components/user_manager",
     "//components/wallpaper",
     "//content/public/browser",
@@ -31,14 +33,15 @@ component("ash") {
     "//net",
     "//skia",
     "//third_party/icu",
-    "//ui/accelerometer",
     "//ui/accessibility",
     "//ui/app_list",
     "//ui/aura",
     "//ui/base",
+    "//ui/base/ime",
     "//ui/compositor",
     "//ui/events",
     "//ui/events:events_base",
+    "//ui/events:gesture_detection",
     "//ui/events/devices",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -60,17 +63,31 @@ component("ash") {
     ]
 
     # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4267" ]
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
   }
 
   if (use_x11) {
-    configs += [ "//build/config/linux:xfixes" ]
+    configs += [
+      "//build/config/linux:x11",
+      "//build/config/linux:xfixes",
+    ]
+    deps += [
+      "//ui/events/platform",
+      "//ui/gfx/x",
+    ]
   } else {
     sources -= [
       "host/ash_window_tree_host_x11.cc",
       "host/ash_window_tree_host_x11.h",
       "wm/maximize_mode/scoped_disable_internal_mouse_and_keyboard_x11.cc",
       "wm/maximize_mode/scoped_disable_internal_mouse_and_keyboard_x11.h",
+    ]
+  }
+
+  if (use_ozone) {
+    deps += [
+      "//ui/events/ozone:events_ozone",
+      "//ui/ozone",
     ]
   }
 
@@ -110,7 +127,11 @@ component("ash") {
   }
 
   if (!use_ozone) {
-    sources -= [ "host/ash_window_tree_host_ozone.cc" ]
+    sources -= [
+      "host/ash_window_tree_host_ozone.cc",
+      "wm/maximize_mode/scoped_disable_internal_mouse_and_keyboard_ozone.cc",
+      "wm/maximize_mode/scoped_disable_internal_mouse_and_keyboard_ozone.h",
+    ]
   }
 }
 
@@ -180,10 +201,10 @@ static_library("test_support") {
     ]
     deps += [
       "//ipc",
-      #'../ui/metro_viewer/metro_viewer.gyp:metro_viewer_messages',  TODO(GYP)
-      #'../win8/win8.gyp:metro_viewer',  TODO(GYP)
-      #'../win8/win8.gyp:test_support_win8',  TODO(GYP)
-      #'../win8/win8_tests.gyp:test_registrar',  TODO(GYP)
+      "//ui/metro_viewer",
+      "//win8:metro_viewer",
+      "//win8:test_support_win8",
+      "//win8:test_registrar",
     ]
   }
 }
@@ -210,6 +231,7 @@ static_library("ash_shell_lib") {
     "//ui/app_list",
     "//ui/aura",
     "//ui/base",
+    "//ui/base/ime",
     "//ui/compositor",
     "//ui/events",
     "//ui/events:events_base",
@@ -243,11 +265,11 @@ test("ash_unittests") {
     "//skia",
     "//testing/gtest",
     "//third_party/icu",
-    "//ui/accelerometer",
     "//ui/accessibility",
     "//ui/aura",
     "//ui/aura:test_support",
     "//ui/base",
+    "//ui/base/ime",
     "//ui/base:test_support",
     "//ui/compositor",
     "//ui/compositor:test_support",
@@ -281,21 +303,19 @@ test("ash_unittests") {
       "wm/maximize_mode/maximize_mode_controller_unittest.cc",
 
       # Can't resize on Windows Ash. http://crbug.com/165962
+      "autoclick/autoclick_unittest.cc",
       "magnifier/magnification_controller_unittest.cc",
-      "wm/workspace/workspace_window_resizer_unittest.cc",
       "sticky_keys/sticky_keys_overlay_unittest.cc",
       "system/tray/media_security/multi_profile_media_tray_item_unittest.cc",
-      "autoclick/autoclick_unittest.cc",
       "virtual_keyboard_controller_unittest.cc",
+      "wm/workspace/workspace_window_resizer_unittest.cc",
     ]
     sources += [
       #'<(SHARED_INTERMEDIATE_DIR)/ui/resources/ui_unscaled_resources.rc',  TODO(GYP)
     ]
   }
 
-  if (is_win) {
-    cflags = [ "/wd4267" ]
-  }
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   if (!use_x11) {
     sources -= [ "host/ash_window_tree_host_x11_unittest.cc" ]
@@ -375,3 +395,5 @@ test("ash_shell_unittests") {
     deps += [ "//ui/display" ]
   }
 }
+# When adding support for isolates, please have a look at run-time dependencies
+# in the ash_unittests_run target in ash.gyp.

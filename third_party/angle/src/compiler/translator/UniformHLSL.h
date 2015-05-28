@@ -10,16 +10,16 @@
 #ifndef COMPILER_TRANSLATOR_UNIFORMHLSL_H_
 #define COMPILER_TRANSLATOR_UNIFORMHLSL_H_
 
-#include "compiler/translator/Types.h"
+#include "compiler/translator/OutputHLSL.h"
 
 namespace sh
 {
 class StructureHLSL;
 
-class UniformHLSL
+class UniformHLSL : angle::NonCopyable
 {
   public:
-    UniformHLSL(StructureHLSL *structureHLSL, TranslatorHLSL *translator);
+    UniformHLSL(StructureHLSL *structureHLSL, ShShaderOutput outputType, const std::vector<Uniform> &uniforms);
 
     void reserveUniformRegisters(unsigned int registerCount);
     void reserveInterfaceBlockRegisters(unsigned int registerCount);

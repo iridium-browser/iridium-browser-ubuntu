@@ -31,7 +31,7 @@
 #include "core/dom/Text.h"
 #include "core/editing/SurroundingText.h"
 #include "core/editing/VisiblePosition.h"
-#include "core/rendering/RenderObject.h"
+#include "core/layout/LayoutObject.h"
 #include "public/platform/WebPoint.h"
 #include "public/web/WebHitTestResult.h"
 
@@ -40,10 +40,10 @@ namespace blink {
 void WebSurroundingText::initialize(const WebNode& webNode, const WebPoint& nodePoint, size_t maxLength)
 {
     const Node* node = webNode.constUnwrap<Node>();
-    if (!node || !node->renderer())
+    if (!node || !node->layoutObject())
         return;
 
-    m_private.reset(new SurroundingText(VisiblePosition(node->renderer()->positionForPoint(static_cast<IntPoint>(nodePoint))).deepEquivalent().parentAnchoredEquivalent(), maxLength));
+    m_private.reset(new SurroundingText(VisiblePosition(node->layoutObject()->positionForPoint(static_cast<IntPoint>(nodePoint))).deepEquivalent().parentAnchoredEquivalent(), maxLength));
 }
 
 void WebSurroundingText::initialize(const WebRange& webRange, size_t maxLength)

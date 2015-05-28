@@ -138,12 +138,6 @@ IPC_STRUCT_END()
   IPC_STRUCT_TRAITS_MEMBER(children)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(gpu::GpuPerformanceStats)
-  IPC_STRUCT_TRAITS_MEMBER(graphics)
-  IPC_STRUCT_TRAITS_MEMBER(gaming)
-  IPC_STRUCT_TRAITS_MEMBER(overall)
-IPC_STRUCT_TRAITS_END()
-
 IPC_STRUCT_TRAITS_BEGIN(gpu::GPUInfo::GPUDevice)
   IPC_STRUCT_TRAITS_MEMBER(vendor_id)
   IPC_STRUCT_TRAITS_MEMBER(device_id)
@@ -183,7 +177,6 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::GPUInfo)
   IPC_STRUCT_TRAITS_MEMBER(gl_ws_extensions)
   IPC_STRUCT_TRAITS_MEMBER(gl_reset_notification_strategy)
   IPC_STRUCT_TRAITS_MEMBER(can_lose_context)
-  IPC_STRUCT_TRAITS_MEMBER(performance_stats)
   IPC_STRUCT_TRAITS_MEMBER(software_rendering)
   IPC_STRUCT_TRAITS_MEMBER(direct_rendering)
   IPC_STRUCT_TRAITS_MEMBER(sandboxed)
@@ -393,12 +386,6 @@ IPC_MESSAGE_CONTROL2(GpuHostMsg_AcceleratedSurfaceInitialized,
 IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceBuffersSwapped,
                      GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
 
-// Tells the browser about updated parameters for vsync alignment.
-IPC_MESSAGE_CONTROL3(GpuHostMsg_UpdateVSyncParameters,
-                     int32 /* surface_id */,
-                     base::TimeTicks /* timebase */,
-                     base::TimeDelta /* interval */)
-
 IPC_MESSAGE_CONTROL1(GpuHostMsg_DidCreateOffscreenContext,
                      GURL /* url */)
 
@@ -446,15 +433,6 @@ IPC_SYNC_MESSAGE_CONTROL3_1(GpuChannelMsg_CreateOffscreenCommandBuffer,
 // object that it's hosting.
 IPC_SYNC_MESSAGE_CONTROL1_0(GpuChannelMsg_DestroyCommandBuffer,
                             int32 /* instance_id */)
-
-// Sent by DevTools agent in the inspected renderer process to initiate GPU
-// instrumentation events recording.
-IPC_SYNC_MESSAGE_CONTROL1_1(GpuChannelMsg_DevToolsStartEventsRecording,
-                            int32, /* route_id */
-                            bool /* succeeded */)
-
-// The message is sent when DevTools want to stop events recording.
-IPC_MESSAGE_CONTROL0(GpuChannelMsg_DevToolsStopEventsRecording)
 
 #if defined(OS_ANDROID)
 //------------------------------------------------------------------------------
@@ -573,6 +551,11 @@ IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_Destroyed,
 IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_SwapBuffersCompleted,
                     std::vector<ui::LatencyInfo> /* latency_info */)
 
+// Tells the browser about updated parameters for vsync alignment.
+IPC_MESSAGE_ROUTED2(GpuCommandBufferMsg_UpdateVSyncParameters,
+                    base::TimeTicks /* timebase */,
+                    base::TimeDelta /* interval */)
+
 // Send to stub on surface visibility change.
 IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_SetSurfaceVisible, bool /* visible */)
 
@@ -688,10 +671,11 @@ IPC_MESSAGE_ROUTED1(AcceleratedVideoDecoderHostMsg_DismissPictureBuffer,
                     int32) /* Picture buffer ID */
 
 // Decoder reports that a picture is ready.
-IPC_MESSAGE_ROUTED3(AcceleratedVideoDecoderHostMsg_PictureReady,
+IPC_MESSAGE_ROUTED4(AcceleratedVideoDecoderHostMsg_PictureReady,
                     int32,     /* Picture buffer ID */
                     int32,     /* Bitstream buffer ID */
-                    gfx::Rect) /* Visible rectangle */
+                    gfx::Rect, /* Visible rectangle */
+                    bool)      /* Buffer is HW overlay capable */
 
 // Confirm decoder has been flushed.
 IPC_MESSAGE_ROUTED0(AcceleratedVideoDecoderHostMsg_FlushDone)
@@ -708,10 +692,11 @@ IPC_MESSAGE_ROUTED1(AcceleratedVideoDecoderHostMsg_ErrorNotification,
 // These messages are sent from the Renderer process to GPU process.
 
 // Queue a input buffer to the encoder to encode. |frame_id| will be returned by
-// AcceleratedVideoEncoderHostMsg_NotifyEncodeDone.
-IPC_MESSAGE_ROUTED4(AcceleratedVideoEncoderMsg_Encode,
+// AcceleratedVideoEncoderHostMsg_NotifyInputDone.
+IPC_MESSAGE_ROUTED5(AcceleratedVideoEncoderMsg_Encode,
                     int32 /* frame_id */,
                     base::SharedMemoryHandle /* buffer_handle */,
+                    uint32 /* buffer_offset */,
                     uint32 /* buffer_size */,
                     bool /* force_keyframe */)
 

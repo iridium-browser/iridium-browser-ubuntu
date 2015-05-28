@@ -49,6 +49,12 @@ void PopulateHidDeviceInfo(hid::HidDeviceInfo* output,
 
     output->collections.push_back(make_linked_ptr(api_collection));
   }
+
+  const std::vector<uint8>& report_descriptor = input->report_descriptor();
+  if (report_descriptor.size() > 0) {
+    output->report_descriptor.assign(report_descriptor.begin(),
+                                     report_descriptor.end());
+  }
 }
 
 bool WillDispatchDeviceEvent(scoped_refptr<HidDeviceInfo> device_info,
@@ -229,7 +235,7 @@ scoped_ptr<base::ListValue> HidDeviceManager::CreateApiDeviceList(
   DCHECK(hid_service);
 
   scoped_ptr<base::ListValue> api_devices(new base::ListValue());
-  for (const std::pair<int, HidDeviceId>& map_entry : device_ids_) {
+  for (const ResourceIdToDeviceIdMap::value_type& map_entry : device_ids_) {
     int resource_id = map_entry.first;
     const HidDeviceId& device_id = map_entry.second;
 

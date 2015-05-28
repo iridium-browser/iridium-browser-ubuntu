@@ -78,7 +78,7 @@ void NewTab(Browser* browser);
 void CloseTab(Browser* browser);
 bool CanZoomIn(content::WebContents* contents);
 bool CanZoomOut(content::WebContents* contents);
-bool ActualSize(content::WebContents* contents);
+bool CanResetZoom(content::WebContents* contents);
 void RestoreTab(Browser* browser);
 TabStripModelDelegate::RestoreTabType GetRestoreTabType(
     const Browser* browser);
@@ -142,6 +142,7 @@ void OpenFeedbackDialog(Browser* browser);
 void ToggleBookmarkBar(Browser* browser);
 void ShowAppMenu(Browser* browser);
 void ShowAvatarMenu(Browser* browser);
+void ShowFastUserSwitcher(Browser* browser);
 void OpenUpdateChromeDialog(Browser* browser);
 void ToggleSpeechInput(Browser* browser);
 void DistillCurrentPage(Browser* browser);

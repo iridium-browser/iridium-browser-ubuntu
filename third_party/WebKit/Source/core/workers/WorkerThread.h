@@ -27,10 +27,11 @@
 #ifndef WorkerThread_h
 #define WorkerThread_h
 
+#include "core/CoreExport.h"
 #include "core/dom/ExecutionContextTask.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/workers/WorkerGlobalScope.h"
-#include "platform/SharedTimer.h"
+#include "core/workers/WorkerLoaderProxy.h"
 #include "platform/WebThreadSupportingGC.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "wtf/Forward.h"
@@ -38,13 +39,13 @@
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefCounted.h"
+#include <v8.h>
 
 namespace blink {
 
 class WebWaitableEvent;
 class WorkerGlobalScope;
 class WorkerInspectorController;
-class WorkerLoaderProxy;
 class WorkerReportingProxy;
 class WorkerSharedTimer;
 class WorkerThreadShutdownFinishTask;
@@ -56,12 +57,18 @@ enum WorkerThreadStartMode {
     PauseWorkerGlobalScopeOnStart
 };
 
-class WorkerThread : public RefCounted<WorkerThread> {
+class CORE_EXPORT WorkerThread : public RefCounted<WorkerThread> {
 public:
     virtual ~WorkerThread();
 
     virtual void start();
     virtual void stop();
+
+    virtual PassOwnPtr<WebThreadSupportingGC> createWebThreadSupportingGC();
+    virtual void didStartRunLoop();
+    virtual void didStopRunLoop();
+
+    v8::Isolate* isolate() const { return m_isolate; }
 
     // Can be used to wait for this worker thread to shut down.
     // (This is signalled on the main thread, so it's assumed to be waited on the worker context thread)
@@ -72,11 +79,16 @@ public:
     static void terminateAndWaitForAllWorkers();
 
     bool isCurrentThread() const;
-    WorkerLoaderProxy& workerLoaderProxy() const { return m_workerLoaderProxy; }
+    WorkerLoaderProxy* workerLoaderProxy() const
+    {
+        RELEASE_ASSERT(m_workerLoaderProxy);
+        return m_workerLoaderProxy.get();
+    }
+
     WorkerReportingProxy& workerReportingProxy() const { return m_workerReportingProxy; }
 
-    void postTask(PassOwnPtr<ExecutionContextTask>);
-    void postDebuggerTask(PassOwnPtr<ExecutionContextTask>);
+    void postTask(const WebTraceLocation&, PassOwnPtr<ExecutionContextTask>);
+    void postDebuggerTask(const WebTraceLocation&, PassOwnPtr<ExecutionContextTask>);
 
     enum WaitMode { WaitForMessage, DontWaitForMessage };
     MessageQueueWaitResult runDebuggerTask(WaitMode = WaitForMessage);
@@ -98,12 +110,17 @@ public:
     void setWorkerInspectorController(WorkerInspectorController*);
 
 protected:
-    WorkerThread(WorkerLoaderProxy&, WorkerReportingProxy&, PassOwnPtrWillBeRawPtr<WorkerThreadStartupData>);
+    WorkerThread(PassRefPtr<WorkerLoaderProxy>, WorkerReportingProxy&, PassOwnPtr<WorkerThreadStartupData>);
 
     // Factory method for creating a new worker context for the thread.
-    virtual PassRefPtrWillBeRawPtr<WorkerGlobalScope> createWorkerGlobalScope(PassOwnPtrWillBeRawPtr<WorkerThreadStartupData>) = 0;
+    virtual PassRefPtrWillBeRawPtr<WorkerGlobalScope> createWorkerGlobalScope(PassOwnPtr<WorkerThreadStartupData>) = 0;
 
     virtual void postInitialize() { }
+
+    virtual v8::Isolate* initializeIsolate();
+    virtual void willDestroyIsolate();
+    virtual void destroyIsolate();
+    virtual void terminateV8Execution();
 
 private:
     friend class WorkerSharedTimer;
@@ -116,13 +133,13 @@ private:
     void cleanup();
     void idleHandler();
     void postDelayedTask(PassOwnPtr<ExecutionContextTask>, long long delayMs);
+    void postDelayedTask(const WebTraceLocation&, PassOwnPtr<ExecutionContextTask>, long long delayMs);
 
     bool m_terminated;
-    OwnPtr<WorkerSharedTimer> m_sharedTimer;
     MessageQueue<WorkerThreadTask> m_debuggerMessageQueue;
     OwnPtr<WebThread::TaskObserver> m_microtaskRunner;
 
-    WorkerLoaderProxy& m_workerLoaderProxy;
+    RefPtr<WorkerLoaderProxy> m_workerLoaderProxy;
     WorkerReportingProxy& m_workerReportingProxy;
 
     RefPtrWillBePersistent<WorkerInspectorController> m_workerInspectorController;
@@ -130,7 +147,10 @@ private:
 
     Mutex m_threadCreationMutex;
     RefPtrWillBePersistent<WorkerGlobalScope> m_workerGlobalScope;
-    OwnPtrWillBePersistent<WorkerThreadStartupData> m_startupData;
+    OwnPtr<WorkerThreadStartupData> m_startupData;
+
+    v8::Isolate* m_isolate;
+    OwnPtr<V8IsolateInterruptor> m_interruptor;
 
     // Used to signal thread shutdown.
     OwnPtr<WebWaitableEvent> m_shutdownEvent;

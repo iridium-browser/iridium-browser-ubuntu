@@ -31,20 +31,31 @@ class AudioDecoder {
   // Used by PacketDuration below. Save the value -1 for errors.
   enum { kNotImplemented = -2 };
 
-  AudioDecoder() : channels_(1) {}
-  virtual ~AudioDecoder() {}
+  AudioDecoder() = default;
+  virtual ~AudioDecoder() = default;
 
   // Decodes |encode_len| bytes from |encoded| and writes the result in
-  // |decoded|. The number of samples from all channels produced is in
-  // the return value. If the decoder produced comfort noise, |speech_type|
-  // is set to kComfortNoise, otherwise it is kSpeech.
-  virtual int Decode(const uint8_t* encoded, size_t encoded_len,
-                     int16_t* decoded, SpeechType* speech_type) = 0;
+  // |decoded|. The maximum bytes allowed to be written into |decoded| is
+  // |max_decoded_bytes|. The number of samples from all channels produced is
+  // in the return value. If the decoder produced comfort noise, |speech_type|
+  // is set to kComfortNoise, otherwise it is kSpeech. The desired output
+  // sample rate is provided in |sample_rate_hz|, which must be valid for the
+  // codec at hand.
+  virtual int Decode(const uint8_t* encoded,
+                     size_t encoded_len,
+                     int sample_rate_hz,
+                     size_t max_decoded_bytes,
+                     int16_t* decoded,
+                     SpeechType* speech_type);
 
   // Same as Decode(), but interfaces to the decoders redundant decode function.
   // The default implementation simply calls the regular Decode() method.
-  virtual int DecodeRedundant(const uint8_t* encoded, size_t encoded_len,
-                              int16_t* decoded, SpeechType* speech_type);
+  virtual int DecodeRedundant(const uint8_t* encoded,
+                              size_t encoded_len,
+                              int sample_rate_hz,
+                              size_t max_decoded_bytes,
+                              int16_t* decoded,
+                              SpeechType* speech_type);
 
   // Indicates if the decoder implements the DecodePlc method.
   virtual bool HasDecodePlc() const;
@@ -69,7 +80,7 @@ class AudioDecoder {
   // Returns the duration in samples of the payload in |encoded| which is
   // |encoded_len| bytes long. Returns kNotImplemented if no duration estimate
   // is available, or -1 in case of an error.
-  virtual int PacketDuration(const uint8_t* encoded, size_t encoded_len);
+  virtual int PacketDuration(const uint8_t* encoded, size_t encoded_len) const;
 
   // Returns the duration in samples of the redandant payload in |encoded| which
   // is |encoded_len| bytes long. Returns kNotImplemented if no duration
@@ -86,12 +97,22 @@ class AudioDecoder {
   // isn't a CNG decoder, don't call this method.
   virtual CNG_dec_inst* CngDecoderInstance();
 
-  size_t channels() const { return channels_; }
+  virtual size_t Channels() const = 0;
 
  protected:
   static SpeechType ConvertSpeechType(int16_t type);
 
-  size_t channels_;
+  virtual int DecodeInternal(const uint8_t* encoded,
+                             size_t encoded_len,
+                             int sample_rate_hz,
+                             int16_t* decoded,
+                             SpeechType* speech_type);
+
+  virtual int DecodeRedundantInternal(const uint8_t* encoded,
+                                      size_t encoded_len,
+                                      int sample_rate_hz,
+                                      int16_t* decoded,
+                                      SpeechType* speech_type);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AudioDecoder);

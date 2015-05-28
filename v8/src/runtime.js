@@ -312,8 +312,8 @@ function SHR(y) {
 */
 
 // ECMA-262, section 11.4.1, page 46.
-function DELETE(key, strict) {
-  return %DeleteProperty(%ToObject(this), %ToName(key), strict);
+function DELETE(key, language_mode) {
+  return %DeleteProperty(%ToObject(this), %ToName(key), language_mode);
 }
 
 
@@ -377,7 +377,9 @@ function FILTER_KEY(key) {
 function CALL_NON_FUNCTION() {
   var delegate = %GetFunctionDelegate(this);
   if (!IS_FUNCTION(delegate)) {
-    throw %MakeTypeError('called_non_callable', [typeof this]);
+    var callsite = %RenderCallSite();
+    if (callsite == "") callsite = typeof this;
+    throw %MakeTypeError('called_non_callable', [callsite]);
   }
   return %Apply(delegate, this, arguments, 0, %_ArgumentsLength());
 }
@@ -386,7 +388,9 @@ function CALL_NON_FUNCTION() {
 function CALL_NON_FUNCTION_AS_CONSTRUCTOR() {
   var delegate = %GetConstructorDelegate(this);
   if (!IS_FUNCTION(delegate)) {
-    throw %MakeTypeError('called_non_callable', [typeof this]);
+    var callsite = %RenderCallSite();
+    if (callsite == "") callsite = typeof this;
+    throw %MakeTypeError('called_non_callable', [callsite]);
   }
   return %Apply(delegate, this, arguments, 0, %_ArgumentsLength());
 }
@@ -414,7 +418,7 @@ function APPLY_PREPARE(args) {
   // that takes care of more eventualities.
   if (IS_ARRAY(args)) {
     length = args.length;
-    if (%_IsSmi(length) && length >= 0 && length < 0x800000 &&
+    if (%_IsSmi(length) && length >= 0 && length < kSafeArgumentsLength &&
         IS_SPEC_FUNCTION(this)) {
       return length;
     }
@@ -425,7 +429,7 @@ function APPLY_PREPARE(args) {
   // We can handle any number of apply arguments if the stack is
   // big enough, but sanity check the value to avoid overflow when
   // multiplying with pointer size.
-  if (length > 0x800000) {
+  if (length > kSafeArgumentsLength) {
     throw %MakeRangeError('stack_overflow', []);
   }
 
@@ -437,6 +441,93 @@ function APPLY_PREPARE(args) {
   // Make sure the arguments list has the right type.
   if (args != null && !IS_SPEC_OBJECT(args)) {
     throw %MakeTypeError('apply_wrong_args', []);
+  }
+
+  // Return the length which is the number of arguments to copy to the
+  // stack. It is guaranteed to be a small integer at this point.
+  return length;
+}
+
+
+function REFLECT_APPLY_PREPARE(args) {
+  var length;
+  // First check whether length is a positive Smi and args is an
+  // array. This is the fast case. If this fails, we do the slow case
+  // that takes care of more eventualities.
+  if (IS_ARRAY(args)) {
+    length = args.length;
+    if (%_IsSmi(length) && length >= 0 && length < kSafeArgumentsLength &&
+        IS_SPEC_FUNCTION(this)) {
+      return length;
+    }
+  }
+
+  if (!IS_SPEC_FUNCTION(this)) {
+    throw %MakeTypeError('called_non_callable', [ %ToString(this) ]);
+  }
+
+  if (!IS_SPEC_OBJECT(args)) {
+    throw %MakeTypeError('reflect_apply_wrong_args', [ ]);
+  }
+
+  length = %ToLength(args.length);
+
+  // We can handle any number of apply arguments if the stack is
+  // big enough, but sanity check the value to avoid overflow when
+  // multiplying with pointer size.
+  if (length > kSafeArgumentsLength) {
+    throw %MakeRangeError('stack_overflow', []);
+  }
+
+  // Return the length which is the number of arguments to copy to the
+  // stack. It is guaranteed to be a small integer at this point.
+  return length;
+}
+
+
+function REFLECT_CONSTRUCT_PREPARE(args, newTarget) {
+  var length;
+  var ctorOk = IS_SPEC_FUNCTION(this) && %IsConstructor(this);
+  var newTargetOk = IS_SPEC_FUNCTION(newTarget) && %IsConstructor(newTarget);
+
+  // First check whether length is a positive Smi and args is an
+  // array. This is the fast case. If this fails, we do the slow case
+  // that takes care of more eventualities.
+  if (IS_ARRAY(args)) {
+    length = args.length;
+    if (%_IsSmi(length) && length >= 0 && length < kSafeArgumentsLength &&
+        ctorOk && newTargetOk) {
+      return length;
+    }
+  }
+
+  if (!ctorOk) {
+    if (!IS_SPEC_FUNCTION(this)) {
+      throw %MakeTypeError('called_non_callable', [ %ToString(this) ]);
+    } else {
+      throw %MakeTypeError('not_constructor', [ %ToString(this) ]);
+    }
+  }
+
+  if (!newTargetOk) {
+    if (!IS_SPEC_FUNCTION(newTarget)) {
+      throw %MakeTypeError('called_non_callable', [ %ToString(newTarget) ]);
+    } else {
+      throw %MakeTypeError('not_constructor', [ %ToString(newTarget) ]);
+    }
+  }
+
+  if (!IS_SPEC_OBJECT(args)) {
+    throw %MakeTypeError('reflect_construct_wrong_args', [ ]);
+  }
+
+  length = %ToLength(args.length);
+
+  // We can handle any number of apply arguments if the stack is
+  // big enough, but sanity check the value to avoid overflow when
+  // multiplying with pointer size.
+  if (length > kSafeArgumentsLength) {
+    throw %MakeRangeError('stack_overflow', []);
   }
 
   // Return the length which is the number of arguments to copy to the
@@ -465,6 +556,12 @@ function TO_NUMBER() {
 // Convert the receiver to a string - forward to ToString.
 function TO_STRING() {
   return %ToString(this);
+}
+
+
+// Convert the receiver to a string or symbol - forward to ToName.
+function TO_NAME() {
+  return %ToName(this);
 }
 
 
@@ -684,3 +781,14 @@ function ToPositiveInteger(x, rangeErrorName) {
 // that is cloned when running the code.  It is essential that the
 // boilerplate gets the right prototype.
 %FunctionSetPrototype($Array, new $Array(0));
+
+
+/* -----------------------------------------------
+   - - -   J a v a S c r i p t   S t u b s   - - -
+   -----------------------------------------------
+*/
+
+function STRING_LENGTH_STUB(name) {
+  var receiver = this;  // implicit first parameter
+  return %_StringGetLength(%_JSValueGetValue(receiver));
+}

@@ -8,6 +8,7 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/mac/scoped_nsobject.h"
+#import "ui/base/cocoa/tracking_area.h"
 
 // Sent when a user-initiated drag to resize the container is initiated.
 extern NSString* const kBrowserActionGrippyDragStartedNotification;
@@ -20,6 +21,10 @@ extern NSString* const kBrowserActionGrippyDragFinishedNotification;
 
 // Sent when the Browser Actions container view is about to animate.
 extern NSString* const kBrowserActionsContainerWillAnimate;
+
+// Sent when the mouse enters the browser actions container (if tracking is
+// enabled).
+extern NSString* const kBrowserActionsContainerMouseEntered;
 
 // Key which is used to notify the translation with delta.
 extern NSString* const kTranslationWithDelta;
@@ -71,12 +76,18 @@ class BrowserActionsContainerViewSizeDelegate {
   // to large.
   BOOL grippyPinned_;
 
+  // A tracking area to receive mouseEntered events, if tracking is enabled.
+  ui::ScopedCrTrackingArea trackingArea_;
+
   // The size delegate, if any.
   // Weak; delegate is responsible for adding/removing itself.
   BrowserActionsContainerViewSizeDelegate* sizeDelegate_;
 
   base::scoped_nsobject<NSViewAnimation> resizeAnimation_;
 }
+
+// Sets whether or not tracking (for mouseEntered events) is enabled.
+- (void)setTrackingEnabled:(BOOL)enabled;
 
 // Resizes the container to the given ideal width, adjusting the |lastXPos_| so
 // that |resizeDeltaX| is accurate.

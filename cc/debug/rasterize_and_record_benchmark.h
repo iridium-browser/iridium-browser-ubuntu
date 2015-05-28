@@ -37,7 +37,10 @@ class RasterizeAndRecordBenchmark : public MicroBenchmark {
       scoped_refptr<base::MessageLoopProxy> origin_loop) override;
 
  private:
-  void Run(Layer* layer);
+  void RunOnDisplayListLayer(PictureLayer* layer,
+                             const gfx::Rect& visible_content_rect);
+  void RunOnPictureLayer(PictureLayer* layer,
+                         const gfx::Rect& visible_content_rect);
 
   void RecordRasterResults(scoped_ptr<base::Value> results);
 
@@ -47,7 +50,7 @@ class RasterizeAndRecordBenchmark : public MicroBenchmark {
 
     int pixels_recorded;
     size_t bytes_used;
-    base::TimeDelta total_best_time[Picture::RECORDING_MODE_COUNT];
+    base::TimeDelta total_best_time[RecordingSource::RECORDING_MODE_COUNT];
   };
 
   RecordResults record_results_;

@@ -50,7 +50,7 @@ public:
     ~HTMLElementStack();
 
     class ElementRecord final : public NoBaseWillBeGarbageCollected<ElementRecord> {
-        WTF_MAKE_NONCOPYABLE(ElementRecord); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+        WTF_MAKE_NONCOPYABLE(ElementRecord); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(ElementRecord);
     public:
 #if !ENABLE(OILPAN)
         ~ElementRecord(); // Public for ~PassOwnPtr()
@@ -66,7 +66,7 @@ public:
 
         ElementRecord* next() const { return m_next.get(); }
 
-        void trace(Visitor*);
+        DECLARE_TRACE();
     private:
         friend class HTMLElementStack;
 
@@ -163,7 +163,7 @@ public:
 
     ContainerNode* rootNode() const;
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 #ifndef NDEBUG
     void show();

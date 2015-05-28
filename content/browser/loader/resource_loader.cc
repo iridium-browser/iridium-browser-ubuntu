@@ -281,7 +281,8 @@ void ResourceLoader::OnAuthRequired(net::URLRequest* unused,
                                     net::AuthChallengeInfo* auth_info) {
   DCHECK_EQ(request_.get(), unused);
 
-  if (request_->load_flags() & net::LOAD_DO_NOT_PROMPT_FOR_LOGIN) {
+  ResourceRequestInfoImpl* info = GetRequestInfo();
+  if (info->do_not_prompt_for_login()) {
     request_->CancelAuth();
     return;
   }
@@ -310,8 +311,7 @@ void ResourceLoader::OnCertificateRequested(
       << "OnCertificateRequested called with ssl_client_auth_handler pending";
   ssl_client_auth_handler_.reset(new SSLClientAuthHandler(
       GetRequestInfo()->GetContext()->CreateClientCertStore(), request_.get(),
-      cert_info, base::Bind(&ResourceLoader::ContinueWithCertificate,
-                            weak_ptr_factory_.GetWeakPtr())));
+      cert_info, this));
   ssl_client_auth_handler_->SelectCertificate();
 }
 
@@ -479,7 +479,7 @@ void ResourceLoader::OnReadCompleted(net::URLRequest* unused, int bytes_read) {
 
 void ResourceLoader::CancelSSLRequest(int error,
                                       const net::SSLInfo* ssl_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   // The request can be NULL if it was cancelled by the renderer (as the
   // request of the user navigating to a new page from the location bar).
@@ -495,11 +495,23 @@ void ResourceLoader::CancelSSLRequest(int error,
 }
 
 void ResourceLoader::ContinueSSLRequest() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   DVLOG(1) << "ContinueSSLRequest() url: " << request_->url().spec();
 
   request_->ContinueDespiteLastError();
+}
+
+void ResourceLoader::ContinueWithCertificate(net::X509Certificate* cert) {
+  DCHECK(ssl_client_auth_handler_);
+  ssl_client_auth_handler_.reset();
+  request_->ContinueWithCertificate(cert);
+}
+
+void ResourceLoader::CancelCertificateSelection() {
+  DCHECK(ssl_client_auth_handler_);
+  ssl_client_auth_handler_.reset();
+  request_->CancelWithError(net::ERR_SSL_CLIENT_AUTH_CERT_NEEDED);
 }
 
 void ResourceLoader::Resume() {
@@ -848,11 +860,6 @@ void ResourceLoader::RecordHistograms() {
 
     UMA_HISTOGRAM_ENUMERATION("Net.Prefetch.Pattern", status, STATUS_MAX);
   }
-}
-
-void ResourceLoader::ContinueWithCertificate(net::X509Certificate* cert) {
-  ssl_client_auth_handler_.reset();
-  request_->ContinueWithCertificate(cert);
 }
 
 }  // namespace content

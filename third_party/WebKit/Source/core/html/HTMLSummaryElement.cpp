@@ -23,14 +23,14 @@
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/HTMLNames.h"
-#include "core/events/KeyboardEvent.h"
-#include "core/dom/NodeRenderingTraversal.h"
+#include "core/dom/shadow/ComposedTreeTraversal.h"
 #include "core/dom/shadow/ShadowRoot.h"
+#include "core/events/KeyboardEvent.h"
 #include "core/html/HTMLContentElement.h"
 #include "core/html/HTMLDetailsElement.h"
 #include "core/html/shadow/DetailsMarkerControl.h"
 #include "core/html/shadow/ShadowElementNames.h"
-#include "core/rendering/RenderBlockFlow.h"
+#include "core/layout/LayoutBlockFlow.h"
 
 namespace blink {
 
@@ -39,7 +39,7 @@ using namespace HTMLNames;
 PassRefPtrWillBeRawPtr<HTMLSummaryElement> HTMLSummaryElement::create(Document& document)
 {
     RefPtrWillBeRawPtr<HTMLSummaryElement> summary = adoptRefWillBeNoop(new HTMLSummaryElement(document));
-    summary->ensureUserAgentShadowRoot();
+    summary->ensureClosedShadowRoot();
     return summary.release();
 }
 
@@ -48,12 +48,12 @@ HTMLSummaryElement::HTMLSummaryElement(Document& document)
 {
 }
 
-RenderObject* HTMLSummaryElement::createRenderer(RenderStyle*)
+LayoutObject* HTMLSummaryElement::createLayoutObject(const ComputedStyle&)
 {
-    return new RenderBlockFlow(this);
+    return new LayoutBlockFlow(this);
 }
 
-void HTMLSummaryElement::didAddUserAgentShadowRoot(ShadowRoot& root)
+void HTMLSummaryElement::didAddClosedShadowRoot(ShadowRoot& root)
 {
     RefPtrWillBeRawPtr<DetailsMarkerControl> markerControl = DetailsMarkerControl::create(document());
     markerControl->setIdAttribute(ShadowElementNames::detailsMarker());
@@ -63,7 +63,7 @@ void HTMLSummaryElement::didAddUserAgentShadowRoot(ShadowRoot& root)
 
 HTMLDetailsElement* HTMLSummaryElement::detailsElement() const
 {
-    Node* parent = NodeRenderingTraversal::parent(*this);
+    Node* parent = ComposedTreeTraversal::parent(*this);
     if (isHTMLDetailsElement(parent))
         return toHTMLDetailsElement(parent);
     return nullptr;
@@ -71,7 +71,7 @@ HTMLDetailsElement* HTMLSummaryElement::detailsElement() const
 
 Element* HTMLSummaryElement::markerControl()
 {
-    return ensureUserAgentShadowRoot().getElementById(ShadowElementNames::detailsMarker());
+    return ensureClosedShadowRoot().getElementById(ShadowElementNames::detailsMarker());
 }
 
 bool HTMLSummaryElement::isMainSummary() const
@@ -100,7 +100,7 @@ bool HTMLSummaryElement::supportsFocus() const
 
 void HTMLSummaryElement::defaultEventHandler(Event* event)
 {
-    if (isMainSummary() && renderer()) {
+    if (isMainSummary() && layoutObject()) {
         if (event->type() == EventTypeNames::DOMActivate && !isClickableControl(event->target()->toNode())) {
             if (HTMLDetailsElement* details = detailsElement())
                 details->toggleOpen();
@@ -140,7 +140,7 @@ void HTMLSummaryElement::defaultEventHandler(Event* event)
 
 bool HTMLSummaryElement::willRespondToMouseClickEvents()
 {
-    if (isMainSummary() && renderer())
+    if (isMainSummary() && layoutObject())
         return true;
 
     return HTMLElement::willRespondToMouseClickEvents();

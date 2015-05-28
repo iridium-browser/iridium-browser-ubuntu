@@ -24,6 +24,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.TabState;
+import org.chromium.chrome.browser.document.IncognitoNotificationManager;
 import org.chromium.chrome.browser.tabmodel.TabList;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelJniBridge;
@@ -32,6 +33,7 @@ import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.browser.tabmodel.document.DocumentTabModelInfo.DocumentEntry;
 import org.chromium.chrome.browser.tabmodel.document.DocumentTabModelInfo.DocumentList;
 import org.chromium.chrome.browser.util.MathUtils;
+import org.chromium.content_public.browser.WebContents;
 
 import java.io.File;
 import java.io.IOException;
@@ -143,7 +145,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
      */
     public DocumentTabModelImpl(ActivityDelegate activityDelegate, TabDelegate tabDelegate,
             boolean isIncognito, int prioritizedTabId) {
-        this(activityDelegate, new StorageDelegate(isIncognito), tabDelegate, isIncognito,
+        this(activityDelegate, new StorageDelegate(), tabDelegate, isIncognito,
                 prioritizedTabId, ApplicationStatus.getApplicationContext());
     }
 
@@ -221,7 +223,10 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
     }
 
     @Override
-    public void setLastShownId(int id) {
+    public boolean setLastShownId(int id) {
+        if (mLastShownTabId == id) return false;
+
+        int previousTabId = mLastShownTabId;
         mLastShownTabId = id;
 
         String prefName =
@@ -230,6 +235,15 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         SharedPreferences.Editor editor = prefs.edit();
         editor.putInt(prefName, id);
         editor.apply();
+
+        // TODO(dfalcantara): Figure out how to fire the correct type of TabSelectionType, which is
+        //                    quite hard to do in Document-mode from where we call this.
+        for (TabModelObserver obs : mObservers) {
+            obs.didSelectTab(
+                    TabModelUtils.getCurrentTab(this), TabSelectionType.FROM_USER, previousTabId);
+        }
+
+        return true;
     }
 
     @Override
@@ -264,7 +278,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
 
         // Try to create a Tab that will hold the Tab's info.
         Entry entry = mEntryMap.get(tabId);
-        if (entry == null) return null;
+        assert entry != null;
 
         // If a tab has already been initialized, use that.
         if (entry.placeholderTab != null && entry.placeholderTab.isInitialized()) {
@@ -272,7 +286,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         }
 
         // Create a frozen Tab if we are capable, or if the previous Tab is just a placeholder.
-        if (entry.tabState != null && isNativeInitialized()
+        if (entry.getTabState() != null && isNativeInitialized()
                 && (entry.placeholderTab == null || !entry.placeholderTab.isInitialized())) {
             entry.placeholderTab = mTabDelegate.createFrozenTab(entry);
             entry.placeholderTab.initializeNative();
@@ -318,9 +332,9 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
     }
 
     @Override
-    protected Tab createTabWithNativeContents(
-            boolean isIncognito, long webContentsPtr, int parentTabId) {
-        mTabDelegate.createTabWithNativeContents(isIncognito, webContentsPtr, parentTabId);
+    protected Tab createTabWithWebContents(
+            boolean isIncognito, WebContents webContents, int parentTabId) {
+        mTabDelegate.createTabWithWebContents(isIncognito, webContents, parentTabId);
         return null;
     }
 
@@ -349,6 +363,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
      * @param tabId ID to add.
      */
     private void addTabId(int index, int tabId) {
+        assert tabId != Tab.INVALID_TAB_ID;
         if (mTabIdList.contains(tabId)) return;
         mTabIdList.add(index, tabId);
     }
@@ -374,7 +389,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
     @Override
     public TabState getTabStateForDocument(int tabId) {
         Entry entry = mEntryMap.get(tabId);
-        return entry == null ? null : entry.tabState;
+        return entry == null ? null : entry.getTabState();
     }
 
     @Override
@@ -408,14 +423,14 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         for (int i = 0; i < mEntryMap.size(); i++) {
             int tabId = mEntryMap.keyAt(i);
             if (isTabIdInEntryList(current, tabId)
-                    || isTabAssociatedWithNonDestroyedActivity(tabId)) {
+                    || mActivityDelegate.isTabAssociatedWithNonDestroyedActivity(
+                            isIncognito(), tabId)) {
                 continue;
             }
 
             Entry entry = mEntryMap.get(tabId);
-            if (!isIncognito() && entry.tabState != null
-                    && entry.tabState.contentsState != null) {
-                entry.tabState.contentsState.createHistoricalTab();
+            if (!isIncognito() && entry.getTabState() != null) {
+                entry.getTabState().contentsState.createHistoricalTab();
             }
             removed.add(tabId);
         }
@@ -427,7 +442,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
 
     @Override
     public void updateEntry(Intent intent, Tab tab) {
-        if (!mActivityDelegate.isValidActivity(isIncognito(), intent)) return;
+        assert mActivityDelegate.isValidActivity(isIncognito(), intent);
 
         int id = ActivityDelegate.getTabIdFromIntent(intent);
         if (id == Tab.INVALID_TAB_ID) return;
@@ -435,14 +450,14 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         Entry currentEntry = mEntryMap.get(id);
         String currentUrl = tab.getUrl();
         boolean canGoBack = tab.canGoBack();
-        boolean isCoveredByChildActivity = mTabDelegate.isTabCoveredByChildActivity(tab);
+        boolean isCoveredByChildActivity = tab.isCoveredByChildActivity();
         TabState state = tab.getState();
         if (currentEntry != null
                 && currentEntry.tabId == id
                 && TextUtils.equals(currentEntry.currentUrl, currentUrl)
                 && currentEntry.canGoBack == canGoBack
                 && currentEntry.isCoveredByChildActivity == isCoveredByChildActivity
-                && currentEntry.tabState == state
+                && currentEntry.getTabState() == state
                 && !tab.isTabStateDirty()) {
             return;
         }
@@ -455,7 +470,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         currentEntry.currentUrl = currentUrl;
         currentEntry.canGoBack = canGoBack;
         currentEntry.isCoveredByChildActivity = isCoveredByChildActivity;
-        currentEntry.tabState = state;
+        currentEntry.setTabState(state);
 
         // TODO(dfalcantara): This is different from how the normal Tab determines when to save its
         // state, but this can't be fixed because we cann't hold onto Tabs in this class.
@@ -499,7 +514,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         }
 
         // Read the file, which saved out the task IDs in regular order.
-        byte[] tabFileBytes = mStorageDelegate.readTaskFileBytes();
+        byte[] tabFileBytes = mStorageDelegate.readTaskFileBytes(isIncognito());
         if (tabFileBytes != null) {
             try {
                 DocumentList list = MessageNano.mergeFrom(new DocumentList(), tabFileBytes);
@@ -543,7 +558,8 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         if (mPrioritizedTabId != Tab.INVALID_TAB_ID) {
             Entry entry = mEntryMap.get(mPrioritizedTabId);
             if (entry != null) {
-                entry.tabState = mStorageDelegate.restoreTabState(mPrioritizedTabId);
+                entry.setTabState(
+                        mStorageDelegate.restoreTabState(mPrioritizedTabId, isIncognito()));
                 entry.isTabStateReady = true;
             }
         }
@@ -567,7 +583,8 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
             public Void doInBackground(Void... params) {
                 for (Entry entry : mEntries) {
                     if (mPrioritizedTabId == entry.tabId) continue;
-                    entry.tabState = mStorageDelegate.restoreTabState(entry.tabId);
+                    entry.setTabState(
+                            mStorageDelegate.restoreTabState(entry.tabId, isIncognito()));
                     entry.isTabStateReady = true;
                 }
 
@@ -580,7 +597,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
                     Entry entry = mEntryMap.get(pair.tabId);
                     if (entry == null) continue;
 
-                    if (entry.tabState == null) entry.tabState = pair.tabState;
+                    if (entry.getTabState() == null) entry.setTabState(pair.getTabState());
                     entry.isTabStateReady = true;
                 }
 
@@ -602,15 +619,15 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
 
                 for (int i = 0; i < mEntryMap.size(); i++) {
                     Entry entry = mEntryMap.valueAt(i);
-                    if (entry.tabState == null) continue;
-                    mCachedEntries.add(new Entry(entry.tabId, entry.tabState));
+                    if (entry.getTabState() == null) continue;
+                    mCachedEntries.add(new Entry(entry.tabId, entry.getTabState()));
                 }
             }
 
             @Override
             public Void doInBackground(Void... params) {
                 for (Entry entry : mCachedEntries) {
-                    TabState tabState = entry.tabState;
+                    TabState tabState = entry.getTabState();
                     updateEntryInfoFromTabState(entry, tabState);
                 }
                 return null;
@@ -669,9 +686,9 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
             public Void doInBackground(Void... params) {
                 for (Integer tabId : mHistoricalTabsForBackgroundThread) {
                     // Read the saved state, then delete the file.
-                    TabState state = mStorageDelegate.restoreTabState(tabId);
+                    TabState state = mStorageDelegate.restoreTabState(tabId, isIncognito());
                     mEntries.add(new Entry(tabId, state));
-                    mStorageDelegate.deleteTabStateFile(tabId);
+                    mStorageDelegate.deleteTabState(tabId, isIncognito());
                 }
 
                 return null;
@@ -680,8 +697,8 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
             @Override
             public void onPostExecute(Void result) {
                 for (Entry entry : mEntries) {
-                    if (entry.tabState == null || entry.tabState.contentsState == null) continue;
-                    entry.tabState.contentsState.createHistoricalTab();
+                    if (entry.getTabState() == null) continue;
+                    entry.getTabState().contentsState.createHistoricalTab();
                 }
                 mHistoricalTabs.clear();
                 setCurrentState(STATE_DETERMINE_HISTORICAL_TABS_END);
@@ -760,7 +777,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
 
             @Override
             protected Void doInBackground(Void... params) {
-                mStorageDelegate.writeTaskFileBytes(MessageNano.toByteArray(mList));
+                mStorageDelegate.writeTaskFileBytes(isIncognito(), MessageNano.toByteArray(mList));
                 return null;
             }
         }.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
@@ -777,8 +794,8 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
             protected void onPreExecute() {
                 for (int i = 0; i < mEntryMap.size(); i++) {
                     Entry entry = mEntryMap.valueAt(i);
-                    if (!entry.isDirty || entry.tabState == null) continue;
-                    mStatesToWrite.put(entry.tabId, entry.tabState);
+                    if (!entry.isDirty || entry.getTabState() == null) continue;
+                    mStatesToWrite.put(entry.tabId, entry.getTabState());
                 }
             }
 
@@ -786,7 +803,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
             protected Void doInBackground(Void... voids) {
                 for (int i = 0; i < mStatesToWrite.size(); i++) {
                     int tabId = mStatesToWrite.keyAt(i);
-                    mStorageDelegate.saveTabState(tabId, mStatesToWrite.valueAt(i));
+                    mStorageDelegate.saveTabState(tabId, isIncognito(), mStatesToWrite.valueAt(i));
                 }
                 return null;
             }
@@ -833,6 +850,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
     @Override
     public void closeAllTabs(boolean allowDelegation, boolean uponExit) {
         for (int i = getCount() - 1; i >= 0; i--) closeTabAt(i);
+        if (isIncognito()) IncognitoNotificationManager.dismissIncognitoNotification();
     }
 
     @Override
@@ -859,14 +877,24 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
     }
 
     @Override
-    public void addTab(Tab tab) {
+    public void addTab(Intent intent, Tab tab) {
+        if (tab.getId() == Tab.INVALID_TAB_ID
+                || ActivityDelegate.getTabIdFromIntent(intent) != tab.getId()) {
+            return;
+        }
+
         int parentIndex = indexOf(tab.getParentId());
         int index = parentIndex == -1 ? getCount() : parentIndex + 1;
         addTab(tab, index, tab.getLaunchType());
+        updateEntry(intent, tab);
     }
 
     @Override
     public void addTab(Tab tab, int index, TabLaunchType type) {
+        // TODO(dfalcantara): Prevent this method from being called directly instead of going
+        //                    through addTab(Intent intent, Tab tab).
+        if (tab.getId() == Tab.INVALID_TAB_ID) return;
+
         for (TabModelObserver obs : mObservers) obs.willAddTab(tab, type);
 
         if (index == TabModel.INVALID_TAB_INDEX) {
@@ -914,27 +942,6 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
     private static boolean isTabIdInEntryList(List<Entry> entries, int tabId) {
         for (int i = 0; i < entries.size(); i++) {
             if (entries.get(i).tabId == tabId) return true;
-        }
-        return false;
-    }
-
-    /**
-     * Check if the Tab is associated with an Activity that hasn't been destroyed.
-     * This catches situations where a DocumentActivity is no longer listed in Android's Recents
-     * list, but is not dead yet.
-     * @param tabId ID of the Tab to find.
-     * @return Whether the tab is still alive.
-     */
-    private boolean isTabAssociatedWithNonDestroyedActivity(int tabId) {
-        List<WeakReference<Activity>> activities = ApplicationStatus.getRunningActivities();
-        for (WeakReference<Activity> ref : activities) {
-            Activity activity = ref.get();
-            if (activity != null
-                    && mActivityDelegate.isValidActivity(isIncognito(), activity.getIntent())
-                    && ActivityDelegate.getTabIdFromIntent(activity.getIntent()) == tabId
-                    && !activity.isDestroyed()) {
-                return true;
-            }
         }
         return false;
     }

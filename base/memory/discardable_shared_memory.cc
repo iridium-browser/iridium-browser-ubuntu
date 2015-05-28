@@ -157,23 +157,24 @@ bool DiscardableSharedMemory::Map(size_t size) {
   return true;
 }
 
-bool DiscardableSharedMemory::Lock(size_t offset, size_t length) {
+DiscardableSharedMemory::LockResult DiscardableSharedMemory::Lock(
+    size_t offset, size_t length) {
   DCHECK_EQ(AlignToPageSize(offset), offset);
   DCHECK_EQ(AlignToPageSize(length), length);
 
-  // Calls to this function must synchronized properly.
+  // Calls to this function must be synchronized properly.
   DFAKE_SCOPED_LOCK(thread_collision_warner_);
-
-  // Return false when instance has been purged or not initialized properly by
-  // checking if |last_known_usage_| is NULL.
-  if (last_known_usage_.is_null())
-    return false;
 
   DCHECK(shared_memory_.memory());
 
   // We need to successfully acquire the platform independent lock before
   // individual pages can be locked.
   if (!locked_page_count_) {
+    // Return false when instance has been purged or not initialized properly
+    // by checking if |last_known_usage_| is NULL.
+    if (last_known_usage_.is_null())
+      return FAILED;
+
     SharedState old_state(SharedState::UNLOCKED, last_known_usage_);
     SharedState new_state(SharedState::LOCKED, Time());
     SharedState result(subtle::Acquire_CompareAndSwap(
@@ -184,7 +185,7 @@ bool DiscardableSharedMemory::Lock(size_t offset, size_t length) {
       // Update |last_known_usage_| in case the above CAS failed because of
       // an incorrect timestamp.
       last_known_usage_ = result.GetTimestamp();
-      return false;
+      return FAILED;
     }
   }
 
@@ -214,18 +215,18 @@ bool DiscardableSharedMemory::Lock(size_t offset, size_t length) {
   DCHECK(SharedMemory::IsHandleValid(handle));
   if (ashmem_pin_region(
           handle.fd, AlignToPageSize(sizeof(SharedState)) + offset, length)) {
-    return false;
+    return PURGED;
   }
 #endif
 
-  return true;
+  return SUCCESS;
 }
 
 void DiscardableSharedMemory::Unlock(size_t offset, size_t length) {
   DCHECK_EQ(AlignToPageSize(offset), offset);
   DCHECK_EQ(AlignToPageSize(length), length);
 
-  // Calls to this function must synchronized properly.
+  // Calls to this function must be synchronized properly.
   DFAKE_SCOPED_LOCK(thread_collision_warner_);
 
   // Zero for length means "everything onward".
@@ -293,7 +294,7 @@ void* DiscardableSharedMemory::memory() const {
 }
 
 bool DiscardableSharedMemory::Purge(Time current_time) {
-  // Calls to this function must synchronized properly.
+  // Calls to this function must be synchronized properly.
   DFAKE_SCOPED_LOCK(thread_collision_warner_);
 
   // Early out if not mapped. This can happen if the segment was previously
@@ -324,22 +325,6 @@ bool DiscardableSharedMemory::Purge(Time current_time) {
   return true;
 }
 
-bool DiscardableSharedMemory::PurgeAndTruncate(Time current_time) {
-  if (!Purge(current_time))
-    return false;
-
-#if defined(OS_POSIX)
-  // Truncate shared memory to size of SharedState.
-  SharedMemoryHandle handle = shared_memory_.handle();
-  if (SharedMemory::IsHandleValid(handle)) {
-    if (HANDLE_EINTR(ftruncate(handle.fd, sizeof(SharedState))) != 0)
-      DPLOG(ERROR) << "ftruncate() failed";
-  }
-#endif
-
-  return true;
-}
-
 bool DiscardableSharedMemory::IsMemoryResident() const {
   DCHECK(shared_memory_.memory());
 
@@ -353,7 +338,28 @@ bool DiscardableSharedMemory::IsMemoryResident() const {
 void DiscardableSharedMemory::Close() {
   shared_memory_.Unmap();
   shared_memory_.Close();
+  mapped_size_ = 0;
 }
+
+#if defined(DISCARDABLE_SHARED_MEMORY_SHRINKING)
+void DiscardableSharedMemory::Shrink() {
+#if defined(OS_POSIX)
+  SharedMemoryHandle handle = shared_memory_.handle();
+  if (!SharedMemory::IsHandleValid(handle))
+    return;
+
+  // Truncate shared memory to size of SharedState.
+  if (HANDLE_EINTR(
+          ftruncate(handle.fd, AlignToPageSize(sizeof(SharedState)))) != 0) {
+    DPLOG(ERROR) << "ftruncate() failed";
+    return;
+  }
+  mapped_size_ = 0;
+#else
+  NOTIMPLEMENTED();
+#endif
+}
+#endif
 
 Time DiscardableSharedMemory::Now() const {
   return Time::Now();

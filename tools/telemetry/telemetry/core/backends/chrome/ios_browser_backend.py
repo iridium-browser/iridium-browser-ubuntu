@@ -8,9 +8,10 @@ import logging
 import re
 import urllib2
 
-from telemetry.core import util
 from telemetry.core.backends.chrome import chrome_browser_backend
 from telemetry.core.backends.chrome import system_info_backend
+from telemetry.core import exceptions
+from telemetry.core import util
 
 
 class IosBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
@@ -90,7 +91,7 @@ class IosBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         # Retry a few times since it can take a few seconds for this API to be
         # ready, if ios_webkit_debug_proxy is just launched.
         data = util.WaitFor(GetData, 5)
-      except util.TimeoutException as e:
+      except exceptions.TimeoutException as e:
         logging.debug('Timeout retrieving data from iOS device')
         logging.debug(e)
         return []
@@ -107,14 +108,6 @@ class IosBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       self._system_info_backend = system_info_backend.SystemInfoBackend(
           self._port, self._page)
     return self._system_info_backend.GetSystemInfo()
-
-  def ListInspectableContexts(self):
-    response = super(IosBrowserBackend, self).ListInspectableContexts()
-    if len(response) != len(self._webviews):
-      self.UpdateRunningBrowsersInfo()
-    for i in range(len(response)):
-      response[i]['id'] = 1
-    return response
 
   def IsBrowserRunning(self):
     return bool(self._webviews)

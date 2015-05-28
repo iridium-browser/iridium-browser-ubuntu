@@ -26,31 +26,31 @@ public:
     virtual ~GrStencilAndCoverPathRenderer();
 
     virtual bool canDrawPath(const GrDrawTarget*,
-                             const GrDrawState*,
+                             const GrPipelineBuilder*,
                              const SkMatrix& viewMatrix,
                              const SkPath&,
                              const SkStrokeRec&,
-                             bool antiAlias) const SK_OVERRIDE;
+                             bool antiAlias) const override;
 
 protected:
     virtual StencilSupport onGetStencilSupport(const GrDrawTarget*,
-                                               const GrDrawState*,
+                                               const GrPipelineBuilder*,
                                                const SkPath&,
-                                               const SkStrokeRec&) const SK_OVERRIDE;
+                                               const SkStrokeRec&) const override;
 
     virtual bool onDrawPath(GrDrawTarget*,
-                            GrDrawState*,
+                            GrPipelineBuilder*,
                             GrColor,
                             const SkMatrix& viewMatrix,
                             const SkPath&,
                             const SkStrokeRec&,
-                            bool antiAlias) SK_OVERRIDE;
+                            bool antiAlias) override;
 
     virtual void onStencilPath(GrDrawTarget*,
-                               GrDrawState*,
+                               GrPipelineBuilder*,
                                const SkMatrix& viewMatrix,
                                const SkPath&,
-                               const SkStrokeRec&) SK_OVERRIDE;
+                               const SkStrokeRec&) override;
 
 private:
     GrStencilAndCoverPathRenderer(GrGpu*);

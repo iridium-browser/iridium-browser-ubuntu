@@ -58,18 +58,13 @@ PassRefPtrWillBeRawPtr<XPathExpression> XPathExpression::createExpression(const 
     return expr.release();
 }
 
-void XPathExpression::trace(Visitor* visitor)
+DEFINE_TRACE(XPathExpression)
 {
     visitor->trace(m_topExpression);
 }
 
-PassRefPtrWillBeRawPtr<XPathResult> XPathExpression::evaluate(Node* contextNode, unsigned short type, XPathResult*, ExceptionState& exceptionState)
+PassRefPtrWillBeRawPtr<XPathResult> XPathExpression::evaluate(Node* contextNode, unsigned short type, const ScriptValue&, ExceptionState& exceptionState)
 {
-    if (!contextNode) {
-        exceptionState.throwDOMException(NotSupportedError, "The context node provided is null.");
-        return nullptr;
-    }
-
     if (!isValidContextNode(contextNode)) {
         exceptionState.throwDOMException(NotSupportedError, "The node provided is '" + contextNode->nodeName() + "', which is not a valid context node type.");
         return nullptr;

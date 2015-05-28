@@ -44,6 +44,8 @@ component("domain_reliability") {
     "config.h",
     "context.cc",
     "context.h",
+    "context_manager.cc",
+    "context_manager.h",
     "dispatcher.cc",
     "dispatcher.h",
     "domain_reliability_export.h",
@@ -85,6 +87,8 @@ source_set("unit_tests") {
     "uploader_unittest.cc",
     "util_unittest.cc",
   ]
+
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   deps = [
     ":domain_reliability",

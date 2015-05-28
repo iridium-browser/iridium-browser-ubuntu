@@ -5,6 +5,7 @@
 #include "content/public/browser/content_browser_client.h"
 
 #include "base/files/file_path.h"
+#include "content/public/browser/client_certificate_delegate.h"
 #include "ui/gfx/image/image_skia.h"
 #include "url/gurl.h"
 
@@ -12,12 +13,12 @@ namespace content {
 
 BrowserMainParts* ContentBrowserClient::CreateBrowserMainParts(
     const MainFunctionParams& parameters) {
-  return NULL;
+  return nullptr;
 }
 
 WebContentsViewDelegate* ContentBrowserClient::GetWebContentsViewDelegate(
     WebContents* web_contents) {
-  return NULL;
+  return nullptr;
 }
 
 GURL ContentBrowserClient::GetEffectiveURL(BrowserContext* browser_context,
@@ -34,7 +35,7 @@ net::URLRequestContextGetter* ContentBrowserClient::CreateRequestContext(
     BrowserContext* browser_context,
     ProtocolHandlerMap* protocol_handlers,
     URLRequestInterceptorScopedVector request_interceptors) {
-  return NULL;
+  return nullptr;
 }
 
 net::URLRequestContextGetter*
@@ -44,7 +45,7 @@ ContentBrowserClient::CreateRequestContextForStoragePartition(
     bool in_memory,
     ProtocolHandlerMap* protocol_handlers,
     URLRequestInterceptorScopedVector request_interceptors) {
-  return NULL;
+  return nullptr;
 }
 
 bool ContentBrowserClient::IsHandledURL(const GURL& url) {
@@ -173,20 +174,18 @@ bool ContentBrowserClient::AllowWorkerIndexedDB(
 }
 
 QuotaPermissionContext* ContentBrowserClient::CreateQuotaPermissionContext() {
-  return NULL;
+  return nullptr;
 }
 
 void ContentBrowserClient::SelectClientCertificate(
-    int render_process_id,
-    int render_frame_id,
+    WebContents* web_contents,
     net::SSLCertRequestInfo* cert_request_info,
-    const base::Callback<void(net::X509Certificate*)>& callback) {
-  callback.Run(NULL);
+    scoped_ptr<ClientCertificateDelegate> delegate) {
 }
 
 net::URLRequestContext* ContentBrowserClient::OverrideRequestContextForURL(
     const GURL& url, ResourceContext* context) {
-  return NULL;
+  return nullptr;
 }
 
 std::string ContentBrowserClient::GetStoragePartitionIdForSite(
@@ -216,30 +215,12 @@ void ContentBrowserClient::GetStoragePartitionConfigForSite(
 }
 
 MediaObserver* ContentBrowserClient::GetMediaObserver() {
-  return NULL;
+  return nullptr;
 }
 
 PlatformNotificationService*
 ContentBrowserClient::GetPlatformNotificationService() {
-  return NULL;
-}
-
-void ContentBrowserClient::RequestPermission(
-    PermissionType permission,
-    WebContents* web_contents,
-    int bridge_id,
-    const GURL& requesting_frame,
-    bool user_gesture,
-    const base::Callback<void(bool)>& result_callback) {
-  result_callback.Run(true);
-}
-
-PermissionStatus ContentBrowserClient::GetPermissionStatus(
-    PermissionType permission,
-    BrowserContext* browser_context,
-    const GURL& requesting_origin,
-    const GURL& embedding_origin) {
-  return PERMISSION_STATUS_DENIED;
+  return nullptr;
 }
 
 bool ContentBrowserClient::CanCreateWindow(
@@ -263,15 +244,15 @@ bool ContentBrowserClient::CanCreateWindow(
 
 SpeechRecognitionManagerDelegate*
     ContentBrowserClient::CreateSpeechRecognitionManagerDelegate() {
-  return NULL;
+  return nullptr;
 }
 
 net::NetLog* ContentBrowserClient::GetNetLog() {
-  return NULL;
+  return nullptr;
 }
 
 AccessTokenStore* ContentBrowserClient::CreateAccessTokenStore() {
-  return NULL;
+  return nullptr;
 }
 
 bool ContentBrowserClient::IsFastShutdownPossible() {
@@ -288,7 +269,7 @@ std::string ContentBrowserClient::GetDefaultDownloadName() {
 
 BrowserPpapiHost*
     ContentBrowserClient::GetExternalBrowserPpapiHost(int plugin_process_id) {
-  return NULL;
+  return nullptr;
 }
 
 bool ContentBrowserClient::AllowPepperSocketAPI(
@@ -301,15 +282,19 @@ bool ContentBrowserClient::AllowPepperSocketAPI(
 
 ui::SelectFilePolicy* ContentBrowserClient::CreateSelectFilePolicy(
     WebContents* web_contents) {
-  return NULL;
+  return nullptr;
 }
 
 LocationProvider* ContentBrowserClient::OverrideSystemLocationProvider() {
-  return NULL;
+  return nullptr;
 }
 
 DevToolsManagerDelegate* ContentBrowserClient::GetDevToolsManagerDelegate() {
-  return NULL;
+  return nullptr;
+}
+
+TracingDelegate* ContentBrowserClient::GetTracingDelegate() {
+  return nullptr;
 }
 
 bool ContentBrowserClient::IsPluginAllowedToCallRequestOSFileHandle(
@@ -324,11 +309,6 @@ bool ContentBrowserClient::IsPluginAllowedToUseDevChannelAPIs(
   return false;
 }
 
-net::CookieStore* ContentBrowserClient::OverrideCookieStoreForRenderProcess(
-    int render_process_id) {
-  return NULL;
-}
-
 bool ContentBrowserClient::CheckMediaAccessPermission(
     BrowserContext* browser_context,
     const GURL& security_origin,
@@ -336,9 +316,22 @@ bool ContentBrowserClient::CheckMediaAccessPermission(
   return false;
 }
 
+PresentationServiceDelegate*
+ContentBrowserClient::GetPresentationServiceDelegate(
+    WebContents* web_contents) {
+  return nullptr;
+}
+
+void ContentBrowserClient::OpenURL(
+    content::BrowserContext* browser_context,
+    const content::OpenURLParams& params,
+    const base::Callback<void(content::WebContents*)>& callback) {
+  callback.Run(nullptr);
+}
+
 #if defined(OS_WIN)
 const wchar_t* ContentBrowserClient::GetResourceDllName() {
-  return NULL;
+  return nullptr;
 }
 #endif
 
@@ -346,7 +339,7 @@ const wchar_t* ContentBrowserClient::GetResourceDllName() {
 ExternalVideoSurfaceContainer*
 ContentBrowserClient::OverrideCreateExternalVideoSurfaceContainer(
     WebContents* web_contents) {
-  return NULL;
+  return nullptr;
 }
 #endif
 

@@ -23,14 +23,20 @@ public:
         bool      fPacked;
     };
 
+    struct IDDesc {
+        IDDesc() : fRenderbufferID(0), fLifeCycle(kCached_LifeCycle) {}
+        GrGLuint fRenderbufferID;
+        GrGpuResource::LifeCycle fLifeCycle;
+    };
+
     GrGLStencilBuffer(GrGpu* gpu,
-                      GrGLint rbid,
+                      const IDDesc& idDesc,
                       int width, int height,
                       int sampleCnt,
                       const Format& format)
-        : GrStencilBuffer(gpu, width, height, format.fStencilBits, sampleCnt)
+        : GrStencilBuffer(gpu, idDesc.fLifeCycle, width, height, format.fStencilBits, sampleCnt)
         , fFormat(format)
-        , fRenderbufferID(rbid) {
+        , fRenderbufferID(idDesc.fRenderbufferID) {
         this->registerWithCache();
     }
 
@@ -42,11 +48,11 @@ public:
 
 protected:
     // overrides of GrResource
-    virtual void onRelease() SK_OVERRIDE;
-    virtual void onAbandon() SK_OVERRIDE;
+    void onRelease() override;
+    void onAbandon() override;
 
 private:
-    virtual size_t onGpuMemorySize() const SK_OVERRIDE;
+    size_t onGpuMemorySize() const override;
 
     Format fFormat;
     // may be zero for external SBs associated with external RTs

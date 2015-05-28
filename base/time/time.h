@@ -33,6 +33,7 @@
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
+#include "base/numerics/safe_math.h"
 #include "build/build_config.h"
 
 #if defined(OS_MACOSX)
@@ -100,6 +101,15 @@ class BASE_EXPORT TimeDelta {
     return delta_;
   }
 
+  // Returns the magnitude (absolute value) of this TimeDelta.
+  TimeDelta magnitude() const {
+    // Some toolchains provide an incomplete C++11 implementation and lack an
+    // int64 overload for std::abs().  The following is a simple branchless
+    // implementation:
+    const int64 mask = delta_ >> (sizeof(delta_) * 8 - 1);
+    return TimeDelta((delta_ + mask) ^ mask);
+  }
+
   // Returns true if the time delta is the maximum time delta.
   bool is_max() const {
     return delta_ == std::numeric_limits<int64>::max();
@@ -131,40 +141,52 @@ class BASE_EXPORT TimeDelta {
 
   // Computations with other deltas.
   TimeDelta operator+(TimeDelta other) const {
-    return TimeDelta(delta_ + other.delta_);
+    return TimeDelta(SaturatedAdd(other.delta_));
   }
   TimeDelta operator-(TimeDelta other) const {
-    return TimeDelta(delta_ - other.delta_);
+    return TimeDelta(SaturatedSub(other.delta_));
   }
 
   TimeDelta& operator+=(TimeDelta other) {
-    delta_ += other.delta_;
+    delta_ = SaturatedAdd(other.delta_);
     return *this;
   }
   TimeDelta& operator-=(TimeDelta other) {
-    delta_ -= other.delta_;
+    delta_ = SaturatedSub(other.delta_);
     return *this;
   }
   TimeDelta operator-() const {
     return TimeDelta(-delta_);
   }
 
-  // Computations with ints, note that we only allow multiplicative operations
-  // with ints, and additive operations with other deltas.
-  TimeDelta operator*(int64 a) const {
-    return TimeDelta(delta_ * a);
+  // Computations with numeric types.
+  template<typename T>
+  TimeDelta operator*(T a) const {
+    CheckedNumeric<int64> rv(delta_);
+    rv *= a;
+    return TimeDelta(FromCheckedNumeric(rv));
   }
-  TimeDelta operator/(int64 a) const {
-    return TimeDelta(delta_ / a);
+  template<typename T>
+  TimeDelta operator/(T a) const {
+    CheckedNumeric<int64> rv(delta_);
+    rv /= a;
+    return TimeDelta(FromCheckedNumeric(rv));
   }
-  TimeDelta& operator*=(int64 a) {
-    delta_ *= a;
+  template<typename T>
+  TimeDelta& operator*=(T a) {
+    CheckedNumeric<int64> rv(delta_);
+    rv *= a;
+    delta_ = FromCheckedNumeric(rv);
     return *this;
   }
-  TimeDelta& operator/=(int64 a) {
-    delta_ /= a;
+  template<typename T>
+  TimeDelta& operator/=(T a) {
+    CheckedNumeric<int64> rv(delta_);
+    rv /= a;
+    delta_ = FromCheckedNumeric(rv);
     return *this;
   }
+
   int64 operator/(TimeDelta a) const {
     return delta_ / a.delta_;
   }
@@ -196,7 +218,6 @@ class BASE_EXPORT TimeDelta {
  private:
   friend class Time;
   friend class TimeTicks;
-  friend TimeDelta operator*(int64 a, TimeDelta td);
 
   // Constructs a delta given the duration in microseconds. This is private
   // to avoid confusion by callers with an integer constructor. Use
@@ -204,12 +225,20 @@ class BASE_EXPORT TimeDelta {
   explicit TimeDelta(int64 delta_us) : delta_(delta_us) {
   }
 
+  // Add or subtract |value| from this delta.
+  int64 SaturatedAdd(int64 value) const;
+  int64 SaturatedSub(int64 value) const;
+
+  // Clamp |value| on overflow and underflow conditions.
+  static int64 FromCheckedNumeric(const CheckedNumeric<int64> value);
+
   // Delta in microseconds.
   int64 delta_;
 };
 
-inline TimeDelta operator*(int64 a, TimeDelta td) {
-  return TimeDelta(a * td.delta_);
+template<typename T>
+inline TimeDelta operator*(T a, TimeDelta td) {
+  return td * a;
 }
 
 // For logging use only.
@@ -220,13 +249,16 @@ BASE_EXPORT std::ostream& operator<<(std::ostream& os, TimeDelta time_delta);
 // Represents a wall clock time in UTC.
 class BASE_EXPORT Time {
  public:
+  static const int64 kHoursPerDay = 24;
   static const int64 kMillisecondsPerSecond = 1000;
+  static const int64 kMillisecondsPerDay = kMillisecondsPerSecond * 60 * 60 *
+                                           kHoursPerDay;
   static const int64 kMicrosecondsPerMillisecond = 1000;
   static const int64 kMicrosecondsPerSecond = kMicrosecondsPerMillisecond *
                                               kMillisecondsPerSecond;
   static const int64 kMicrosecondsPerMinute = kMicrosecondsPerSecond * 60;
   static const int64 kMicrosecondsPerHour = kMicrosecondsPerMinute * 60;
-  static const int64 kMicrosecondsPerDay = kMicrosecondsPerHour * 24;
+  static const int64 kMicrosecondsPerDay = kMicrosecondsPerHour * kHoursPerDay;
   static const int64 kMicrosecondsPerWeek = kMicrosecondsPerDay * 7;
   static const int64 kNanosecondsPerMicrosecond = 1000;
   static const int64 kNanosecondsPerSecond = kNanosecondsPerMicrosecond *
@@ -435,20 +467,20 @@ class BASE_EXPORT Time {
 
   // Modify by some time delta.
   Time& operator+=(TimeDelta delta) {
-    us_ += delta.delta_;
+    us_ = delta.SaturatedAdd(us_);
     return *this;
   }
   Time& operator-=(TimeDelta delta) {
-    us_ -= delta.delta_;
+    us_ = -delta.SaturatedSub(us_);
     return *this;
   }
 
   // Return a new time modified by some delta.
   Time operator+(TimeDelta delta) const {
-    return Time(us_ + delta.delta_);
+    return Time(delta.SaturatedAdd(us_));
   }
   Time operator-(TimeDelta delta) const {
-    return Time(us_ - delta.delta_);
+    return Time(-delta.SaturatedSub(us_));
   }
 
   // Comparison operators
@@ -567,7 +599,7 @@ inline TimeDelta TimeDelta::FromMicroseconds(int64 us) {
 }
 
 inline Time TimeDelta::operator+(Time t) const {
-  return Time(t.us_ + delta_);
+  return Time(SaturatedAdd(t.us_));
 }
 
 // For logging use only.
@@ -588,18 +620,17 @@ class BASE_EXPORT TimeTicks {
   TimeTicks() : ticks_(0) {
   }
 
-  // Platform-dependent tick count representing "right now."
-  // The resolution of this clock is ~1-15ms.  Resolution varies depending
-  // on hardware/operating system configuration.
+  // Platform-dependent tick count representing "right now." When
+  // IsHighResolution() returns false, the resolution of the clock could be
+  // as coarse as ~15.6ms. Otherwise, the resolution should be no worse than one
+  // microsecond.
   static TimeTicks Now();
 
-  // Returns a platform-dependent high-resolution tick count. Implementation
-  // is hardware dependent and may or may not return sub-millisecond
-  // resolution.  THIS CALL IS GENERALLY MUCH MORE EXPENSIVE THAN Now() AND
-  // SHOULD ONLY BE USED WHEN IT IS REALLY NEEDED.
-  static TimeTicks HighResNow();
-
-  static bool IsHighResNowFastAndReliable();
+  // Returns true if the high resolution clock is working on this system and
+  // Now() will return high resolution values. Note that, on systems where the
+  // high resolution clock works but is deemed inefficient, the low resolution
+  // clock will be used instead.
+  static bool IsHighResolution();
 
   // Returns true if ThreadNow() is supported on this system.
   static bool IsThreadNowSupported() {
@@ -616,29 +647,43 @@ class BASE_EXPORT TimeTicks {
   // to (approximately) measure how much time the calling thread spent doing
   // actual work vs. being de-scheduled. May return bogus results if the thread
   // migrates to another CPU between two calls.
+  //
+  // WARNING: The returned value might NOT have the same origin as Now(). Do not
+  // perform math between TimeTicks values returned by Now() and ThreadNow() and
+  // expect meaningful results.
+  // TODO(miu): Since the timeline of these values is different, the values
+  // should be of a different type.
   static TimeTicks ThreadNow();
 
-  // Returns the current system trace time or, if none is defined, the current
-  // high-res time (i.e. HighResNow()). On systems where a global trace clock
-  // is defined, timestamping TraceEvents's with this value guarantees
-  // synchronization between events collected inside chrome and events
-  // collected outside (e.g. kernel, X server).
+  // Returns the current system trace time or, if not available on this
+  // platform, a high-resolution time value; or a low-resolution time value if
+  // neither are avalable. On systems where a global trace clock is defined,
+  // timestamping TraceEvents's with this value guarantees synchronization
+  // between events collected inside chrome and events collected outside
+  // (e.g. kernel, X server).
+  //
+  // WARNING: The returned value might NOT have the same origin as Now(). Do not
+  // perform math between TimeTicks values returned by Now() and
+  // NowFromSystemTraceTime() and expect meaningful results.
+  // TODO(miu): Since the timeline of these values is different, the values
+  // should be of a different type.
   static TimeTicks NowFromSystemTraceTime();
 
 #if defined(OS_WIN)
-  // Get the absolute value of QPC time drift. For testing.
-  static int64 GetQPCDriftMicroseconds();
-
+  // Translates an absolute QPC timestamp into a TimeTicks value. The returned
+  // value has the same origin as Now(). Do NOT attempt to use this if
+  // IsHighResolution() returns false.
   static TimeTicks FromQPCValue(LONGLONG qpc_value);
-
-  // Returns true if the high resolution clock is working on this system.
-  // This is only for testing.
-  static bool IsHighResClockWorking();
 #endif
 
   // Returns true if this object has not been initialized.
   bool is_null() const {
     return ticks_ == 0;
+  }
+
+  // Returns true if the time delta is the maximum delta.
+  bool is_max() const {
+    return ticks_ == std::numeric_limits<int64>::max();
   }
 
   // Converts an integer value representing TimeTicks to a class. This is used
@@ -663,6 +708,12 @@ class BASE_EXPORT TimeTicks {
     return ticks_;
   }
 
+  // Returns |this| snapped to the next tick, given a |tick_phase| and
+  // repeating |tick_interval| in both directions. |this| may be before,
+  // after, or equal to the |tick_phase|.
+  TimeTicks SnappedToNextTick(TimeTicks tick_phase,
+                              TimeDelta tick_interval) const;
+
   TimeTicks& operator=(TimeTicks other) {
     ticks_ = other.ticks_;
     return *this;
@@ -675,20 +726,20 @@ class BASE_EXPORT TimeTicks {
 
   // Modify by some time delta.
   TimeTicks& operator+=(TimeDelta delta) {
-    ticks_ += delta.delta_;
+    ticks_ = delta.SaturatedAdd(ticks_);
     return *this;
   }
   TimeTicks& operator-=(TimeDelta delta) {
-    ticks_ -= delta.delta_;
+    ticks_ = -delta.SaturatedSub(ticks_);
     return *this;
   }
 
   // Return a new TimeTicks modified by some delta.
   TimeTicks operator+(TimeDelta delta) const {
-    return TimeTicks(ticks_ + delta.delta_);
+    return TimeTicks(delta.SaturatedAdd(ticks_));
   }
   TimeTicks operator-(TimeDelta delta) const {
-    return TimeTicks(ticks_ - delta.delta_);
+    return TimeTicks(-delta.SaturatedSub(ticks_));
   }
 
   // Comparison operators
@@ -729,7 +780,7 @@ class BASE_EXPORT TimeTicks {
 };
 
 inline TimeTicks TimeDelta::operator+(TimeTicks t) const {
-  return TimeTicks(t.ticks_ + delta_);
+  return TimeTicks(SaturatedAdd(t.ticks_));
 }
 
 // For logging use only.

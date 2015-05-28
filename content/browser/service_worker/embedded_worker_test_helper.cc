@@ -18,7 +18,9 @@
 
 namespace content {
 
-EmbeddedWorkerTestHelper::EmbeddedWorkerTestHelper(int mock_render_process_id)
+EmbeddedWorkerTestHelper::EmbeddedWorkerTestHelper(
+    const base::FilePath& user_data_directory,
+    int mock_render_process_id)
     : wrapper_(new ServiceWorkerContextWrapper(NULL)),
       next_thread_id_(0),
       mock_render_process_id_(mock_render_process_id),
@@ -26,12 +28,8 @@ EmbeddedWorkerTestHelper::EmbeddedWorkerTestHelper(int mock_render_process_id)
   scoped_ptr<MockServiceWorkerDatabaseTaskManager> database_task_manager(
       new MockServiceWorkerDatabaseTaskManager(
           base::MessageLoopProxy::current()));
-  wrapper_->InitInternal(base::FilePath(),
-                         base::MessageLoopProxy::current(),
-                         database_task_manager.Pass(),
-                         base::MessageLoopProxy::current(),
-                         NULL,
-                         NULL);
+  wrapper_->InitInternal(user_data_directory, database_task_manager.Pass(),
+                         base::MessageLoopProxy::current(), NULL, NULL);
   wrapper_->process_manager()->SetProcessIdForTest(mock_render_process_id);
   registry()->AddChildProcessSender(mock_render_process_id, this, nullptr);
 }
@@ -137,8 +135,7 @@ void EmbeddedWorkerTestHelper::OnActivateEvent(int embedded_worker_id,
 }
 
 void EmbeddedWorkerTestHelper::OnInstallEvent(int embedded_worker_id,
-                                              int request_id,
-                                              int active_version_id) {
+                                              int request_id) {
   // The installing worker may have been doomed and terminated.
   if (!registry()->GetWorker(embedded_worker_id))
     return;
@@ -215,7 +212,7 @@ void EmbeddedWorkerTestHelper::SimulateWorkerStopped(
 
 void EmbeddedWorkerTestHelper::SimulateSend(
     IPC::Message* message) {
-  registry()->OnMessageReceived(*message);
+  registry()->OnMessageReceived(*message, mock_render_process_id_);
   delete message;
 }
 
@@ -283,15 +280,13 @@ void EmbeddedWorkerTestHelper::OnActivateEventStub(int request_id) {
                  request_id));
 }
 
-void EmbeddedWorkerTestHelper::OnInstallEventStub(int request_id,
-                                                  int active_version_id) {
+void EmbeddedWorkerTestHelper::OnInstallEventStub(int request_id) {
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
       base::Bind(&EmbeddedWorkerTestHelper::OnInstallEvent,
                  weak_factory_.GetWeakPtr(),
                  current_embedded_worker_id_,
-                 request_id,
-                 active_version_id));
+                 request_id));
 }
 
 void EmbeddedWorkerTestHelper::OnFetchEventStub(

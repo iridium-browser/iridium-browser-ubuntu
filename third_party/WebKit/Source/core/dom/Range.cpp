@@ -35,15 +35,15 @@
 #include "core/dom/NodeWithIndex.h"
 #include "core/dom/ProcessingInstruction.h"
 #include "core/dom/Text.h"
-#include "core/editing/TextIterator.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/editing/VisibleUnits.h"
+#include "core/editing/iterators/TextIterator.h"
 #include "core/editing/markup.h"
 #include "core/events/ScopedEventQueue.h"
 #include "core/html/HTMLBodyElement.h"
 #include "core/html/HTMLElement.h"
-#include "core/rendering/RenderBoxModelObject.h"
-#include "core/rendering/RenderText.h"
+#include "core/layout/LayoutBoxModelObject.h"
+#include "core/layout/LayoutText.h"
 #include "core/svg/SVGSVGElement.h"
 #include "platform/geometry/FloatQuad.h"
 #include "wtf/RefCountedLeakCounter.h"
@@ -99,6 +99,25 @@ PassRefPtrWillBeRawPtr<Range> Range::create(Document& ownerDocument, Node* start
 PassRefPtrWillBeRawPtr<Range> Range::create(Document& ownerDocument, const Position& start, const Position& end)
 {
     return adoptRefWillBeNoop(new Range(ownerDocument, start.containerNode(), start.computeOffsetInContainerNode(), end.containerNode(), end.computeOffsetInContainerNode()));
+}
+
+PassRefPtrWillBeRawPtr<Range> Range::createAdjustedToTreeScope(const TreeScope& treeScope, const Position& position)
+{
+    RefPtrWillBeRawPtr<Range> range = create(treeScope.document(), position, position);
+
+    // Make sure the range is in this scope.
+    Node* firstNode = range->firstNode();
+    ASSERT(firstNode);
+    Node* shadowHostInThisScopeOrFirstNode = treeScope.ancestorInThisScope(firstNode);
+    ASSERT(shadowHostInThisScopeOrFirstNode);
+    if (shadowHostInThisScopeOrFirstNode == firstNode)
+        return range.release();
+
+    // If not, create a range for the shadow host in this scope.
+    ContainerNode* container = shadowHostInThisScopeOrFirstNode->parentNode();
+    ASSERT(container);
+    unsigned offset = shadowHostInThisScopeOrFirstNode->nodeIndex();
+    return Range::create(treeScope.document(), container, offset, container, offset);
 }
 
 #if !ENABLE(OILPAN) || !defined(NDEBUG)
@@ -157,7 +176,8 @@ static inline bool checkForDifferentRootContainer(const RangeBoundaryPoint& star
 void Range::setStart(PassRefPtrWillBeRawPtr<Node> refNode, int offset, ExceptionState& exceptionState)
 {
     if (!refNode) {
-        exceptionState.throwDOMException(NotFoundError, "The node provided was null.");
+        // FIXME: Generated bindings code never calls with null, and neither should other callers!
+        exceptionState.throwTypeError("The node provided is null.");
         return;
     }
 
@@ -180,7 +200,8 @@ void Range::setStart(PassRefPtrWillBeRawPtr<Node> refNode, int offset, Exception
 void Range::setEnd(PassRefPtrWillBeRawPtr<Node> refNode, int offset, ExceptionState& exceptionState)
 {
     if (!refNode) {
-        exceptionState.throwDOMException(NotFoundError, "The node provided was null.");
+        // FIXME: Generated bindings code never calls with null, and neither should other callers!
+        exceptionState.throwTypeError("The node provided is null.");
         return;
     }
 
@@ -223,7 +244,8 @@ void Range::collapse(bool toStart)
 bool Range::isPointInRange(Node* refNode, int offset, ExceptionState& exceptionState)
 {
     if (!refNode) {
-        exceptionState.throwDOMException(HierarchyRequestError, "The node provided was null.");
+        // FIXME: Generated bindings code never calls with null, and neither should other callers!
+        exceptionState.throwTypeError("The node provided is null.");
         return false;
     }
 
@@ -281,7 +303,8 @@ Range::CompareResults Range::compareNode(Node* refNode, ExceptionState& exceptio
     // before and after(surrounds), or inside the range, respectively
 
     if (!refNode) {
-        exceptionState.throwDOMException(NotFoundError, "The node provided was null.");
+        // FIXME: Generated bindings code never calls with null, and neither should other callers!
+        exceptionState.throwTypeError("The node provided is null.");
         return NODE_BEFORE;
     }
 
@@ -473,7 +496,8 @@ void Range::deleteContents(ExceptionState& exceptionState)
 static bool nodeValidForIntersects(Node* refNode, Document* expectedDocument, ExceptionState& exceptionState)
 {
     if (!refNode) {
-        exceptionState.throwDOMException(NotFoundError, "The node provided is null.");
+        // FIXME: Generated bindings code never calls with null, and neither should other callers!
+        exceptionState.throwTypeError("The node provided is null.");
         return false;
     }
 
@@ -860,7 +884,8 @@ void Range::insertNode(PassRefPtrWillBeRawPtr<Node> prpNewNode, ExceptionState& 
     RefPtrWillBeRawPtr<Node> newNode = prpNewNode;
 
     if (!newNode) {
-        exceptionState.throwDOMException(NotFoundError, "The node provided is null.");
+        // FIXME: Generated bindings code never calls with null, and neither should other callers!
+        exceptionState.throwTypeError("The node provided is null.");
         return;
     }
 
@@ -1079,7 +1104,8 @@ Node* Range::checkNodeWOffset(Node* n, int offset, ExceptionState& exceptionStat
 void Range::checkNodeBA(Node* n, ExceptionState& exceptionState) const
 {
     if (!n) {
-        exceptionState.throwDOMException(NotFoundError, "The node provided is null.");
+        // FIXME: Generated bindings code never calls with null, and neither should other callers!
+        exceptionState.throwTypeError("The node provided is null.");
         return;
     }
 
@@ -1162,7 +1188,8 @@ void Range::setEndAfter(Node* refNode, ExceptionState& exceptionState)
 void Range::selectNode(Node* refNode, ExceptionState& exceptionState)
 {
     if (!refNode) {
-        exceptionState.throwDOMException(NotFoundError, "The node provided is null.");
+        // FIXME: Generated bindings code never calls with null, and neither should other callers!
+        exceptionState.throwTypeError("The node provided is null.");
         return;
     }
 
@@ -1216,7 +1243,8 @@ void Range::selectNode(Node* refNode, ExceptionState& exceptionState)
 void Range::selectNodeContents(Node* refNode, ExceptionState& exceptionState)
 {
     if (!refNode) {
-        exceptionState.throwDOMException(NotFoundError, "The node provided is null.");
+        // FIXME: Generated bindings code never calls with null, and neither should other callers!
+        exceptionState.throwTypeError("The node provided is null.");
         return;
     }
 
@@ -1281,7 +1309,8 @@ void Range::surroundContents(PassRefPtrWillBeRawPtr<Node> passNewParent, Excepti
 {
     RefPtrWillBeRawPtr<Node> newParent = passNewParent;
     if (!newParent) {
-        exceptionState.throwDOMException(NotFoundError, "The node provided is null.");
+        // FIXME: Generated bindings code never calls with null, and neither should other callers!
+        exceptionState.throwTypeError("The node provided is null.");
         return;
     }
 
@@ -1333,7 +1362,7 @@ void Range::surroundContents(PassRefPtrWillBeRawPtr<Node> passNewParent, Excepti
         return;
     }
 
-    if (newParent->contains(m_start.container())) {
+    if (newParent->containsIncludingShadowDOM(m_start.container())) {
         exceptionState.throwDOMException(HierarchyRequestError, "The node provided contains the insertion point; it may not be inserted into itself.");
         return;
     }
@@ -1385,13 +1414,7 @@ void Range::checkExtractPrecondition(ExceptionState& exceptionState)
 
 Node* Range::firstNode() const
 {
-    if (m_start.container()->offsetInCharacters())
-        return m_start.container();
-    if (Node* child = NodeTraversal::childAt(*m_start.container(), m_start.offset()))
-        return child;
-    if (!m_start.offset())
-        return m_start.container();
-    return NodeTraversal::nextSkippingChildren(*m_start.container());
+    return startPosition().toOffsetInAnchor().nodeAsRangeFirstNode();
 }
 
 ShadowRoot* Range::shadowRoot() const
@@ -1401,11 +1424,7 @@ ShadowRoot* Range::shadowRoot() const
 
 Node* Range::pastLastNode() const
 {
-    if (m_end.container()->offsetInCharacters())
-        return NodeTraversal::nextSkippingChildren(*m_end.container());
-    if (Node* child = NodeTraversal::childAt(*m_end.container(), m_end.offset()))
-        return child;
-    return NodeTraversal::nextSkippingChildren(*m_end.container());
+    return endPosition().toOffsetInAnchor().nodeAsRangePastLastNode();
 }
 
 IntRect Range::boundingBox() const
@@ -1430,10 +1449,10 @@ void Range::textRects(Vector<IntRect>& rects, bool useSelectionHeight, RangeInFi
 
     Node* stopNode = pastLastNode();
     for (Node* node = firstNode(); node != stopNode; node = NodeTraversal::next(*node)) {
-        RenderObject* r = node->renderer();
+        LayoutObject* r = node->layoutObject();
         if (!r || !r->isText())
             continue;
-        RenderText* renderText = toRenderText(r);
+        LayoutText* renderText = toLayoutText(r);
         int startOffset = node == startContainer ? m_start.offset() : 0;
         int endOffset = node == endContainer ? m_end.offset() : std::numeric_limits<int>::max();
         bool isFixed = false;
@@ -1458,10 +1477,10 @@ void Range::textQuads(Vector<FloatQuad>& quads, bool useSelectionHeight, RangeIn
 
     Node* stopNode = pastLastNode();
     for (Node* node = firstNode(); node != stopNode; node = NodeTraversal::next(*node)) {
-        RenderObject* r = node->renderer();
+        LayoutObject* r = node->layoutObject();
         if (!r || !r->isText())
             continue;
-        RenderText* renderText = toRenderText(r);
+        LayoutText* renderText = toLayoutText(r);
         int startOffset = node == startContainer ? m_start.offset() : 0;
         int endOffset = node == endContainer ? m_end.offset() : std::numeric_limits<int>::max();
         bool isFixed = false;
@@ -1726,16 +1745,16 @@ void Range::getBorderAndTextQuads(Vector<FloatQuad>& quads) const
     for (Node* node = firstNode(); node != stopNode; node = NodeTraversal::next(*node)) {
         if (node->isElementNode()) {
             if (!nodeSet.contains(node->parentNode())) {
-                if (RenderBoxModelObject* renderBoxModelObject = toElement(node)->renderBoxModelObject()) {
+                if (LayoutBoxModelObject* layoutBoxModelObject = toElement(node)->layoutBoxModelObject()) {
                     Vector<FloatQuad> elementQuads;
-                    renderBoxModelObject->absoluteQuads(elementQuads);
-                    m_ownerDocument->adjustFloatQuadsForScrollAndAbsoluteZoom(elementQuads, *renderBoxModelObject);
+                    layoutBoxModelObject->absoluteQuads(elementQuads);
+                    m_ownerDocument->adjustFloatQuadsForScrollAndAbsoluteZoom(elementQuads, *layoutBoxModelObject);
 
                     quads.appendVector(elementQuads);
                 }
             }
         } else if (node->isTextNode()) {
-            if (RenderText* renderText = toText(node)->renderer()) {
+            if (LayoutText* renderText = toText(node)->layoutObject()) {
                 int startOffset = (node == startContainer) ? m_start.offset() : 0;
                 int endOffset = (node == endContainer) ? m_end.offset() : INT_MAX;
 
@@ -1763,7 +1782,7 @@ FloatRect Range::boundingRect() const
     return result;
 }
 
-void Range::trace(Visitor* visitor)
+DEFINE_TRACE(Range)
 {
     visitor->trace(m_ownerDocument);
     visitor->trace(m_start);

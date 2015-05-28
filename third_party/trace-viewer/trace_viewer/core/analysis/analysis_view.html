@@ -32,6 +32,20 @@ found in the LICENSE file.
 <link rel="import" href="/core/analysis/single_sample_sub_view.html">
 <link rel="import" href="/core/analysis/multi_sample_sub_view.html">
 
+<link rel="import"
+    href="/core/analysis/single_interaction_record_sub_view.html">
+<link rel="import"
+    href="/core/analysis/multi_interaction_record_sub_view.html">
+
+<link rel="import"
+    href="/core/analysis/single_alert_sub_view.html">
+<link rel="import"
+    href="/core/analysis/multi_alert_sub_view.html">
+
+<link rel="import"
+    href="/core/analysis/single_global_memory_dump_sub_view.html">
+<link rel="import" href="/core/analysis/multi_global_memory_dump_sub_view.html">
+
 <!--
 @fileoverview A component used to display an analysis of a selection,
 using custom elements specialized for different event types.
@@ -62,15 +76,6 @@ using custom elements specialized for different event types.
   'use strict';
   (function() {
     var EventRegistry = tv.c.trace_model.EventRegistry;
-
-    /**
-     * Utility function used to convert camelCase to Title Case.
-     */
-    function convertCamelCaseToTitleCase(name) {
-      var result = name.replace(/[A-Z]/g, ' $&');
-      result = result.charAt(0).toUpperCase() + result.slice(1);
-      return result;
-    }
 
     Polymer({
       ready: function() {
@@ -137,7 +142,8 @@ using custom elements specialized for different event types.
 
         // If that fails, look for a tab with that typeName.
         if (!tab && lastSelectedTabTypeName) {
-          var tab = tv.b.findFirstInArray(this.tabView_.children, function(tab) {
+          var tab = tv.b.findFirstInArray(
+              this.tabView_.children, function(tab) {
             return tab._eventTypeName === lastSelectedTabTypeName;
           });
         }
@@ -149,7 +155,8 @@ using custom elements specialized for different event types.
 
       createSubViewForSelection_: function(eventTypeName, subSelection) {
         // Find.
-        var eventTypeInfo = EventRegistry.getEventTypeInfoByTypeName(eventTypeName);
+        var eventTypeInfo = EventRegistry.getEventTypeInfoByTypeName(
+            eventTypeName);
         var singleMode = subSelection.length == 1;
         var tagName;
         if (subSelection.length === 1)
@@ -166,11 +173,10 @@ using custom elements specialized for different event types.
         // Set label.
         var camelLabel;
         if (subSelection.length === 1)
-          camelLabel = eventTypeInfo.metadata.name;
+          camelLabel = EventRegistry.getUserFriendlySingularName(eventTypeName);
         else
-          camelLabel = eventTypeInfo.metadata.pluralName;
-
-        subView.tabLabel = convertCamelCaseToTitleCase(camelLabel);
+          camelLabel = EventRegistry.getUserFriendlyPluralName(eventTypeName);
+        subView.tabLabel = camelLabel;
 
         return subView;
       },
@@ -180,7 +186,7 @@ using custom elements specialized for different event types.
           this.tallMode = this.tabView_.selectedTab.requiresTallView;
         else
           this.tallMode = false;
-      },
+      }
     });
   })();
   </script>

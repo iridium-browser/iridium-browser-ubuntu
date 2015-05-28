@@ -31,6 +31,7 @@
 
 #include "core/frame/ConsoleBase.h"
 #include "core/frame/DOMWindowProperty.h"
+#include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
 #include "wtf/PassRefPtr.h"
@@ -39,11 +40,10 @@
 namespace blink {
 
 class LocalFrame;
-class MemoryInfo;
 
-class Console final : public ConsoleBase, public DOMWindowProperty {
-    DEFINE_WRAPPERTYPEINFO();
+class Console final : public ConsoleBase, public DOMWindowProperty, public WillBeHeapSupplementable<Console> {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Console);
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<Console> create(LocalFrame* frame)
     {
@@ -51,9 +51,7 @@ public:
     }
     virtual ~Console();
 
-    PassRefPtrWillBeRawPtr<MemoryInfo> memory() const;
-
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     virtual ExecutionContext* context() override;

@@ -3,11 +3,13 @@
 <translation id="6895424601869865703">เพิ่มบัญชีสำหรับ <ph name="GIVEN_NAME"/></translation>
 <translation id="1270290102613614947">ปิดใช้แป้นพิมพ์บนหน้าจออยู่</translation>
 <translation id="1057289296854808272">การหมุนเปิดอยู่ (แตะที่นี่เพื่อเปลี่ยนแปลง)</translation>
+<translation id="5548285847212963613">ส่วนขยาย &quot;<ph name="EXTENSION_NAME"/>&quot; สามารถช่วยในการเชื่อมต่อเครือข่ายนี้</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> กับ <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">ปุ่มแบบโอเวอร์โฟลว์</translation>
 <translation id="7904094684485781019">ผู้ดูแลระบบของบัญชีนี้ไม่อนุญาตการลงชื่อเข้าสู่ระบบพร้อมกันหลายบัญชี</translation>
 <translation id="8673028979667498656">270°</translation>
 <translation id="5571066253365925590">เปิดใช้งานบลูทูธแล้ว</translation>
+<translation id="5895138241574237353">ปิดแล้วเปิดอีกครั้ง</translation>
 <translation id="6310121235600822547"><ph name="DISPLAY_NAME"/> หมุนเวียนเป็น <ph name="ROTATION"/></translation>
 <translation id="9074739597929991885">บลูทูธ</translation>
 <translation id="2268130516524549846">ปิดใช้งานบลูทูธแล้ว</translation>
@@ -58,7 +60,9 @@
 <translation id="8676770494376880701">เชื่อมต่อกับที่ชาร์จพลังงานต่ำ</translation>
 <translation id="5238774010593222950">ไม่สามารถลงชื่อเข้าใช้บัญชีอื่น</translation>
 <translation id="1723752762323179280">กำลังออกจากเซสชัน</translation>
+<translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">ใช่</translation>
+<translation id="4804818685124855865">ตัดการเชื่อมต่อ</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">ออกจากระบบ</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -77,7 +81,6 @@
 <translation id="5825747213122829519">วิธีการป้อนข้อมูลของคุณเปลี่ยนแปลงเป็น <ph name="INPUT_METHOD_ID"/> แล้ว
 กด Shift + Alt เพื่อสลับ</translation>
 <translation id="2562916301614567480">เครือข่ายส่วนบุคคล</translation>
-<translation id="2982222131142145681"><ph name="DEVICE_NAME"/> (HDMI)</translation>
 <translation id="4250680216510889253">ไม่มี</translation>
 <translation id="4379753398862151997">จอภาพเอ๋ย เราร่วมงานกันไม่ได้ (จอภาพนั้นไม่ได้รับการสนับสนุน)</translation>
 <translation id="6426039856985689743">ปิดการใช้งานข้อมูลมือถือ</translation>
@@ -159,6 +162,7 @@
 <translation id="9201131092683066720">มีแบตเตอรี่ <ph name="PERCENTAGE"/>%</translation>
 <translation id="2983818520079887040">การตั้งค่า...</translation>
 <translation id="6452181791372256707">ปฏิเสธ</translation>
+<translation id="1330145147221172764">เปิดใช้แป้นพิมพ์บนหน้าจอ</translation>
 <translation id="1195412055398077112">โอเวอร์สแกน</translation>
 <translation id="607652042414456612">ค้นพบคอมพิวเตอร์ของคุณอยู่ใกล้กับอุปกรณ์บลูทูธและจะปรากฏเป็น &quot;<ph name="NAME"/>&quot; พร้อมด้วยที่อยู่ <ph name="ADDRESS"/></translation>
 <translation id="112308213915226829">ซ่อนชั้นวางโดยอัตโนมัติ</translation>
@@ -190,15 +194,18 @@
 <translation id="7097613348211027502">เปิดใช้ ChromeVox (การตอบสนองด้วยเสียง) อยู่
 กด Ctrl+Alt+Z เพื่อปิด</translation>
 <translation id="5045002648206642691">การตั้งค่า Google ไดรฟ์...</translation>
+<translation id="1510238584712386396">ตัวเรียกใช้งาน</translation>
 <translation id="7209101170223508707">CAPS LOCK เปิดอยู่
 กด Alt+ค้นหา หรือ Shift เพื่อยกเลิก</translation>
 <translation id="8940956008527784070">แบตเตอรี่ต่ำ (<ph name="PERCENTAGE"/>%)</translation>
 <translation id="4918086044614829423">ยอมรับ</translation>
 <translation id="5102001756192215136">เหลืออีก <ph name="HOUR"/>:<ph name="MINUTE"/></translation>
 <translation id="3009178788565917040">เอาต์พุต</translation>
+<translation id="3147142846278915599">Launcher (กำลังซิงค์แอป...)</translation>
 <translation id="6911468394164995108">เชื่อมต่อเครือข่ายอื่น...</translation>
 <translation id="3678715477168044796"><ph name="DISPLAY_NAME"/>: <ph name="ANNOTATION"/></translation>
 <translation id="412065659894267608">อีก <ph name="HOUR"/>ชม. <ph name="MINUTE"/>นาทีจึงจะเต็ม</translation>
 <translation id="3077734595579995578">shift</translation>
 <translation id="6359806961507272919">SMS จาก <ph name="PHONE_NUMBER"/></translation>
+<translation id="4053612967614057854">ปิดใช้แป้นพิมพ์บนหน้าจอ</translation>
 </translationbundle>

@@ -21,6 +21,7 @@
 #include "./vpx_config.h"
 #include "./vp9_rtcd.h"
 #include "vp9/common/vp9_entropy.h"
+#include "vp9/common/vp9_loopfilter.h"
 #include "vpx/vpx_integer.h"
 
 using libvpx_test::ACMRandom;
@@ -106,6 +107,36 @@ void wrapper_vertical_16_dual_c(uint8_t *s, int p, const uint8_t *blimit,
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 #endif  // HAVE_SSE2
 
+#if HAVE_NEON_ASM
+#if CONFIG_VP9_HIGHBITDEPTH
+// No neon high bitdepth functions.
+#else
+void wrapper_vertical_16_neon(uint8_t *s, int p, const uint8_t *blimit,
+                              const uint8_t *limit, const uint8_t *thresh,
+                              int count) {
+  vp9_lpf_vertical_16_neon(s, p, blimit, limit, thresh);
+}
+
+void wrapper_vertical_16_c(uint8_t *s, int p, const uint8_t *blimit,
+                           const uint8_t *limit, const uint8_t *thresh,
+                           int count) {
+  vp9_lpf_vertical_16_c(s, p, blimit, limit, thresh);
+}
+
+void wrapper_vertical_16_dual_neon(uint8_t *s, int p, const uint8_t *blimit,
+                                   const uint8_t *limit, const uint8_t *thresh,
+                                   int count) {
+  vp9_lpf_vertical_16_dual_neon(s, p, blimit, limit, thresh);
+}
+
+void wrapper_vertical_16_dual_c(uint8_t *s, int p, const uint8_t *blimit,
+                                const uint8_t *limit, const uint8_t *thresh,
+                                int count) {
+  vp9_lpf_vertical_16_dual_c(s, p, blimit, limit, thresh);
+}
+#endif  // CONFIG_VP9_HIGHBITDEPTH
+#endif  // HAVE_NEON_ASM
+
 class Loop8Test6Param : public ::testing::TestWithParam<loop8_param_t> {
  public:
   virtual ~Loop8Test6Param() {}
@@ -159,12 +190,12 @@ TEST_P(Loop8Test6Param, OperationCheck) {
   int first_failure = -1;
   for (int i = 0; i < count_test_block; ++i) {
     int err_count = 0;
-    uint8_t tmp = rnd.Rand8();
+    uint8_t tmp = static_cast<uint8_t>(rnd(3 * MAX_LOOP_FILTER + 4));
     DECLARE_ALIGNED(16, const uint8_t, blimit[16]) = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
     };
-    tmp = rnd.Rand8();
+    tmp = static_cast<uint8_t>(rnd(MAX_LOOP_FILTER));
     DECLARE_ALIGNED(16, const uint8_t, limit[16])  = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
@@ -243,14 +274,27 @@ TEST_P(Loop8Test6Param, ValueCheck) {
 #endif  // CONFIG_VP9_HIGHBITDEPTH
   int err_count_total = 0;
   int first_failure = -1;
+
+  // NOTE: The code in vp9_loopfilter.c:update_sharpness computes mblim as a
+  // function of sharpness_lvl and the loopfilter lvl as:
+  // block_inside_limit = lvl >> ((sharpness_lvl > 0) + (sharpness_lvl > 4));
+  // ...
+  // vpx_memset(lfi->lfthr[lvl].mblim, (2 * (lvl + 2) + block_inside_limit),
+  //            SIMD_WIDTH);
+  // This means that the largest value for mblim will occur when sharpness_lvl
+  // is equal to 0, and lvl is equal to its greatest value (MAX_LOOP_FILTER).
+  // In this case block_inside_limit will be equal to MAX_LOOP_FILTER and
+  // therefore mblim will be equal to (2 * (lvl + 2) + block_inside_limit) =
+  // 2 * (MAX_LOOP_FILTER + 2) + MAX_LOOP_FILTER = 3 * MAX_LOOP_FILTER + 4
+
   for (int i = 0; i < count_test_block; ++i) {
     int err_count = 0;
-    uint8_t tmp = rnd.Rand8();
+    uint8_t tmp = static_cast<uint8_t>(rnd(3 * MAX_LOOP_FILTER + 4));
     DECLARE_ALIGNED(16, const uint8_t, blimit[16]) = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
     };
-    tmp = rnd.Rand8();
+    tmp = static_cast<uint8_t>(rnd(MAX_LOOP_FILTER));
     DECLARE_ALIGNED(16, const uint8_t, limit[16])  = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
@@ -304,12 +348,12 @@ TEST_P(Loop8Test9Param, OperationCheck) {
   int first_failure = -1;
   for (int i = 0; i < count_test_block; ++i) {
     int err_count = 0;
-    uint8_t tmp = rnd.Rand8();
+    uint8_t tmp = static_cast<uint8_t>(rnd(3 * MAX_LOOP_FILTER + 4));
     DECLARE_ALIGNED(16, const uint8_t, blimit0[16]) = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
     };
-    tmp = rnd.Rand8();
+    tmp = static_cast<uint8_t>(rnd(MAX_LOOP_FILTER));
     DECLARE_ALIGNED(16, const uint8_t, limit0[16])  = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
@@ -319,12 +363,12 @@ TEST_P(Loop8Test9Param, OperationCheck) {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
     };
-    tmp = rnd.Rand8();
+    tmp = static_cast<uint8_t>(rnd(3 * MAX_LOOP_FILTER + 4));
     DECLARE_ALIGNED(16, const uint8_t, blimit1[16]) = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
     };
-    tmp = rnd.Rand8();
+    tmp = static_cast<uint8_t>(rnd(MAX_LOOP_FILTER));
     DECLARE_ALIGNED(16, const uint8_t, limit1[16])  = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
@@ -406,12 +450,12 @@ TEST_P(Loop8Test9Param, ValueCheck) {
   int first_failure = -1;
   for (int i = 0; i < count_test_block; ++i) {
     int err_count = 0;
-    uint8_t tmp = rnd.Rand8();
+    uint8_t tmp = static_cast<uint8_t>(rnd(3 * MAX_LOOP_FILTER + 4));
     DECLARE_ALIGNED(16, const uint8_t, blimit0[16]) = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
     };
-    tmp = rnd.Rand8();
+    tmp = static_cast<uint8_t>(rnd(MAX_LOOP_FILTER));
     DECLARE_ALIGNED(16, const uint8_t, limit0[16])  = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
@@ -421,12 +465,12 @@ TEST_P(Loop8Test9Param, ValueCheck) {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
     };
-    tmp = rnd.Rand8();
+    tmp = static_cast<uint8_t>(rnd(3 * MAX_LOOP_FILTER + 4));
     DECLARE_ALIGNED(16, const uint8_t, blimit1[16]) = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
     };
-    tmp = rnd.Rand8();
+    tmp = static_cast<uint8_t>(rnd(MAX_LOOP_FILTER));
     DECLARE_ALIGNED(16, const uint8_t, limit1[16])  = {
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp,
         tmp, tmp, tmp, tmp, tmp, tmp, tmp, tmp
@@ -519,10 +563,8 @@ INSTANTIATE_TEST_CASE_P(
         make_tuple(&wrapper_vertical_16_dual_sse2,
                    &wrapper_vertical_16_dual_c, 12)));
 #else
-// TODO(peter.derivaz): re-enable after these handle the expanded range [0, 255]
-// returned from Rand8().
 INSTANTIATE_TEST_CASE_P(
-    DISABLED_SSE2, Loop8Test6Param,
+    SSE2, Loop8Test6Param,
     ::testing::Values(
         make_tuple(&vp9_lpf_horizontal_8_sse2, &vp9_lpf_horizontal_8_c, 8),
         make_tuple(&vp9_lpf_horizontal_16_sse2, &vp9_lpf_horizontal_16_c, 8),
@@ -532,10 +574,8 @@ INSTANTIATE_TEST_CASE_P(
 #endif
 
 #if HAVE_AVX2 && (!CONFIG_VP9_HIGHBITDEPTH)
-// TODO(peter.derivaz): re-enable after these handle the expanded range [0, 255]
-// returned from Rand8().
 INSTANTIATE_TEST_CASE_P(
-    DISABLED_AVX2, Loop8Test6Param,
+    AVX2, Loop8Test6Param,
     ::testing::Values(
         make_tuple(&vp9_lpf_horizontal_16_avx2, &vp9_lpf_horizontal_16_c, 8)));
 #endif
@@ -570,10 +610,8 @@ INSTANTIATE_TEST_CASE_P(
         make_tuple(&vp9_highbd_lpf_vertical_8_dual_sse2,
                    &vp9_highbd_lpf_vertical_8_dual_c, 12)));
 #else
-// TODO(peter.derivaz): re-enable after these handle the expanded range [0, 255]
-// returned from Rand8().
 INSTANTIATE_TEST_CASE_P(
-    DISABLED_SSE2, Loop8Test9Param,
+    SSE2, Loop8Test9Param,
     ::testing::Values(
         make_tuple(&vp9_lpf_horizontal_4_dual_sse2,
                    &vp9_lpf_horizontal_4_dual_c, 8),
@@ -585,5 +623,46 @@ INSTANTIATE_TEST_CASE_P(
                    &vp9_lpf_vertical_8_dual_c, 8)));
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 #endif
+
+#if HAVE_NEON
+#if CONFIG_VP9_HIGHBITDEPTH
+// No neon high bitdepth functions.
+#else
+INSTANTIATE_TEST_CASE_P(
+    NEON, Loop8Test6Param,
+    ::testing::Values(
+#if HAVE_NEON_ASM
+// Using #if inside the macro is unsupported on MSVS but the tests are not
+// currently built for MSVS with ARM and NEON.
+        make_tuple(&vp9_lpf_horizontal_16_neon,
+                   &vp9_lpf_horizontal_16_c, 8),
+        make_tuple(&wrapper_vertical_16_neon,
+                   &wrapper_vertical_16_c, 8),
+        make_tuple(&wrapper_vertical_16_dual_neon,
+                   &wrapper_vertical_16_dual_c, 8),
+        make_tuple(&vp9_lpf_horizontal_8_neon,
+                   &vp9_lpf_horizontal_8_c, 8),
+        make_tuple(&vp9_lpf_vertical_8_neon,
+                   &vp9_lpf_vertical_8_c, 8),
+#endif  // HAVE_NEON_ASM
+        make_tuple(&vp9_lpf_horizontal_4_neon,
+                   &vp9_lpf_horizontal_4_c, 8),
+        make_tuple(&vp9_lpf_vertical_4_neon,
+                   &vp9_lpf_vertical_4_c, 8)));
+INSTANTIATE_TEST_CASE_P(
+    NEON, Loop8Test9Param,
+    ::testing::Values(
+#if HAVE_NEON_ASM
+        make_tuple(&vp9_lpf_horizontal_8_dual_neon,
+                   &vp9_lpf_horizontal_8_dual_c, 8),
+        make_tuple(&vp9_lpf_vertical_8_dual_neon,
+                   &vp9_lpf_vertical_8_dual_c, 8),
+#endif  // HAVE_NEON_ASM
+        make_tuple(&vp9_lpf_horizontal_4_dual_neon,
+                   &vp9_lpf_horizontal_4_dual_c, 8),
+        make_tuple(&vp9_lpf_vertical_4_dual_neon,
+                   &vp9_lpf_vertical_4_dual_c, 8)));
+#endif  // CONFIG_VP9_HIGHBITDEPTH
+#endif  // HAVE_NEON
 
 }  // namespace

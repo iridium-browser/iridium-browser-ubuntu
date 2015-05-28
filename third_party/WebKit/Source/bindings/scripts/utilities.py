@@ -65,8 +65,20 @@ class ComponentInfoProvider(object):
         return {}
 
     @property
+    def enumerations(self):
+        return {}
+
+    @property
+    def typedefs(self):
+        return {}
+
+    @property
     def union_types(self):
         return set()
+
+    @property
+    def include_path_for_union_types(self):
+        return None
 
 
 class ComponentInfoProviderCore(ComponentInfoProvider):
@@ -84,8 +96,28 @@ class ComponentInfoProviderCore(ComponentInfoProvider):
         return self._component_info
 
     @property
+    def enumerations(self):
+        return self._component_info['enumerations']
+
+    @property
+    def typedefs(self):
+        return self._component_info['typedefs']
+
+    @property
     def union_types(self):
         return self._component_info['union_types']
+
+    @property
+    def include_path_for_union_types(self):
+        return 'bindings/core/v8/UnionTypesCore.h'
+
+    @property
+    def specifier_for_export(self):
+        return 'CORE_EXPORT '
+
+    @property
+    def include_path_for_export(self):
+        return 'core/CoreExport.h'
 
 
 class ComponentInfoProviderModules(ComponentInfoProvider):
@@ -105,10 +137,34 @@ class ComponentInfoProviderModules(ComponentInfoProvider):
         return self._component_info_modules
 
     @property
+    def enumerations(self):
+        enums = self._component_info_core['enumerations'].copy()
+        enums.update(self._component_info_modules['enumerations'])
+        return enums
+
+    @property
+    def typedefs(self):
+        typedefs = self._component_info_core['typedefs'].copy()
+        typedefs.update(self._component_info_modules['typedefs'])
+        return typedefs
+
+    @property
     def union_types(self):
         # Remove duplicate union types from component_info_modules to avoid
         # generating multiple container generation.
         return self._component_info_modules['union_types'] - self._component_info_core['union_types']
+
+    @property
+    def include_path_for_union_types(self):
+        return 'bindings/modules/v8/UnionTypesModules.h'
+
+    @property
+    def specifier_for_export(self):
+        return 'MODULES_EXPORT '
+
+    @property
+    def include_path_for_export(self):
+        return 'modules/ModulesExport.h'
 
 
 def load_interfaces_info_overall_pickle(info_dir):
@@ -226,6 +282,14 @@ def write_pickle_file(pickle_filename, data, only_if_changed):
 
 def is_callback_interface_from_idl(file_contents):
     match = re.search(r'callback\s+interface\s+\w+\s*{', file_contents)
+    return bool(match)
+
+
+def should_generate_impl_file_from_idl(file_contents):
+    """True when a given IDL file contents could generate .h/.cpp files."""
+    # FIXME: This would be error-prone and we should use AST rather than
+    # improving the regexp pattern.
+    match = re.search(r'(interface|dictionary|exception)\s+\w+', file_contents)
     return bool(match)
 
 

@@ -161,17 +161,14 @@ MetricsStateManager::CreateEntropyProvider() {
   UMA_HISTOGRAM_SPARSE_SLOWLY("UMA.LowEntropySourceValue",
                               low_entropy_source_value);
   if (IsMetricsReportingEnabled()) {
-    if (entropy_source_returned_ == ENTROPY_SOURCE_NONE)
-      entropy_source_returned_ = ENTROPY_SOURCE_HIGH;
+    UpdateEntropySourceReturnedValue(ENTROPY_SOURCE_HIGH);
     const std::string high_entropy_source =
         client_id_ + base::IntToString(low_entropy_source_value);
     return scoped_ptr<const base::FieldTrial::EntropyProvider>(
         new SHA1EntropyProvider(high_entropy_source));
   }
 
-  if (entropy_source_returned_ == ENTROPY_SOURCE_NONE)
-    entropy_source_returned_ = ENTROPY_SOURCE_LOW;
-
+  UpdateEntropySourceReturnedValue(ENTROPY_SOURCE_LOW);
 #if defined(OS_ANDROID) || defined(OS_IOS)
   return scoped_ptr<const base::FieldTrial::EntropyProvider>(
       new CachingPermutedEntropyProvider(local_state_,
@@ -219,9 +216,6 @@ void MetricsStateManager::RegisterPrefs(PrefRegistrySimple* registry) {
 }
 
 void MetricsStateManager::BackUpCurrentClientInfo() {
-  // TODO(gayane): Eliminate use of ScopedAllowIO. crbug.com/413783
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
-
   ClientInfo client_info;
   client_info.client_id = client_id_;
   client_info.installation_date = local_state_->GetInt64(prefs::kInstallDate);
@@ -293,6 +287,16 @@ int MetricsStateManager::GetLowEntropySource() {
   CachingPermutedEntropyProvider::ClearCache(local_state_);
 
   return low_entropy_source_;
+}
+
+void MetricsStateManager::UpdateEntropySourceReturnedValue(
+    EntropySourceType type) {
+  if (entropy_source_returned_ != ENTROPY_SOURCE_NONE)
+    return;
+
+  entropy_source_returned_ = type;
+  UMA_HISTOGRAM_ENUMERATION("UMA.EntropySourceType", type,
+                            ENTROPY_SOURCE_ENUM_SIZE);
 }
 
 void MetricsStateManager::ResetMetricsIDsIfNecessary() {

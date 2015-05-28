@@ -24,6 +24,7 @@ using protocol::ClipboardEvent;
 using protocol::KeyEvent;
 using protocol::MouseEvent;
 using protocol::TextEvent;
+using protocol::TouchEvent;
 
 namespace {
 
@@ -46,8 +47,7 @@ ui::EventFlags MouseButtonToUIFlags(MouseEvent::MouseButton button) {
 // This class is run exclusively on the UI thread of the browser process.
 class InputInjectorChromeos::Core {
  public:
-  Core(scoped_ptr<ui::SystemInputInjector> delegate_,
-       ui::InputController* input_controller);
+  Core();
 
   // Mirrors the public InputInjectorChromeos interface.
   void InjectClipboardEvent(const ClipboardEvent& event);
@@ -74,16 +74,7 @@ class InputInjectorChromeos::Core {
   DISALLOW_COPY_AND_ASSIGN(Core);
 };
 
-InputInjectorChromeos::Core::Core(scoped_ptr<ui::SystemInputInjector> delegate,
-                                  ui::InputController* input_controller)
-    : delegate_(delegate.Pass()),
-      input_controller_(input_controller),
-      // Implemented by remoting::ClipboardAura.
-      clipboard_(Clipboard::Create()),
-      saved_auto_repeat_enabled_(false) {
-  DCHECK(delegate_);
-  DCHECK(input_controller_);
-  DCHECK(clipboard_);
+InputInjectorChromeos::Core::Core() : saved_auto_repeat_enabled_(false) {
 }
 
 void InputInjectorChromeos::Core::InjectClipboardEvent(
@@ -159,6 +150,14 @@ void InputInjectorChromeos::Core::InjectMouseEvent(const MouseEvent& event) {
 
 void InputInjectorChromeos::Core::Start(
     scoped_ptr<protocol::ClipboardStub> client_clipboard) {
+  ui::OzonePlatform* ozone_platform = ui::OzonePlatform::GetInstance();
+  delegate_ = ozone_platform->CreateSystemInputInjector();
+  DCHECK(delegate_);
+  input_controller_ = ozone_platform->GetInputController();
+  DCHECK(input_controller_);
+
+  // Implemented by remoting::ClipboardAura.
+  clipboard_ = Clipboard::Create();
   clipboard_->Start(client_clipboard.Pass());
   point_transformer_.reset(new PointTransformer());
 }
@@ -166,9 +165,7 @@ void InputInjectorChromeos::Core::Start(
 InputInjectorChromeos::InputInjectorChromeos(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : input_task_runner_(task_runner) {
-  ui::OzonePlatform* ozone_platform = ui::OzonePlatform::GetInstance();
-  core_.reset(new Core(ozone_platform->CreateSystemInputInjector(),
-                       ozone_platform->GetInputController()));
+  core_.reset(new Core());
 }
 
 InputInjectorChromeos::~InputInjectorChromeos() {
@@ -197,6 +194,10 @@ void InputInjectorChromeos::InjectMouseEvent(const MouseEvent& event) {
   input_task_runner_->PostTask(
       FROM_HERE, base::Bind(&Core::InjectMouseEvent,
                             base::Unretained(core_.get()), event));
+}
+
+void InputInjectorChromeos::InjectTouchEvent(const TouchEvent& event) {
+  NOTIMPLEMENTED() << "Raw touch event injection not implemented for ChromeOS.";
 }
 
 void InputInjectorChromeos::Start(

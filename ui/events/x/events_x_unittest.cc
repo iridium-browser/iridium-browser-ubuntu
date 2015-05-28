@@ -101,6 +101,8 @@ TEST_F(EventsXTest, ButtonEvents) {
   InitButtonEvent(&event, true, location, 1, 0);
   EXPECT_EQ(ui::ET_MOUSE_PRESSED, ui::EventTypeFromNative(&event));
   EXPECT_EQ(ui::EF_LEFT_MOUSE_BUTTON, ui::EventFlagsFromNative(&event));
+  EXPECT_EQ(ui::EF_LEFT_MOUSE_BUTTON,
+            ui::GetChangedMouseButtonFlagsFromNative(&event));
   EXPECT_EQ(location, ui::EventLocationFromNative(&event));
 
   InitButtonEvent(&event, true, location, 2, Button1Mask | ShiftMask);
@@ -108,17 +110,22 @@ TEST_F(EventsXTest, ButtonEvents) {
   EXPECT_EQ(ui::EF_LEFT_MOUSE_BUTTON | ui::EF_MIDDLE_MOUSE_BUTTON |
                 ui::EF_SHIFT_DOWN,
             ui::EventFlagsFromNative(&event));
+  EXPECT_EQ(ui::EF_MIDDLE_MOUSE_BUTTON,
+            ui::GetChangedMouseButtonFlagsFromNative(&event));
   EXPECT_EQ(location, ui::EventLocationFromNative(&event));
 
   InitButtonEvent(&event, false, location, 3, 0);
   EXPECT_EQ(ui::ET_MOUSE_RELEASED, ui::EventTypeFromNative(&event));
   EXPECT_EQ(ui::EF_RIGHT_MOUSE_BUTTON, ui::EventFlagsFromNative(&event));
+  EXPECT_EQ(ui::EF_RIGHT_MOUSE_BUTTON,
+            ui::GetChangedMouseButtonFlagsFromNative(&event));
   EXPECT_EQ(location, ui::EventLocationFromNative(&event));
 
   // Scroll up.
   InitButtonEvent(&event, true, location, 4, 0);
   EXPECT_EQ(ui::ET_MOUSEWHEEL, ui::EventTypeFromNative(&event));
   EXPECT_EQ(0, ui::EventFlagsFromNative(&event));
+  EXPECT_EQ(ui::EF_NONE, ui::GetChangedMouseButtonFlagsFromNative(&event));
   EXPECT_EQ(location, ui::EventLocationFromNative(&event));
   offset = ui::GetMouseWheelOffset(&event);
   EXPECT_GT(offset.y(), 0);
@@ -128,6 +135,7 @@ TEST_F(EventsXTest, ButtonEvents) {
   InitButtonEvent(&event, true, location, 5, 0);
   EXPECT_EQ(ui::ET_MOUSEWHEEL, ui::EventTypeFromNative(&event));
   EXPECT_EQ(0, ui::EventFlagsFromNative(&event));
+  EXPECT_EQ(ui::EF_NONE, ui::GetChangedMouseButtonFlagsFromNative(&event));
   EXPECT_EQ(location, ui::EventLocationFromNative(&event));
   offset = ui::GetMouseWheelOffset(&event);
   EXPECT_LT(offset.y(), 0);
@@ -137,6 +145,7 @@ TEST_F(EventsXTest, ButtonEvents) {
   InitButtonEvent(&event, true, location, 6, 0);
   EXPECT_EQ(ui::ET_MOUSEWHEEL, ui::EventTypeFromNative(&event));
   EXPECT_EQ(0, ui::EventFlagsFromNative(&event));
+  EXPECT_EQ(ui::EF_NONE, ui::GetChangedMouseButtonFlagsFromNative(&event));
   EXPECT_EQ(location, ui::EventLocationFromNative(&event));
   offset = ui::GetMouseWheelOffset(&event);
   EXPECT_EQ(0, offset.y());
@@ -146,6 +155,7 @@ TEST_F(EventsXTest, ButtonEvents) {
   InitButtonEvent(&event, true, location, 7, 0);
   EXPECT_EQ(ui::ET_MOUSEWHEEL, ui::EventTypeFromNative(&event));
   EXPECT_EQ(0, ui::EventFlagsFromNative(&event));
+  EXPECT_EQ(ui::EF_NONE, ui::GetChangedMouseButtonFlagsFromNative(&event));
   EXPECT_EQ(location, ui::EventLocationFromNative(&event));
   offset = ui::GetMouseWheelOffset(&event);
   EXPECT_EQ(0, offset.y());
@@ -216,7 +226,7 @@ TEST_F(EventsXTest, ClickCount) {
 }
 
 TEST_F(EventsXTest, TouchEventBasic) {
-  std::vector<unsigned int> devices;
+  std::vector<int> devices;
   devices.push_back(0);
   ui::SetUpTouchDevicesForTest(devices);
   std::vector<Valuator> valuators;
@@ -300,54 +310,67 @@ int GetTouchIdForTrackingId(uint32 tracking_id) {
   return -1;
 }
 
-TEST_F(EventsXTest, TouchEventIdRefcounting) {
-  std::vector<unsigned int> devices;
+TEST_F(EventsXTest, TouchEventNotRemovingFromNativeMapping) {
+  std::vector<int> devices;
   devices.push_back(0);
   ui::SetUpTouchDevicesForTest(devices);
   std::vector<Valuator> valuators;
 
-  const int kTrackingId0 = 5;
-  const int kTrackingId1 = 7;
+  const int kTrackingId = 5;
 
-  // Increment ref count once for first touch.
+  // Two touch presses with the same tracking id.
   ui::ScopedXI2Event xpress0;
   xpress0.InitTouchEvent(
-      0, XI_TouchBegin, kTrackingId0, gfx::Point(10, 10), valuators);
+      0, XI_TouchBegin, kTrackingId, gfx::Point(10, 10), valuators);
   scoped_ptr<ui::TouchEvent> upress0(new ui::TouchEvent(xpress0));
-  EXPECT_EQ(0, GetTouchIdForTrackingId(kTrackingId0));
+  EXPECT_EQ(0, GetTouchIdForTrackingId(kTrackingId));
 
-  // Increment ref count 4 times for second touch.
   ui::ScopedXI2Event xpress1;
   xpress1.InitTouchEvent(
-      0, XI_TouchBegin, kTrackingId1, gfx::Point(20, 20), valuators);
+      0, XI_TouchBegin, kTrackingId, gfx::Point(20, 20), valuators);
+  ui::TouchEvent upress1(xpress1);
+  EXPECT_EQ(0, GetTouchIdForTrackingId(kTrackingId));
 
-  for (int i = 0; i < 4; ++i) {
-    ui::TouchEvent upress1(xpress1);
-    EXPECT_EQ(1, GetTouchIdForTrackingId(kTrackingId1));
-  }
-
-  ui::ScopedXI2Event xrelease1;
-  xrelease1.InitTouchEvent(
-      0, XI_TouchEnd, kTrackingId1, gfx::Point(10, 10), valuators);
-
-  // Decrement ref count 3 times for second touch.
-  for (int i = 0; i < 3; ++i) {
-    ui::TouchEvent urelease1(xrelease1);
-    EXPECT_EQ(1, GetTouchIdForTrackingId(kTrackingId1));
-  }
-
-  // This should clear the touch id of the second touch.
-  scoped_ptr<ui::TouchEvent> urelease1(new ui::TouchEvent(xrelease1));
-  urelease1.reset();
-  EXPECT_EQ(-1, GetTouchIdForTrackingId(kTrackingId1));
-
-  // This should clear the touch id of the first touch.
+  // The first touch release shouldn't clear the mapping from the
+  // tracking id.
   ui::ScopedXI2Event xrelease0;
   xrelease0.InitTouchEvent(
-      0, XI_TouchEnd, kTrackingId0, gfx::Point(10, 10), valuators);
-  scoped_ptr<ui::TouchEvent> urelease0(new ui::TouchEvent(xrelease0));
-  urelease0.reset();
-  EXPECT_EQ(-1, GetTouchIdForTrackingId(kTrackingId0));
+      0, XI_TouchEnd, kTrackingId, gfx::Point(10, 10), valuators);
+  {
+    ui::TouchEvent urelease0(xrelease0);
+    urelease0.set_should_remove_native_touch_id_mapping(false);
+  }
+  EXPECT_EQ(0, GetTouchIdForTrackingId(kTrackingId));
+
+  // The second touch release should clear the mapping from the
+  // tracking id.
+  ui::ScopedXI2Event xrelease1;
+  xrelease1.InitTouchEvent(
+      0, XI_TouchEnd, kTrackingId, gfx::Point(10, 10), valuators);
+  {
+    ui::TouchEvent urelease1(xrelease1);
+  }
+  EXPECT_EQ(-1, GetTouchIdForTrackingId(kTrackingId));
+}
+
+// Copied events should not remove native touch id mappings, as this causes a
+// crash (crbug.com/467102). Copied events do not contain a proper
+// base::NativeEvent and should not attempt to access it.
+TEST_F(EventsXTest, CopiedTouchEventNotRemovingFromNativeMapping) {
+  std::vector<int> devices;
+  devices.push_back(0);
+  ui::SetUpTouchDevicesForTest(devices);
+  std::vector<Valuator> valuators;
+
+  // Create a release event which has a native touch id mapping.
+  ui::ScopedXI2Event xrelease0;
+  xrelease0.InitTouchEvent(0, XI_TouchEnd, 0, gfx::Point(10, 10), valuators);
+  ui::TouchEvent urelease0(xrelease0);
+  {
+    // When the copy is destructed it should not attempt to remove the mapping.
+    // Exiting this scope should not cause a crash.
+    ui::TouchEvent copy = urelease0;
+  }
 }
 
 TEST_F(EventsXTest, NumpadKeyEvents) {
@@ -512,9 +535,9 @@ TEST_F(EventsXTest, DisableKeyboard) {
   DeviceDataManagerX11* device_data_manager =
       static_cast<DeviceDataManagerX11*>(
           DeviceDataManager::GetInstance());
-  unsigned int blocked_device_id = 1;
-  unsigned int other_device_id = 2;
-  unsigned int master_device_id = 3;
+  int blocked_device_id = 1;
+  int other_device_id = 2;
+  int master_device_id = 3;
   device_data_manager->DisableDevice(blocked_device_id);
 
   scoped_ptr<std::set<KeyboardCode> > excepted_keys(new std::set<KeyboardCode>);
@@ -553,8 +576,7 @@ TEST_F(EventsXTest, DisableKeyboard) {
   EXPECT_EQ(ui::ET_KEY_PRESSED, ui::EventTypeFromNative(xev));
 
   device_data_manager->EnableDevice(blocked_device_id);
-  device_data_manager->SetDisabledKeyboardAllowedKeys(
-      scoped_ptr<std::set<KeyboardCode> >());
+  device_data_manager->SetDisabledKeyboardAllowedKeys(nullptr);
 
   // A key returns KEY_PRESSED as per usual now that keyboard was re-enabled.
   xev.InitGenericKeyEvent(master_device_id,
@@ -570,9 +592,9 @@ TEST_F(EventsXTest, DisableMouse) {
   DeviceDataManagerX11* device_data_manager =
       static_cast<DeviceDataManagerX11*>(
           DeviceDataManager::GetInstance());
-  unsigned int blocked_device_id = 1;
-  unsigned int other_device_id = 2;
-  std::vector<unsigned int> device_list;
+  int blocked_device_id = 1;
+  int other_device_id = 2;
+  std::vector<int> device_list;
   device_list.push_back(blocked_device_id);
   device_list.push_back(other_device_id);
   TouchFactory::GetInstance()->SetPointerDeviceForTest(device_list);

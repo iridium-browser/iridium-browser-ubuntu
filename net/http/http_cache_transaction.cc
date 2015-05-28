@@ -27,6 +27,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/clock.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "net/base/completion_callback.h"
@@ -34,7 +35,6 @@
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/base/upload_data_stream.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/disk_cache/disk_cache.h"
@@ -45,6 +45,7 @@
 #include "net/http/http_transaction.h"
 #include "net/http/http_util.h"
 #include "net/http/partial_data.h"
+#include "net/log/net_log.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_config_service.h"
 
@@ -337,9 +338,9 @@ HttpCache::Transaction::Transaction(RequestPriority priority, HttpCache* cache)
       total_received_bytes_(0),
       websocket_handshake_stream_base_create_helper_(NULL),
       weak_factory_(this) {
-  COMPILE_ASSERT(HttpCache::Transaction::kNumValidationHeaders ==
-                 arraysize(kValidationHeaders),
-                 Invalid_number_of_validation_headers);
+  static_assert(HttpCache::Transaction::kNumValidationHeaders ==
+                    arraysize(kValidationHeaders),
+                "invalid number of validation headers");
 
   io_callback_ = base::Bind(&Transaction::OnIOComplete,
                               weak_factory_.GetWeakPtr());
@@ -755,8 +756,8 @@ int HttpCache::Transaction::HandleResult(int rv) {
 // 2. Cached entry, no validation:
 //   Start():
 //   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
-//   -> BeginPartialCacheValidation() -> BeginCacheValidation() ->
-//   SetupEntryForRead()
+//   -> CacheDispatchValidation -> BeginPartialCacheValidation() ->
+//   BeginCacheValidation() -> SetupEntryForRead()
 //
 //   Read():
 //   CacheReadData*
@@ -764,10 +765,10 @@ int HttpCache::Transaction::HandleResult(int rv) {
 // 3. Cached entry, validation (304):
 //   Start():
 //   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
-//   -> BeginPartialCacheValidation() -> BeginCacheValidation() ->
-//   SendRequest* -> SuccessfulSendRequest -> UpdateCachedResponse ->
-//   CacheWriteResponse* -> UpdateCachedResponseComplete ->
-//   OverwriteCachedResponse -> PartialHeadersReceived
+//   -> CacheDispatchValidation -> BeginPartialCacheValidation() ->
+//   BeginCacheValidation() -> SendRequest* -> SuccessfulSendRequest ->
+//   UpdateCachedResponse -> CacheWriteResponse* -> UpdateCachedResponseComplete
+//   -> OverwriteCachedResponse -> PartialHeadersReceived
 //
 //   Read():
 //   CacheReadData*
@@ -775,10 +776,10 @@ int HttpCache::Transaction::HandleResult(int rv) {
 // 4. Cached entry, validation and replace (200):
 //   Start():
 //   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
-//   -> BeginPartialCacheValidation() -> BeginCacheValidation() ->
-//   SendRequest* -> SuccessfulSendRequest -> OverwriteCachedResponse ->
-//   CacheWriteResponse* -> DoTruncateCachedData* -> TruncateCachedMetadata* ->
-//   PartialHeadersReceived
+//   -> CacheDispatchValidation -> BeginPartialCacheValidation() ->
+//   BeginCacheValidation() -> SendRequest* -> SuccessfulSendRequest ->
+//   OverwriteCachedResponse -> CacheWriteResponse* -> DoTruncateCachedData* ->
+//   TruncateCachedMetadata* -> PartialHeadersReceived
 //
 //   Read():
 //   NetworkRead* -> CacheWriteData*
@@ -786,12 +787,12 @@ int HttpCache::Transaction::HandleResult(int rv) {
 // 5. Sparse entry, partially cached, byte range request:
 //   Start():
 //   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
-//   -> BeginPartialCacheValidation() -> CacheQueryData* ->
-//   ValidateEntryHeadersAndContinue() -> StartPartialCacheValidation ->
-//   CompletePartialCacheValidation -> BeginCacheValidation() -> SendRequest* ->
-//   SuccessfulSendRequest -> UpdateCachedResponse -> CacheWriteResponse* ->
-//   UpdateCachedResponseComplete -> OverwriteCachedResponse ->
-//   PartialHeadersReceived
+//   -> CacheDispatchValidation -> BeginPartialCacheValidation() ->
+//   CacheQueryData* -> ValidateEntryHeadersAndContinue() ->
+//   StartPartialCacheValidation -> CompletePartialCacheValidation ->
+//   BeginCacheValidation() -> SendRequest* -> SuccessfulSendRequest ->
+//   UpdateCachedResponse -> CacheWriteResponse* -> UpdateCachedResponseComplete
+//   -> OverwriteCachedResponse -> PartialHeadersReceived
 //
 //   Read() 1:
 //   NetworkRead* -> CacheWriteData*
@@ -830,8 +831,9 @@ int HttpCache::Transaction::HandleResult(int rv) {
 //   itself.
 //   Start():
 //   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
-//   -> BeginPartialCacheValidation() -> BeginCacheValidation() ->
-//   SendRequest* -> SuccessfulSendRequest -> OverwriteCachedResponse
+//   -> CacheDispatchValidation -> BeginPartialCacheValidation() ->
+//   BeginCacheValidation() -> SendRequest* -> SuccessfulSendRequest ->
+//   OverwriteCachedResponse
 //
 // 10. HEAD. Sparse entry, partially cached:
 //   Serve the request from the cache, as long as it doesn't require
@@ -842,6 +844,28 @@ int HttpCache::Transaction::HandleResult(int rv) {
 //   Start(): Basically the same as example 7, as we never create a partial_
 //   object for this request.
 //
+// 11. Prefetch, not-cached entry:
+//   The same as example 1. The "unused_since_prefetch" bit is stored as true in
+//   UpdateCachedResponse.
+//
+// 12. Prefetch, cached entry:
+//   Like examples 2-4, only CacheToggleUnusedSincePrefetch* is inserted between
+//   CacheReadResponse* and CacheDispatchValidation if the unused_since_prefetch
+//   bit is unset.
+//
+// 13. Cached entry less than 5 minutes old, unused_since_prefetch is true:
+//   Skip validation, similar to example 2.
+//   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
+//   -> CacheToggleUnusedSincePrefetch* -> CacheDispatchValidation ->
+//   BeginPartialCacheValidation() -> BeginCacheValidation() ->
+//   SetupEntryForRead()
+//
+//   Read():
+//   CacheReadData*
+//
+// 14. Cached entry more than 5 minutes old, unused_since_prefetch is true:
+//   Like examples 2-4, only CacheToggleUnusedSincePrefetch* is inserted between
+//   CacheReadResponse* and CacheDispatchValidation.
 int HttpCache::Transaction::DoLoop(int result) {
   DCHECK(next_state_ != STATE_NONE);
 
@@ -949,6 +973,17 @@ int HttpCache::Transaction::DoLoop(int result) {
         break;
       case STATE_CACHE_READ_RESPONSE_COMPLETE:
         rv = DoCacheReadResponseComplete(rv);
+        break;
+      case STATE_CACHE_DISPATCH_VALIDATION:
+        DCHECK_EQ(OK, rv);
+        rv = DoCacheDispatchValidation();
+        break;
+      case STATE_TOGGLE_UNUSED_SINCE_PREFETCH:
+        DCHECK_EQ(OK, rv);
+        rv = DoCacheToggleUnusedSincePrefetch();
+        break;
+      case STATE_TOGGLE_UNUSED_SINCE_PREFETCH_COMPLETE:
+        rv = DoCacheToggleUnusedSincePrefetchComplete(rv);
         break;
       case STATE_CACHE_WRITE_RESPONSE:
         DCHECK_EQ(OK, rv);
@@ -1386,8 +1421,6 @@ int HttpCache::Transaction::DoOpenEntryComplete(int result) {
     next_state_ = STATE_SEND_REQUEST;
     return OK;
   }
-  if (cache_->mode() == PLAYBACK)
-    DVLOG(1) << "Playback Cache Miss: " << request_->url;
 
   // The entry does not exist, and we are not permitted to create a new entry,
   // so we must fail.
@@ -1629,6 +1662,16 @@ int HttpCache::Transaction::DoUpdateCachedResponse() {
   response_.response_time = new_response_->response_time;
   response_.request_time = new_response_->request_time;
   response_.network_accessed = new_response_->network_accessed;
+  response_.unused_since_prefetch = new_response_->unused_since_prefetch;
+  if (new_response_->vary_data.is_valid()) {
+    response_.vary_data = new_response_->vary_data;
+  } else if (response_.vary_data.is_valid()) {
+    // There is a vary header in the stored response but not in the current one.
+    // Update the data with the new request headers.
+    HttpVaryData new_vary_data;
+    new_vary_data.Init(*request_, *response_.headers.get());
+    response_.vary_data = new_vary_data;
+  }
 
   if (response_.headers->HasHeaderValue("cache-control", "no-store")) {
     if (!entry_->doomed) {
@@ -1857,6 +1900,22 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
   if (response_.headers->GetContentLength() == current_size)
     truncated_ = false;
 
+  if ((response_.unused_since_prefetch &&
+       !(request_->load_flags & LOAD_PREFETCH)) ||
+      (!response_.unused_since_prefetch &&
+       (request_->load_flags & LOAD_PREFETCH))) {
+    // Either this is the first use of an entry since it was prefetched or
+    // this is a prefetch. The value of response.unused_since_prefetch is valid
+    // for this transaction but the bit needs to be flipped in storage.
+    next_state_ = STATE_TOGGLE_UNUSED_SINCE_PREFETCH;
+    return OK;
+  }
+
+  next_state_ = STATE_CACHE_DISPATCH_VALIDATION;
+  return OK;
+}
+
+int HttpCache::Transaction::DoCacheDispatchValidation() {
   // We now have access to the cache entry.
   //
   //  o if we are a reader for the transaction, then we can start reading the
@@ -1870,6 +1929,7 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
   //    conditionalized request (if-modified-since / if-none-match). We check
   //    if the request headers define a validation request.
   //
+  int result = ERR_FAILED;
   switch (mode_) {
     case READ:
       UpdateTransactionPattern(PATTERN_ENTRY_USED);
@@ -1884,9 +1944,28 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
     case WRITE:
     default:
       NOTREACHED();
-      result = ERR_FAILED;
   }
   return result;
+}
+
+int HttpCache::Transaction::DoCacheToggleUnusedSincePrefetch() {
+  // Write back the toggled value for the next use of this entry.
+  response_.unused_since_prefetch = !response_.unused_since_prefetch;
+
+  // TODO(jkarlin): If DoUpdateCachedResponse is also called for this
+  // transaction then metadata will be written to cache twice. If prefetching
+  // becomes more common, consider combining the writes.
+  target_state_ = STATE_TOGGLE_UNUSED_SINCE_PREFETCH_COMPLETE;
+  next_state_ = STATE_CACHE_WRITE_RESPONSE;
+  return OK;
+}
+
+int HttpCache::Transaction::DoCacheToggleUnusedSincePrefetchComplete(
+    int result) {
+  // Restore the original value for this transaction.
+  response_.unused_since_prefetch = !response_.unused_since_prefetch;
+  next_state_ = STATE_CACHE_DISPATCH_VALIDATION;
+  return OK;
 }
 
 int HttpCache::Transaction::DoCacheWriteResponse() {
@@ -2176,24 +2255,8 @@ void HttpCache::Transaction::SetRequest(const BoundNetLog& net_log,
   request_ = request;
   effective_load_flags_ = request_->load_flags;
 
-  switch (cache_->mode()) {
-    case NORMAL:
-      break;
-    case RECORD:
-      // When in record mode, we want to NEVER load from the cache.
-      // The reason for this is because we save the Set-Cookie headers
-      // (intentionally).  If we read from the cache, we replay them
-      // prematurely.
-      effective_load_flags_ |= LOAD_BYPASS_CACHE;
-      break;
-    case PLAYBACK:
-      // When in playback mode, we want to load exclusively from the cache.
-      effective_load_flags_ |= LOAD_ONLY_FROM_CACHE;
-      break;
-    case DISABLE:
-      effective_load_flags_ |= LOAD_DISABLE_CACHE;
-      break;
-  }
+  if (cache_->mode() == DISABLE)
+    effective_load_flags_ |= LOAD_DISABLE_CACHE;
 
   // Some headers imply load flags.  The order here is significant.
   //
@@ -2291,11 +2354,6 @@ bool HttpCache::Transaction::ShouldPassThrough() {
   // like not enough disk space, or sharing violations.
   if (!cache_->disk_cache_.get())
     return true;
-
-  // When using the record/playback modes, we always use the cache
-  // and we never pass through.
-  if (cache_->mode() == RECORD || cache_->mode() == PLAYBACK)
-    return false;
 
   if (effective_load_flags_ & LOAD_DISABLE_CACHE)
     return true;
@@ -2540,10 +2598,6 @@ ValidationType HttpCache::Transaction::RequiresValidation() {
   //  - make sure we have a matching request method
   //  - watch out for cached responses that depend on authentication
 
-  // In playback mode, nothing requires validation.
-  if (cache_->mode() == net::HttpCache::PLAYBACK)
-    return VALIDATION_NONE;
-
   if (response_.vary_data.is_valid() &&
       !response_.vary_data.MatchesRequest(*request_,
                                           *response_.headers.get())) {
@@ -2554,6 +2608,16 @@ ValidationType HttpCache::Transaction::RequiresValidation() {
   if (effective_load_flags_ & LOAD_PREFERRING_CACHE)
     return VALIDATION_NONE;
 
+  if (response_.unused_since_prefetch &&
+      !(effective_load_flags_ & LOAD_PREFETCH) &&
+      response_.headers->GetCurrentAge(
+          response_.request_time, response_.response_time,
+          cache_->clock_->Now()) < TimeDelta::FromMinutes(kPrefetchReuseMins)) {
+    // The first use of a resource after prefetch within a short window skips
+    // validation.
+    return VALIDATION_NONE;
+  }
+
   if (effective_load_flags_ & (LOAD_VALIDATE_CACHE | LOAD_ASYNC_REVALIDATION))
     return VALIDATION_SYNCHRONOUS;
 
@@ -2561,8 +2625,9 @@ ValidationType HttpCache::Transaction::RequiresValidation() {
     return VALIDATION_SYNCHRONOUS;
 
   ValidationType validation_required_by_headers =
-      response_.headers->RequiresValidation(
-          response_.request_time, response_.response_time, Time::Now());
+      response_.headers->RequiresValidation(response_.request_time,
+                                            response_.response_time,
+                                            cache_->clock_->Now());
 
   if (validation_required_by_headers == VALIDATION_ASYNCHRONOUS) {
     // Asynchronous revalidation is only supported for GET and HEAD methods.
@@ -2624,7 +2689,8 @@ bool HttpCache::Transaction::ConditionalizeRequest() {
         response_.headers->GetFreshnessLifetimes(response_.response_time);
     if (lifetimes.staleness > TimeDelta()) {
       TimeDelta current_age = response_.headers->GetCurrentAge(
-          response_.request_time, response_.response_time, Time::Now());
+          response_.request_time, response_.response_time,
+          cache_->clock_->Now());
 
       custom_request_->extra_headers.SetHeader(
           kFreshnessHeader,
@@ -2801,7 +2867,6 @@ void HttpCache::Transaction::IgnoreRangeRequest() {
 
 void HttpCache::Transaction::FixHeadersForHead() {
   if (response_.headers->response_code() == 206) {
-    response_.headers->RemoveHeader("Content-Length");
     response_.headers->RemoveHeader("Content-Range");
     response_.headers->ReplaceStatusLine("HTTP/1.1 200 OK");
   }
@@ -2894,17 +2959,16 @@ int HttpCache::Transaction::WriteResponseInfoToEntry(bool truncated) {
   if (!entry_)
     return OK;
 
-  // Do not cache no-store content (unless we are record mode).  Do not cache
-  // content with cert errors either.  This is to prevent not reporting net
-  // errors when loading a resource from the cache.  When we load a page over
-  // HTTPS with a cert error we show an SSL blocking page.  If the user clicks
-  // proceed we reload the resource ignoring the errors.  The loaded resource
-  // is then cached.  If that resource is subsequently loaded from the cache,
-  // no net error is reported (even though the cert status contains the actual
-  // errors) and no SSL blocking page is shown.  An alternative would be to
-  // reverse-map the cert status to a net error and replay the net error.
-  if ((cache_->mode() != RECORD &&
-       response_.headers->HasHeaderValue("cache-control", "no-store")) ||
+  // Do not cache no-store content.  Do not cache content with cert errors
+  // either.  This is to prevent not reporting net errors when loading a
+  // resource from the cache.  When we load a page over HTTPS with a cert error
+  // we show an SSL blocking page.  If the user clicks proceed we reload the
+  // resource ignoring the errors.  The loaded resource is then cached.  If that
+  // resource is subsequently loaded from the cache, no net error is reported
+  // (even though the cert status contains the actual errors) and no SSL
+  // blocking page is shown.  An alternative would be to reverse-map the cert
+  // status to a net error and replay the net error.
+  if ((response_.headers->HasHeaderValue("cache-control", "no-store")) ||
       net::IsCertStatusError(response_.ssl_info.cert_status)) {
     DoneWritingToEntry(false);
     if (net_log_.IsLogging())
@@ -2916,13 +2980,11 @@ int HttpCache::Transaction::WriteResponseInfoToEntry(bool truncated) {
   if (cache_->cert_cache() && response_.ssl_info.is_valid())
     WriteCertChain();
 
-  // When writing headers, we normally only write the non-transient
-  // headers; when in record mode, record everything.
-  bool skip_transient_headers = (cache_->mode() != RECORD);
-
   if (truncated)
     DCHECK_EQ(200, response_.headers->response_code());
 
+  // When writing headers, we normally only write the non-transient headers.
+  bool skip_transient_headers = true;
   scoped_refptr<PickledIOBuffer> data(new PickledIOBuffer());
   response_.Persist(data->pickle(), skip_transient_headers, truncated);
   data->Done();

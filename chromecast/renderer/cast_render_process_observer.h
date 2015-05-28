@@ -5,11 +5,18 @@
 #ifndef CHROMECAST_RENDERER_CAST_RENDER_PROCESS_OBSERVER_H_
 #define CHROMECAST_RENDERER_CAST_RENDER_PROCESS_OBSERVER_H_
 
+#include <vector>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/public/renderer/render_process_observer.h"
 
+namespace IPC {
+class MessageFilter;
+}
+
 namespace chromecast {
+class CapabilitiesMessageFilter;
 namespace media {
 class CmaMessageFilterProxy;
 }
@@ -18,7 +25,9 @@ namespace shell {
 
 class CastRenderProcessObserver : public content::RenderProcessObserver {
  public:
-  CastRenderProcessObserver();
+  CastRenderProcessObserver(
+      const std::vector<scoped_refptr<IPC::MessageFilter>>&
+          platform_message_filters);
   ~CastRenderProcessObserver() override;
 
  private:
@@ -30,6 +39,8 @@ class CastRenderProcessObserver : public content::RenderProcessObserver {
 #if !defined(OS_ANDROID)
   scoped_refptr<media::CmaMessageFilterProxy> cma_message_filter_proxy_;
 #endif  // !defined(OS_ANDROID)
+  scoped_refptr<CapabilitiesMessageFilter> capabilities_message_filter_;
+  std::vector<scoped_refptr<IPC::MessageFilter>> platform_message_filters_;
 
   DISALLOW_COPY_AND_ASSIGN(CastRenderProcessObserver);
 };

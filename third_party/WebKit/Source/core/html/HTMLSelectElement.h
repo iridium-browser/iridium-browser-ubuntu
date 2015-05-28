@@ -26,6 +26,7 @@
 #ifndef HTMLSelectElement_h
 #define HTMLSelectElement_h
 
+#include "core/CoreExport.h"
 #include "core/html/HTMLContentElement.h"
 #include "core/html/HTMLFormControlElementWithState.h"
 #include "core/html/HTMLOptionsCollection.h"
@@ -40,7 +41,7 @@ class HTMLOptionElement;
 class HTMLOptionElementOrHTMLOptGroupElement;
 class HTMLElementOrLong;
 
-class HTMLSelectElement final : public HTMLFormControlElementWithState, public TypeAheadDataSource {
+class CORE_EXPORT HTMLSelectElement final : public HTMLFormControlElementWithState, public TypeAheadDataSource {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLSelectElement> create(Document&);
@@ -110,7 +111,6 @@ public:
     int listToOptionIndex(int listIndex) const;
     void listBoxOnChange();
     int optionToListIndex(int optionIndex) const;
-    int activeSelectionStartListIndex() const;
     int activeSelectionEndListIndex() const;
     void setActiveSelectionAnchorIndex(int);
     void setActiveSelectionEndIndex(int);
@@ -126,7 +126,9 @@ public:
     HTMLOptionElement* spatialNavigationFocusedOption();
     void handleMouseRelease();
 
-    virtual void trace(Visitor*) override;
+    int listIndexForOption(const HTMLOptionElement&);
+
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     HTMLSelectElement(Document&, HTMLFormElement*);
@@ -136,8 +138,8 @@ private:
 
     virtual bool shouldShowFocusRingOnMouseFocus() const override;
 
-    virtual void dispatchFocusEvent(Element* oldFocusedElement, FocusType) override;
-    virtual void dispatchBlurEvent(Element* newFocusedElemnet) override;
+    virtual void dispatchFocusEvent(Element* oldFocusedElement, WebFocusType) override;
+    virtual void dispatchBlurEvent(Element* newFocusedElement, WebFocusType) override;
 
     virtual bool canStartSelection() const override { return false; }
 
@@ -152,9 +154,9 @@ private:
     virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual bool isPresentationAttribute(const QualifiedName&) const override;
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
     virtual bool appendFormData(FormDataList&, bool) override;
-    virtual void didAddUserAgentShadowRoot(ShadowRoot&) override;
+    virtual void didAddClosedShadowRoot(ShadowRoot&) override;
 
     virtual void defaultEventHandler(Event*) override;
 
@@ -203,7 +205,6 @@ private:
     int lastSelectableListIndex() const;
     int nextSelectableListIndexPageAway(int startIndex, SkipDirection) const;
     int listIndexForEventTargetOption(const Event&);
-    int listIndexForOption(const HTMLOptionElement&);
     AutoscrollController* autoscrollController() const;
 
     virtual void childrenChanged(const ChildrenChange&) override;

@@ -2,7 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/ui.gni")
 import("//build/json_schema_api.gni")
+import("//testing/test.gni")
 
 component("accessibility") {
   sources = [
@@ -30,6 +32,8 @@ component("accessibility") {
     "platform/ax_platform_node_delegate.h",
     "platform/ax_platform_node_mac.h",
     "platform/ax_platform_node_mac.mm",
+    "platform/ax_platform_node_win.cc",
+    "platform/ax_platform_node_win.h",
   ]
 
   defines = [ "ACCESSIBILITY_IMPLEMENTATION" ]
@@ -40,10 +44,32 @@ component("accessibility") {
     "//ui/gfx",
     "//ui/gfx/geometry",
   ]
+
+  if (is_win) {
+    public_deps += [ "//third_party/iaccessible2" ]
+  }
+
+  if (use_aura && !is_chromeos && is_linux && use_x11) {
+    sources += [
+      "platform/atk_util_auralinux.cc",
+      "platform/atk_util_auralinux.h",
+      "platform/ax_platform_node_auralinux.cc",
+      "platform/ax_platform_node_auralinux.h",
+    ]
+
+    configs += [
+      "//build/config/linux:atk",
+      "//build/config/linux:atk_warnings",
+      "//build/config/linux:gconf",
+      "//build/config/linux:glib",
+    ]
+  }
 }
 
 source_set("test_support") {
   sources = [
+    "platform/test_ax_node_wrapper.cc",
+    "platform/test_ax_node_wrapper.h",
     "tree_generator.cc",
     "tree_generator.h",
   ]
@@ -56,8 +82,10 @@ source_set("test_support") {
 test("accessibility_unittests") {
   sources = [
     "ax_generated_tree_unittest.cc",
+    "ax_text_utils_unittest.cc",
     "ax_tree_serializer_unittest.cc",
     "ax_tree_unittest.cc",
+    "platform/ax_platform_node_win_unittest.cc",
   ]
 
   deps = [
@@ -69,6 +97,10 @@ test("accessibility_unittests") {
     "//ui/gfx",
     "//ui/gfx/geometry",
   ]
+
+  if (is_win) {
+    deps += [ "//third_party/iaccessible2" ]
+  }
 }
 
 json_schema_api("ax_gen") {

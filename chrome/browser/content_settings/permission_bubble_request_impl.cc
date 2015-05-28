@@ -16,7 +16,7 @@ PermissionBubbleRequestImpl::PermissionBubbleRequestImpl(
     bool user_gesture,
     ContentSettingsType type,
     const std::string& display_languages,
-    const base::Callback<void(bool, bool)> permission_decided_callback,
+    const PermissionDecidedCallback& permission_decided_callback,
     const base::Closure delete_callback)
     : request_origin_(request_origin),
       user_gesture_(user_gesture),
@@ -51,6 +51,11 @@ int PermissionBubbleRequestImpl::GetIconID() const {
     case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       icon_id = IDR_INFOBAR_WARNING;
       break;
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+    case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
+      icon_id = IDR_INFOBAR_PROTECTED_MEDIA_IDENTIFIER;
+      break;
+#endif
     default:
       NOTREACHED();
       return IDR_INFOBAR_WARNING;
@@ -75,6 +80,11 @@ base::string16 PermissionBubbleRequestImpl::GetMessageText() const {
     case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       message_id = IDS_PUSH_MESSAGES_PERMISSION_QUESTION;
       break;
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+    case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
+      message_id = IDS_PROTECTED_MEDIA_IDENTIFIER_INFOBAR_QUESTION;
+      break;
+#endif
     default:
       NOTREACHED();
       return base::string16();
@@ -104,6 +114,11 @@ base::string16 PermissionBubbleRequestImpl::GetMessageTextFragment() const {
     case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       message_id = IDS_PUSH_MESSAGES_BUBBLE_FRAGMENT;
       break;
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+    case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
+      message_id = IDS_PROTECTED_MEDIA_IDENTIFIER_PERMISSION_FRAGMENT;
+      break;
+#endif
     default:
       NOTREACHED();
       return base::string16();
@@ -121,17 +136,17 @@ GURL PermissionBubbleRequestImpl::GetRequestingHostname() const {
 
 void PermissionBubbleRequestImpl::PermissionGranted() {
   RegisterActionTaken();
-  permission_decided_callback_.Run(true, true);
+  permission_decided_callback_.Run(true, CONTENT_SETTING_ALLOW);
 }
 
 void PermissionBubbleRequestImpl::PermissionDenied() {
   RegisterActionTaken();
-  permission_decided_callback_.Run(true, false);
+  permission_decided_callback_.Run(true, CONTENT_SETTING_BLOCK);
 }
 
 void PermissionBubbleRequestImpl::Cancelled() {
   RegisterActionTaken();
-  permission_decided_callback_.Run(false, false);
+  permission_decided_callback_.Run(false, CONTENT_SETTING_DEFAULT);
 }
 
 void PermissionBubbleRequestImpl::RequestFinished() {

@@ -34,7 +34,7 @@ class BrowserPluginDelegate;
 struct WebPluginInfo;
 }
 
-namespace dns_prefetch {
+namespace network_hints {
 class PrescientNetworkingDispatcher;
 }
 
@@ -81,7 +81,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   void RenderThreadStarted() override;
   void RenderFrameCreated(content::RenderFrame* render_frame) override;
   void RenderViewCreated(content::RenderView* render_view) override;
-  void SetNumberOfViews(int number_of_views) override;
   SkBitmap* GetSadPluginBitmap() override;
   SkBitmap* GetSadWebViewBitmap() override;
   bool OverrideCreatePlugin(content::RenderFrame* render_frame,
@@ -122,10 +121,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                        const GURL& url,
                        const GURL& first_party_for_cookies,
                        GURL* new_url) override;
-  void DidCreateScriptContext(blink::WebFrame* frame,
-                              v8::Handle<v8::Context> context,
-                              int extension_group,
-                              int world_id) override;
   unsigned long long VisitedLinkHash(const char* canonical_url,
                                      size_t length) override;
   bool IsLinkVisited(unsigned long long link_hash) override;
@@ -140,12 +135,13 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   bool ShouldReportDetailedMessageForSource(
       const base::string16& source) const override;
   bool ShouldEnableSiteIsolationPolicy() const override;
-  blink::WebWorkerPermissionClientProxy* CreateWorkerPermissionClientProxy(
-      content::RenderFrame* render_frame,
-      blink::WebFrame* frame) override;
+  blink::WebWorkerContentSettingsClientProxy*
+  CreateWorkerContentSettingsClientProxy(content::RenderFrame* render_frame,
+                                         blink::WebFrame* frame) override;
   bool AllowPepperMediaStreamAPI(const GURL& url) override;
   void AddKeySystems(std::vector<media::KeySystemInfo>* key_systems) override;
   bool IsPluginAllowedToUseDevChannelAPIs() override;
+  bool IsPluginAllowedToUseCameraDeviceAPI(const GURL& url) override;
   bool IsPluginAllowedToUseCompositorAPI(const GURL& url) override;
   content::BrowserPluginDelegate* CreateBrowserPluginDelegate(
       content::RenderFrame* render_frame,
@@ -223,7 +219,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       permissions_policy_delegate_;
 #endif
 
-  scoped_ptr<dns_prefetch::PrescientNetworkingDispatcher>
+  scoped_ptr<network_hints::PrescientNetworkingDispatcher>
       prescient_networking_dispatcher_;
   scoped_ptr<password_manager::CredentialManagerClient>
       credential_manager_client_;
@@ -241,8 +237,8 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   scoped_ptr<ChromePDFPrintClient> pdf_print_client_;
 #endif
 #if defined(ENABLE_PLUGINS)
+  std::set<std::string> allowed_camera_device_origins_;
   std::set<std::string> allowed_compositor_origins_;
-  std::set<std::string> allowed_video_decode_origins_;
 #endif
 };
 

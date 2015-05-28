@@ -57,6 +57,7 @@
 #include <openssl/evp.h>
 
 #include <stdio.h>
+#include <string.h>
 
 #include <openssl/err.h>
 #include <openssl/mem.h>
@@ -69,7 +70,7 @@ extern const EVP_PKEY_METHOD rsa_pkey_meth;
 extern const EVP_PKEY_METHOD hmac_pkey_meth;
 extern const EVP_PKEY_METHOD ec_pkey_meth;
 
-static const EVP_PKEY_METHOD *evp_methods[] = {
+static const EVP_PKEY_METHOD *const evp_methods[] = {
   &rsa_pkey_meth,
   &hmac_pkey_meth,
   &ec_pkey_meth,
@@ -211,32 +212,25 @@ void *EVP_PKEY_CTX_get_app_data(EVP_PKEY_CTX *ctx) { return ctx->app_data; }
 
 int EVP_PKEY_CTX_ctrl(EVP_PKEY_CTX *ctx, int keytype, int optype, int cmd,
                       int p1, void *p2) {
-  int ret;
   if (!ctx || !ctx->pmeth || !ctx->pmeth->ctrl) {
     OPENSSL_PUT_ERROR(EVP, EVP_PKEY_CTX_ctrl, EVP_R_COMMAND_NOT_SUPPORTED);
-    return -2;
+    return 0;
   }
   if (keytype != -1 && ctx->pmeth->pkey_id != keytype) {
-    return -1;
+    return 0;
   }
 
   if (ctx->operation == EVP_PKEY_OP_UNDEFINED) {
     OPENSSL_PUT_ERROR(EVP, EVP_PKEY_CTX_ctrl, EVP_R_NO_OPERATION_SET);
-    return -1;
+    return 0;
   }
 
   if (optype != -1 && !(ctx->operation & optype)) {
     OPENSSL_PUT_ERROR(EVP, EVP_PKEY_CTX_ctrl, EVP_R_INVALID_OPERATION);
-    return -1;
+    return 0;
   }
 
-  ret = ctx->pmeth->ctrl(ctx, cmd, p1, p2);
-
-  if (ret == -2) {
-    OPENSSL_PUT_ERROR(EVP, EVP_PKEY_CTX_ctrl, EVP_R_COMMAND_NOT_SUPPORTED);
-  }
-
-  return ret;
+  return ctx->pmeth->ctrl(ctx, cmd, p1, p2);
 }
 
 int EVP_PKEY_sign_init(EVP_PKEY_CTX *ctx) {

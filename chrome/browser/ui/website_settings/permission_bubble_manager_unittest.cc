@@ -32,8 +32,7 @@ class MockView : public PermissionBubbleView {
   void SetDelegate(Delegate* delegate) override { delegate_ = delegate; }
 
   void Show(const std::vector<PermissionBubbleRequest*>& requests,
-            const std::vector<bool>& accept_state,
-            bool customization_state_) override {
+            const std::vector<bool>& accept_state) override {
     shown_ = true;
     permission_requests_ = requests;
     permission_states_ = accept_state;
@@ -521,3 +520,43 @@ TEST_F(PermissionBubbleManagerTest, AllUserGestureRequests) {
   EXPECT_TRUE(iframe_request_other_domain_.finished());
   EXPECT_FALSE(view_.shown_);
 }
+
+TEST_F(PermissionBubbleManagerTest, RequestsWithoutUserGesture) {
+  manager_->RequireUserGesture(true);
+  manager_->SetView(&view_);
+  WaitForFrameLoad();
+  WaitForCoalescing();
+  manager_->AddRequest(&request1_);
+  manager_->AddRequest(&iframe_request_other_domain_);
+  manager_->AddRequest(&request2_);
+  base::MessageLoop::current()->RunUntilIdle();
+
+  EXPECT_FALSE(view_.shown_);
+}
+
+TEST_F(PermissionBubbleManagerTest, RequestsWithUserGesture) {
+  manager_->RequireUserGesture(true);
+  manager_->SetView(&view_);
+  WaitForFrameLoad();
+  WaitForCoalescing();
+  request1_.SetHasUserGesture();
+  manager_->AddRequest(&request1_);
+  manager_->AddRequest(&iframe_request_other_domain_);
+  manager_->AddRequest(&request2_);
+  base::MessageLoop::current()->RunUntilIdle();
+
+  EXPECT_TRUE(view_.shown_);
+}
+
+TEST_F(PermissionBubbleManagerTest, RequestsDontNeedUserGesture) {
+  manager_->SetView(&view_);
+  WaitForFrameLoad();
+  WaitForCoalescing();
+  manager_->AddRequest(&request1_);
+  manager_->AddRequest(&iframe_request_other_domain_);
+  manager_->AddRequest(&request2_);
+  base::MessageLoop::current()->RunUntilIdle();
+
+  EXPECT_TRUE(view_.shown_);
+}
+

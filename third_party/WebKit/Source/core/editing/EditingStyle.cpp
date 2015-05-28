@@ -54,9 +54,9 @@
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLFontElement.h"
 #include "core/html/HTMLSpanElement.h"
-#include "core/rendering/RenderBox.h"
-#include "core/rendering/RenderObject.h"
-#include "core/rendering/style/RenderStyle.h"
+#include "core/layout/LayoutBox.h"
+#include "core/layout/LayoutObject.h"
+#include "core/style/ComputedStyle.h"
 
 namespace blink {
 
@@ -155,7 +155,7 @@ static bool hasTransparentBackgroundColor(StylePropertySet*);
 static PassRefPtrWillBeRawPtr<CSSValue> backgroundColorInEffect(Node*);
 
 class HTMLElementEquivalent : public NoBaseWillBeGarbageCollected<HTMLElementEquivalent> {
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(HTMLElementEquivalent);
     DECLARE_EMPTY_VIRTUAL_DESTRUCTOR_WILL_BE_REMOVED(HTMLElementEquivalent);
 public:
     static PassOwnPtrWillBeRawPtr<HTMLElementEquivalent> create(CSSPropertyID propertyID, CSSValueID primitiveValue, const HTMLQualifiedName& tagName)
@@ -169,7 +169,7 @@ public:
     virtual bool valueIsPresentInStyle(HTMLElement*, StylePropertySet*) const;
     virtual void addToStyle(Element*, EditingStyle*) const;
 
-    virtual void trace(Visitor* visitor) { visitor->trace(m_primitiveValue); }
+    DEFINE_INLINE_VIRTUAL_TRACE() { visitor->trace(m_primitiveValue); }
 
 protected:
     HTMLElementEquivalent(CSSPropertyID);
@@ -222,7 +222,7 @@ public:
     virtual bool propertyExistsInStyle(const StylePropertySet*) const override;
     virtual bool valueIsPresentInStyle(HTMLElement*, StylePropertySet*) const override;
 
-    virtual void trace(Visitor* visitor) override { HTMLElementEquivalent::trace(visitor); }
+    DEFINE_INLINE_VIRTUAL_TRACE() { HTMLElementEquivalent::trace(visitor); }
 
 private:
     HTMLTextDecorationEquivalent(CSSValueID primitiveValue, const HTMLQualifiedName& tagName);
@@ -266,7 +266,7 @@ public:
     virtual PassRefPtrWillBeRawPtr<CSSValue> attributeValueAsCSSValue(Element*) const;
     inline const QualifiedName& attributeName() const { return m_attrName; }
 
-    virtual void trace(Visitor* visitor) override { HTMLElementEquivalent::trace(visitor); }
+    DEFINE_INLINE_VIRTUAL_TRACE() { HTMLElementEquivalent::trace(visitor); }
 
 protected:
     HTMLAttributeEquivalent(CSSPropertyID, const HTMLQualifiedName& tagName, const QualifiedName& attrName);
@@ -321,7 +321,7 @@ public:
     }
     virtual PassRefPtrWillBeRawPtr<CSSValue> attributeValueAsCSSValue(Element*) const override;
 
-    virtual void trace(Visitor* visitor) override { HTMLAttributeEquivalent::trace(visitor); }
+    DEFINE_INLINE_VIRTUAL_TRACE() { HTMLAttributeEquivalent::trace(visitor); }
 
 private:
     HTMLFontSizeEquivalent();
@@ -347,20 +347,20 @@ PassRefPtrWillBeRawPtr<CSSValue> HTMLFontSizeEquivalent::attributeValueAsCSSValu
 float EditingStyle::NoFontDelta = 0.0f;
 
 EditingStyle::EditingStyle()
-    : m_fixedPitchFontType(NonFixedPitchFont)
+    : m_fixedPitchFontType(VariablePitchFont)
     , m_fontSizeDelta(NoFontDelta)
 {
 }
 
 EditingStyle::EditingStyle(ContainerNode* node, PropertiesToInclude propertiesToInclude)
-    : m_fixedPitchFontType(NonFixedPitchFont)
+    : m_fixedPitchFontType(VariablePitchFont)
     , m_fontSizeDelta(NoFontDelta)
 {
     init(node, propertiesToInclude);
 }
 
 EditingStyle::EditingStyle(const Position& position, PropertiesToInclude propertiesToInclude)
-    : m_fixedPitchFontType(NonFixedPitchFont)
+    : m_fixedPitchFontType(VariablePitchFont)
     , m_fontSizeDelta(NoFontDelta)
 {
     init(position.deprecatedNode(), propertiesToInclude);
@@ -368,7 +368,7 @@ EditingStyle::EditingStyle(const Position& position, PropertiesToInclude propert
 
 EditingStyle::EditingStyle(const StylePropertySet* style)
     : m_mutableStyle(style ? style->mutableCopy() : nullptr)
-    , m_fixedPitchFontType(NonFixedPitchFont)
+    , m_fixedPitchFontType(VariablePitchFont)
     , m_fontSizeDelta(NoFontDelta)
 {
     extractFontSizeDelta();
@@ -376,7 +376,7 @@ EditingStyle::EditingStyle(const StylePropertySet* style)
 
 EditingStyle::EditingStyle(CSSPropertyID propertyID, const String& value)
     : m_mutableStyle(nullptr)
-    , m_fixedPitchFontType(NonFixedPitchFont)
+    , m_fixedPitchFontType(VariablePitchFont)
     , m_fontSizeDelta(NoFontDelta)
 {
     setProperty(propertyID, value);
@@ -471,24 +471,24 @@ void EditingStyle::init(Node* node, PropertiesToInclude propertiesToInclude)
             m_mutableStyle->setProperty(CSSPropertyTextDecoration, value->cssText());
     }
 
-    if (node && node->computedStyle()) {
-        RenderStyle* renderStyle = node->computedStyle();
-        removeTextFillAndStrokeColorsIfNeeded(renderStyle);
-        replaceFontSizeByKeywordIfPossible(renderStyle, computedStyleAtPosition.get());
+    if (node && node->ensureComputedStyle()) {
+        const ComputedStyle* computedStyle = node->ensureComputedStyle();
+        removeTextFillAndStrokeColorsIfNeeded(computedStyle);
+        replaceFontSizeByKeywordIfPossible(computedStyle, computedStyleAtPosition.get());
     }
 
     m_fixedPitchFontType = computedStyleAtPosition->fixedPitchFontType();
     extractFontSizeDelta();
 }
 
-void EditingStyle::removeTextFillAndStrokeColorsIfNeeded(RenderStyle* renderStyle)
+void EditingStyle::removeTextFillAndStrokeColorsIfNeeded(const ComputedStyle* computedStyle)
 {
     // If a node's text fill color is currentColor, then its children use
     // their font-color as their text fill color (they don't
     // inherit it).  Likewise for stroke color.
-    if (renderStyle->textFillColor().isCurrentColor())
+    if (computedStyle->textFillColor().isCurrentColor())
         m_mutableStyle->removeProperty(CSSPropertyWebkitTextFillColor);
-    if (renderStyle->textStrokeColor().isCurrentColor())
+    if (computedStyle->textStrokeColor().isCurrentColor())
         m_mutableStyle->removeProperty(CSSPropertyWebkitTextStrokeColor);
 }
 
@@ -500,11 +500,11 @@ void EditingStyle::setProperty(CSSPropertyID propertyID, const String& value, bo
     m_mutableStyle->setProperty(propertyID, value, important);
 }
 
-void EditingStyle::replaceFontSizeByKeywordIfPossible(RenderStyle* renderStyle, CSSComputedStyleDeclaration* computedStyle)
+void EditingStyle::replaceFontSizeByKeywordIfPossible(const ComputedStyle* computedStyle, CSSComputedStyleDeclaration* cssComputedStyle)
 {
-    ASSERT(renderStyle);
-    if (renderStyle->fontDescription().keywordSize())
-        m_mutableStyle->setProperty(CSSPropertyFontSize, computedStyle->getFontSizeCSSValuePreferringKeyword()->cssText());
+    ASSERT(computedStyle);
+    if (computedStyle->fontDescription().keywordSize())
+        m_mutableStyle->setProperty(CSSPropertyFontSize, cssComputedStyle->getFontSizeCSSValuePreferringKeyword()->cssText());
 }
 
 void EditingStyle::extractFontSizeDelta()
@@ -580,7 +580,7 @@ void EditingStyle::overrideWithStyle(const StylePropertySet* style)
 void EditingStyle::clear()
 {
     m_mutableStyle.clear();
-    m_fixedPitchFontType = NonFixedPitchFont;
+    m_fixedPitchFontType = VariablePitchFont;
     m_fontSizeDelta = NoFontDelta;
 }
 
@@ -713,7 +713,7 @@ TriState EditingStyle::triStateOfStyle(const VisibleSelection& selection) const
     TriState state = FalseTriState;
     bool nodeIsStart = true;
     for (Node& node : NodeTraversal::startsAt(selection.start().deprecatedNode())) {
-        if (node.renderer() && node.hasEditableStyle()) {
+        if (node.layoutObject() && node.hasEditableStyle()) {
             RefPtrWillBeRawPtr<CSSComputedStyleDeclaration> nodeStyle = CSSComputedStyleDeclaration::create(&node);
             if (nodeStyle) {
                 TriState nodeState = triStateOfStyle(nodeStyle.get(), node.isTextNode() ? EditingStyle::DoNotIgnoreTextOnlyProperties : EditingStyle::IgnoreTextOnlyProperties);
@@ -1234,17 +1234,17 @@ void EditingStyle::removePropertiesInElementDefaultStyle(Element* element)
 void EditingStyle::addAbsolutePositioningFromElement(const Element& element)
 {
     LayoutRect rect = element.boundingBox();
-    RenderObject* renderer = element.renderer();
+    LayoutObject* renderer = element.layoutObject();
 
     LayoutUnit x = rect.x();
     LayoutUnit y = rect.y();
     LayoutUnit width = rect.width();
     LayoutUnit height = rect.height();
     if (renderer && renderer->isBox()) {
-        RenderBox* renderBox = toRenderBox(renderer);
+        LayoutBox* layoutBox = toLayoutBox(renderer);
 
-        x -= renderBox->marginLeft();
-        y -= renderBox->marginTop();
+        x -= layoutBox->marginLeft();
+        y -= layoutBox->marginTop();
 
         m_mutableStyle->setProperty(CSSPropertyBoxSizing, CSSValueBorderBox);
     }
@@ -1394,7 +1394,7 @@ WritingDirection EditingStyle::textDirectionForSelection(const VisibleSelection&
     return foundDirection;
 }
 
-void EditingStyle::trace(Visitor* visitor)
+DEFINE_TRACE(EditingStyle)
 {
     visitor->trace(m_mutableStyle);
 }
@@ -1425,12 +1425,13 @@ StyleChange::StyleChange(EditingStyle* style, const Position& position)
     , m_applySuperscript(false)
 {
     Document* document = position.document();
-    if (!style || !style->style() || !document || !document->frame())
+    if (!style || !style->style() || !document || !document->frame() || !position.element())
         return;
 
-    RefPtrWillBeRawPtr<CSSComputedStyleDeclaration> computedStyle = position.computedStyle();
+    RefPtrWillBeRawPtr<CSSComputedStyleDeclaration> computedStyle = position.ensureComputedStyle();
     // FIXME: take care of background-color in effect
     RefPtrWillBeRawPtr<MutableStylePropertySet> mutableStyle = getPropertiesNotIn(style->style(), computedStyle.get());
+    ASSERT(mutableStyle);
 
     reconcileTextDecorationProperties(mutableStyle.get());
     if (!document->frame()->editor().shouldStyleWithCSS())
@@ -1635,7 +1636,7 @@ static bool isCSSValueLength(CSSPrimitiveValue* value)
 int legacyFontSizeFromCSSValue(Document* document, CSSPrimitiveValue* value, FixedPitchFontType fixedPitchFontType, LegacyFontSizeMode mode)
 {
     if (isCSSValueLength(value)) {
-        int pixelFontSize = value->getIntValue(CSSPrimitiveValue::CSS_PX);
+        int pixelFontSize = clampTo<int>(value->deprecatedGetDoubleValue());
         int legacyFontSize = FontSize::legacyFontSize(document, pixelFontSize, fixedPitchFontType);
         // Use legacy font size only if pixel value matches exactly to that of legacy font size.
         if (mode == AlwaysUseLegacyFontSize || FontSize::fontSizeForKeyword(document, legacyFontSize, fixedPitchFontType) == pixelFontSize)

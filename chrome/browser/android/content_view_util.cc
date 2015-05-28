@@ -12,7 +12,7 @@
 #include "content/public/browser/web_contents.h"
 #include "jni/ContentViewUtil_jni.h"
 
-static jlong CreateNativeWebContents(
+static jobject CreateWebContents(
     JNIEnv* env, jclass clazz, jboolean incognito, jboolean initially_hidden) {
   Profile* profile = g_browser_process->profile_manager()->GetLastUsedProfile();
   if (incognito)
@@ -20,10 +20,10 @@ static jlong CreateNativeWebContents(
 
   content::WebContents::CreateParams params(profile);
   params.initially_hidden = static_cast<bool>(initially_hidden);
-  return reinterpret_cast<intptr_t>(content::WebContents::Create(params));
+  return content::WebContents::Create(params)->GetJavaWebContents().Release();
 }
 
-static jlong CreateNativeWebContentsWithSharedSiteInstance(
+static jobject CreateWebContentsWithSharedSiteInstance(
     JNIEnv* env,
     jclass clazz,
     jobject jcontent_view_core) {
@@ -38,14 +38,7 @@ static jlong CreateNativeWebContentsWithSharedSiteInstance(
   content::WebContents::CreateParams params(
       profile, content_view_core->GetWebContents()->GetSiteInstance());
 
-  return reinterpret_cast<intptr_t>(content::WebContents::Create(params));
-}
-
-static void DestroyNativeWebContents(
-    JNIEnv* env, jclass clazz, jlong web_contents_ptr) {
-  content::WebContents* web_contents =
-      reinterpret_cast<content::WebContents*>(web_contents_ptr);
-  delete web_contents;
+  return content::WebContents::Create(params)->GetJavaWebContents().Release();
 }
 
 static jobject GetWebContentsFromNative(
@@ -55,6 +48,12 @@ static jobject GetWebContentsFromNative(
   if (!web_contents)
     return NULL;
   return web_contents->GetJavaWebContents().Release();
+}
+
+static jlong GetNativeWebContentsPtr(
+    JNIEnv* env, jclass clazz, jobject jweb_contents) {
+  return reinterpret_cast<intptr_t>(
+      content::WebContents::FromJavaWebContents(jweb_contents));
 }
 
 bool RegisterContentViewUtil(JNIEnv* env) {

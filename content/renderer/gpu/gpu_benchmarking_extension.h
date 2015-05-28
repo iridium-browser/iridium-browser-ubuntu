@@ -45,12 +45,11 @@ class GpuBenchmarking : public gin::Wrappable<GpuBenchmarking> {
   void PrintToSkPicture(v8::Isolate* isolate, const std::string& dirname);
   bool GestureSourceTypeSupported(int gesture_source_type);
   bool SmoothScrollBy(gin::Arguments* args);
+  bool SmoothDrag(gin::Arguments* args);
   bool Swipe(gin::Arguments* args);
   bool ScrollBounce(gin::Arguments* args);
   bool PinchBy(gin::Arguments* args);
   bool Tap(gin::Arguments* args);
-  void BeginWindowSnapshotPNG(v8::Isolate* isolate,
-                              v8::Handle<v8::Function> callback);
   void ClearImageCache();
   int RunMicroBenchmark(gin::Arguments* args);
   bool SendMessageToMicroBenchmark(int id, v8::Handle<v8::Object> message);
@@ -61,4 +60,4 @@ class GpuBenchmarking : public gin::Wrappable<GpuBenchmarking> {
 
 }  // namespace content
 
-#endif // CONTENT_RENDERER_GPU_GPU_BENCHMARKING_EXTENSION_H_
+#endif  // CONTENT_RENDERER_GPU_GPU_BENCHMARKING_EXTENSION_H_

@@ -334,21 +334,6 @@ class EasyUnlockPrivateGetUserInfoFunction : public SyncExtensionFunction {
   DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateGetUserInfoFunction);
 };
 
-class EasyUnlockPrivateGetUserImageFunction : public SyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("easyUnlockPrivate.getUserImage",
-                             EASYUNLOCKPRIVATE_GETUSERIMAGE)
-  EasyUnlockPrivateGetUserImageFunction();
-
- private:
-  ~EasyUnlockPrivateGetUserImageFunction() override;
-
-  // SyncExtensionFunction:
-  bool RunSync() override;
-
-  DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateGetUserImageFunction);
-};
-
 class EasyUnlockPrivateGetConnectionInfoFunction
     : public core_api::BluetoothExtensionFunction {
  public:
@@ -366,6 +351,52 @@ class EasyUnlockPrivateGetConnectionInfoFunction
       const device::BluetoothDevice::ConnectionInfo& connection_info);
 
   DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateGetConnectionInfoFunction);
+};
+
+class EasyUnlockPrivateShowErrorBubbleFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("easyUnlockPrivate.showErrorBubble",
+                             EASYUNLOCKPRIVATE_SHOWERRORBUBBLE)
+  EasyUnlockPrivateShowErrorBubbleFunction();
+
+ private:
+  ~EasyUnlockPrivateShowErrorBubbleFunction() override;
+
+  // SyncExtensionFunction:
+  bool RunSync() override;
+
+  DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateShowErrorBubbleFunction);
+};
+
+class EasyUnlockPrivateHideErrorBubbleFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("easyUnlockPrivate.hideErrorBubble",
+                             EASYUNLOCKPRIVATE_HIDEERRORBUBBLE)
+  EasyUnlockPrivateHideErrorBubbleFunction();
+
+ private:
+  ~EasyUnlockPrivateHideErrorBubbleFunction() override;
+
+  // SyncExtensionFunction:
+  bool RunSync() override;
+
+  DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateHideErrorBubbleFunction);
+};
+
+class EasyUnlockPrivateSetAutoPairingResultFunction
+    : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("easyUnlockPrivate.setAutoPairingResult",
+                             EASYUNLOCKPRIVATE_SETAUTOPAIRINGRESULT)
+  EasyUnlockPrivateSetAutoPairingResultFunction();
+
+ private:
+  ~EasyUnlockPrivateSetAutoPairingResultFunction() override;
+
+  // SyncExtensionFunction:
+  bool RunSync() override;
+
+  DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateSetAutoPairingResultFunction);
 };
 
 }  // namespace api

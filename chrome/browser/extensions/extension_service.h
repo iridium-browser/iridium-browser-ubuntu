@@ -21,6 +21,7 @@
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/crx_file_info.h"
 #include "extensions/browser/external_provider_interface.h"
 #include "extensions/browser/install_flag.h"
 #include "extensions/browser/management_policy.h"
@@ -51,6 +52,7 @@ class DevToolsAgentHost;
 }
 
 namespace extensions {
+class AppDataMigrator;
 class ComponentLoader;
 class CrxInstaller;
 class ExtensionActionStorageManager;
@@ -82,8 +84,7 @@ class ExtensionServiceInterface
   // TODO(aa): This method can be removed. ExtensionUpdater could use
   // CrxInstaller directly instead.
   virtual bool UpdateExtension(
-      const std::string& id,
-      const base::FilePath& path,
+      const extensions::CRXFileInfo& file,
       bool file_ownership_passed,
       extensions::CrxInstaller** out_crx_installer) = 0;
 
@@ -206,8 +207,7 @@ class ExtensionService
       bool include_disabled) const override;
   const extensions::Extension* GetInstalledExtension(
       const std::string& id) const override;
-  bool UpdateExtension(const std::string& id,
-                       const base::FilePath& extension_path,
+  bool UpdateExtension(const extensions::CRXFileInfo& file,
                        bool file_ownership_passed,
                        extensions::CrxInstaller** out_crx_installer) override;
   bool IsExtensionEnabled(const std::string& extension_id) const override;
@@ -501,6 +501,14 @@ class ExtensionService
   // externally managed extension.  If so, uninstall it.
   void CheckExternalUninstall(const std::string& id);
 
+  // Attempt to enable all disabled extensions which the only disabled reason is
+  // reloading.
+  void EnabledReloadableExtensions();
+
+  // Finish install (if possible) of extensions that were still delayed while
+  // the browser was shut down.
+  void MaybeFinishShutdownDelayed();
+
   // Populates greylist_.
   void LoadGreylistFromPrefs();
 
@@ -732,6 +740,9 @@ class ExtensionService
   scoped_ptr<extensions::SharedModuleService> shared_module_service_;
 
   ObserverList<extensions::UpdateObserver, true> update_observers_;
+
+  // Migrates app data when upgrading a legacy packaged app to a platform app
+  scoped_ptr<extensions::AppDataMigrator> app_data_migrator_;
 
   FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
                            DestroyingProfileClearsExtensions);

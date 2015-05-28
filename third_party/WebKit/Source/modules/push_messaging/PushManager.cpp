@@ -20,8 +20,8 @@
 #include "modules/push_messaging/PushSubscriptionCallbacks.h"
 #include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebPushClient.h"
-#include "public/platform/WebPushProvider.h"
+#include "public/platform/modules/push_messaging/WebPushClient.h"
+#include "public/platform/modules/push_messaging/WebPushProvider.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
@@ -68,9 +68,6 @@ ScriptPromise PushManager::subscribe(ScriptState* scriptState)
 
 ScriptPromise PushManager::getSubscription(ScriptState* scriptState)
 {
-    if (!m_registration->active())
-        return ScriptPromise::rejectWithDOMException(scriptState, DOMException::create(AbortError, "Could not get subscription - no active Service Worker"));
-
     RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
@@ -93,7 +90,7 @@ ScriptPromise PushManager::hasPermission(ScriptState* scriptState)
     return promise;
 }
 
-void PushManager::trace(Visitor* visitor)
+DEFINE_TRACE(PushManager)
 {
     visitor->trace(m_registration);
 }

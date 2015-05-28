@@ -19,7 +19,6 @@
 #include "net/cookies/cookie_store.h"
 #include "net/dns/host_resolver.h"
 #include "net/http/http_auth_handler_factory.h"
-#include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_server_properties_impl.h"
 #include "net/http/http_stream_factory.h"
@@ -144,7 +143,7 @@ URLRequestContextFactory::~URLRequestContextFactory() {
 }
 
 void URLRequestContextFactory::InitializeOnUIThread() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   // Cast http user agent settings must be initialized in UI thread
   // because it registers itself to pref notification observer which is not
   // thread safe.
@@ -298,7 +297,7 @@ void URLRequestContextFactory::PopulateNetworkSessionParams(
 }
 
 net::URLRequestContext* URLRequestContextFactory::CreateSystemRequestContext() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   InitializeSystemContextDependencies();
   net::HttpNetworkSession::Params system_params;
   PopulateNetworkSessionParams(false, &system_params);
@@ -330,7 +329,7 @@ net::URLRequestContext* URLRequestContextFactory::CreateSystemRequestContext() {
 }
 
 net::URLRequestContext* URLRequestContextFactory::CreateMediaRequestContext() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   DCHECK(main_getter_.get())
       << "Getting MediaRequestContext before MainRequestContext";
   net::URLRequestContext* main_context = main_getter_->GetURLRequestContext();
@@ -352,11 +351,8 @@ net::URLRequestContext* URLRequestContextFactory::CreateMainRequestContext(
     content::BrowserContext* browser_context,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   InitializeSystemContextDependencies();
-
-  net::HttpCache::BackendFactory* main_backend =
-      net::HttpCache::DefaultBackend::InMemory(16 * 1024 * 1024);
 
   bool ignore_certificate_errors = false;
   base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
@@ -367,7 +363,8 @@ net::URLRequestContext* URLRequestContextFactory::CreateMainRequestContext(
   PopulateNetworkSessionParams(ignore_certificate_errors,
                                &network_session_params);
   InitializeMainContextDependencies(
-      new net::HttpCache(network_session_params, main_backend),
+      new net::HttpNetworkLayer(
+          new net::HttpNetworkSession(network_session_params)),
       protocol_handlers,
       request_interceptors.Pass());
 

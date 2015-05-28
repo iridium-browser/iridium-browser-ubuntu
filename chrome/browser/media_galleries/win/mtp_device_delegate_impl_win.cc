@@ -315,8 +315,13 @@ void OnGetStorageInfoCreateDelegate(
 
 void CreateMTPDeviceAsyncDelegate(
     const base::string16& device_location,
+    const bool read_only,
     const CreateMTPDeviceAsyncDelegateCallback& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+
+  // Write operation is not supported on Windows.
+  DCHECK(read_only);
+
   DCHECK(!device_location.empty());
   base::string16* pnp_device_id = new base::string16;
   base::string16* storage_object_id = new base::string16;
@@ -396,6 +401,15 @@ void MTPDeviceDelegateImplWin::GetFileInfo(
                                  base::Owned(file_info))));
 }
 
+void MTPDeviceDelegateImplWin::CreateDirectory(
+    const base::FilePath& directory_path,
+    const bool exclusive,
+    const bool recursive,
+    const CreateDirectorySuccessCallback& success_callback,
+    const ErrorCallback& error_callback) {
+  NOTREACHED();
+}
+
 void MTPDeviceDelegateImplWin::ReadDirectory(
     const base::FilePath& root,
     const ReadDirectorySuccessCallback& success_callback,
@@ -452,6 +466,51 @@ void MTPDeviceDelegateImplWin::ReadBytes(
     int64 offset,
     int buf_len,
     const ReadBytesSuccessCallback& success_callback,
+    const ErrorCallback& error_callback) {
+  NOTREACHED();
+}
+
+bool MTPDeviceDelegateImplWin::IsReadOnly() const {
+  return true;
+}
+
+void MTPDeviceDelegateImplWin::CopyFileLocal(
+    const base::FilePath& source_file_path,
+    const base::FilePath& device_file_path,
+    const CreateTemporaryFileCallback& create_temporary_file_callback,
+    const CopyFileProgressCallback& progress_callback,
+    const CopyFileLocalSuccessCallback& success_callback,
+    const ErrorCallback& error_callback) {
+  NOTREACHED();
+}
+
+void MTPDeviceDelegateImplWin::MoveFileLocal(
+    const base::FilePath& source_file_path,
+    const base::FilePath& device_file_path,
+    const CreateTemporaryFileCallback& create_temporary_file_callback,
+    const MoveFileLocalSuccessCallback& success_callback,
+    const ErrorCallback& error_callback) {
+  NOTREACHED();
+}
+
+void MTPDeviceDelegateImplWin::CopyFileFromLocal(
+    const base::FilePath& source_file_path,
+    const base::FilePath& device_file_path,
+    const CopyFileFromLocalSuccessCallback& success_callback,
+    const ErrorCallback& error_callback) {
+  NOTREACHED();
+}
+
+void MTPDeviceDelegateImplWin::DeleteFile(
+    const base::FilePath& file_path,
+    const DeleteFileSuccessCallback& success_callback,
+    const ErrorCallback& error_callback) {
+  NOTREACHED();
+}
+
+void MTPDeviceDelegateImplWin::DeleteDirectory(
+    const base::FilePath& file_path,
+    const DeleteDirectorySuccessCallback& success_callback,
     const ErrorCallback& error_callback) {
   NOTREACHED();
 }

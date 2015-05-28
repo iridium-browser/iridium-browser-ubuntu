@@ -16,8 +16,14 @@
 #include "chrome/browser/ui/app_list/search/suggestions/suggestions_search_provider.h"
 #include "chrome/browser/ui/app_list/search/webstore/webstore_provider.h"
 #include "chrome/common/chrome_switches.h"
+#include "ui/app_list/app_list_model.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/search/mixer.h"
 #include "ui/app_list/search_controller.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/ui/app_list/search/launcher_search/launcher_search_provider.h"
+#endif
 
 namespace app_list {
 
@@ -39,34 +45,42 @@ bool IsSuggestionsSearchProviderEnabled() {
 
 scoped_ptr<SearchController> CreateSearchController(
     Profile* profile,
-    SearchBoxModel* search_box,
-    AppListModel::SearchResults* results,
+    AppListModel* model,
     AppListControllerDelegate* list_controller) {
-  scoped_ptr<SearchController> controller(new SearchController(
-      search_box, results, HistoryFactory::GetForBrowserContext(profile)));
+  scoped_ptr<SearchController> controller(
+      new SearchController(model->search_box(), model->results(),
+                           HistoryFactory::GetForBrowserContext(profile)));
 
-  controller->AddProvider(Mixer::MAIN_GROUP,
-                          scoped_ptr<SearchProvider>(new AppSearchProvider(
-                              profile, list_controller,
-                              make_scoped_ptr(new base::DefaultClock()))));
+  controller->AddProvider(
+      Mixer::MAIN_GROUP,
+      scoped_ptr<SearchProvider>(new AppSearchProvider(
+          profile, list_controller, make_scoped_ptr(new base::DefaultClock()),
+          model->top_level_item_list())));
   controller->AddProvider(Mixer::OMNIBOX_GROUP,
                           scoped_ptr<SearchProvider>(
                               new OmniboxProvider(profile, list_controller)));
   controller->AddProvider(Mixer::WEBSTORE_GROUP,
                           scoped_ptr<SearchProvider>(
                               new WebstoreProvider(profile, list_controller)));
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisablePeopleSearch)) {
-    controller->AddProvider(Mixer::PEOPLE_GROUP,
-                            scoped_ptr<SearchProvider>(
-                                new PeopleProvider(profile, list_controller)));
-  }
+  controller->AddProvider(
+      Mixer::PEOPLE_GROUP,
+      scoped_ptr<SearchProvider>(new PeopleProvider(profile, list_controller)));
   if (IsSuggestionsSearchProviderEnabled()) {
     controller->AddProvider(
         Mixer::SUGGESTIONS_GROUP,
         scoped_ptr<SearchProvider>(
             new SuggestionsSearchProvider(profile, list_controller)));
   }
+
+  // LauncherSearchProvider is added only when flag is enabled and running on
+  // Chrome OS.
+#if defined(OS_CHROMEOS)
+  if (app_list::switches::IsLauncherSearchProviderApiEnabled()) {
+    controller->AddProvider(
+        Mixer::LAUNCHER_SEARCH_API_GROUP,
+        scoped_ptr<SearchProvider>(new LauncherSearchProvider(profile)));
+  }
+#endif
 
   return controller.Pass();
 }

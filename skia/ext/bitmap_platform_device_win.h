@@ -63,8 +63,7 @@ class SK_API BitmapPlatformDevice : public SkBitmapDevice, public PlatformDevice
   // starts accessing pixel data.
   virtual const SkBitmap& onAccessBitmap() override;
 
-  virtual SkBaseDevice* onCreateCompatibleDevice(const CreateInfo& info)
-    override;
+  SkBaseDevice* onCreateDevice(const CreateInfo&, const SkPaint*) override;
 
  private:
   // Private constructor.

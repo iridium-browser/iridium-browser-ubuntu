@@ -169,7 +169,7 @@ extern const char kImportDefault[] =
 typedef FirstRunMasterPrefsBrowserTestT<kImportDefault>
     FirstRunMasterPrefsImportDefault;
 // http://crbug.com/314221
-#if defined(GOOGLE_CHROME_BUILD) && (defined(OS_MACOSX) || defined(OS_LINUX))
+#if defined(OS_MACOSX) || (defined(GOOGLE_CHROME_BUILD) && defined(OS_LINUX))
 #define MAYBE_ImportDefault DISABLED_ImportDefault
 #else
 #define MAYBE_ImportDefault ImportDefault
@@ -192,7 +192,7 @@ extern const char kImportBookmarksFile[] =
 typedef FirstRunMasterPrefsBrowserTestT<kImportBookmarksFile>
     FirstRunMasterPrefsImportBookmarksFile;
 // http://crbug.com/314221
-#if defined(GOOGLE_CHROME_BUILD) && (defined(OS_MACOSX) || defined(OS_LINUX))
+#if (defined(GOOGLE_CHROME_BUILD) && defined(OS_LINUX)) || defined(OS_MACOSX)
 #define MAYBE_ImportBookmarksFile DISABLED_ImportBookmarksFile
 #else
 #define MAYBE_ImportBookmarksFile ImportBookmarksFile

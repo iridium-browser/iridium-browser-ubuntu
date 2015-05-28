@@ -80,7 +80,9 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
     } else if (doubleOrNullMemberValue->IsNull()) {
         impl.setDoubleOrNullMemberToNull();
     } else {
-        TONATIVE_VOID_EXCEPTIONSTATE(double, doubleOrNullMember, toDouble(doubleOrNullMemberValue, exceptionState), exceptionState);
+        double doubleOrNullMember = toRestrictedDouble(isolate, doubleOrNullMemberValue, exceptionState);
+        if (exceptionState.hadException())
+            return;
         impl.setDoubleOrNullMember(doubleOrNullMember);
     }
 
@@ -93,7 +95,9 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
         // Do nothing.
     } else {
         DoubleOrString doubleOrStringMember;
-        TONATIVE_VOID_EXCEPTIONSTATE_ARGINTERNAL(V8DoubleOrString::toImpl(isolate, doubleOrStringMemberValue, doubleOrStringMember, exceptionState), exceptionState);
+        V8DoubleOrString::toImpl(isolate, doubleOrStringMemberValue, doubleOrStringMember, exceptionState);
+        if (exceptionState.hadException())
+            return;
         impl.setDoubleOrStringMember(doubleOrStringMember);
     }
 
@@ -123,13 +127,40 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
     if (enumMemberValue.IsEmpty() || enumMemberValue->IsUndefined()) {
         // Do nothing.
     } else {
-        TOSTRING_VOID(V8StringResource<>, enumMember, enumMemberValue);
-        String string = enumMember;
-        if (!(string == "foo" || string == "bar" || string == "baz")) {
-            exceptionState.throwTypeError("member enumMember ('" + string + "') is not a valid enum value.");
+        V8StringResource<> enumMember = enumMemberValue;
+        if (!enumMember.prepare(exceptionState))
             return;
-        }
+        static const char* validValues[] = {
+            "",
+            "EnumValue1",
+            "EnumValue2",
+            "EnumValue3",
+        };
+        if (!isValidEnum(enumMember, validValues, WTF_ARRAY_LENGTH(validValues), "TestEnum", exceptionState))
+            return;
         impl.setEnumMember(enumMember);
+    }
+
+    v8::Local<v8::Value> enumSequenceMemberValue = v8Object->Get(v8String(isolate, "enumSequenceMember"));
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return;
+    }
+    if (enumSequenceMemberValue.IsEmpty() || enumSequenceMemberValue->IsUndefined()) {
+        // Do nothing.
+    } else {
+        Vector<String> enumSequenceMember = toImplArray<String>(enumSequenceMemberValue, 0, isolate, exceptionState);
+        if (exceptionState.hadException())
+            return;
+        static const char* validValues[] = {
+            "",
+            "EnumValue1",
+            "EnumValue2",
+            "EnumValue3",
+        };
+        if (!isValidEnum(enumSequenceMember, validValues, WTF_ARRAY_LENGTH(validValues), "TestEnum", exceptionState))
+            return;
+        impl.setEnumSequenceMember(enumSequenceMember);
     }
 
     v8::Local<v8::Value> eventTargetMemberValue = v8Object->Get(v8String(isolate, "eventTargetMember"));
@@ -156,7 +187,9 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
     if (internalDictionarySequenceMemberValue.IsEmpty() || internalDictionarySequenceMemberValue->IsUndefined()) {
         // Do nothing.
     } else {
-        TONATIVE_VOID_EXCEPTIONSTATE(Vector<InternalDictionary>, internalDictionarySequenceMember, toImplArray<InternalDictionary>(internalDictionarySequenceMemberValue, 0, isolate, exceptionState), exceptionState);
+        Vector<InternalDictionary> internalDictionarySequenceMember = toImplArray<InternalDictionary>(internalDictionarySequenceMemberValue, 0, isolate, exceptionState);
+        if (exceptionState.hadException())
+            return;
         impl.setInternalDictionarySequenceMember(internalDictionarySequenceMember);
     }
 
@@ -168,7 +201,9 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
     if (longMemberValue.IsEmpty() || longMemberValue->IsUndefined()) {
         // Do nothing.
     } else {
-        TONATIVE_VOID_EXCEPTIONSTATE(int, longMember, toInt32(longMemberValue, exceptionState), exceptionState);
+        int longMember = toInt32(isolate, longMemberValue, NormalConversion, exceptionState);
+        if (exceptionState.hadException())
+            return;
         impl.setLongMember(longMember);
     }
 
@@ -206,6 +241,35 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
         impl.setObjectOrNullMember(objectOrNullMember);
     }
 
+    v8::Local<v8::Value> otherDoubleOrStringMemberValue = v8Object->Get(v8String(isolate, "otherDoubleOrStringMember"));
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return;
+    }
+    if (otherDoubleOrStringMemberValue.IsEmpty() || otherDoubleOrStringMemberValue->IsUndefined()) {
+        // Do nothing.
+    } else {
+        DoubleOrString otherDoubleOrStringMember;
+        V8DoubleOrString::toImpl(isolate, otherDoubleOrStringMemberValue, otherDoubleOrStringMember, exceptionState);
+        if (exceptionState.hadException())
+            return;
+        impl.setOtherDoubleOrStringMember(otherDoubleOrStringMember);
+    }
+
+    v8::Local<v8::Value> restrictedDoubleMemberValue = v8Object->Get(v8String(isolate, "restrictedDoubleMember"));
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return;
+    }
+    if (restrictedDoubleMemberValue.IsEmpty() || restrictedDoubleMemberValue->IsUndefined()) {
+        // Do nothing.
+    } else {
+        double restrictedDoubleMember = toRestrictedDouble(isolate, restrictedDoubleMemberValue, exceptionState);
+        if (exceptionState.hadException())
+            return;
+        impl.setRestrictedDoubleMember(restrictedDoubleMember);
+    }
+
     v8::Local<v8::Value> stringArrayMemberValue = v8Object->Get(v8String(isolate, "stringArrayMember"));
     if (block.HasCaught()) {
         exceptionState.rethrowV8Exception(block.Exception());
@@ -214,7 +278,9 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
     if (stringArrayMemberValue.IsEmpty() || stringArrayMemberValue->IsUndefined()) {
         // Do nothing.
     } else {
-        TONATIVE_VOID_EXCEPTIONSTATE(Vector<String>, stringArrayMember, toImplArray<String>(stringArrayMemberValue, 0, isolate, exceptionState), exceptionState);
+        Vector<String> stringArrayMember = toImplArray<String>(stringArrayMemberValue, 0, isolate, exceptionState);
+        if (exceptionState.hadException())
+            return;
         impl.setStringArrayMember(stringArrayMember);
     }
 
@@ -226,7 +292,9 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
     if (stringMemberValue.IsEmpty() || stringMemberValue->IsUndefined()) {
         // Do nothing.
     } else {
-        TOSTRING_VOID(V8StringResource<>, stringMember, stringMemberValue);
+        V8StringResource<> stringMember = stringMemberValue;
+        if (!stringMember.prepare(exceptionState))
+            return;
         impl.setStringMember(stringMember);
     }
 
@@ -240,7 +308,9 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
     } else if (stringOrNullMemberValue->IsNull()) {
         impl.setStringOrNullMemberToNull();
     } else {
-        TOSTRING_VOID(V8StringResource<>, stringOrNullMember, stringOrNullMemberValue);
+        V8StringResource<> stringOrNullMember = stringOrNullMemberValue;
+        if (!stringOrNullMember.prepare(exceptionState))
+            return;
         impl.setStringOrNullMember(stringOrNullMember);
     }
 
@@ -252,7 +322,9 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
     if (stringSequenceMemberValue.IsEmpty() || stringSequenceMemberValue->IsUndefined()) {
         // Do nothing.
     } else {
-        TONATIVE_VOID_EXCEPTIONSTATE(Vector<String>, stringSequenceMember, toImplArray<String>(stringSequenceMemberValue, 0, isolate, exceptionState), exceptionState);
+        Vector<String> stringSequenceMember = toImplArray<String>(stringSequenceMemberValue, 0, isolate, exceptionState);
+        if (exceptionState.hadException())
+            return;
         impl.setStringSequenceMember(stringSequenceMember);
     }
 
@@ -265,7 +337,9 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
         // Do nothing.
     } else {
         TestInterface2OrUint8Array testInterface2OrUint8ArrayMember;
-        TONATIVE_VOID_EXCEPTIONSTATE_ARGINTERNAL(V8TestInterface2OrUint8Array::toImpl(isolate, testInterface2OrUint8ArrayMemberValue, testInterface2OrUint8ArrayMember, exceptionState), exceptionState);
+        V8TestInterface2OrUint8Array::toImpl(isolate, testInterface2OrUint8ArrayMemberValue, testInterface2OrUint8ArrayMember, exceptionState);
+        if (exceptionState.hadException())
+            return;
         impl.setTestInterface2OrUint8ArrayMember(testInterface2OrUint8ArrayMember);
     }
 
@@ -387,6 +461,20 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
         impl.setUint8ArrayMember(uint8ArrayMember);
     }
 
+    v8::Local<v8::Value> unrestrictedDoubleMemberValue = v8Object->Get(v8String(isolate, "unrestrictedDoubleMember"));
+    if (block.HasCaught()) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return;
+    }
+    if (unrestrictedDoubleMemberValue.IsEmpty() || unrestrictedDoubleMemberValue->IsUndefined()) {
+        // Do nothing.
+    } else {
+        double unrestrictedDoubleMember = toDouble(isolate, unrestrictedDoubleMemberValue, exceptionState);
+        if (exceptionState.hadException())
+            return;
+        impl.setUnrestrictedDoubleMember(unrestrictedDoubleMember);
+    }
+
 }
 
 v8::Local<v8::Value> toV8(const TestDictionary& impl, v8::Local<v8::Object> creationContext, v8::Isolate* isolate)
@@ -418,6 +506,8 @@ void toV8TestDictionary(const TestDictionary& impl, v8::Local<v8::Object> dictio
 
     if (impl.hasDoubleOrStringMember()) {
         dictionary->Set(v8String(isolate, "doubleOrStringMember"), toV8(impl.doubleOrStringMember(), creationContext, isolate));
+    } else {
+        dictionary->Set(v8String(isolate, "doubleOrStringMember"), toV8(DoubleOrString::fromDouble(3.14), creationContext, isolate));
     }
 
     if (impl.hasElementOrNullMember()) {
@@ -428,6 +518,10 @@ void toV8TestDictionary(const TestDictionary& impl, v8::Local<v8::Object> dictio
         dictionary->Set(v8String(isolate, "enumMember"), v8String(isolate, impl.enumMember()));
     } else {
         dictionary->Set(v8String(isolate, "enumMember"), v8String(isolate, String("foo")));
+    }
+
+    if (impl.hasEnumSequenceMember()) {
+        dictionary->Set(v8String(isolate, "enumSequenceMember"), toV8(impl.enumSequenceMember(), creationContext, isolate));
     }
 
     if (impl.hasEventTargetMember()) {
@@ -452,6 +546,18 @@ void toV8TestDictionary(const TestDictionary& impl, v8::Local<v8::Object> dictio
     if (impl.hasObjectOrNullMember()) {
         ASSERT(impl.objectOrNullMember().isObject());
         dictionary->Set(v8String(isolate, "objectOrNullMember"), impl.objectOrNullMember().v8Value());
+    }
+
+    if (impl.hasOtherDoubleOrStringMember()) {
+        dictionary->Set(v8String(isolate, "otherDoubleOrStringMember"), toV8(impl.otherDoubleOrStringMember(), creationContext, isolate));
+    } else {
+        dictionary->Set(v8String(isolate, "otherDoubleOrStringMember"), toV8(DoubleOrString::fromString(String("default string value")), creationContext, isolate));
+    }
+
+    if (impl.hasRestrictedDoubleMember()) {
+        dictionary->Set(v8String(isolate, "restrictedDoubleMember"), v8::Number::New(isolate, impl.restrictedDoubleMember()));
+    } else {
+        dictionary->Set(v8String(isolate, "restrictedDoubleMember"), v8::Number::New(isolate, 3.14));
     }
 
     if (impl.hasStringArrayMember()) {
@@ -504,9 +610,15 @@ void toV8TestDictionary(const TestDictionary& impl, v8::Local<v8::Object> dictio
         dictionary->Set(v8String(isolate, "uint8ArrayMember"), toV8(impl.uint8ArrayMember(), creationContext, isolate));
     }
 
+    if (impl.hasUnrestrictedDoubleMember()) {
+        dictionary->Set(v8String(isolate, "unrestrictedDoubleMember"), v8::Number::New(isolate, impl.unrestrictedDoubleMember()));
+    } else {
+        dictionary->Set(v8String(isolate, "unrestrictedDoubleMember"), v8::Number::New(isolate, 3.14));
+    }
+
 }
 
-TestDictionary NativeValueTraits<TestDictionary>::nativeValue(const v8::Local<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
+TestDictionary NativeValueTraits<TestDictionary>::nativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState)
 {
     TestDictionary impl;
     V8TestDictionary::toImpl(isolate, value, impl, exceptionState);

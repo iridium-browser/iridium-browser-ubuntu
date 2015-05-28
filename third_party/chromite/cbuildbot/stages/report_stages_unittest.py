@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,34 +6,78 @@
 
 from __future__ import print_function
 
+import mock
 import os
-import sys
 
-sys.path.insert(0, os.path.abspath('%s/../../..' % os.path.dirname(__file__)))
+from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import failures_lib
+from chromite.cbuildbot import manifest_version
+from chromite.cbuildbot import metadata_lib
 from chromite.cbuildbot import results_lib
 from chromite.cbuildbot import validation_pool
 from chromite.cbuildbot.cbuildbot_unittest import BuilderRunMock
+from chromite.cbuildbot.stages import generic_stages_unittest
+from chromite.cbuildbot.stages import report_stages
 from chromite.cbuildbot.stages import sync_stages
 from chromite.cbuildbot.stages import sync_stages_unittest
-from chromite.cbuildbot.stages import report_stages
-from chromite.cbuildbot.stages import generic_stages_unittest
-from chromite.lib import cidb
-from chromite.lib import cros_test_lib
 from chromite.lib import alerts
+from chromite.lib import cidb
+from chromite.lib import cros_build_lib
+from chromite.lib import fake_cidb
+from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import retry_stats
-
-
-# TODO(build): Finish test wrapper (http://crosbug.com/37517).
-# Until then, this has to be after the chromite imports.
-import mock
-
+from chromite.lib import toolchain
 
 # pylint: disable=protected-access
 
+class BuildReexecutionStageTest(generic_stages_unittest.AbstractStageTest):
+  """Tests that BuildReexecutionFinishedStage behaves as expected."""
+  def setUp(self):
+    self.fake_db = fake_cidb.FakeCIDBConnection()
+    cidb.CIDBConnectionFactory.SetupMockCidb(self.fake_db)
+    build_id = self.fake_db.InsertBuild(
+        'builder name', 'waterfall', 1, 'build config', 'bot hostname')
+
+    self._Prepare(build_id=build_id)
+
+    release_tag = '4815.0.0-rc1'
+    self._run.attrs.release_tag = '4815.0.0-rc1'
+    fake_versioninfo = manifest_version.VersionInfo(release_tag, '39')
+    self.PatchObject(gs.GSContext, 'Copy')
+    self.PatchObject(cbuildbot_run._BuilderRunBase, 'GetVersionInfo',
+                     return_value=fake_versioninfo)
+    self.PatchObject(toolchain, 'GetToolchainsForBoard')
+
+  def tearDown(self):
+    cidb.CIDBConnectionFactory.SetupMockCidb()
+
+  def testPerformStage(self):
+    """Test that a normal runs completes without error."""
+    self.RunStage()
+
+  def testMasterSlaveVersionMismatch(self):
+    """Test that master/slave version mismatch causes failure."""
+    master_release_tag = '9999.0.0-rc1'
+    master_build_id = self.fake_db.InsertBuild(
+        'master', 'waterfall', 2, 'master config', 'master hostname')
+    master_metadata = metadata_lib.CBuildbotMetadata()
+    master_metadata.UpdateKeyDictWithDict(
+        'version', {'full' : 'R39-9999.0.0-rc1',
+                    'milestone': '39',
+                    'platform': master_release_tag})
+    self._run.attrs.metadata.UpdateWithDict(
+        {'master_build_id': master_build_id})
+    self.fake_db.UpdateMetadata(master_build_id, master_metadata)
+
+    stage = self.ConstructStage()
+    with self.assertRaises(failures_lib.StepFailure):
+      stage.Run()
+
+  def ConstructStage(self):
+    return report_stages.BuildReexecutionFinishedStage(self._run)
 
 class BuildStartStageTest(generic_stages_unittest.AbstractStageTest):
   """Tests that BuildStartStage behaves as expected."""
@@ -66,7 +109,7 @@ class BuildStartStageTest(generic_stages_unittest.AbstractStageTest):
         timeout_seconds=mock.ANY)
     self.assertEqual(self._run.attrs.metadata.GetValue('build_id'), 31337)
     self.assertEqual(self._run.attrs.metadata.GetValue('db_type'),
-                     cidb.CIDBConnectionFactory._CONNECTION_TYPE_MOCK)
+                     cidb.CONNECTION_TYPE_MOCK)
 
   def testHandleSkipWithInstanceChange(self):
     """Test that HandleSkip disables cidb and dies when necessary."""
@@ -77,10 +120,9 @@ class BuildStartStageTest(generic_stages_unittest.AbstractStageTest):
     stage = self.ConstructStage()
     self.assertRaises(AssertionError, stage.HandleSkip)
     self.assertEqual(cidb.CIDBConnectionFactory.GetCIDBConnectionType(),
-                     cidb.CIDBConnectionFactory._CONNECTION_TYPE_INV)
+                     cidb.CONNECTION_TYPE_INV)
     # The above test has the side effect of invalidating CIDBConnectionFactory.
     # Undo that side effect so other unit tests can run.
-    cidb.CIDBConnectionFactory._ClearCIDBSetup()
     cidb.CIDBConnectionFactory.SetupMockCidb()
 
   def testHandleSkipWithNoDbType(self):
@@ -93,7 +135,7 @@ class BuildStartStageTest(generic_stages_unittest.AbstractStageTest):
     """Test that HandleSkip passes when db_type is specified."""
     self._run.attrs.metadata.UpdateWithDict(
         {'build_id': 31337,
-         'db_type': cidb.CIDBConnectionFactory._CONNECTION_TYPE_MOCK})
+         'db_type': cidb.CONNECTION_TYPE_MOCK})
     stage = self.ConstructStage()
     stage.HandleSkip()
 
@@ -180,6 +222,9 @@ class ReportStageTest(AbstractReportStageTest):
 
   def testAlertEmail(self):
     """Send out alerts when streak counter reaches the threshold."""
+    self.PatchObject(cbuildbot_run._BuilderRunBase,
+                     'InProduction', return_value=True)
+    self.PatchObject(cros_build_lib, 'HostIsCIBuilder', return_value=True)
     self._Prepare(extra_config={'health_threshold': 3,
                                 'health_alert_recipients': ['foo@bar.org']})
     self._SetupUpdateStreakCounter(counter_value=-3)
@@ -192,6 +237,9 @@ class ReportStageTest(AbstractReportStageTest):
 
   def testAlertEmailOnFailingStreak(self):
     """Continue sending out alerts when streak counter exceeds the threshold."""
+    self.PatchObject(cbuildbot_run._BuilderRunBase,
+                     'InProduction', return_value=True)
+    self.PatchObject(cros_build_lib, 'HostIsCIBuilder', return_value=True)
     self._Prepare(extra_config={'health_threshold': 3,
                                 'health_alert_recipients': ['foo@bar.org']})
     self._SetupUpdateStreakCounter(counter_value=-5)
@@ -238,7 +286,3 @@ class ReportStageNoSyncTest(AbstractReportStageTest):
     """Check that we can run with a RELEASE_TAG of None."""
     self._SetupUpdateStreakCounter()
     self.RunStage()
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()

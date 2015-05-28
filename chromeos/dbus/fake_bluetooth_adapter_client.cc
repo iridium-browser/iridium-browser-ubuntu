@@ -4,13 +4,11 @@
 
 #include "chromeos/dbus/fake_bluetooth_adapter_client.h"
 
-#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_bluetooth_device_client.h"
-#include "dbus/object_path.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
@@ -205,6 +203,20 @@ void FakeBluetoothAdapterClient::RemoveDevice(
       static_cast<FakeBluetoothDeviceClient*>(
           DBusThreadManager::Get()->GetBluetoothDeviceClient());
   device_client->RemoveDevice(dbus::ObjectPath(kAdapterPath), device_path);
+}
+
+void FakeBluetoothAdapterClient::SetDiscoveryFilter(
+    const dbus::ObjectPath& object_path,
+    const DiscoveryFilter& discovery_filter,
+    const base::Closure& callback,
+    const ErrorCallback& error_callback) {
+  if (object_path != dbus::ObjectPath(kAdapterPath)) {
+    PostDelayedTask(base::Bind(error_callback, kNoResponseError, ""));
+    return;
+  }
+
+  VLOG(1) << "SetDiscoveryFilter: " << object_path.value();
+  PostDelayedTask(callback);
 }
 
 void FakeBluetoothAdapterClient::SetSimulationIntervalMs(int interval_ms) {

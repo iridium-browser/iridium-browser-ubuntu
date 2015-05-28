@@ -4,8 +4,8 @@
 
 #include "content/browser/gamepad/gamepad_platform_data_fetcher_win.h"
 
-#include "base/debug/trace_event.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 #include "base/win/windows_version.h"
 #include "content/common/gamepad_hardware_buffer.h"
 #include "content/common/gamepad_messages.h"
@@ -97,6 +97,7 @@ void GamepadPlatformDataFetcherWin::EnumerateDevices(
     WebGamepads* pads) {
   TRACE_EVENT0("GAMEPAD", "EnumerateDevices");
 
+  pads->length = 0;
   // Mark all disconnected pads DISCONNECTED.
   for (size_t i = 0; i < WebGamepads::itemsLengthCap; ++i) {
     if (!pads->items[i].connected)

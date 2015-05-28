@@ -60,33 +60,24 @@ TEST(SyscallWrappers, CloneChildSettid) {
   EXPECT_EQ(kSuccessExit, WEXITSTATUS(status));
 }
 
-TEST(SyscallWrappers, ForkWithFlagsUpdatesPidCache) {
-  // The libc clone function, which allows ForkWithFlags to keep the pid cache
-  // up to date, does not work on Valgrind.
-  if (IsRunningOnValgrind()) {
-    return;
-  }
+TEST(SyscallWrappers, GetRESUid) {
+  uid_t ruid, euid, suid;
+  uid_t sys_ruid, sys_euid, sys_suid;
+  ASSERT_EQ(0, getresuid(&ruid, &euid, &suid));
+  ASSERT_EQ(0, sys_getresuid(&sys_ruid, &sys_euid, &sys_suid));
+  EXPECT_EQ(ruid, sys_ruid);
+  EXPECT_EQ(euid, sys_euid);
+  EXPECT_EQ(suid, sys_suid);
+}
 
-  // Warm up the libc pid cache, if there is one.
-  ASSERT_EQ(sys_getpid(), getpid());
-
-  pid_t ctid = 0;
-  pid_t pid = ForkWithFlags(CLONE_CHILD_SETTID | SIGCHLD, nullptr, &ctid);
-
-  const int kSuccessExit = 0;
-  if (0 == pid) {
-    // In child.  Check both the raw getpid syscall and the libc getpid wrapper
-    // (which may rely on a pid cache).
-    if (sys_getpid() == ctid && getpid() == ctid)
-      _exit(kSuccessExit);
-    _exit(1);
-  }
-
-  ASSERT_NE(-1, pid);
-  int status = 0;
-  ASSERT_EQ(pid, HANDLE_EINTR(waitpid(pid, &status, 0)));
-  ASSERT_TRUE(WIFEXITED(status));
-  EXPECT_EQ(kSuccessExit, WEXITSTATUS(status));
+TEST(SyscallWrappers, GetRESGid) {
+  gid_t rgid, egid, sgid;
+  gid_t sys_rgid, sys_egid, sys_sgid;
+  ASSERT_EQ(0, getresgid(&rgid, &egid, &sgid));
+  ASSERT_EQ(0, sys_getresgid(&sys_rgid, &sys_egid, &sys_sgid));
+  EXPECT_EQ(rgid, sys_rgid);
+  EXPECT_EQ(egid, sys_egid);
+  EXPECT_EQ(sgid, sys_sgid);
 }
 
 }  // namespace

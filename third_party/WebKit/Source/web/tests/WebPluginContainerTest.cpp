@@ -33,9 +33,10 @@
 
 #include "core/dom/Element.h"
 #include "core/events/KeyboardEvent.h"
-#include "core/testing/URLTestHelpers.h"
 #include "platform/PlatformEvent.h"
 #include "platform/PlatformKeyboardEvent.h"
+#include "platform/testing/URLTestHelpers.h"
+#include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebClipboard.h"
 #include "public/platform/WebThread.h"
@@ -54,11 +55,12 @@
 #include "web/tests/FrameTestHelpers.h"
 #include <gtest/gtest.h>
 
+using blink::testing::runPendingTasks;
 using namespace blink;
 
 namespace {
 
-class WebPluginContainerTest : public testing::Test {
+class WebPluginContainerTest : public ::testing::Test {
 public:
     WebPluginContainerTest()
         : m_baseURL("http://www.test.com/")
@@ -111,23 +113,23 @@ TEST_F(WebPluginContainerTest, WindowToLocalPointTest)
     webView->settings()->setPluginsEnabled(true);
     webView->resize(WebSize(300, 300));
     webView->layout();
-    FrameTestHelpers::runPendingTasks();
+    runPendingTasks();
 
     WebPluginContainer* pluginContainerOne = getWebPluginContainer(webView, WebString::fromUTF8("translated-plugin"));
     ASSERT(pluginContainerOne);
-    WebPoint point1 = pluginContainerOne->windowToLocalPoint(WebPoint(10, 10));
+    WebPoint point1 = pluginContainerOne->rootFrameToLocalPoint(WebPoint(10, 10));
     ASSERT_EQ(0, point1.x);
     ASSERT_EQ(0, point1.y);
-    WebPoint point2 = pluginContainerOne->windowToLocalPoint(WebPoint(100, 100));
+    WebPoint point2 = pluginContainerOne->rootFrameToLocalPoint(WebPoint(100, 100));
     ASSERT_EQ(90, point2.x);
     ASSERT_EQ(90, point2.y);
 
     WebPluginContainer* pluginContainerTwo = getWebPluginContainer(webView, WebString::fromUTF8("rotated-plugin"));
     ASSERT(pluginContainerTwo);
-    WebPoint point3 = pluginContainerTwo->windowToLocalPoint(WebPoint(0, 10));
+    WebPoint point3 = pluginContainerTwo->rootFrameToLocalPoint(WebPoint(0, 10));
     ASSERT_EQ(10, point3.x);
     ASSERT_EQ(0, point3.y);
-    WebPoint point4 = pluginContainerTwo->windowToLocalPoint(WebPoint(-10, 10));
+    WebPoint point4 = pluginContainerTwo->rootFrameToLocalPoint(WebPoint(-10, 10));
     ASSERT_EQ(10, point4.x);
     ASSERT_EQ(10, point4.y);
 }
@@ -141,23 +143,23 @@ TEST_F(WebPluginContainerTest, LocalToWindowPointTest)
     webView->settings()->setPluginsEnabled(true);
     webView->resize(WebSize(300, 300));
     webView->layout();
-    FrameTestHelpers::runPendingTasks();
+    runPendingTasks();
 
     WebPluginContainer* pluginContainerOne = getWebPluginContainer(webView, WebString::fromUTF8("translated-plugin"));
     ASSERT(pluginContainerOne);
-    WebPoint point1 = pluginContainerOne->localToWindowPoint(WebPoint(0, 0));
+    WebPoint point1 = pluginContainerOne->localToRootFramePoint(WebPoint(0, 0));
     ASSERT_EQ(10, point1.x);
     ASSERT_EQ(10, point1.y);
-    WebPoint point2 = pluginContainerOne->localToWindowPoint(WebPoint(90, 90));
+    WebPoint point2 = pluginContainerOne->localToRootFramePoint(WebPoint(90, 90));
     ASSERT_EQ(100, point2.x);
     ASSERT_EQ(100, point2.y);
 
     WebPluginContainer* pluginContainerTwo = getWebPluginContainer(webView, WebString::fromUTF8("rotated-plugin"));
     ASSERT(pluginContainerTwo);
-    WebPoint point3 = pluginContainerTwo->localToWindowPoint(WebPoint(10, 0));
+    WebPoint point3 = pluginContainerTwo->localToRootFramePoint(WebPoint(10, 0));
     ASSERT_EQ(0, point3.x);
     ASSERT_EQ(10, point3.y);
-    WebPoint point4 = pluginContainerTwo->localToWindowPoint(WebPoint(10, 10));
+    WebPoint point4 = pluginContainerTwo->localToRootFramePoint(WebPoint(10, 10));
     ASSERT_EQ(-10, point4.x);
     ASSERT_EQ(10, point4.y);
 }
@@ -172,7 +174,7 @@ TEST_F(WebPluginContainerTest, Copy)
     webView->settings()->setPluginsEnabled(true);
     webView->resize(WebSize(300, 300));
     webView->layout();
-    FrameTestHelpers::runPendingTasks();
+    runPendingTasks();
 
     WebElement pluginContainerOneElement = webView->mainFrame()->document().getElementById(WebString::fromUTF8("translated-plugin"));
     EXPECT_TRUE(webView->mainFrame()->executeCommand("Copy",  pluginContainerOneElement));
@@ -192,14 +194,14 @@ TEST_F(WebPluginContainerTest, CopyInsertKeyboardEventsTest)
     webView->settings()->setPluginsEnabled(true);
     webView->resize(WebSize(300, 300));
     webView->layout();
-    FrameTestHelpers::runPendingTasks();
+    runPendingTasks();
 
     WebElement pluginContainerOneElement = webView->mainFrame()->document().getElementById(WebString::fromUTF8("translated-plugin"));
     PlatformEvent::Modifiers modifierKey = PlatformEvent::CtrlKey;
 #if OS(MACOSX)
     modifierKey = PlatformEvent::MetaKey;
 #endif
-    PlatformKeyboardEvent platformKeyboardEventC(PlatformEvent::RawKeyDown, "", "", "67", 67, 0, false, false, false, modifierKey, 0.0);
+    PlatformKeyboardEvent platformKeyboardEventC(PlatformEvent::RawKeyDown, "", "", "67", "", 67, 0, false, false, false, modifierKey, 0.0);
     RefPtrWillBeRawPtr<KeyboardEvent> keyEventC = KeyboardEvent::create(platformKeyboardEventC, 0);
     ((WebPluginContainerImpl*)(pluginContainerOneElement.pluginContainer()))->handleEvent(keyEventC.get());
     EXPECT_EQ(WebString("x"), Platform::current()->clipboard()->readPlainText(WebClipboard::Buffer()));
@@ -208,7 +210,7 @@ TEST_F(WebPluginContainerTest, CopyInsertKeyboardEventsTest)
     Platform::current()->clipboard()->writePlainText(WebString(""));
     EXPECT_EQ(WebString(""), Platform::current()->clipboard()->readPlainText(WebClipboard::Buffer()));
 
-    PlatformKeyboardEvent platformKeyboardEventInsert(PlatformEvent::RawKeyDown, "", "", "45", 45, 0, false, false, false, modifierKey, 0.0);
+    PlatformKeyboardEvent platformKeyboardEventInsert(PlatformEvent::RawKeyDown, "", "", "45", "", 45, 0, false, false, false, modifierKey, 0.0);
     RefPtrWillBeRawPtr<KeyboardEvent> keyEventInsert = KeyboardEvent::create(platformKeyboardEventInsert, 0);
     ((WebPluginContainerImpl*)(pluginContainerOneElement.pluginContainer()))->handleEvent(keyEventInsert.get());
     EXPECT_EQ(WebString("x"), Platform::current()->clipboard()->readPlainText(WebClipboard::Buffer()));

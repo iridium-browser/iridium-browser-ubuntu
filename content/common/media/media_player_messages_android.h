@@ -30,6 +30,8 @@ IPC_STRUCT_TRAITS_BEGIN(media::DemuxerConfigs)
   IPC_STRUCT_TRAITS_MEMBER(audio_sampling_rate)
   IPC_STRUCT_TRAITS_MEMBER(is_audio_encrypted)
   IPC_STRUCT_TRAITS_MEMBER(audio_extra_data)
+  IPC_STRUCT_TRAITS_MEMBER(audio_codec_delay_ns)
+  IPC_STRUCT_TRAITS_MEMBER(audio_seek_preroll_ns)
 
   IPC_STRUCT_TRAITS_MEMBER(video_codec)
   IPC_STRUCT_TRAITS_MEMBER(video_size)
@@ -47,12 +49,13 @@ IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(media::AccessUnit)
   IPC_STRUCT_TRAITS_MEMBER(status)
-  IPC_STRUCT_TRAITS_MEMBER(end_of_stream)
+  IPC_STRUCT_TRAITS_MEMBER(is_end_of_stream)
   IPC_STRUCT_TRAITS_MEMBER(data)
   IPC_STRUCT_TRAITS_MEMBER(timestamp)
   IPC_STRUCT_TRAITS_MEMBER(key_id)
   IPC_STRUCT_TRAITS_MEMBER(iv)
   IPC_STRUCT_TRAITS_MEMBER(subsamples)
+  IPC_STRUCT_TRAITS_MEMBER(is_key_frame)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(media::SubsampleEntry)
@@ -158,6 +161,9 @@ IPC_MESSAGE_ROUTED3(MediaPlayerMsg_MediaTimeUpdate,
                     int /* player_id */,
                     base::TimeDelta /* current_timestamp */,
                     base::TimeTicks /* current_time_ticks */)
+
+// A new key is required in order to continue decrypting encrypted content.
+IPC_MESSAGE_ROUTED1(MediaPlayerMsg_WaitingForDecryptionKey, int /* player_id */)
 
 // The player has been released.
 IPC_MESSAGE_ROUTED1(MediaPlayerMsg_MediaPlayerReleased,

@@ -11,13 +11,14 @@
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "cc/layers/video_frame_provider.h"
-#include "media/filters/skcanvas_video_renderer.h"
+#include "media/blink/skcanvas_video_renderer.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayer.h"
 #include "url/gurl.h"
 
 namespace blink {
 class WebFrame;
+class WebGraphicsContext3D;
 class WebMediaPlayerClient;
 }
 
@@ -112,6 +113,23 @@ class WebMediaPlayerMS
   virtual unsigned droppedFrameCount() const;
   virtual unsigned audioDecodedByteCount() const;
   virtual unsigned videoDecodedByteCount() const;
+
+  // TODO(dshwang): remove |level|. crbug.com/443151
+  bool copyVideoTextureToPlatformTexture(
+      blink::WebGraphicsContext3D* web_graphics_context,
+      unsigned int texture,
+      unsigned int level,
+      unsigned int internal_format,
+      unsigned int type,
+      bool premultiply_alpha,
+      bool flip_y) override;
+  virtual bool copyVideoTextureToPlatformTexture(
+      blink::WebGraphicsContext3D* web_graphics_context,
+      unsigned int texture,
+      unsigned int internal_format,
+      unsigned int type,
+      bool premultiply_alpha,
+      bool flip_y);
 
   // VideoFrameProvider implementation.
   void SetVideoFrameProviderClient(

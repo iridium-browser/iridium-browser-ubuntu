@@ -15,28 +15,30 @@ namespace chromeos {
 namespace file_system_provider {
 namespace {
 
-void OnAbort(int* abort_counter,
-             const storage::AsyncFileUtil::StatusCallback& callback) {
-  (*abort_counter)++;
-  callback.Run(base::File::FILE_ERROR_FAILED);
+void OnAbort(int* abort_counter) {
+  ++(*abort_counter);
 }
 
 AbortCallback OnRun(int* run_counter, int* abort_counter) {
-  (*run_counter)++;
+  ++(*run_counter);
   return base::Bind(&OnAbort, abort_counter);
 }
 
-void OnAbortCallback(std::vector<base::File::Error>* log,
-                     base::File::Error result) {
-  log->push_back(result);
+#if !defined(NDEBUG) && defined(GTEST_HAS_DEATH_TEST)
+
+AbortCallback OnRunNonAbortable(int* run_counter, int* abort_counter) {
+  ++(*run_counter);
+  return AbortCallback();
 }
+
+#endif
 
 }  // namespace
 
 class FileSystemProviderQueueTest : public testing::Test {
  protected:
   FileSystemProviderQueueTest() {}
-  virtual ~FileSystemProviderQueueTest() {}
+  ~FileSystemProviderQueueTest() override {}
 
   content::TestBrowserThreadBundle thread_bundle_;
 };
@@ -59,8 +61,8 @@ TEST_F(FileSystemProviderQueueTest, Enqueue_OneAtOnce) {
   const size_t second_token = queue.NewToken();
   int second_counter = 0;
   int second_abort_counter = 0;
-  const AbortCallback abort_callback = queue.Enqueue(
-      second_token, base::Bind(&OnRun, &second_counter, &second_abort_counter));
+  queue.Enqueue(second_token,
+                base::Bind(&OnRun, &second_counter, &second_abort_counter));
 
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, first_counter);
@@ -68,16 +70,8 @@ TEST_F(FileSystemProviderQueueTest, Enqueue_OneAtOnce) {
   EXPECT_EQ(0, second_counter);
   EXPECT_EQ(0, second_abort_counter);
 
-  // Complete the first task, which should not run the second one, yet.
+  // Complete the first task from the queue should run the second task.
   queue.Complete(first_token);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(1, first_counter);
-  EXPECT_EQ(0, first_abort_counter);
-  EXPECT_EQ(0, second_counter);
-  EXPECT_EQ(0, second_abort_counter);
-
-  // Removing the first task from the queue should run the second task.
-  queue.Remove(first_token);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, first_counter);
   EXPECT_EQ(0, first_abort_counter);
@@ -100,15 +94,13 @@ TEST_F(FileSystemProviderQueueTest, Enqueue_OneAtOnce) {
   EXPECT_EQ(0, third_abort_counter);
 
   // After aborting the second task, the third should run.
-  std::vector<base::File::Error> abort_callback_log;
-  abort_callback.Run(base::Bind(&OnAbortCallback, &abort_callback_log));
+  queue.Abort(second_token);
+  queue.Complete(second_token);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, first_counter);
   EXPECT_EQ(0, first_abort_counter);
   EXPECT_EQ(1, second_counter);
   EXPECT_EQ(1, second_abort_counter);
-  ASSERT_EQ(1u, abort_callback_log.size());
-  EXPECT_EQ(base::File::FILE_ERROR_FAILED, abort_callback_log[0]);
   EXPECT_EQ(1, third_counter);
   EXPECT_EQ(0, third_abort_counter);
 }
@@ -143,7 +135,6 @@ TEST_F(FileSystemProviderQueueTest, Enqueue_MultipleAtOnce) {
 
   // Completing and removing the second task, should start the last one.
   queue.Complete(second_token);
-  queue.Remove(second_token);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, first_counter);
   EXPECT_EQ(0, first_abort_counter);
@@ -182,10 +173,24 @@ TEST_F(FileSystemProviderQueueTest, InvalidUsage_CompleteNotStarted) {
   // Completing and removing the first task, which however hasn't started.
   // That should not invoke the second task.
   EXPECT_DEATH(queue.Complete(first_token), "");
-  EXPECT_DEATH(queue.Remove(first_token), "");
 }
 
-TEST_F(FileSystemProviderQueueTest, InvalidUsage_RemoveNotCompleted) {
+TEST_F(FileSystemProviderQueueTest,
+       InvalidUsage_CompleteAfterAbortingNonExecutedTask) {
+  Queue queue(1);
+  const size_t first_token = queue.NewToken();
+  int first_counter = 0;
+  int first_abort_counter = 0;
+  queue.Enqueue(first_token,
+                base::Bind(&OnRun, &first_counter, &first_abort_counter));
+
+  std::vector<base::File::Error> first_abort_callback_log;
+  queue.Abort(first_token);
+
+  EXPECT_DEATH(queue.Complete(first_token), "");
+}
+
+TEST_F(FileSystemProviderQueueTest, InvalidUsage_AbortAfterCompleting) {
   Queue queue(1);
   const size_t first_token = queue.NewToken();
   int first_counter = 0;
@@ -195,47 +200,8 @@ TEST_F(FileSystemProviderQueueTest, InvalidUsage_RemoveNotCompleted) {
 
   base::RunLoop().RunUntilIdle();
 
-  // Remove before completing.
-  EXPECT_DEATH(queue.Remove(first_token), "");
-}
-
-TEST_F(FileSystemProviderQueueTest, InvalidUsage_CompleteAfterAborting) {
-  Queue queue(1);
-  const size_t first_token = queue.NewToken();
-  int first_counter = 0;
-  int first_abort_counter = 0;
-  AbortCallback first_abort_callback = queue.Enqueue(
-      first_token, base::Bind(&OnRun, &first_counter, &first_abort_counter));
-
-  base::RunLoop().RunUntilIdle();
-
-  // Run, then abort.
-  std::vector<base::File::Error> first_abort_callback_log;
-  first_abort_callback.Run(
-      base::Bind(&OnAbortCallback, &first_abort_callback_log));
-
-  EXPECT_DEATH(queue.Complete(first_token), "");
-}
-
-TEST_F(FileSystemProviderQueueTest, InvalidUsage_RemoveAfterAborting) {
-  Queue queue(1);
-  const size_t first_token = queue.NewToken();
-  int first_counter = 0;
-  int first_abort_counter = 0;
-  AbortCallback first_abort_callback = queue.Enqueue(
-      first_token, base::Bind(&OnRun, &first_counter, &first_abort_counter));
-
-  base::RunLoop().RunUntilIdle();
-
-  // Abort after executing.
-  std::vector<base::File::Error> first_abort_callback_log;
-  first_abort_callback.Run(
-      base::Bind(&OnAbortCallback, &first_abort_callback_log));
-
-  base::RunLoop().RunUntilIdle();
-
-  // Remove before completing.
-  EXPECT_DEATH(queue.Remove(first_token), "");
+  queue.Complete(first_token);
+  EXPECT_DEATH(queue.Abort(first_token), "");
 }
 
 TEST_F(FileSystemProviderQueueTest, InvalidUsage_CompleteTwice) {
@@ -243,8 +209,8 @@ TEST_F(FileSystemProviderQueueTest, InvalidUsage_CompleteTwice) {
   const size_t first_token = queue.NewToken();
   int first_counter = 0;
   int first_abort_counter = 0;
-  AbortCallback first_abort_callback = queue.Enqueue(
-      first_token, base::Bind(&OnRun, &first_counter, &first_abort_counter));
+  queue.Enqueue(first_token,
+                base::Bind(&OnRun, &first_counter, &first_abort_counter));
 
   base::RunLoop().RunUntilIdle();
 
@@ -252,19 +218,31 @@ TEST_F(FileSystemProviderQueueTest, InvalidUsage_CompleteTwice) {
   EXPECT_DEATH(queue.Complete(first_token), "");
 }
 
-TEST_F(FileSystemProviderQueueTest, InvalidUsage_RemoveTwice) {
+TEST_F(FileSystemProviderQueueTest, InvalidUsage_AbortTwice) {
   Queue queue(1);
   const size_t first_token = queue.NewToken();
   int first_counter = 0;
   int first_abort_counter = 0;
-  AbortCallback first_abort_callback = queue.Enqueue(
-      first_token, base::Bind(&OnRun, &first_counter, &first_abort_counter));
+  queue.Enqueue(first_token,
+                base::Bind(&OnRun, &first_counter, &first_abort_counter));
 
   base::RunLoop().RunUntilIdle();
 
-  queue.Complete(first_token);
-  queue.Remove(first_token);
-  EXPECT_DEATH(queue.Complete(first_token), "");
+  queue.Abort(first_token);
+  EXPECT_DEATH(queue.Abort(first_token), "");
+}
+
+TEST_F(FileSystemProviderQueueTest, InvalidUsage_AbortNonAbortable) {
+  Queue queue(1);
+  const size_t first_token = queue.NewToken();
+  int first_counter = 0;
+  int first_abort_counter = 0;
+  queue.Enqueue(first_token, base::Bind(&OnRunNonAbortable, &first_counter,
+                                        &first_abort_counter));
+
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_DEATH(queue.Abort(first_token), "");
 }
 
 #endif
@@ -274,14 +252,14 @@ TEST_F(FileSystemProviderQueueTest, Enqueue_Abort) {
   const size_t first_token = queue.NewToken();
   int first_counter = 0;
   int first_abort_counter = 0;
-  const AbortCallback first_abort_callback = queue.Enqueue(
-      first_token, base::Bind(&OnRun, &first_counter, &first_abort_counter));
+  queue.Enqueue(first_token,
+                base::Bind(&OnRun, &first_counter, &first_abort_counter));
 
   const size_t second_token = queue.NewToken();
   int second_counter = 0;
   int second_abort_counter = 0;
-  const AbortCallback second_abort_callback = queue.Enqueue(
-      second_token, base::Bind(&OnRun, &second_counter, &second_abort_counter));
+  queue.Enqueue(second_token,
+                base::Bind(&OnRun, &second_counter, &second_abort_counter));
 
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, first_counter);
@@ -290,34 +268,18 @@ TEST_F(FileSystemProviderQueueTest, Enqueue_Abort) {
   EXPECT_EQ(0, second_abort_counter);
 
   // Abort the first task while it's being executed.
-  std::vector<base::File::Error> first_abort_callback_log;
-  first_abort_callback.Run(
-      base::Bind(&OnAbortCallback, &first_abort_callback_log));
+  queue.Abort(first_token);
+  queue.Complete(first_token);
 
   // Abort the second task, before it's started.
   EXPECT_EQ(0, second_counter);
-  std::vector<base::File::Error> second_abort_callback_log;
-  second_abort_callback.Run(
-      base::Bind(&OnAbortCallback, &second_abort_callback_log));
+  queue.Abort(second_token);
 
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, first_counter);
   EXPECT_EQ(1, first_abort_counter);
-  ASSERT_EQ(1u, first_abort_callback_log.size());
-  EXPECT_EQ(base::File::FILE_ERROR_FAILED, first_abort_callback_log[0]);
   EXPECT_EQ(0, second_counter);
   EXPECT_EQ(0, second_abort_counter);
-  ASSERT_EQ(1u, second_abort_callback_log.size());
-  EXPECT_EQ(base::File::FILE_OK, second_abort_callback_log[0]);
-
-  // Aborting again, should result in the FILE_ERROR_INVALID_MODIFICATION error
-  // code.
-  second_abort_callback.Run(
-      base::Bind(&OnAbortCallback, &second_abort_callback_log));
-
-  ASSERT_EQ(2u, second_abort_callback_log.size());
-  EXPECT_EQ(base::File::FILE_ERROR_INVALID_OPERATION,
-            second_abort_callback_log[1]);
 }
 
 }  // namespace file_system_provider

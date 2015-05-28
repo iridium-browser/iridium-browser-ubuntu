@@ -10,14 +10,20 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
+#include "base/values.h"
 #include "media/midi/midi_manager.h"
+
+#if defined(USE_UDEV)
+#include "device/udev_linux/scoped_udev.h"
+#endif  // defined(USE_UDEV)
 
 namespace media {
 
-class MidiManagerAlsa : public MidiManager {
+class MEDIA_EXPORT MidiManagerAlsa : public MidiManager {
  public:
   MidiManagerAlsa();
   ~MidiManagerAlsa() override;
@@ -30,14 +36,112 @@ class MidiManagerAlsa : public MidiManager {
                             double timestamp) override;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(MidiManagerAlsaTest, ExtractManufacturer);
+  FRIEND_TEST_ALL_PREFIXES(MidiManagerAlsaTest, JSONPortMetadata);
+
+  class AlsaCard {
+   public:
+    AlsaCard(const MidiManagerAlsa* outer,
+             const std::string& alsa_name,
+             const std::string& alsa_longname,
+             const std::string& alsa_driver,
+             int card_index,
+             int midi_count);
+    ~AlsaCard();
+
+    const std::string alsa_name() const;
+    const std::string alsa_longname() const;
+    const std::string manufacturer() const;
+    const std::string alsa_driver() const;
+    const std::string path() const;
+    const std::string bus() const;
+    const std::string vendor_id() const;
+    const std::string id() const;
+    const int midi_count() const;
+
+   private:
+    FRIEND_TEST_ALL_PREFIXES(MidiManagerAlsaTest, ExtractManufacturer);
+
+    // Extracts the manufacturer using heuristics and a variety of sources.
+    static std::string ExtractManufacturerString(
+        const std::string& udev_id_vendor,
+        const std::string& udev_id_vendor_id,
+        const std::string& udev_id_vendor_from_database,
+        const std::string& alsa_name,
+        const std::string& alsa_longname);
+
+    std::string alsa_name_;
+    std::string alsa_longname_;
+    std::string manufacturer_;
+    std::string alsa_driver_;
+    std::string path_;
+    std::string bus_;
+    std::string vendor_id_;
+    std::string model_id_;
+    std::string usb_interface_num_;
+    int midi_count_;
+
+    DISALLOW_COPY_AND_ASSIGN(AlsaCard);
+  };
+
+  class AlsaPortMetadata {
+   public:
+    enum class Type { kInput, kOutput };
+
+    AlsaPortMetadata(const std::string& path,
+                     const std::string& bus,
+                     const std::string& id,
+                     const snd_seq_addr_t* address,
+                     const std::string& client_name,
+                     const std::string& port_name,
+                     const std::string& card_name,
+                     const std::string& card_longname,
+                     Type type);
+    ~AlsaPortMetadata();
+
+    // Gets a Value representation of this object, suitable for serialization.
+    scoped_ptr<base::Value> Value() const;
+
+    // Gets a string version of Value in JSON format.
+    std::string JSONValue() const;
+
+    // Gets an opaque identifier for this object, suitable for using as the id
+    // field in MidiPort.id on the web. Note that this string does not store
+    // the full state.
+    std::string OpaqueKey() const;
+
+   private:
+    FRIEND_TEST_ALL_PREFIXES(MidiManagerAlsaTest, JSONPortMetadata);
+
+    const std::string path_;
+    const std::string bus_;
+    const std::string id_;
+    const int client_addr_;
+    const int port_addr_;
+    const std::string client_name_;
+    const std::string port_name_;
+    const std::string card_name_;
+    const std::string card_longname_;
+    const Type type_;
+
+    DISALLOW_COPY_AND_ASSIGN(AlsaPortMetadata);
+  };
+
+  // Returns an ordered vector of all the cards with MIDI capabilities.
+  ScopedVector<AlsaCard> AllMidiCards();
+
+  // Enumerate all the ports for initial setup.
+  void EnumeratePorts();
+
   // An internal callback that runs on MidiSendThread.
   void SendMidiData(uint32 port_index,
                     const std::vector<uint8>& data);
 
-  void EventReset();
+  void ScheduleEventLoop();
   void EventLoop();
+  void ProcessSingleEvent(snd_seq_event_t* event, double timestamp);
 
-  // Alsa seq handles.
+  // ALSA seq handles.
   snd_seq_t* in_client_;
   snd_seq_t* out_client_;
   int out_client_id_;
@@ -46,14 +150,17 @@ class MidiManagerAlsa : public MidiManager {
   int in_port_;
   std::vector<int> out_ports_;
 
-  // Mapping from Alsa client:port to our index.
+  // Mapping from ALSA client:port to our index.
   typedef std::map<int, uint32> SourceMap;
   SourceMap source_map_;
 
-  // Alsa event <-> MIDI coders.
+  // ALSA event <-> MIDI coders.
   snd_midi_event_t* decoder_;
-  typedef std::vector<snd_midi_event_t*> EncoderList;
-  EncoderList encoders_;
+
+  // udev, for querying hardware devices.
+#if defined(USE_UDEV)
+  device::ScopedUdevPtr udev_;
+#endif  // defined(USE_UDEV)
 
   base::Thread send_thread_;
   base::Thread event_thread_;

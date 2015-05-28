@@ -35,7 +35,7 @@
 namespace blink {
 
 class AXObjectCacheImpl;
-class RenderTableSection;
+class LayoutTableSection;
 
 class AXTableColumn final : public AXMockObject {
 
@@ -46,7 +46,10 @@ public:
     static PassRefPtr<AXTableColumn> create(AXObjectCacheImpl*);
     virtual ~AXTableColumn();
 
+    // retrieves the topmost "column" header (th)
     AXObject* headerObject();
+    // retrieves the "column" headers (th, scope) from top to bottom
+    void headerObjectsForColumn(AccessibilityChildrenVector&);
 
     virtual AccessibilityRole roleValue() const override { return ColumnRole; }
 
@@ -63,7 +66,6 @@ private:
     LayoutRect m_columnRect;
 
     virtual bool isTableCol() const override { return true; }
-    AXObject* headerObjectForSection(RenderTableSection*, bool thTagRequired);
     virtual bool computeAccessibilityIsIgnored() const override;
 };
 

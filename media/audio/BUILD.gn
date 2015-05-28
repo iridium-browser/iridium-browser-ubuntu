@@ -84,16 +84,16 @@ source_set("audio") {
     "audio_source_diverter.h",
     "clockless_audio_sink.cc",
     "clockless_audio_sink.h",
-    "fake_audio_consumer.cc",
-    "fake_audio_consumer.h",
     "fake_audio_input_stream.cc",
     "fake_audio_input_stream.h",
-    "fake_audio_log_factory.h",
     "fake_audio_log_factory.cc",
+    "fake_audio_log_factory.h",
     "fake_audio_manager.cc",
     "fake_audio_manager.h",
     "fake_audio_output_stream.cc",
     "fake_audio_output_stream.h",
+    "fake_audio_worker.cc",
+    "fake_audio_worker.h",
     "null_audio_sink.cc",
     "null_audio_sink.h",
     "sample_rates.cc",
@@ -243,11 +243,15 @@ source_set("audio") {
       sources += get_target_outputs(":pulse_generate_stubs")
     }
   }
+
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 }
 
 source_set("test_support") {
   testonly = true
   sources = [
+    "audio_unittest_util.cc",
+    "audio_unittest_util.h",
     "mock_audio_manager.cc",
     "mock_audio_manager.h",
     "mock_audio_source_callback.cc",
@@ -266,14 +270,13 @@ source_set("unittests") {
   sources = [
     "audio_input_controller_unittest.cc",
     "audio_input_unittest.cc",
-    "audio_low_latency_input_output_unittest.cc",
     "audio_manager_unittest.cc",
     "audio_output_controller_unittest.cc",
     "audio_output_device_unittest.cc",
     "audio_output_proxy_unittest.cc",
     "audio_parameters_unittest.cc",
     "audio_power_monitor_unittest.cc",
-    "fake_audio_consumer_unittest.cc",
+    "fake_audio_worker_unittest.cc",
     "simple_sources_unittest.cc",
     "virtual_audio_input_stream_unittest.cc",
     "virtual_audio_output_stream_unittest.cc",
@@ -283,7 +286,11 @@ source_set("unittests") {
     "//testing/gmock",
     "//testing/gtest",
   ]
-  configs += [ "//media:media_config" ]
+
+  configs += [
+    "//build/config/compiler:no_size_t_to_int_warning",
+    "//media:media_config",
+  ]
 
   if (is_android) {
     sources += [ "android/audio_android_unittest.cc" ]
@@ -327,6 +334,9 @@ source_set("unittests") {
   }
 
   if (use_alsa) {
-    sources += [ "alsa/alsa_output_unittest.cc" ]
+    sources += [
+      "alsa/alsa_output_unittest.cc",
+      "audio_low_latency_input_output_unittest.cc",
+    ]
   }
 }

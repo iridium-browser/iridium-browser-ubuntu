@@ -6,8 +6,8 @@ import json
 import os
 import unittest
 
-from telemetry import decorators
 from telemetry.core import wpr_modes
+from telemetry import decorators
 from telemetry.page import page as page_module
 from telemetry.page import page_set
 from telemetry.page import page_test
@@ -48,7 +48,7 @@ class PageTestQueryParams(page_test.PageTest):
 
 class PageTestWithAction(page_test.PageTest):
   def __init__(self):
-    super(PageTestWithAction, self).__init__('RunTestAction')
+    super(PageTestWithAction, self).__init__()
 
   def ValidateAndMeasurePage(self, page, tab, results):
     pass
@@ -59,7 +59,7 @@ class PageWithAction(page_module.Page):
     super(PageWithAction, self).__init__(url, ps, ps.base_dir)
     self.run_test_action_called = False
 
-  def RunTestAction(self, _):
+  def RunPageInteractions(self, _):
     self.run_test_action_called = True
 
 

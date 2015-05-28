@@ -6,21 +6,21 @@
 #define ClipPathRecorder_h
 
 #include "platform/graphics/Path.h"
-#include "platform/graphics/paint/DisplayItem.h"
+#include "platform/graphics/paint/DisplayItemClient.h"
 
 namespace blink {
 
 class GraphicsContext;
 
 class PLATFORM_EXPORT ClipPathRecorder {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(ClipPathRecorder);
 public:
-    ClipPathRecorder(GraphicsContext&, DisplayItemClient, const Path&, WindRule);
+    ClipPathRecorder(GraphicsContext&, const DisplayItemClientWrapper&, const Path&, WindRule);
     ~ClipPathRecorder();
 
 private:
     GraphicsContext& m_context;
-    DisplayItemClient m_client;
+    DisplayItemClientWrapper m_client;
 };
 
 } // namespace blink

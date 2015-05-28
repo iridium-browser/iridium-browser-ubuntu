@@ -23,18 +23,16 @@
  */
 
 #include "config.h"
-
 #if ENABLE(WEB_AUDIO)
-
 #include "modules/webaudio/ConvolverNode.h"
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
-#include "platform/audio/Reverb.h"
 #include "modules/webaudio/AudioBuffer.h"
 #include "modules/webaudio/AudioContext.h"
 #include "modules/webaudio/AudioNodeInput.h"
 #include "modules/webaudio/AudioNodeOutput.h"
+#include "platform/audio/Reverb.h"
 #include "wtf/MainThread.h"
 
 // Note about empirical tuning:
@@ -47,12 +45,12 @@ const size_t MaxFFTSize = 32768;
 
 namespace blink {
 
-ConvolverNode::ConvolverNode(AudioContext* context, float sampleRate)
-    : AudioNode(NodeTypeConvolver, context, sampleRate)
+ConvolverHandler::ConvolverHandler(AudioNode& node, float sampleRate)
+    : AudioHandler(NodeTypeConvolver, node, sampleRate)
     , m_normalize(true)
 {
     addInput();
-    addOutput(AudioNodeOutput::create(this, 2));
+    addOutput(2);
 
     // Node-specific default mixing rules.
     m_channelCount = 2;
@@ -62,18 +60,18 @@ ConvolverNode::ConvolverNode(AudioContext* context, float sampleRate)
     initialize();
 }
 
-ConvolverNode::~ConvolverNode()
+ConvolverHandler::~ConvolverHandler()
 {
     ASSERT(!isInitialized());
 }
 
-void ConvolverNode::dispose()
+void ConvolverHandler::dispose()
 {
     uninitialize();
-    AudioNode::dispose();
+    AudioHandler::dispose();
 }
 
-void ConvolverNode::process(size_t framesToProcess)
+void ConvolverHandler::process(size_t framesToProcess)
 {
     AudioBus* outputBus = output(0)->bus();
     ASSERT(outputBus);
@@ -81,9 +79,9 @@ void ConvolverNode::process(size_t framesToProcess)
     // Synchronize with possible dynamic changes to the impulse response.
     MutexTryLocker tryLocker(m_processLock);
     if (tryLocker.locked()) {
-        if (!isInitialized() || !m_reverb.get())
+        if (!isInitialized() || !m_reverb) {
             outputBus->zero();
-        else {
+        } else {
             // Process using the convolution engine.
             // Note that we can handle the case where nothing is connected to the input, in which case we'll just feed silence into the convolver.
             // FIXME:  If we wanted to get fancy we could try to factor in the 'tail time' and stop processing once the tail dies down if
@@ -96,24 +94,24 @@ void ConvolverNode::process(size_t framesToProcess)
     }
 }
 
-void ConvolverNode::initialize()
+void ConvolverHandler::initialize()
 {
     if (isInitialized())
         return;
 
-    AudioNode::initialize();
+    AudioHandler::initialize();
 }
 
-void ConvolverNode::uninitialize()
+void ConvolverHandler::uninitialize()
 {
     if (!isInitialized())
         return;
 
     m_reverb.clear();
-    AudioNode::uninitialize();
+    AudioHandler::uninitialize();
 }
 
-void ConvolverNode::setBuffer(AudioBuffer* buffer, ExceptionState& exceptionState)
+void ConvolverHandler::setBuffer(AudioBuffer* buffer, ExceptionState& exceptionState)
 {
     ASSERT(isMainThread());
 
@@ -147,7 +145,7 @@ void ConvolverNode::setBuffer(AudioBuffer* buffer, ExceptionState& exceptionStat
 
     // Create the reverb with the given impulse response.
     bool useBackgroundThreads = !context()->isOfflineContext();
-    OwnPtr<Reverb> reverb = adoptPtr(new Reverb(bufferBus.get(), AudioNode::ProcessingSizeInFrames, MaxFFTSize, 2, useBackgroundThreads, m_normalize));
+    OwnPtr<Reverb> reverb = adoptPtr(new Reverb(bufferBus.get(), ProcessingSizeInFrames, MaxFFTSize, 2, useBackgroundThreads, m_normalize));
 
     {
         // Synchronize with process().
@@ -157,13 +155,13 @@ void ConvolverNode::setBuffer(AudioBuffer* buffer, ExceptionState& exceptionStat
     }
 }
 
-AudioBuffer* ConvolverNode::buffer()
+AudioBuffer* ConvolverHandler::buffer()
 {
     ASSERT(isMainThread());
     return m_buffer.get();
 }
 
-double ConvolverNode::tailTime() const
+double ConvolverHandler::tailTime() const
 {
     MutexTryLocker tryLocker(m_processLock);
     if (tryLocker.locked())
@@ -173,7 +171,7 @@ double ConvolverNode::tailTime() const
     return std::numeric_limits<double>::infinity();
 }
 
-double ConvolverNode::latencyTime() const
+double ConvolverHandler::latencyTime() const
 {
     MutexTryLocker tryLocker(m_processLock);
     if (tryLocker.locked())
@@ -183,10 +181,48 @@ double ConvolverNode::latencyTime() const
     return std::numeric_limits<double>::infinity();
 }
 
-void ConvolverNode::trace(Visitor* visitor)
+DEFINE_TRACE(ConvolverHandler)
 {
     visitor->trace(m_buffer);
-    AudioNode::trace(visitor);
+    AudioHandler::trace(visitor);
+}
+
+// ----------------------------------------------------------------
+
+ConvolverNode::ConvolverNode(AudioContext& context, float sampleRate)
+    : AudioNode(context)
+{
+    setHandler(new ConvolverHandler(*this, sampleRate));
+}
+
+ConvolverNode* ConvolverNode::create(AudioContext* context, float sampleRate)
+{
+    return new ConvolverNode(*context, sampleRate);
+}
+
+ConvolverHandler& ConvolverNode::convolverHandler() const
+{
+    return static_cast<ConvolverHandler&>(handler());
+}
+
+AudioBuffer* ConvolverNode::buffer() const
+{
+    return convolverHandler().buffer();
+}
+
+void ConvolverNode::setBuffer(AudioBuffer* newBuffer, ExceptionState& exceptionState)
+{
+    convolverHandler().setBuffer(newBuffer, exceptionState);
+}
+
+bool ConvolverNode::normalize() const
+{
+    return convolverHandler().normalize();
+}
+
+void ConvolverNode::setNormalize(bool normalize)
+{
+    convolverHandler().setNormalize(normalize);
 }
 
 } // namespace blink

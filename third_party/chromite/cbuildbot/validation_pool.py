@@ -107,26 +107,21 @@ class InternalCQError(cros_patch.PatchException):
     return 'failed to apply due to a CQ issue: %s' % (self.message,)
 
 
-class NoMatchingChangeFoundException(Exception):
-  """Raised if we try to apply a non-existent change."""
-
-
-class ChangeNotInManifestException(Exception):
-  """Raised if we try to apply a not-in-manifest change."""
-
-
-class PatchNotCommitReady(cros_patch.PatchException):
-  """Raised if a patch is not marked as commit ready."""
-
-  def ShortExplanation(self):
-    return 'isn\'t marked as Commit-Ready anymore.'
+class InconsistentReloadException(Exception):
+  """Raised if patches applied by the CQ cannot be found anymore."""
 
 
 class PatchModified(cros_patch.PatchException):
   """Raised if a patch is modified while the CQ is running."""
 
+  def __init__(self, patch, patch_number):
+    cros_patch.PatchException.__init__(self, patch)
+    self.new_patch_number = patch_number
+    self.args = (patch, patch_number)
+
   def ShortExplanation(self):
-    return 'was modified while the CQ was in the middle of testing it.'
+    return ('was modified while the CQ was in the middle of testing it. '
+            'Patch set %s was uploaded.' % self.new_patch_number)
 
 
 class PatchRejected(cros_patch.PatchException):
@@ -186,21 +181,6 @@ class PatchSeriesTooLong(cros_patch.PatchException):
 
   def __str__(self):
     return self.ShortExplanation()
-
-
-def _RunCommand(cmd, dryrun):
-  """Runs the specified shell cmd if dryrun=False.
-
-  Errors are ignored, but logged.
-  """
-  if dryrun:
-    logging.info('Would have run: %s', ' '.join(cmd))
-    return
-
-  try:
-    cros_build_lib.RunCommand(cmd)
-  except cros_build_lib.RunCommandError:
-    cros_build_lib.Error('Command failed', exc_info=True)
 
 
 class GerritHelperNotAvailable(gerrit.GerritException):
@@ -340,8 +320,6 @@ class PatchSeries(object):
     self.deps_filter_fn = deps_filter_fn
     self._is_submitting = is_submitting
 
-    self.applied = []
-    self.failed = []
     self.failed_tot = {}
 
     # A mapping of ChangeId to exceptions if the patch failed against
@@ -484,7 +462,7 @@ class PatchSeries(object):
         if self._is_submitting:
           raise PatchRejected(dep_change)
         else:
-          raise PatchNotCommitReady(dep_change)
+          raise dep_change.GetMergeException() or PatchRejected(dep_change)
 
       unsatisfied.append(dep_change)
 
@@ -746,8 +724,10 @@ class PatchSeries(object):
     If we're an external builder, internal changes are filtered out.
 
     Returns:
-      An iterator over a list of the filtered changes.
+      A list of the filtered changes.
     """
+    by_repo = {}
+    changes_to_fetch = []
     for change in changes:
       try:
         self._helper_pool.ForChange(change)
@@ -755,8 +735,24 @@ class PatchSeries(object):
         # Internal patches are irrelevant to external builders.
         logging.info("Skipping internal patch: %s", change)
         continue
-      change.Fetch(self.GetGitRepoForChange(change, strict=True))
-      yield change
+      repo = self.GetGitRepoForChange(change, strict=True)
+      by_repo.setdefault(repo, []).append(change)
+      changes_to_fetch.append(change)
+
+    # Fetch changes in parallel. The change.Fetch() method modifies the
+    # 'change' object, so make sure we grab all of that information.
+    with parallel.Manager() as manager:
+      fetched_changes = manager.dict()
+      def FetchChangesForRepo(repo):
+        for change in by_repo[repo]:
+          original_id = change.id
+          change.Fetch(repo)
+          fetched_changes[original_id] = change
+      parallel.RunTasksInProcessPool(FetchChangesForRepo,
+                                     [[repo] for repo in by_repo])
+
+      # Return the list of fetched changes in the order they were requested.
+      return [fetched_changes[c.id] for c in changes_to_fetch]
 
   @_ManifestDecorator
   def Apply(self, changes, frozen=True, honor_ordering=False,
@@ -805,7 +801,7 @@ class PatchSeries(object):
     """
     # Prefetch the changes; we need accurate change_id/id's, which is
     # guaranteed via Fetch.
-    changes = list(self.FetchChanges(changes))
+    changes = self.FetchChanges(changes)
     if changes_filter:
       changes = changes_filter(self, changes)
 
@@ -1024,10 +1020,14 @@ class ValidationPool(object):
   # module.
   THROTTLED_OK = True
   GLOBAL_DRYRUN = False
-  MAX_TIMEOUT = 60 * 60 * 4
+  DEFAULT_TIMEOUT = 60 * 60 * 4
   # How long to wait when the tree is throttled before checking for CR+1 CL's.
   CQ_THROTTLED_TIMEOUT = 60 * 10
   SLEEP_TIMEOUT = 30
+  # Buffer time to leave when using the global build deadline as the sync stage
+  # timeout. We need some time to possibly extend the global build deadline
+  # after the sync timeout is hit.
+  EXTENSION_TIMEOUT_BUFFER = 10 * 60
   INCONSISTENT_SUBMIT_MSG = ('Gerrit thinks that the change was not submitted, '
                              'even though we hit the submit button.')
 
@@ -1177,7 +1177,6 @@ class ValidationPool(object):
     kwargs.setdefault('pre_cq_trybot', True)
     kwargs.setdefault('is_master', True)
     pool = cls(*args, **kwargs)
-    pool.RecordPatchesInMetadataAndDatabase()
     return pool
 
   @staticmethod
@@ -1266,11 +1265,22 @@ class ValidationPool(object):
 
     # We choose a longer wait here as we haven't committed to anything yet. By
     # doing this here we can reduce the number of builder cycles.
-    end_time = time.time() + cls.MAX_TIMEOUT
+    timeout = cls.DEFAULT_TIMEOUT
+    if builder_run is not None:
+      build_id, db = builder_run.GetCIDBHandle()
+      if db:
+        time_to_deadline = db.GetTimeToDeadline(build_id)
+        if time_to_deadline is not None:
+          # We must leave enough time before the deadline to allow us to extend
+          # the deadline in case we hit this timeout.
+          timeout = time_to_deadline - cls.EXTENSION_TIMEOUT_BUFFER
+
+    end_time = time.time() + timeout
     # How long to wait until if the tree is throttled and we want to be more
     # accepting of changes. We leave it as end_time whenever the tree is open.
     tree_throttled_time = end_time
     status = constants.TREE_OPEN
+
     while True:
       current_time = time.time()
       time_left = end_time - current_time
@@ -1323,7 +1333,6 @@ class ValidationPool(object):
                    cls._WaitForQuery(query), time_left / 60)
       time.sleep(cls.SLEEP_TIMEOUT)
 
-    pool.RecordPatchesInMetadataAndDatabase()
     return pool
 
   def _GetFailStreak(self):
@@ -1334,18 +1343,19 @@ class ValidationPool(object):
     tree throttled validation pool logic.
     """
     # TODO(sosa): Remove Google Storage Fail Streak Counter.
-    _, db = self._run.GetCIDBHandle()
+    build_id, db = self._run.GetCIDBHandle()
     if not db:
       return 0
 
-    statuses = db.GetLastBuildStatuses(self._run.config.name,
-                                       ValidationPool.CQ_SEARCH_HISTORY)
+    builds = db.GetBuildHistory(self._run.config.name,
+                                ValidationPool.CQ_SEARCH_HISTORY,
+                                ignore_build_id=build_id)
     number_of_failures = 0
-    # Iterate through the ordered list of statuses until you get one that is
+    # Iterate through the ordered list of builds until you get one that is
     # passed.
-    for status_dict in statuses:
-      if status_dict['status'] != constants.BUILDER_STATUS_PASSED:
-        number_of_failures = number_of_failures + 1
+    for build in builds:
+      if build['status'] != constants.BUILDER_STATUS_PASSED:
+        number_of_failures += 1
       else:
         break
 
@@ -1405,7 +1415,6 @@ class ValidationPool(object):
     pool = ValidationPool(overlays, repo.directory, build_number, builder_name,
                           is_master, dryrun, builder_run=builder_run)
     pool.AddPendingCommitsIntoPool(manifest)
-    pool.RecordPatchesInMetadataAndDatabase()
     return pool
 
   @classmethod
@@ -1617,20 +1626,27 @@ class ValidationPool(object):
         else:
           applied.append(change)
 
+    self.RecordPatchesInMetadataAndDatabase(applied)
     self.PrintLinksToChanges(applied)
 
     if self.is_master and not self.pre_cq_trybot:
       inputs = [[change, self.build_log] for change in applied]
       parallel.RunTasksInProcessPool(self.HandleApplySuccess, inputs)
 
-    failed_tot = self._FilterDependencyErrors(failed_tot)
+    # We only filter out dependency errors in the CQ and Pre-CQ masters.
+    # On Pre-CQ trybots, we want to reject patches immediately, because
+    # otherwise the pre-cq master will think we just dropped the patch
+    # on the floor and never tested it.
+    if not self.pre_cq_trybot:
+      failed_tot = self._FilterDependencyErrors(failed_tot)
+      failed_inflight = self._FilterDependencyErrors(failed_inflight)
+
     if failed_tot:
       logging.info(
           'The following changes could not cleanly be applied to ToT: %s',
           ' '.join([c.patch.id for c in failed_tot]))
       self._HandleApplyFailure(failed_tot)
 
-    failed_inflight = self._FilterDependencyErrors(failed_inflight)
     if failed_inflight:
       logging.info(
           'The following changes could not cleanly be applied against the '
@@ -1766,21 +1782,19 @@ class ValidationPool(object):
     assert self.is_master, 'Non-master builder calling SubmitPool'
     assert not self.pre_cq_trybot, 'Trybot calling SubmitPool'
 
+    # TODO(pprabhu) It is bad form for master-paladin to do work after its
+    # deadline has passed. Extend the deadline after waiting for slave
+    # completion and ensure that none of the follow up stages go beyond the
+    # deadline.
     if (check_tree_open and not self.dryrun and not
         tree_status.IsTreeOpen(period=self.SLEEP_TIMEOUT,
-                               timeout=self.MAX_TIMEOUT,
+                               timeout=self.DEFAULT_TIMEOUT,
                                throttled_ok=throttled_ok)):
       raise TreeIsClosedException(
           closed_or_throttled=not throttled_ok)
 
     # Filter out changes that were modified during the CQ run.
-    unmodified_changes, errors = self.FilterModifiedChanges(changes)
-
-    # Filter out changes that aren't marked as CR=+2, CQ=+1, V=+1 anymore, in
-    # case the patch status changed during the CQ run.
-    filtered_changes = [x for x in unmodified_changes if x.IsMergeable()]
-    for change in set(unmodified_changes) - set(filtered_changes):
-      errors[change] = PatchNotCommitReady(change)
+    filtered_changes, errors = self.FilterModifiedChanges(changes)
 
     patch_series = PatchSeries(self.build_root, helper_pool=self._helper_pool,
                                is_submitting=True)
@@ -1811,7 +1825,7 @@ class ValidationPool(object):
       submitted_changes = set(changes) - set(p_errors.keys())
       return (submitted_changes, dict(p_errors))
 
-  def RecordPatchesInMetadataAndDatabase(self):
+  def RecordPatchesInMetadataAndDatabase(self, changes):
     """Mark all patches as having been picked up in metadata.json and cidb.
 
     If self._run is None, then this function does nothing.
@@ -1823,7 +1837,7 @@ class ValidationPool(object):
 
     _, db = self._run.GetCIDBHandle()
     timestamp = int(time.time())
-    for change in self.changes:
+    for change in changes:
       metadata.RecordCLAction(change, constants.CL_ACTION_PICKED_UP,
                               timestamp)
       # TODO(akeshet): If a separate query for each insert here becomes
@@ -1842,8 +1856,8 @@ class ValidationPool(object):
     Returns:
       This returns a tuple (unmodified_changes, errors).
 
-      unmodified_changes: A reloaded list of changes, only including unmodified
-                          and unsubmitted changes.
+      unmodified_changes: A reloaded list of changes, only including mergeable,
+                          unmodified and unsubmitted changes.
       errors: A dictionary. This dictionary will contain all patches that have
         encountered errors, and map them to the associated exception object.
     """
@@ -1853,16 +1867,32 @@ class ValidationPool(object):
     unmodified_changes, errors = [], {}
     reloaded_changes = list(cls.ReloadChanges(changes))
     old_changes = cros_patch.PatchCache(changes)
-    for change in reloaded_changes:
-      if change.IsAlreadyMerged():
+
+    if list(changes) != list(reloaded_changes):
+      logging.error('Changes: %s', map(str, changes))
+      logging.error('Reloaded changes: %s', map(str, reloaded_changes))
+      for change in set(changes) - set(reloaded_changes):
+        logging.error('%s disappeared after reloading', change)
+      for change in set(reloaded_changes) - set(changes):
+        logging.error('%s appeared after reloading', change)
+      raise InconsistentReloadException()
+
+    for reloaded_change in reloaded_changes:
+      old_change = old_changes[reloaded_change]
+      if reloaded_change.IsAlreadyMerged():
         logging.warning('%s is already merged. It was most likely chumped '
-                        'during the current CQ run.', change)
-      elif change.patch_number != old_changes[change].patch_number:
+                        'during the current CQ run.', reloaded_change)
+      elif reloaded_change.patch_number != old_change.patch_number:
         # If users upload new versions of a CL while the CQ is in-flight, then
         # their CLs are no longer tested. These CLs should be rejected.
-        errors[change] = PatchModified(change)
+        errors[old_change] = PatchModified(reloaded_change,
+                                           reloaded_change.patch_number)
+      elif not reloaded_change.IsMergeable():
+        # Get the reason why this change is not mergeable anymore.
+        errors[old_change] = reloaded_change.GetMergeException()
+        errors[old_change].patch = old_change
       else:
-        unmodified_changes.append(change)
+        unmodified_changes.append(old_change)
 
     return unmodified_changes, errors
 
@@ -1939,16 +1969,23 @@ class ValidationPool(object):
     self._helper_pool.ForChange(change).RemoveReady(change, dryrun=self.dryrun)
     if self._run:
       metadata = self._run.attrs.metadata
-      _, db = self._run.GetCIDBHandle()
       timestamp = int(time.time())
       metadata.RecordCLAction(change, constants.CL_ACTION_KICKED_OUT,
                               timestamp)
-      if db:
-        self._InsertCLActionToDatabase(change, constants.CL_ACTION_KICKED_OUT,
-                                       reason)
-        if self.pre_cq_trybot:
-          self._InsertCLActionToDatabase(
-              change, constants.CL_ACTION_PRE_CQ_FAILED)
+
+    self._InsertCLActionToDatabase(change, constants.CL_ACTION_KICKED_OUT,
+                                   reason)
+    if self.pre_cq_trybot:
+      self.UpdateCLPreCQStatus(change, constants.CL_STATUS_FAILED)
+
+  def MarkForgiven(self, change, reason=None):
+    """Mark |change| as forgiven with |reason|.
+
+    Args:
+      change: A GerritPatch or GerritPatchTuple object.
+      reason: Optional reason field for the CLAction that will be inserted.
+    """
+    self._InsertCLActionToDatabase(change, constants.CL_ACTION_FORGIVEN, reason)
 
   def _InsertCLActionToDatabase(self, change, action, reason=None):
     """If cidb is set up and not None, insert given cl action to cidb.
@@ -2004,57 +2041,6 @@ class ValidationPool(object):
     if self.changes_that_failed_to_apply_earlier:
       self._HandleApplyFailure(self.changes_that_failed_to_apply_earlier)
 
-  @classmethod
-  def _GetShouldSubmitChanges(cls, changes, messages, build_root, no_stat):
-    """Examine failure |messages| to filter a set of |changes| to submit.
-
-    This function has been factored out from SubmitPartialPool() so
-    that we can switch to using _GetFullyVerifiedChanges() in the near
-    future. There is no functional change at all.
-
-    TODO(yjhong): Deprecate this function once crbug.com/422639 is completed.
-
-    Args:
-      changes: A list of GerritPatch instances to examine.
-      messages: A list of BuildFailureMessage or NoneType objects from
-        the failed slaves.
-      build_root: Build root directory.
-      no_stat: Set of builder names of slave builders that had status None.
-
-    Returns:
-      A set of changes to submit.
-    """
-    if no_stat:
-      # If a builder did not return any status, we do not have
-      # sufficient information about the failure. Don't submit any
-      # changes.
-      return set()
-
-    # Create a list of the failing stage prefixes.
-    failing_stages = set()
-    for message in messages:
-      stages = None if not message else message.GetFailingStages()
-      if not stages:
-        # If there are no tracebacks, that means that the builder did not
-        # report its status properly. Don't submit anything.
-        return set()
-      failing_stages.update(stages)
-
-    # For each CL, look at whether it cares about the failures. Based on this,
-    # filter out CLs that don't care about the failure.
-    rejection_candidates = []
-    for change in changes:
-      ignored_stages = triage_lib.GetStagesToIgnoreForChange(build_root, change)
-      if not ignored_stages or not failing_stages.issubset(ignored_stages):
-        rejection_candidates.append(change)
-
-    # Filter out innocent internal overlay changes from our list of candidates.
-    rejected = triage_lib.CalculateSuspects.FilterOutInnocentChanges(
-        build_root, rejection_candidates, messages)
-
-    should_submit = set(changes) - set(rejected)
-    return should_submit
-
   def SubmitPartialPool(self, changes, messages, changes_by_config, failing,
                         inflight, no_stat):
     """If the build failed, push any CLs that don't care about the failure.
@@ -2079,31 +2065,13 @@ class ValidationPool(object):
     Returns:
       A set of the non-submittable changes.
     """
-    # TODO(yjhong): Deprecate _GetShouldSubmitChanges() and the
-    # related code (crbug.com/422639).
-
-    should_submit = self._GetShouldSubmitChanges(
-        changes, messages, self.build_root, no_stat)
     fully_verified = triage_lib.CalculateSuspects.GetFullyVerifiedChanges(
         changes, changes_by_config, failing, inflight, no_stat,
         messages, self.build_root)
-
-    if should_submit:
-      logging.info('The following changes would have been submitted using '
-                   'deprecated logic: %s',
-                   cros_patch.GetChangesAsString(should_submit))
     if fully_verified:
       logging.info('The following changes will be submitted using '
                    'board-aware submission logic: %s',
                    cros_patch.GetChangesAsString(fully_verified))
-
-    # Record the difference of CL submission count between the old and
-    # the new board-specific submission logic in metadata.json.
-    # TODO(yjhong): Remove this counter once we have enough stats to
-    # show that the board-specific submission logic is superior.
-    self._run.attrs.metadata.UpdateWithDict(
-        {'bs_submission_diff_count': len(fully_verified) - len(should_submit)})
-
     self.SubmitChanges(fully_verified)
 
     # Return the list of non-submittable changes.
@@ -2174,8 +2142,9 @@ class ValidationPool(object):
   def HandleValidationTimeout(self, changes=None, sanity=True):
     """Handles changes that timed out.
 
-    This handler removes the commit ready bit from the specified changes and
-    sends the developer a message explaining why.
+    If sanity is set, then this handler removes the commit ready bit
+    from infrastructure changes and sends the developer a message explaining
+    why.
 
     Args:
       changes: A list of cros_patch.GerritPatch instances to mark as failed.
@@ -2187,22 +2156,28 @@ class ValidationPool(object):
       changes = self.changes
 
     logging.info('Validation timed out for all changes.')
-    msg = ('%(queue)s timed out while verifying your change in '
-           '%(build_log)s . This means that a supporting builder did not '
-           'finish building your change within the specified timeout.')
-    if sanity:
-      msg += (' If you believe this happened in error, just re-mark your '
-              'commit as ready. Your change will then get automatically '
-              'retried.')
-    else:
-      msg += (' The build failure may have been caused by infrastructure '
-              'issues, so no changes will be blamed for the failure.')
+    base_msg = ('%(queue)s timed out while verifying your change in '
+                '%(build_log)s . This means that a supporting builder did not '
+                'finish building your change within the specified timeout.')
+
+    blamed = triage_lib.CalculateSuspects.FilterChangesForInfraFail(changes)
 
     for change in changes:
       logging.info('Validation timed out for change %s.', change)
-      self.SendNotification(change, msg)
-      if sanity:
+      if sanity and change in blamed:
+        msg = ('%s If you believe this happened in error, just re-mark your '
+               'commit as ready. Your change will then get automatically '
+               'retried.' % base_msg)
+        self.SendNotification(change, msg)
         self.RemoveReady(change)
+      else:
+        msg = ('NOTE: The Commit Queue will retry your change automatically.'
+               '\n\n'
+               '%s The build failure may have been caused by infrastructure '
+               'issues, so your change will not be blamed for the failure.'
+               % base_msg)
+        self.SendNotification(change, msg)
+        self.MarkForgiven(change)
 
   def SendNotification(self, change, msg, **kwargs):
     if not kwargs.get('build_log'):
@@ -2266,7 +2241,8 @@ class ValidationPool(object):
   @staticmethod
   def _CreateValidationFailureMessage(pre_cq_trybot, change, suspects, messages,
                                       sanity=True, infra_fail=False,
-                                      lab_fail=False, no_stat=None):
+                                      lab_fail=False, no_stat=None,
+                                      retry=False):
     """Create a message explaining why a validation failure occurred.
 
     Args:
@@ -2282,6 +2258,10 @@ class ValidationPool(object):
       lab_fail: The build failed purely due to test lab infrastructure failures.
       no_stat: A list of builders which failed prematurely without reporting
         status.
+      retry: Whether we should retry automatically.
+
+    Returns:
+      A string that communicates what happened.
     """
     msg = []
     if no_stat:
@@ -2302,23 +2282,22 @@ class ValidationPool(object):
     # Limit the number of suspects to 20 so that the list of suspects isn't
     # ridiculously long.
     max_suspects = 20
-    other_suspects = suspects - set([change])
+    other_suspects = set(suspects) - set([change])
     if len(other_suspects) < max_suspects:
       other_suspects_str = cros_patch.GetChangesAsString(other_suspects)
     else:
       other_suspects_str = ('%d other changes. See the blamelist for more '
                             'details.' % (len(other_suspects),))
 
-    will_retry_automatically = False
     if not sanity:
       msg.append('The build was consider not sane because the sanity check '
                  'builder(s) failed. Your change will not be blamed for the '
                  'failure.')
-      will_retry_automatically = True
+      assert retry
     elif lab_fail:
       msg.append('The build encountered Chrome OS Lab infrastructure issues. '
                  ' Your change will not be blamed for the failure.')
-      will_retry_automatically = True
+      assert retry
     else:
       if infra_fail:
         msg.append('The build failure may have been caused by infrastructure '
@@ -2342,11 +2321,11 @@ class ValidationPool(object):
           msg.append('One of the following changes is probably at fault: %s'
                      % other_suspects_str)
 
-        will_retry_automatically = not pre_cq_trybot
+        assert retry
 
-    if will_retry_automatically:
-      msg.insert(
-          0, 'NOTE: The Commit Queue will retry your change automatically.')
+    if retry:
+      bot = 'The Pre-Commit Queue' if pre_cq_trybot else 'The Commit Queue'
+      msg.insert(0, 'NOTE: %s will retry your change automatically.' % bot)
 
     return '\n\n'.join(msg)
 
@@ -2366,13 +2345,15 @@ class ValidationPool(object):
       no_stat: A list of builders which failed prematurely without reporting
         status.
     """
+    retry = not sanity or lab_fail or change not in suspects
     msg = self._CreateValidationFailureMessage(
         self.pre_cq_trybot, change, suspects, messages,
-        sanity, infra_fail, lab_fail, no_stat)
+        sanity, infra_fail, lab_fail, no_stat, retry)
     self.SendNotification(change, '%(details)s', details=msg)
-    if sanity:
-      if change in suspects:
-        self.RemoveReady(change)
+    if retry:
+      self.MarkForgiven(change)
+    else:
+      self.RemoveReady(change)
 
   def HandleValidationFailure(self, messages, changes=None, sanity=True,
                               no_stat=None):
@@ -2428,32 +2409,6 @@ class ValidationPool(object):
     inputs = [[change, messages, suspects, sanity, infra_fail,
                lab_fail, no_stat] for change in candidates]
     parallel.RunTasksInProcessPool(self._ChangeFailedValidation, inputs)
-
-  def HandleCouldNotApply(self, change):
-    """Handler for when Paladin fails to apply a change.
-
-    This handler strips the Commit Ready bit forcing the developer
-    to re-upload a rebased change as this theirs failed to apply cleanly.
-
-    Args:
-      change: GerritPatch instance to operate upon.
-    """
-    msg = '%(queue)s failed to apply your change in %(build_log)s . '
-    # This is written this way to protect against bugs in CQ itself.  We log
-    # it both to the build output, and mark the change w/ it.
-    extra_msg = getattr(change, 'apply_error_message', None)
-    if extra_msg is None:
-      logging.error(
-          'Change %s was passed to HandleCouldNotApply without an appropriate '
-          'apply_error_message set.  Internal bug.', change)
-      extra_msg = (
-          'Internal CQ issue: extra error info was not given,  Please contact '
-          'the build team and ensure they are aware of this specific change '
-          'failing.')
-
-    msg += extra_msg
-    self.SendNotification(change, msg)
-    self.RemoveReady(change)
 
   def HandleApplySuccess(self, change, build_log=None):
     """Handler for when Paladin successfully applies (picks up) a change.

@@ -10,7 +10,6 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
-import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
@@ -104,6 +103,13 @@ public class TabManager extends LinearLayout {
     }
 
     /**
+     * Get the ContentViewRenderView.
+     */
+    public ContentViewRenderView getContentViewRenderView() {
+        return mContentViewRenderView;
+    }
+
+    /**
      * @param startupUrl The URL that the first tab should navigate to.
      */
     public void setStartupUrl(String startupUrl) {
@@ -169,6 +175,11 @@ public class TabManager extends LinearLayout {
             public void onToggleFullscreenMode(Tab tab, boolean enable) {
                 mToolbar.setVisibility(enable ? GONE : VISIBLE);
             }
+
+            @Override
+            public void onContentChanged(Tab tab) {
+                setupContent();
+            }
         });
         return tab;
     }
@@ -214,7 +225,7 @@ public class TabManager extends LinearLayout {
             assert parent == mContentViewHolder;
             mContentViewHolder.removeView(mTabModelWrapper);
         }
-        mToolbar.showAddButton(false);
+        mToolbar.updateToolbarState();
     }
 
     /**
@@ -232,10 +243,7 @@ public class TabManager extends LinearLayout {
         if (mTabModelWrapper.getParent() == null) {
             mContentViewHolder.addView(mTabModelWrapper);
         }
-        mToolbar.showAddButton(true);
-        InputMethodManager mImm = (InputMethodManager) getContext().getSystemService(
-                Context.INPUT_METHOD_SERVICE);
-        mImm.hideSoftInputFromWindow(mContentViewHolder.getWindowToken(), 0);
+        mToolbar.updateToolbarState();
     }
 
     /**

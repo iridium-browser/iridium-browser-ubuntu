@@ -23,6 +23,8 @@
 #include "config.h"
 #include "core/events/MouseEvent.h"
 
+#include "bindings/core/v8/DOMWrapperWorld.h"
+#include "bindings/core/v8/ScriptState.h"
 #include "core/clipboard/DataTransfer.h"
 #include "core/dom/Element.h"
 #include "core/events/EventDispatcher.h"
@@ -30,8 +32,10 @@
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<MouseEvent> MouseEvent::create(const AtomicString& type, const MouseEventInit& initializer)
+PassRefPtrWillBeRawPtr<MouseEvent> MouseEvent::create(ScriptState* scriptState, const AtomicString& type, const MouseEventInit& initializer)
 {
+    if (scriptState->world().isIsolatedWorld())
+        UIEventWithKeyState::didCreateEventInIsolatedWorld(initializer.ctrlKey(), initializer.altKey(), initializer.shiftKey(), initializer.metaKey());
     return adoptRefWillBeNoop(new MouseEvent(type, initializer));
 }
 
@@ -70,6 +74,9 @@ MouseEvent::MouseEvent()
     : m_button(0)
     , m_buttons(0)
     , m_buttonDown(false)
+    , m_relatedTarget(nullptr)
+    , m_dataTransfer(nullptr)
+    , m_syntheticEventType(PlatformMouseEvent::RealOrIndistinguishable)
 {
 }
 
@@ -104,6 +111,7 @@ MouseEvent::MouseEvent(const AtomicString& eventType, const MouseEventInit& init
     , m_buttonDown(initializer.button() != (unsigned short)-1)
     , m_relatedTarget(initializer.relatedTarget())
     , m_dataTransfer(nullptr)
+    , m_syntheticEventType(PlatformMouseEvent::RealOrIndistinguishable)
 {
     initCoordinates(IntPoint(initializer.clientX(), initializer.clientY()));
 }
@@ -126,13 +134,16 @@ unsigned short MouseEvent::platformModifiersToButtons(unsigned modifiers)
     return buttons;
 }
 
-void MouseEvent::initMouseEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtrWillBeRawPtr<AbstractView> view,
+void MouseEvent::initMouseEvent(ScriptState* scriptState, const AtomicString& type, bool canBubble, bool cancelable, PassRefPtrWillBeRawPtr<AbstractView> view,
                                 int detail, int screenX, int screenY, int clientX, int clientY,
                                 bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
                                 unsigned short button, PassRefPtrWillBeRawPtr<EventTarget> relatedTarget, unsigned short buttons)
 {
     if (dispatched())
         return;
+
+    if (scriptState && scriptState->world().isIsolatedWorld())
+        UIEventWithKeyState::didCreateEventInIsolatedWorld(ctrlKey, altKey, shiftKey, metaKey);
 
     initUIEvent(type, canBubble, cancelable, view, detail);
 
@@ -197,7 +208,7 @@ Node* MouseEvent::fromElement() const
     return target() ? target()->toNode() : 0;
 }
 
-void MouseEvent::trace(Visitor* visitor)
+DEFINE_TRACE(MouseEvent)
 {
     visitor->trace(m_relatedTarget);
     visitor->trace(m_dataTransfer);
@@ -232,7 +243,7 @@ SimulatedMouseEvent::SimulatedMouseEvent(const AtomicString& eventType, PassRefP
     }
 }
 
-void SimulatedMouseEvent::trace(Visitor* visitor)
+DEFINE_TRACE(SimulatedMouseEvent)
 {
     MouseEvent::trace(visitor);
 }
@@ -280,7 +291,7 @@ bool MouseEventDispatchMediator::dispatchEvent(EventDispatcher& dispatcher) cons
     // of the DOM specs, but is used for compatibility with the ondblclick="" attribute. This is treated
     // as a separate event in other DOM-compliant browsers like Firefox, and so we do the same.
     RefPtrWillBeRawPtr<MouseEvent> doubleClickEvent = MouseEvent::create();
-    doubleClickEvent->initMouseEvent(EventTypeNames::dblclick, event().bubbles(), event().cancelable(), event().view(),
+    doubleClickEvent->initMouseEvent(nullptr, EventTypeNames::dblclick, event().bubbles(), event().cancelable(), event().view(),
         event().detail(), event().screenX(), event().screenY(), event().clientX(), event().clientY(),
         event().ctrlKey(), event().altKey(), event().shiftKey(), event().metaKey(),
         event().button(), relatedTarget, event().buttons());

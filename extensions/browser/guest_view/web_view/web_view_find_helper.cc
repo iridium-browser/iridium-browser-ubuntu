@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "extensions/browser/api/web_view/web_view_internal_api.h"
+#include "extensions/browser/api/guest_view/web_view/web_view_internal_api.h"
 #include "extensions/browser/guest_view/web_view/web_view_constants.h"
 
 namespace extensions {
@@ -37,7 +37,7 @@ void WebViewFindHelper::DispatchFindUpdateEvent(bool canceled,
   args->SetBoolean(webview::kFindCanceled, canceled);
   args->SetBoolean(webview::kFindFinalUpdate, final_update);
   DCHECK(webview_guest_);
-  webview_guest_->DispatchEventToEmbedder(
+  webview_guest_->DispatchEventToView(
       new GuestViewBase::Event(webview::kEventFindReply, args.Pass()));
 }
 

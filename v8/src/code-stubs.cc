@@ -81,6 +81,9 @@ void CodeStub::RecordCodeGeneration(Handle<Code> code) {
           CodeCreateEvent(Logger::STUB_TAG, *code, os.str().c_str()));
   Counters* counters = isolate()->counters();
   counters->total_stubs_code_size()->Increment(code->instruction_size());
+#ifdef DEBUG
+  code->VerifyEmbeddedObjects();
+#endif
 }
 
 
@@ -265,12 +268,8 @@ MaybeHandle<Code> CodeStub::GetCode(Isolate* isolate, uint32_t key) {
 void BinaryOpICStub::GenerateAheadOfTime(Isolate* isolate) {
   // Generate the uninitialized versions of the stub.
   for (int op = Token::BIT_OR; op <= Token::MOD; ++op) {
-    for (int mode = NO_OVERWRITE; mode <= OVERWRITE_RIGHT; ++mode) {
-      BinaryOpICStub stub(isolate,
-                          static_cast<Token::Value>(op),
-                          static_cast<OverwriteMode>(mode));
-      stub.GetCode();
-    }
+    BinaryOpICStub stub(isolate, static_cast<Token::Value>(op));
+    stub.GetCode();
   }
 
   // Generate special versions of the stub.
@@ -621,26 +620,6 @@ CallInterfaceDescriptor StoreTransitionStub::GetCallInterfaceDescriptor() {
 }
 
 
-static void InitializeVectorLoadStub(Isolate* isolate,
-                                     CodeStubDescriptor* descriptor,
-                                     Address deoptimization_handler) {
-  DCHECK(FLAG_vector_ics);
-  descriptor->Initialize(deoptimization_handler);
-}
-
-
-void VectorLoadStub::InitializeDescriptor(CodeStubDescriptor* descriptor) {
-  InitializeVectorLoadStub(isolate(), descriptor,
-                           FUNCTION_ADDR(LoadIC_MissFromStubFailure));
-}
-
-
-void VectorKeyedLoadStub::InitializeDescriptor(CodeStubDescriptor* descriptor) {
-  InitializeVectorLoadStub(isolate(), descriptor,
-                           FUNCTION_ADDR(KeyedLoadIC_MissFromStubFailure));
-}
-
-
 void MegamorphicLoadStub::InitializeDescriptor(CodeStubDescriptor* d) {}
 
 
@@ -679,10 +658,13 @@ void FastCloneShallowObjectStub::InitializeDescriptor(
 void CreateAllocationSiteStub::InitializeDescriptor(CodeStubDescriptor* d) {}
 
 
+void CreateWeakCellStub::InitializeDescriptor(CodeStubDescriptor* d) {}
+
+
 void RegExpConstructResultStub::InitializeDescriptor(
     CodeStubDescriptor* descriptor) {
   descriptor->Initialize(
-      Runtime::FunctionForId(Runtime::kRegExpConstructResult)->entry);
+      Runtime::FunctionForId(Runtime::kRegExpConstructResultRT)->entry);
 }
 
 
@@ -728,12 +710,18 @@ void BinaryOpWithAllocationSiteStub::InitializeDescriptor(
 
 
 void StringAddStub::InitializeDescriptor(CodeStubDescriptor* descriptor) {
-  descriptor->Initialize(Runtime::FunctionForId(Runtime::kStringAdd)->entry);
+  descriptor->Initialize(Runtime::FunctionForId(Runtime::kStringAddRT)->entry);
 }
 
 
 void CreateAllocationSiteStub::GenerateAheadOfTime(Isolate* isolate) {
   CreateAllocationSiteStub stub(isolate);
+  stub.GetCode();
+}
+
+
+void CreateWeakCellStub::GenerateAheadOfTime(Isolate* isolate) {
+  CreateWeakCellStub stub(isolate);
   stub.GetCode();
 }
 
@@ -782,6 +770,11 @@ void ArgumentsAccessStub::Generate(MacroAssembler* masm) {
 }
 
 
+void RestParamAccessStub::Generate(MacroAssembler* masm) {
+  GenerateNew(masm);
+}
+
+
 void ArgumentsAccessStub::PrintName(std::ostream& os) const {  // NOLINT
   os << "ArgumentsAccessStub_";
   switch (type()) {
@@ -799,6 +792,11 @@ void ArgumentsAccessStub::PrintName(std::ostream& os) const {  // NOLINT
       break;
   }
   return;
+}
+
+
+void RestParamAccessStub::PrintName(std::ostream& os) const {  // NOLINT
+  os << "RestParamAccessStub_";
 }
 
 

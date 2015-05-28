@@ -142,6 +142,8 @@ class OS {
   static FILE* FOpen(const char* path, const char* mode);
   static bool Remove(const char* path);
 
+  static bool isDirectorySeparator(const char ch);
+
   // Opens a temporary file, the file is auto removed on close.
   static FILE* OpenTemporaryFile();
 
@@ -245,9 +247,6 @@ class OS {
   // nothing, in which case the code objects must not move (e.g., by
   // using --never-compact) if accurate profiling is desired.
   static void SignalCodeMovingGC();
-
-  // Returns the double constant NAN
-  static double nan_value();
 
   // Support runtime detection of whether the hard float option of the
   // EABI is used.

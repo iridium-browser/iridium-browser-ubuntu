@@ -9,7 +9,6 @@
 #include "SkBitmapDevice.h"
 #include "SkBitmapSource.h"
 #include "SkColor.h"
-#include "SkMatrixImageFilter.h"
 #include "SkRefCnt.h"
 
 namespace skiagm {
@@ -25,17 +24,10 @@ protected:
         return SkString("resizeimagefilter");
     }
 
-#ifdef SK_CPU_ARM64
-    // Skip tiled drawing on 64-bit ARM until https://skbug.com/2908 is fixed.
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
-#endif
-
     void draw(SkCanvas* canvas,
               const SkRect& rect,
               const SkSize& deviceSize,
-              SkPaint::FilterLevel filterLevel,
+              SkFilterQuality filterQuality,
               SkImageFilter* input = NULL) {
         SkRect dstRect;
         canvas->getTotalMatrix().mapRect(&dstRect, rect);
@@ -49,7 +41,7 @@ protected:
         matrix.setScale(SkScalarInvert(deviceScaleX),
                         SkScalarInvert(deviceScaleY));
         SkAutoTUnref<SkImageFilter> imageFilter(
-            SkMatrixImageFilter::Create(matrix, filterLevel, input));
+            SkImageFilter::CreateMatrixFilter(matrix, filterQuality, input));
         SkPaint filteredPaint;
         filteredPaint.setImageFilter(imageFilter.get());
         canvas->saveLayer(&rect, &filteredPaint);
@@ -75,25 +67,25 @@ protected:
         draw(canvas,
              srcRect,
              deviceSize,
-             SkPaint::kNone_FilterLevel);
+             kNone_SkFilterQuality);
 
         canvas->translate(srcRect.width() + SkIntToScalar(10), 0);
         draw(canvas,
              srcRect,
              deviceSize,
-             SkPaint::kLow_FilterLevel);
+             kLow_SkFilterQuality);
 
         canvas->translate(srcRect.width() + SkIntToScalar(10), 0);
         draw(canvas,
              srcRect,
              deviceSize,
-             SkPaint::kMedium_FilterLevel);
+             kMedium_SkFilterQuality);
 
         canvas->translate(srcRect.width() + SkIntToScalar(10), 0);
         draw(canvas,
              srcRect,
              deviceSize,
-             SkPaint::kHigh_FilterLevel);
+             kHigh_SkFilterQuality);
 
         SkBitmap bitmap;
         bitmap.allocN32Pixels(16, 16);
@@ -114,7 +106,7 @@ protected:
         draw(canvas,
              srcRect,
              deviceSize,
-             SkPaint::kHigh_FilterLevel,
+             kHigh_SkFilterQuality,
              source.get());
     }
 

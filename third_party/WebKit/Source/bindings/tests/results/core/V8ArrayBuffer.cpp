@@ -10,7 +10,6 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8ArrayBuffer.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
-#include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
 #include "core/dom/ContextFeatures.h"
 #include "core/dom/DOMArrayBufferDeallocationObserver.h"
@@ -22,7 +21,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8ArrayBuffer::wrapperTypeInfo = { gin::kEmbedderBlink, 0, V8ArrayBuffer::refObject, V8ArrayBuffer::derefObject, V8ArrayBuffer::trace, 0, 0, V8ArrayBuffer::installConditionallyEnabledMethods, V8ArrayBuffer::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8ArrayBuffer::wrapperTypeInfo = { gin::kEmbedderBlink, 0, V8ArrayBuffer::refObject, V8ArrayBuffer::derefObject, V8ArrayBuffer::trace, 0, 0, V8ArrayBuffer::installConditionallyEnabledMethods, V8ArrayBuffer::installConditionallyEnabledProperties, "ArrayBuffer", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestArrayBuffer.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in

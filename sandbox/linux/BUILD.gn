@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/features.gni")
+import("//testing/test.gni")
 
 declare_args() {
   compile_suid_client = is_linux
@@ -10,7 +11,7 @@ declare_args() {
   compile_credentials = is_linux
 
   compile_seccomp_bpf_demo =
-      is_linux && (cpu_arch == "x86" || cpu_arch == "x64")
+      is_linux && (current_cpu == "x86" || current_cpu == "x64")
 }
 
 # We have two principal targets: sandbox and sandbox_linux_unittests
@@ -62,9 +63,13 @@ source_set("sandbox_linux_test_utils") {
   }
 }
 
-# The main sandboxing test target.
-test("sandbox_linux_unittests") {
+# Sources shared by sandbox_linux_unittests and sandbox_linux_jni_unittests.
+source_set("sandbox_linux_unittests_sources") {
+  testonly = true
+
   sources = [
+    "services/proc_util_unittest.cc",
+    "services/resource_limits_unittests.cc",
     "services/scoped_process_unittest.cc",
     "services/syscall_wrappers_unittest.cc",
     "services/thread_helpers_unittests.cc",
@@ -93,49 +98,58 @@ test("sandbox_linux_unittests") {
   }
 
   if (compile_suid_client) {
-    sources += [ "suid/client/setuid_sandbox_client_unittest.cc" ]
+    sources += [
+      "suid/client/setuid_sandbox_client_unittest.cc",
+      "suid/client/setuid_sandbox_host_unittest.cc",
+    ]
   }
   if (use_seccomp_bpf) {
     sources += [
-      "bpf_dsl/bpf_dsl_more_unittest.cc",
       "bpf_dsl/bpf_dsl_unittest.cc",
+      "bpf_dsl/codegen_unittest.cc",
       "bpf_dsl/cons_unittest.cc",
+      "bpf_dsl/syscall_set_unittest.cc",
+      "integration_tests/bpf_dsl_seccomp_unittest.cc",
+      "integration_tests/seccomp_broker_process_unittest.cc",
       "seccomp-bpf-helpers/baseline_policy_unittest.cc",
       "seccomp-bpf-helpers/syscall_parameters_restrictions_unittests.cc",
       "seccomp-bpf/bpf_tests_unittest.cc",
-      "seccomp-bpf/codegen_unittest.cc",
       "seccomp-bpf/errorcode_unittest.cc",
       "seccomp-bpf/sandbox_bpf_unittest.cc",
-      "seccomp-bpf/syscall_iterator_unittest.cc",
       "seccomp-bpf/syscall_unittest.cc",
     ]
   }
   if (compile_credentials) {
     sources += [
+      "integration_tests/namespace_unix_domain_socket_unittest.cc",
       "services/credentials_unittest.cc",
-      "services/proc_util_unittest.cc",
-      "services/unix_domain_socket_unittest.cc",
+      "services/namespace_sandbox_unittest.cc",
+      "services/namespace_utils_unittest.cc",
     ]
+
+    # For credentials_unittest.cc
+    configs += [ "//build/config/linux:libcap" ]
   }
 }
 
-# TODO(GYP) Android version of this test.
-#    {
-#      # This target is the shared library used by Android APK (i.e.
-#      # JNI-friendly) tests.
-#      "target_name": "sandbox_linux_jni_unittests",
-#      "includes": [
-#        "sandbox_linux_test_sources.gypi",
-#      ],
-#      "type": "shared_library",
-#      "conditions": [
-#        [ "OS == "android"", {
-#          "dependencies": [
-#            "../testing/android/native_test.gyp:native_test_native_code",
-#          ],
-#        }],
-#      ],
-#    },
+# The main sandboxing test target.
+test("sandbox_linux_unittests") {
+  deps = [
+    ":sandbox_linux_unittests_sources",
+  ]
+}
+
+# This target is the shared library used by Android APK (i.e.
+# JNI-friendly) tests.
+shared_library("sandbox_linux_jni_unittests") {
+  testonly = true
+  deps = [
+    ":sandbox_linux_unittests_sources",
+  ]
+  if (is_android) {
+    deps += [ "//testing/android:native_test_native_code" ]
+  }
+}
 
 component("seccomp_bpf") {
   sources = [
@@ -143,31 +157,32 @@ component("seccomp_bpf") {
     "bpf_dsl/bpf_dsl.h",
     "bpf_dsl/bpf_dsl_forward.h",
     "bpf_dsl/bpf_dsl_impl.h",
+    "bpf_dsl/codegen.cc",
+    "bpf_dsl/codegen.h",
     "bpf_dsl/cons.h",
     "bpf_dsl/dump_bpf.cc",
     "bpf_dsl/dump_bpf.h",
+    "bpf_dsl/linux_syscall_ranges.h",
     "bpf_dsl/policy.cc",
     "bpf_dsl/policy.h",
     "bpf_dsl/policy_compiler.cc",
     "bpf_dsl/policy_compiler.h",
+    "bpf_dsl/seccomp_macros.h",
+    "bpf_dsl/syscall_set.cc",
+    "bpf_dsl/syscall_set.h",
     "bpf_dsl/trap_registry.h",
-    "seccomp-bpf/codegen.cc",
-    "seccomp-bpf/codegen.h",
+    "bpf_dsl/verifier.cc",
+    "bpf_dsl/verifier.h",
     "seccomp-bpf/die.cc",
     "seccomp-bpf/die.h",
     "seccomp-bpf/errorcode.cc",
     "seccomp-bpf/errorcode.h",
-    "seccomp-bpf/linux_seccomp.h",
     "seccomp-bpf/sandbox_bpf.cc",
     "seccomp-bpf/sandbox_bpf.h",
     "seccomp-bpf/syscall.cc",
     "seccomp-bpf/syscall.h",
-    "seccomp-bpf/syscall_iterator.cc",
-    "seccomp-bpf/syscall_iterator.h",
     "seccomp-bpf/trap.cc",
     "seccomp-bpf/trap.h",
-    "seccomp-bpf/verifier.cc",
-    "seccomp-bpf/verifier.h",
   ]
   defines = [ "SANDBOX_IMPLEMENTATION" ]
 
@@ -193,6 +208,7 @@ component("seccomp_bpf_helpers") {
 
   deps = [
     "//base",
+    ":sandbox_services",
     ":seccomp_bpf",
   ]
 }
@@ -223,14 +239,18 @@ component("sandbox_services") {
   sources = [
     "services/init_process_reaper.cc",
     "services/init_process_reaper.h",
+    "services/proc_util.cc",
+    "services/proc_util.h",
+    "services/resource_limits.cc",
+    "services/resource_limits.h",
     "services/scoped_process.cc",
     "services/scoped_process.h",
     "services/syscall_wrappers.cc",
     "services/syscall_wrappers.h",
     "services/thread_helpers.cc",
     "services/thread_helpers.h",
-    "services/yama.h",
     "services/yama.cc",
+    "services/yama.h",
     "syscall_broker/broker_channel.cc",
     "syscall_broker/broker_channel.h",
     "syscall_broker/broker_client.cc",
@@ -248,35 +268,37 @@ component("sandbox_services") {
 
   defines = [ "SANDBOX_IMPLEMENTATION" ]
 
+  deps = [
+    "//base",
+  ]
+
   if (compile_credentials) {
     sources += [
       "services/credentials.cc",
       "services/credentials.h",
-      "services/proc_util.cc",
-      "services/proc_util.h",
+      "services/namespace_sandbox.cc",
+      "services/namespace_sandbox.h",
+      "services/namespace_utils.cc",
+      "services/namespace_utils.h",
     ]
 
-    # For capabilities.cc.
-    configs += [ "//build/config/linux:libcap" ]
+    deps += [ ":sandbox_services_headers" ]
   }
-
-  deps = [
-    "//base",
-  ]
 }
 
 source_set("sandbox_services_headers") {
   sources = [
-    "services/android_arm_ucontext.h",
-    "services/android_arm64_ucontext.h",
-    "services/android_futex.h",
-    "services/android_ucontext.h",
-    "services/android_i386_ucontext.h",
-    "services/arm_linux_syscalls.h",
-    "services/arm64_linux_syscalls.h",
-    "services/linux_syscalls.h",
-    "services/x86_32_linux_syscalls.h",
-    "services/x86_64_linux_syscalls.h",
+    "system_headers/android_arm64_ucontext.h",
+    "system_headers/android_arm_ucontext.h",
+    "system_headers/android_futex.h",
+    "system_headers/android_i386_ucontext.h",
+    "system_headers/android_ucontext.h",
+    "system_headers/arm64_linux_syscalls.h",
+    "system_headers/arm_linux_syscalls.h",
+    "system_headers/linux_seccomp.h",
+    "system_headers/linux_syscalls.h",
+    "system_headers/x86_32_linux_syscalls.h",
+    "system_headers/x86_64_linux_syscalls.h",
   ]
 }
 
@@ -294,10 +316,12 @@ source_set("libc_urandom_override") {
 if (compile_suid_client) {
   component("suid_sandbox_client") {
     sources = [
-      "suid/common/sandbox.h",
-      "suid/common/suid_unsafe_environment_variables.h",
       "suid/client/setuid_sandbox_client.cc",
       "suid/client/setuid_sandbox_client.h",
+      "suid/client/setuid_sandbox_host.cc",
+      "suid/client/setuid_sandbox_host.h",
+      "suid/common/sandbox.h",
+      "suid/common/suid_unsafe_environment_variables.h",
     ]
     defines = [ "SANDBOX_IMPLEMENTATION" ]
 

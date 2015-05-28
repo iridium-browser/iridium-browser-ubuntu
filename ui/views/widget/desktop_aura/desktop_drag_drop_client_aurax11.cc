@@ -9,6 +9,7 @@
 #include "base/event_types.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram_macros.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/window.h"
@@ -100,6 +101,12 @@ int XGetModifiers() {
     modifiers |= ui::EF_ALT_DOWN;
   if (mask & Mod4Mask)
     modifiers |= ui::EF_COMMAND_DOWN;
+  if (mask & Button1Mask)
+    modifiers |= ui::EF_LEFT_MOUSE_BUTTON;
+  if (mask & Button2Mask)
+    modifiers |= ui::EF_MIDDLE_MOUSE_BUTTON;
+  if (mask & Button3Mask)
+    modifiers |= ui::EF_RIGHT_MOUSE_BUTTON;
   return modifiers;
 }
 
@@ -610,6 +617,10 @@ void DesktopDragDropClientAuraX11::OnXdndDrop(
         event.set_flags(XGetModifiers());
       }
 
+      if (!IsDragDropInProgress()) {
+        UMA_HISTOGRAM_COUNTS("Event.DragDrop.ExternalOriginDrop", 1);
+      }
+
       drag_operation = delegate->OnPerformDrop(event);
     }
 
@@ -643,9 +654,12 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
     const ui::OSExchangeData& data,
     aura::Window* root_window,
     aura::Window* source_window,
-    const gfx::Point& root_location,
+    const gfx::Point& screen_location,
     int operation,
     ui::DragDropTypes::DragEventSource source) {
+  UMA_HISTOGRAM_ENUMERATION("Event.DragDrop.Start", source,
+                            ui::DragDropTypes::DRAG_EVENT_SOURCE_COUNT);
+
   source_current_window_ = None;
   DCHECK(!g_current_drag_drop_client);
   g_current_drag_drop_client = this;
@@ -699,6 +713,13 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
       cursor_manager_->GetInitializedCursor(ui::kCursorGrabbing));
 
   if (alive) {
+    if (negotiated_operation_ == ui::DragDropTypes::DRAG_NONE) {
+      UMA_HISTOGRAM_ENUMERATION("Event.DragDrop.Cancel", source,
+                                ui::DragDropTypes::DRAG_EVENT_SOURCE_COUNT);
+    } else {
+      UMA_HISTOGRAM_ENUMERATION("Event.DragDrop.Drop", source,
+                                ui::DragDropTypes::DRAG_EVENT_SOURCE_COUNT);
+    }
     drag_widget_.reset();
 
     source_provider_ = NULL;
@@ -709,6 +730,8 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
 
     return negotiated_operation_;
   }
+  UMA_HISTOGRAM_ENUMERATION("Event.DragDrop.Cancel", source,
+                            ui::DragDropTypes::DRAG_EVENT_SOURCE_COUNT);
   return ui::DragDropTypes::DRAG_NONE;
 }
 
@@ -747,7 +770,10 @@ void DesktopDragDropClientAuraX11::OnMouseMovement(
   }
 
   const int kModifiers = ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN |
-                         ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN;
+                         ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN |
+                         ui::EF_LEFT_MOUSE_BUTTON |
+                         ui::EF_MIDDLE_MOUSE_BUTTON |
+                         ui::EF_RIGHT_MOUSE_BUTTON;
   current_modifier_state_ = flags & kModifiers;
 
   repeat_mouse_move_timer_.Stop();

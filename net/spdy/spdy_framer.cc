@@ -6,7 +6,6 @@
 
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/metrics/stats_counters.h"
 #include "base/third_party/valgrind/memcheck.h"
 #include "net/spdy/spdy_frame_builder.h"
 #include "net/spdy/spdy_frame_reader.h"
@@ -154,20 +153,20 @@ bool SpdyFramerVisitorInterface::OnRstStreamFrameData(
 
 SpdyFramer::SpdyFramer(SpdyMajorVersion version)
     : current_frame_buffer_(new char[kControlFrameBufferSize]),
-      enable_compression_(true),
+      expect_continuation_(0),
       visitor_(NULL),
       debug_visitor_(NULL),
       display_protocol_("SPDY"),
-      spdy_version_(version),
+      protocol_version_(version),
+      enable_compression_(true),
       syn_frame_processed_(false),
       probable_http_response_(false),
-      expect_continuation_(0),
       end_stream_when_done_(false) {
-  DCHECK_GE(spdy_version_, SPDY_MIN_VERSION);
-  DCHECK_LE(spdy_version_, SPDY_MAX_VERSION);
+  DCHECK_GE(protocol_version_, SPDY_MIN_VERSION);
+  DCHECK_LE(protocol_version_, SPDY_MAX_VERSION);
   DCHECK_LE(kMaxControlFrameSize,
-            SpdyConstants::GetFrameMaximumSize(spdy_version_) +
-                SpdyConstants::GetControlFrameHeaderSize(spdy_version_));
+            SpdyConstants::GetFrameMaximumSize(protocol_version_) +
+                SpdyConstants::GetControlFrameHeaderSize(protocol_version_));
   Reset();
 }
 
@@ -1060,7 +1059,8 @@ void SpdyFramer::ProcessControlFrameHeader(int control_frame_type_field) {
   if (current_frame_length_ >
       SpdyConstants::GetFrameMaximumSize(protocol_version()) +
           SpdyConstants::GetControlFrameHeaderSize(protocol_version())) {
-    DLOG(WARNING) << "Received control frame with way too big of a payload: "
+    DLOG(WARNING) << "Received control frame of type " << current_frame_type_
+                  << " with way too big of a payload: "
                   << current_frame_length_;
     set_error(SPDY_CONTROL_PAYLOAD_TOO_LARGE);
     return;
@@ -1197,8 +1197,8 @@ void SpdyFramer::WriteHeaderBlock(SpdyFrameBuilder* frame,
   SpdyHeaderBlock::const_iterator it;
   for (it = headers->begin(); it != headers->end(); ++it) {
     if (spdy_version < SPDY3) {
-      frame->WriteString(it->first);
-      frame->WriteString(it->second);
+      frame->WriteStringPiece16(it->first);
+      frame->WriteStringPiece16(it->second);
     } else {
       frame->WriteStringPiece32(it->first);
       frame->WriteStringPiece32(it->second);
@@ -1281,7 +1281,7 @@ static void WriteLengthZ(size_t n,
 void SpdyFramer::WriteHeaderBlockToZ(const SpdyHeaderBlock* headers,
                                      z_stream* z) const {
   unsigned length_length = 4;
-  if (spdy_version_ < 3)
+  if (protocol_version() < 3)
     length_length = 2;
 
   WriteLengthZ(headers->size(), length_length, kZStandardData, z);
@@ -1422,8 +1422,8 @@ size_t SpdyFramer::ProcessControlFrameBeforeHeaderBlock(const char* data,
             priority = priority >> 5;
           }
 
-         // Seek past unused byte; used to be credential slot in SPDY 3.
-         reader.Seek(1);
+          // Seek past unused byte; used to be credential slot in SPDY 3.
+          reader.Seek(1);
 
           DCHECK(reader.IsDoneReading());
           if (debug_visitor_) {
@@ -2160,10 +2160,13 @@ size_t SpdyFramer::ProcessDataFramePaddingLength(const char* data, size_t len) {
         return 0;
       }
 
+      static_assert(kPadLengthFieldSize == 1,
+                    "Unexpected pad length field size.");
       remaining_padding_payload_length_ = *reinterpret_cast<const uint8*>(data);
       ++data;
       --len;
       --remaining_data_length_;
+      visitor_->OnStreamPadding(current_frame_stream_id_, kPadLengthFieldSize);
     } else {
       // We don't have the data available for parsing the pad length field. Keep
       // waiting.
@@ -2187,11 +2190,8 @@ size_t SpdyFramer::ProcessFramePadding(const char* data, size_t len) {
     DCHECK_EQ(remaining_padding_payload_length_, remaining_data_length_);
     size_t amount_to_discard = std::min(remaining_padding_payload_length_, len);
     if (current_frame_type_ == DATA && amount_to_discard > 0) {
-      // The visitor needs to know about padding so it can send window updates.
-      // Communicate the padding to the visitor through a NULL data pointer,
-      // with a nonzero size.
-      visitor_->OnStreamFrameData(
-          current_frame_stream_id_, NULL, amount_to_discard, false);
+      DCHECK_LE(SPDY4, protocol_version());
+      visitor_->OnStreamPadding(current_frame_stream_id_, amount_to_discard);
     }
     data += amount_to_discard;
     len -= amount_to_discard;
@@ -2968,7 +2968,9 @@ size_t SpdyFramer::GetNumberRequiredContinuationFrames(size_t size) {
   DCHECK_GT(protocol_version(), SPDY3);
   DCHECK_GT(size, kMaxControlFrameSize);
   size_t overflow = size - kMaxControlFrameSize;
-  return overflow / (kMaxControlFrameSize - GetContinuationMinimumSize()) + 1;
+  size_t payload_size = kMaxControlFrameSize - GetContinuationMinimumSize();
+  // This is ceiling(overflow/payload_size) using integer arithmetics.
+  return (overflow - 1) / payload_size + 1;
 }
 
 void SpdyFramer::WritePayloadWithContinuation(SpdyFrameBuilder* builder,
@@ -2976,54 +2978,50 @@ void SpdyFramer::WritePayloadWithContinuation(SpdyFrameBuilder* builder,
                                               SpdyStreamId stream_id,
                                               SpdyFrameType type,
                                               int padding_payload_len) {
-    uint8 end_flag = 0;
-    uint8 flags = 0;
-    if (type == HEADERS) {
-      end_flag = HEADERS_FLAG_END_HEADERS;
-    } else if (type == PUSH_PROMISE) {
-      end_flag = PUSH_PROMISE_FLAG_END_PUSH_PROMISE;
-    } else {
-      DLOG(FATAL) << "CONTINUATION frames cannot be used with frame type "
-                  << FrameTypeToString(type);
-    }
+  uint8 end_flag = 0;
+  uint8 flags = 0;
+  if (type == HEADERS) {
+    end_flag = HEADERS_FLAG_END_HEADERS;
+  } else if (type == PUSH_PROMISE) {
+    end_flag = PUSH_PROMISE_FLAG_END_PUSH_PROMISE;
+  } else {
+    DLOG(FATAL) << "CONTINUATION frames cannot be used with frame type "
+                << FrameTypeToString(type);
+  }
 
-    // Write all the padding payload and as much of the data payload as possible
-    // into the initial frame.
-    size_t bytes_remaining = 0;
-    bytes_remaining = hpack_encoding.size() -
-                      std::min(hpack_encoding.size(),
-                               kMaxControlFrameSize - builder->length() -
-                                   padding_payload_len);
-    builder->WriteBytes(&hpack_encoding[0],
-                        hpack_encoding.size() - bytes_remaining);
-    if (padding_payload_len > 0) {
-      string padding = string(padding_payload_len, 0);
-      builder->WriteBytes(padding.data(), padding.length());
-    }
-    if (bytes_remaining > 0) {
-      builder->OverwriteLength(*this,
-          kMaxControlFrameSize - GetControlFrameHeaderSize());
-    }
+  // Write all the padding payload and as much of the data payload as possible
+  // into the initial frame.
+  size_t bytes_remaining = 0;
+  bytes_remaining =
+      hpack_encoding.size() -
+      std::min(hpack_encoding.size(),
+               kMaxControlFrameSize - builder->length() - padding_payload_len);
+  builder->WriteBytes(&hpack_encoding[0],
+                      hpack_encoding.size() - bytes_remaining);
+  if (padding_payload_len > 0) {
+    string padding = string(padding_payload_len, 0);
+    builder->WriteBytes(padding.data(), padding.length());
+  }
+  if (bytes_remaining > 0) {
+    builder->OverwriteLength(
+        *this, kMaxControlFrameSize - GetControlFrameHeaderSize());
+  }
 
-    // Tack on CONTINUATION frames for the overflow.
-    while (bytes_remaining > 0) {
-      size_t bytes_to_write = std::min(bytes_remaining,
-                                       kMaxControlFrameSize -
-                                       GetContinuationMinimumSize());
-      // Write CONTINUATION frame prefix.
-      if (bytes_remaining == bytes_to_write) {
-        flags |= end_flag;
-      }
-      builder->BeginNewFrame(*this,
-                             CONTINUATION,
-                             flags,
-                             stream_id);
-      // Write payload fragment.
-      builder->WriteBytes(&hpack_encoding[hpack_encoding.size() -
-                                          bytes_remaining],
-                          bytes_to_write);
-      bytes_remaining -= bytes_to_write;
+  // Tack on CONTINUATION frames for the overflow.
+  while (bytes_remaining > 0) {
+    size_t bytes_to_write = std::min(
+        bytes_remaining, kMaxControlFrameSize - GetContinuationMinimumSize());
+    // Write CONTINUATION frame prefix.
+    if (bytes_remaining == bytes_to_write) {
+      flags |= end_flag;
     }
+    builder->BeginNewFrame(*this, CONTINUATION, flags, stream_id);
+    // Write payload fragment.
+    builder->WriteBytes(
+        &hpack_encoding[hpack_encoding.size() - bytes_remaining],
+        bytes_to_write);
+    bytes_remaining -= bytes_to_write;
+  }
 }
 
 // The following compression setting are based on Brian Olson's analysis. See
@@ -3087,16 +3085,16 @@ z_stream* SpdyFramer::GetHeaderDecompressor() {
 }
 
 HpackEncoder* SpdyFramer::GetHpackEncoder() {
-  DCHECK_LT(SPDY3, spdy_version_);
-  if (hpack_encoder_.get() == NULL) {
+  DCHECK_LT(SPDY3, protocol_version());
+  if (hpack_encoder_.get() == nullptr) {
     hpack_encoder_.reset(new HpackEncoder(ObtainHpackHuffmanTable()));
   }
   return hpack_encoder_.get();
 }
 
 HpackDecoder* SpdyFramer::GetHpackDecoder() {
-  DCHECK_LT(SPDY3, spdy_version_);
-  if (hpack_decoder_.get() == NULL) {
+  DCHECK_LT(SPDY3, protocol_version());
+  if (hpack_decoder_.get() == nullptr) {
     hpack_decoder_.reset(new HpackDecoder(ObtainHpackHuffmanTable()));
   }
   return hpack_decoder_.get();
@@ -3218,8 +3216,8 @@ void SpdyFramer::SerializeNameValueBlockWithoutCompression(
        it != name_value_block.end();
        ++it) {
     if (protocol_version() <= SPDY2) {
-      builder->WriteString(it->first);
-      builder->WriteString(it->second);
+      builder->WriteStringPiece16(it->first);
+      builder->WriteStringPiece16(it->second);
     } else {
       builder->WriteStringPiece32(it->first);
       builder->WriteStringPiece32(it->second);
@@ -3249,11 +3247,6 @@ void SpdyFramer::SerializeNameValueBlock(
     LOG(DFATAL) << "Could not obtain compressor.";
     return;
   }
-
-  base::StatsCounter compressed_frames("spdy.CompressedFrames");
-  base::StatsCounter pre_compress_bytes("spdy.PreCompressSize");
-  base::StatsCounter post_compress_bytes("spdy.PostCompressSize");
-
   // Create an output frame.
   // Since we'll be performing lots of flushes when compressing the data,
   // zlib's lower bounds may be insufficient.
@@ -3290,11 +3283,6 @@ void SpdyFramer::SerializeNameValueBlock(
   int compressed_size = compressed_max_size - compressor->avail_out;
   builder->Seek(compressed_size);
   builder->RewriteLength(*this);
-
-  pre_compress_bytes.Add(uncompressed_len);
-  post_compress_bytes.Add(compressed_size);
-
-  compressed_frames.Increment();
 }
 
 }  // namespace net

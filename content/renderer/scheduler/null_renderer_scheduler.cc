@@ -6,40 +6,13 @@
 
 #include "base/bind.h"
 #include "base/message_loop/message_loop_proxy.h"
+#include "content/child/scheduler/null_idle_task_runner.h"
 
 namespace content {
 
-namespace {
-
-class NullIdleTaskRunner : public SingleThreadIdleTaskRunner {
- public:
-  NullIdleTaskRunner(scoped_refptr<base::SingleThreadTaskRunner> task_runner);
-  void PostIdleTask(const tracked_objects::Location& from_here,
-                    const IdleTask& idle_task) override;
-
- protected:
-  ~NullIdleTaskRunner() override;
-};
-
-}  // namespace
-
-NullIdleTaskRunner::NullIdleTaskRunner(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
-    : SingleThreadIdleTaskRunner(task_runner,
-                                 base::Callback<void(base::TimeTicks*)>()) {
-}
-
-NullIdleTaskRunner::~NullIdleTaskRunner() {
-}
-
-void NullIdleTaskRunner::PostIdleTask(
-    const tracked_objects::Location& from_here,
-    const IdleTask& idle_task) {
-}
-
 NullRendererScheduler::NullRendererScheduler()
     : task_runner_(base::MessageLoopProxy::current()),
-      idle_task_runner_(new NullIdleTaskRunner(task_runner_)) {
+      idle_task_runner_(new NullIdleTaskRunner()) {
 }
 
 NullRendererScheduler::~NullRendererScheduler() {
@@ -55,6 +28,11 @@ NullRendererScheduler::CompositorTaskRunner() {
   return task_runner_;
 }
 
+scoped_refptr<base::SingleThreadTaskRunner>
+NullRendererScheduler::LoadingTaskRunner() {
+  return task_runner_;
+}
+
 scoped_refptr<SingleThreadIdleTaskRunner>
 NullRendererScheduler::IdleTaskRunner() {
   return idle_task_runner_;
@@ -63,18 +41,39 @@ NullRendererScheduler::IdleTaskRunner() {
 void NullRendererScheduler::WillBeginFrame(const cc::BeginFrameArgs& args) {
 }
 
+void NullRendererScheduler::BeginFrameNotExpectedSoon() {
+}
+
 void NullRendererScheduler::DidCommitFrameToCompositor() {
 }
 
 void NullRendererScheduler::DidReceiveInputEventOnCompositorThread(
-    blink::WebInputEvent::Type type) {
+    const blink::WebInputEvent& web_input_event) {
 }
 
 void NullRendererScheduler::DidAnimateForInputOnCompositorThread() {
 }
 
+bool NullRendererScheduler::IsHighPriorityWorkAnticipated() {
+  return false;
+}
+
 bool NullRendererScheduler::ShouldYieldForHighPriorityWork() {
   return false;
+}
+
+bool NullRendererScheduler::CanExceedIdleDeadlineIfRequired() const {
+  return false;
+}
+
+void NullRendererScheduler::AddTaskObserver(
+    base::MessageLoop::TaskObserver* task_observer) {
+  base::MessageLoop::current()->AddTaskObserver(task_observer);
+}
+
+void NullRendererScheduler::RemoveTaskObserver(
+    base::MessageLoop::TaskObserver* task_observer) {
+  base::MessageLoop::current()->RemoveTaskObserver(task_observer);
 }
 
 void NullRendererScheduler::Shutdown() {

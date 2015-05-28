@@ -207,7 +207,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillTab) {
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(2, MatchAnyTab()));
 }
 
-// Test for http://crbug.com/444722, which is not fixed yet.
+// Test for http://crbug.com/444945, which is not fixed yet.
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
                        DISABLED_NavigateAwayFromHungRenderer) {
   host_resolver()->AddRule("*", "127.0.0.1");
@@ -606,8 +606,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeHostedAppTabChanges) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   GURL::Replacements replace_host;
-  std::string host_str("localhost");  // must stay in scope with replace_host
-  replace_host.SetHostStr(host_str);
+  replace_host.SetHostStr("localhost");
   GURL base_url = embedded_test_server()->GetURL(
       "/extensions/api_test/app_process/");
   base_url = base_url.ReplaceComponents(replace_host);
@@ -671,8 +670,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeHostedAppTabAfterReload) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   GURL::Replacements replace_host;
-  std::string host_str("localhost");  // must stay in scope with replace_host
-  replace_host.SetHostStr(host_str);
+  replace_host.SetHostStr("localhost");
   GURL base_url =
       embedded_test_server()->GetURL("/extensions/api_test/app_process/");
   base_url = base_url.ReplaceComponents(replace_host);
@@ -707,8 +705,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeHostedAppTabBeforeReload) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   GURL::Replacements replace_host;
-  std::string host_str("localhost");  // must stay in scope with replace_host
-  replace_host.SetHostStr(host_str);
+  replace_host.SetHostStr("localhost");
   GURL base_url =
       embedded_test_server()->GetURL("/extensions/api_test/app_process/");
   base_url = base_url.ReplaceComponents(replace_host);
@@ -781,8 +778,9 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
 
 // Checks that task manager counts a worker thread JS heap size.
 // http://crbug.com/241066
-// Flaky, http://crbug.com/259368
+// Disabled because this test is inherently flaky: http://crbug.com/259368
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, DISABLED_WebWorkerJSHeapMemory) {
+  ShowTaskManager();
   ui_test_utils::NavigateToURL(browser(), GetTestURL());
   const int extra_timeout_ms = 500;
   size_t minimal_heap_size = 2 * 1024 * 1024 * sizeof(void*);
@@ -790,7 +788,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, DISABLED_WebWorkerJSHeapMemory) {
       "var blob = new Blob([\n"
       "    'mem = new Array(%lu);',\n"
       "    'for (var i = 0; i < mem.length; i += 16) mem[i] = i;',\n"
-      "    'postMessage();']);\n"
+      "    'postMessage(i);']);\n"
       "blobURL = window.URL.createObjectURL(blob);\n"
       "worker = new Worker(blobURL);\n"
       "// Give the task manager few seconds to poll for JS heap sizes.\n"
@@ -798,7 +796,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, DISABLED_WebWorkerJSHeapMemory) {
       "    this,\n"
       "    function () { window.domAutomationController.send(true); },\n"
       "    %d);\n"
-      "worker.postMessage();\n",
+      "worker.postMessage('go');\n",
       static_cast<unsigned long>(minimal_heap_size),
       GetUpdateTimeMs() + extra_timeout_ms);
   bool ok;
@@ -806,7 +804,9 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, DISABLED_WebWorkerJSHeapMemory) {
       browser()->tab_strip_model()->GetActiveWebContents(), test_js, &ok));
   ASSERT_TRUE(ok);
 
-  int resource_index = TaskManager::GetInstance()->model()->ResourceCount() - 1;
+  ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchTab("title1.html")));
+  ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchAnyTab()));
+  int resource_index = FindResourceIndex(MatchTab("title1.html"));
   size_t result;
 
   ASSERT_TRUE(model()->GetV8Memory(resource_index, &result));
@@ -1030,11 +1030,8 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest,
 
 // Tests what happens when a tab navigates a cross-frame iframe (to b.com)
 // back to the site of the parent document (a.com).
-//
-// TODO(nick): http://crbug.com/433012. Disabled because the second navigation
-// crashes the renderer under --site-per-process during blink::Frame::detach().
 IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest,
-                       DISABLED_CrossSiteIframeBecomesSameSite) {
+                       CrossSiteIframeBecomesSameSite) {
   ShowTaskManager();
 
   host_resolver()->AddRule("*", "127.0.0.1");

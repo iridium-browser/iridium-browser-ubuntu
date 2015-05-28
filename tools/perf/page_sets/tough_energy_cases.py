@@ -24,10 +24,10 @@ class GooglePage(ToughEnergyCasesPage):
     super(GooglePage, self).__init__(
         url=url,
         page_set=page_set)
-    self.credentials = 'google'
+    self.credentials = 'google2'
 
   def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
+    super(GooglePage, self).RunNavigateSteps(action_runner)
     action_runner.WaitForJavaScriptCondition(
         'window.gmonkey !== undefined &&'
         'document.getElementById("gb") !== null')
@@ -41,8 +41,11 @@ class ToughEnergyCasesPageSet(page_set_module.PageSet):
         archive_data_file='data/tough_energy_cases.json',
         bucket=page_set_module.PARTNER_BUCKET)
 
+    # TODO: this part of the test is disabled because it fails when
+    # run with replay data and not with live data.  See crbug.com/465692
+    # for complete details.
     # Why: productivity, top google properties
-    self.AddUserStory(GooglePage('https://mail.google.com/mail/', self))
+    #self.AddUserStory(GooglePage('https://mail.google.com/mail/', self))
 
     # Disabled: pegs CPU too much to get meaningful results.
     # Why: Image constantly changed in the background, above the fold

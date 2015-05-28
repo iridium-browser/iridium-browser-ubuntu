@@ -6,32 +6,39 @@
 
 #include <cmath>
 
+#include "base/command_line.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
+#include "mojo/services/html_viewer/blink_resource_constants.h"
 #include "mojo/services/html_viewer/webthread_impl.h"
 #include "net/base/data_url.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_util.h"
 #include "third_party/WebKit/public/platform/WebWaitableEvent.h"
+#include "ui/events/gestures/blink/web_gesture_curve_impl.h"
 
 namespace html_viewer {
 namespace {
 
+// Allows overriding user agent scring.
+const char kUserAgentSwitch[] = "user-agent";
+
 // TODO(darin): Figure out what our UA should really be.
-const char kUserAgentString[] =
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
-  "Chrome/35.0.1916.153 Safari/537.36";
+const char kDefaultUserAgentString[] =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/35.0.1916.153 Safari/537.36";
 
 class WebWaitableEventImpl : public blink::WebWaitableEvent {
  public:
   WebWaitableEventImpl() : impl_(new base::WaitableEvent(false, false)) {}
-  virtual ~WebWaitableEventImpl() {}
+  ~WebWaitableEventImpl() override {}
 
-  virtual void wait() { impl_->Wait(); }
-  virtual void signal() { impl_->Signal(); }
+  void wait() override { impl_->Wait(); }
+  void signal() override { impl_->Signal(); }
 
   base::WaitableEvent* impl() {
     return impl_.get();
@@ -50,7 +57,8 @@ BlinkPlatformImpl::BlinkPlatformImpl()
       shared_timer_fire_time_(0.0),
       shared_timer_fire_time_was_set_while_suspended_(false),
       shared_timer_suspended_(0),
-      current_thread_slot_(&DestroyCurrentThread) {
+      current_thread_slot_(&DestroyCurrentThread),
+      scheduler_(main_loop_->message_loop_proxy()) {
 }
 
 BlinkPlatformImpl::~BlinkPlatformImpl() {
@@ -62,6 +70,10 @@ blink::WebMimeRegistry* BlinkPlatformImpl::mimeRegistry() {
 
 blink::WebThemeEngine* BlinkPlatformImpl::themeEngine() {
   return &theme_engine_;
+}
+
+blink::WebScheduler* BlinkPlatformImpl::scheduler() {
+  return &scheduler_;
 }
 
 blink::WebString BlinkPlatformImpl::defaultLocale() {
@@ -143,6 +155,20 @@ const unsigned char* BlinkPlatformImpl::getTraceCategoryEnabledFlag(
   return buf;
 }
 
+blink::WebData BlinkPlatformImpl::loadResource(const char* resource) {
+  for (size_t i = 0; i < arraysize(kDataResources); ++i) {
+    if (!strcmp(resource, kDataResources[i].name)) {
+      int length;
+      const unsigned char* data =
+          blink_resource_map_.GetResource(kDataResources[i].id, &length);
+      CHECK(data != nullptr && length > 0);
+      return blink::WebData(reinterpret_cast<const char*>(data), length);
+    }
+  }
+  NOTREACHED() << "Requested resource is unavailable: " << resource;
+  return blink::WebData();
+}
+
 blink::WebURLLoader* BlinkPlatformImpl::createURLLoader() {
   return NULL;
 }
@@ -152,7 +178,12 @@ blink::WebSocketHandle* BlinkPlatformImpl::createWebSocketHandle() {
 }
 
 blink::WebString BlinkPlatformImpl::userAgent() {
-  return blink::WebString::fromUTF8(kUserAgentString);
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(kUserAgentSwitch)) {
+    return blink::WebString::fromUTF8(
+        command_line->GetSwitchValueASCII(kUserAgentSwitch));
+  }
+  return blink::WebString::fromUTF8(kDefaultUserAgentString);
 }
 
 blink::WebData BlinkPlatformImpl::parseDataURL(
@@ -178,6 +209,14 @@ blink::WebURLError BlinkPlatformImpl::cancelledError(const blink::WebURL& url)
   error.staleCopyInCache = false;
   error.isCancellation = true;
   return error;
+}
+
+bool BlinkPlatformImpl::isReservedIPAddress(
+    const blink::WebString& host) const {
+  net::IPAddressNumber address;
+  if (!net::ParseURLHostnameToNumber(host.utf8(), &address))
+    return false;
+  return net::IsIPAddressReserved(address);
 }
 
 blink::WebThread* BlinkPlatformImpl::createThread(const char* name) {
@@ -217,6 +256,17 @@ blink::WebWaitableEvent* BlinkPlatformImpl::waitMultipleEvents(
       vector_as_array(&events), events.size());
   DCHECK_LT(idx, web_events.size());
   return web_events[idx];
+}
+
+blink::WebGestureCurve* BlinkPlatformImpl::createFlingAnimationCurve(
+    blink::WebGestureDevice device_source,
+    const blink::WebFloatPoint& velocity,
+    const blink::WebSize& cumulative_scroll) {
+  const bool is_main_thread = true;
+  return ui::WebGestureCurveImpl::CreateFromDefaultPlatformCurve(
+             gfx::Vector2dF(velocity.x, velocity.y),
+             gfx::Vector2dF(cumulative_scroll.width, cumulative_scroll.height),
+             is_main_thread).release();
 }
 
 // static

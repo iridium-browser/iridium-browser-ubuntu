@@ -43,7 +43,7 @@ Constructor
 # FIXME: remove [ConstructorCallWith=Document], as can instead use
 # [ConstructorCallWith=ExecutionContext] + toDocument(executionContext)
 ConstructorCallWith=ExecutionContext|ScriptState|Document
-Custom=|Getter|Setter|LegacyCallAsFunction|ToV8|VisitDOMWrapper|PropertyGetter|PropertyEnumerator|PropertyQuery
+Custom=|Getter|Setter|LegacyCallAsFunction|ToV8|VisitDOMWrapper|PropertyGetter|PropertyEnumerator|PropertyQuery|CallEpilogue
 CustomConstructor
 CustomElementCallbacks
 Default=Undefined
@@ -52,6 +52,7 @@ DeprecateAs=*
 DoNotCheckConstants
 DoNotCheckSecurity=|Setter
 DoNotCheckSignature
+DoNotExposeJSAccessors
 EnforceRange
 EventConstructor
 ExposeJSAccessors
@@ -63,9 +64,12 @@ ImplementedAs=*
 ImplementedInPrivateScript
 InitializedByEventConstructor
 Iterable
+LegacyInterfaceTypeChecking
 LegacyTreatAsPartialInterface
 LogActivity=|GetterOnly|SetterOnly
 LogAllWorlds
+NewObject
+Measure
 MeasureAs=*
 NamedConstructor=*
 NoImplHeader
@@ -91,13 +95,14 @@ Replaceable
 # Valid values for [RuntimeEnabled] are the Runtime Enabled Features, listed in
 # Source/core/page/RuntimeEnabledFeatures.in
 RuntimeEnabled=*
+SameObject
 SetWrapperReferenceFrom=*
 SetWrapperReferenceTo=*
 SetterCallWith=ExecutionContext|ScriptArguments|ActiveWindow|FirstWindow
 TreatNullAs=NullString|EmptyString
 TreatReturnedNullStringAs=Null|Undefined
 TreatUndefinedAs=NullString
-TypeChecking=Interface|Unrestricted
+TypeChecking=Interface
 URL
 Unforgeable
 WillBeGarbageCollected

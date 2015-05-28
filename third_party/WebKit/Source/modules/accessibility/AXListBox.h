@@ -29,23 +29,33 @@
 #ifndef AXListBox_h
 #define AXListBox_h
 
-#include "modules/accessibility/AXRenderObject.h"
+#include "modules/accessibility/AXLayoutObject.h"
 
 namespace blink {
 
 class AXObjectCacheImpl;
 
-class AXListBox final : public AXRenderObject {
+class AXListBox final : public AXLayoutObject {
 
 private:
-    AXListBox(RenderObject*, AXObjectCacheImpl*);
+    AXListBox(LayoutObject*, AXObjectCacheImpl*);
 
 public:
-    static PassRefPtr<AXListBox> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXListBox> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AXListBox();
 
-    virtual AccessibilityRole roleValue() const override { return ListBoxRole; }
+    virtual AccessibilityRole roleValue() const override;
+    virtual bool isAXListBox() const override { return true; }
+    virtual bool shouldFocusActiveDescendant() const override { return true; }
+    virtual AXObject* activeDescendant() const override;
+
+    void activeIndexChanged();
+
+private:
+    int m_activeIndex;
 };
+
+DEFINE_AX_OBJECT_TYPE_CASTS(AXListBox, isAXListBox());
 
 } // namespace blink
 

@@ -45,10 +45,7 @@ enum UMALinuxGlibcVersion {
   UMA_LINUX_GLIBC_NOT_PARSEABLE,
   UMA_LINUX_GLIBC_UNKNOWN,
   UMA_LINUX_GLIBC_2_11,
-  UMA_LINUX_GLIBC_2_19 = UMA_LINUX_GLIBC_2_11 + 8,
-  // NOTE: Add new version above this line and update the enum list in
-  // tools/metrics/histograms/histograms.xml accordingly.
-  UMA_LINUX_GLIBC_VERSION_COUNT
+  // To log newer versions, just update tools/metrics/histograms/histograms.xml.
 };
 
 enum UMALinuxWindowManager {
@@ -125,23 +122,21 @@ void RecordLinuxGlibcVersion() {
   UMALinuxGlibcVersion glibc_version_result = UMA_LINUX_GLIBC_NOT_PARSEABLE;
   if (version.IsValid() && version.components().size() == 2) {
     glibc_version_result = UMA_LINUX_GLIBC_UNKNOWN;
-    int glibc_major_version = version.components()[0];
-    int glibc_minor_version = version.components()[1];
+    uint32_t glibc_major_version = version.components()[0];
+    uint32_t glibc_minor_version = version.components()[1];
     if (glibc_major_version == 2) {
       // A constant to translate glibc 2.x minor versions to their
       // equivalent UMALinuxGlibcVersion values.
       const int kGlibcMinorVersionTranslationOffset = 11 - UMA_LINUX_GLIBC_2_11;
-      int translated_glibc_minor_version =
+      uint32_t translated_glibc_minor_version =
           glibc_minor_version - kGlibcMinorVersionTranslationOffset;
-      if (translated_glibc_minor_version >= UMA_LINUX_GLIBC_2_11 &&
-          translated_glibc_minor_version <= UMA_LINUX_GLIBC_2_19) {
+      if (translated_glibc_minor_version >= UMA_LINUX_GLIBC_2_11) {
         glibc_version_result =
             static_cast<UMALinuxGlibcVersion>(translated_glibc_minor_version);
       }
     }
   }
-  UMA_HISTOGRAM_ENUMERATION("Linux.GlibcVersion", glibc_version_result,
-                            UMA_LINUX_GLIBC_VERSION_COUNT);
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Linux.GlibcVersion", glibc_version_result);
 #endif
 }
 

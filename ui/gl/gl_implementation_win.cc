@@ -8,14 +8,17 @@
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_path.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/trace_event/trace_event.h"
 #include "base/win/windows_version.h"
+// TODO(jmadill): Apply to all platforms eventually
+#include "ui/gl/angle_platform_impl.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context_stub_with_extensions.h"
 #include "ui/gl/gl_egl_api_implementation.h"
@@ -96,6 +99,12 @@ typedef void (*AddTraceEventFunc)(char phase,
 typedef void (__stdcall *SetTraceFunctionPointersFunc)(
     GetCategoryEnabledFlagFunc get_category_enabled_flag,
     AddTraceEventFunc add_trace_event_func);
+
+// TODO(jmadill): Apply to all platforms eventually
+base::LazyInstance<ANGLEPlatformImpl> g_angle_platform_impl =
+    LAZY_INSTANCE_INITIALIZER;
+
+ANGLEPlatformShutdownFunc g_angle_platform_shutdown = nullptr;
 
 }  // namespace
 
@@ -204,6 +213,7 @@ bool InitializeStaticGLBindings(GLImplementation implementation) {
 #endif
 
       if (!using_swift_shader) {
+        // TODO(jmadill): remove when platform impl supports tracing
         SetTraceFunctionPointersFunc set_trace_function_pointers =
             reinterpret_cast<SetTraceFunctionPointersFunc>(
                 base::GetFunctionPointerFromNativeLibrary(
@@ -211,6 +221,23 @@ bool InitializeStaticGLBindings(GLImplementation implementation) {
         if (set_trace_function_pointers) {
           set_trace_function_pointers(&AngleGetTraceCategoryEnabledFlag,
                                       &AngleAddTraceEvent);
+        }
+
+        // Init ANGLE platform here, before we call GetPlatformDisplay().
+        // TODO(jmadill): Apply to all platforms eventually
+        ANGLEPlatformInitializeFunc angle_platform_init =
+            reinterpret_cast<ANGLEPlatformInitializeFunc>(
+                base::GetFunctionPointerFromNativeLibrary(
+                    gles_library,
+                    "ANGLEPlatformInitialize"));
+        if (angle_platform_init) {
+          angle_platform_init(&g_angle_platform_impl.Get());
+
+          g_angle_platform_shutdown =
+              reinterpret_cast<ANGLEPlatformShutdownFunc>(
+                  base::GetFunctionPointerFromNativeLibrary(
+                      gles_library,
+                      "ANGLEPlatformShutdown"));
         }
       }
 
@@ -320,16 +347,9 @@ bool InitializeDynamicGLBindings(GLImplementation implementation,
     GLContext* context) {
   switch (implementation) {
     case kGLImplementationOSMesaGL:
-      InitializeDynamicGLBindingsGL(context);
-      InitializeDynamicGLBindingsOSMESA(context);
-      break;
     case kGLImplementationEGLGLES2:
-      InitializeDynamicGLBindingsGL(context);
-      InitializeDynamicGLBindingsEGL(context);
-      break;
     case kGLImplementationDesktopGL:
       InitializeDynamicGLBindingsGL(context);
-      InitializeDynamicGLBindingsWGL(context);
       break;
     case kGLImplementationMockGL:
       if (!context) {
@@ -355,6 +375,11 @@ void InitializeDebugGLBindings() {
 }
 
 void ClearGLBindings() {
+  // TODO(jmadill): Apply to all platforms eventually
+  if (g_angle_platform_shutdown) {
+    g_angle_platform_shutdown();
+  }
+
   ClearGLBindingsEGL();
   ClearGLBindingsGL();
   ClearGLBindingsOSMESA();

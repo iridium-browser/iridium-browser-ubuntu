@@ -78,7 +78,9 @@ Me2MeNativeMessagingHost::Me2MeNativeMessagingHost(
     scoped_refptr<protocol::PairingRegistry> pairing_registry,
     scoped_ptr<OAuthClient> oauth_client)
     : needs_elevation_(needs_elevation),
+#if defined(OS_WIN)
       parent_window_handle_(parent_window_handle),
+#endif
       channel_(channel.Pass()),
       daemon_controller_(daemon_controller),
       pairing_registry_(pairing_registry),
@@ -278,6 +280,12 @@ void Me2MeNativeMessagingHost::ProcessUpdateDaemonConfig(
     scoped_ptr<base::DictionaryValue> response) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  if (needs_elevation_) {
+    if (!DelegateToElevatedHost(message.Pass()))
+      SendAsyncResult(response.Pass(), DaemonController::RESULT_FAILED);
+    return;
+  }
+
   scoped_ptr<base::DictionaryValue> config_dict =
       ConfigDictionaryFromMessage(message.Pass());
   if (!config_dict) {
@@ -331,6 +339,12 @@ void Me2MeNativeMessagingHost::ProcessStartDaemon(
     scoped_ptr<base::DictionaryValue> response) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  if (needs_elevation_) {
+    if (!DelegateToElevatedHost(message.Pass()))
+      SendAsyncResult(response.Pass(), DaemonController::RESULT_FAILED);
+    return;
+  }
+
   bool consent;
   if (!message->GetBoolean("consent", &consent)) {
     LOG(ERROR) << "'consent' not found.";
@@ -356,6 +370,12 @@ void Me2MeNativeMessagingHost::ProcessStopDaemon(
     scoped_ptr<base::DictionaryValue> response) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  if (needs_elevation_) {
+    if (!DelegateToElevatedHost(message.Pass()))
+      SendAsyncResult(response.Pass(), DaemonController::RESULT_FAILED);
+    return;
+  }
+
   daemon_controller_->Stop(
       base::Bind(&Me2MeNativeMessagingHost::SendAsyncResult, weak_ptr_,
                  base::Passed(&response)));
@@ -370,12 +390,6 @@ void Me2MeNativeMessagingHost::ProcessGetDaemonState(
   switch (state) {
     case DaemonController::STATE_NOT_IMPLEMENTED:
       response->SetString("state", "NOT_IMPLEMENTED");
-      break;
-    case DaemonController::STATE_NOT_INSTALLED:
-      response->SetString("state", "NOT_INSTALLED");
-      break;
-    case DaemonController::STATE_INSTALLING:
-      response->SetString("state", "INSTALLING");
       break;
     case DaemonController::STATE_STOPPED:
       response->SetString("state", "STOPPED");
@@ -564,8 +578,10 @@ void Me2MeNativeMessagingHost::EnsureElevatedHostCreated() {
 
   // Create a security descriptor that gives full access to the caller and
   // denies access by anyone else.
-  std::string security_descriptor = base::StringPrintf(
-      "O:%1$sG:%1$sD:(A;;GA;;;%1$s)", base::UTF16ToASCII(user_sid).c_str());
+  std::string user_sid_ascii = base::UTF16ToASCII(user_sid);
+  std::string security_descriptor =
+      base::StringPrintf("O:%sG:%sD:(A;;GA;;;%s)", user_sid_ascii.c_str(),
+                         user_sid_ascii.c_str(), user_sid_ascii.c_str());
 
   ScopedSd sd = ConvertSddlToSd(security_descriptor);
   if (!sd) {

@@ -45,7 +45,7 @@
 
 #include "src/arm/constants-arm.h"
 #include "src/assembler.h"
-#include "src/serialize.h"
+#include "src/compiler.h"
 
 namespace v8 {
 namespace internal {
@@ -794,6 +794,11 @@ class Assembler : public AssemblerBase {
   inline static void deserialization_set_special_target_at(
       Address constant_pool_entry, Code* code, Address target);
 
+  // This sets the internal reference at the pc.
+  inline static void deserialization_set_target_internal_reference_at(
+      Address pc, Address target,
+      RelocInfo::Mode mode = RelocInfo::INTERNAL_REFERENCE);
+
   // Here we are patching the address in the constant pool, not the actual call
   // instruction.  The address in the constant pool is the same size as a
   // pointer.
@@ -823,6 +828,8 @@ class Assembler : public AssemblerBase {
   static const int kPcLoadDelta = 8;
 
   static const int kJSReturnSequenceInstructions = 4;
+  static const int kJSReturnSequenceLength =
+      kJSReturnSequenceInstructions * kInstrSize;
   static const int kDebugBreakSlotInstructions = 3;
   static const int kDebugBreakSlotLength =
       kDebugBreakSlotInstructions * kInstrSize;
@@ -1398,6 +1405,10 @@ class Assembler : public AssemblerBase {
   // Use --code-comments to enable.
   void RecordComment(const char* msg);
 
+  // Record a deoptimization reason that can be used by a log or cpu profiler.
+  // Use --trace-deopt to enable.
+  void RecordDeoptReason(const int reason, const SourcePosition position);
+
   // Record the emission of a constant pool.
   //
   // The emission of constant pool depends on the size of the code generated and
@@ -1423,6 +1434,7 @@ class Assembler : public AssemblerBase {
   // are not emitted as part of the tables generated.
   void db(uint8_t data);
   void dd(uint32_t data);
+  void dd(Label* label);
 
   // Emits the address of the code stub's first instruction.
   void emit_code_stub_address(Code* stub);

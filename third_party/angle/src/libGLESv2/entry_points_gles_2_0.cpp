@@ -628,7 +628,7 @@ void GL_APIENTRY Clear(GLbitfield mask)
             return;
         }
 
-        Error error = framebufferObject->clear(context->getState(), mask);
+        Error error = framebufferObject->clear(context->getData(), mask);
         if (error.isError())
         {
             context->recordError(error);
@@ -645,7 +645,7 @@ void GL_APIENTRY ClearColor(GLclampf red, GLclampf green, GLclampf blue, GLclamp
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        context->getState().setClearColor(red, green, blue, alpha);
+        context->getState().setColorClearValue(red, green, blue, alpha);
     }
 }
 
@@ -656,7 +656,7 @@ void GL_APIENTRY ClearDepthf(GLclampf depth)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        context->getState().setClearDepth(depth);
+        context->getState().setDepthClearValue(depth);
     }
 }
 
@@ -667,7 +667,7 @@ void GL_APIENTRY ClearStencil(GLint s)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        context->getState().setClearStencil(s);
+        context->getState().setStencilClearValue(s);
     }
 }
 
@@ -742,7 +742,7 @@ void GL_APIENTRY CompressedTexImage2D(GLenum target, GLint level, GLenum interna
         }
 
         Extents size(width, height, 1);
-        Texture *texture = context->getTargetTexture(IsCubemapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
+        Texture *texture = context->getTargetTexture(IsCubeMapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
         Error error = texture->setCompressedImage(target, level, internalformat, size, context->getState().getUnpackState(), 
                                                   reinterpret_cast<const uint8_t *>(data));
         if (error.isError())
@@ -787,7 +787,7 @@ void GL_APIENTRY CompressedTexSubImage2D(GLenum target, GLint level, GLint xoffs
 
 
         Box area(xoffset, yoffset, 0, width, height, 1);
-        Texture *texture = context->getTargetTexture(IsCubemapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
+        Texture *texture = context->getTargetTexture(IsCubeMapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
         Error error = texture->setCompressedSubImage(target, level, area, format, context->getState().getUnpackState(),
                                                      reinterpret_cast<const uint8_t *>(data));
         if (error.isError())
@@ -824,7 +824,7 @@ void GL_APIENTRY CopyTexImage2D(GLenum target, GLint level, GLenum internalforma
         Rectangle sourceArea(x, y, width, height);
 
         const Framebuffer *framebuffer = context->getState().getReadFramebuffer();
-        Texture *texture = context->getTargetTexture(IsCubemapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
+        Texture *texture = context->getTargetTexture(IsCubeMapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
         Error error = texture->copyImage(target, level, sourceArea, internalformat, framebuffer);
         if (error.isError())
         {
@@ -861,7 +861,7 @@ void GL_APIENTRY CopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GL
         Rectangle sourceArea(x, y, width, height);
 
         const Framebuffer *framebuffer = context->getState().getReadFramebuffer();
-        Texture *texture = context->getTargetTexture(IsCubemapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
+        Texture *texture = context->getTargetTexture(IsCubeMapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
         Error error = texture->copySubImage(target, level, destOffset, sourceArea, framebuffer);
         if (error.isError())
         {
@@ -1292,7 +1292,7 @@ void GL_APIENTRY Finish(void)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        Error error = context->sync(true);
+        Error error = context->finish();
         if (error.isError())
         {
             context->recordError(error);
@@ -1308,7 +1308,7 @@ void GL_APIENTRY Flush(void)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        Error error = context->sync(false);
+        Error error = context->flush();
         if (error.isError())
         {
             context->recordError(error);
@@ -1379,7 +1379,7 @@ void GL_APIENTRY FramebufferTexture2D(GLenum target, GLenum attachment, GLenum t
             }
             else
             {
-                ASSERT(IsCubemapTextureTarget(textarget));
+                ASSERT(IsCubeMapTextureTarget(textarget));
                 index = ImageIndex::MakeCube(textarget, level);
             }
 
@@ -1453,7 +1453,8 @@ void GL_APIENTRY GenerateMipmap(GLenum target)
             return;
         }
 
-        GLenum internalFormat = texture->getBaseLevelInternalFormat();
+        GLenum baseTarget = (target == GL_TEXTURE_CUBE_MAP) ? GL_TEXTURE_CUBE_MAP_POSITIVE_X : target;
+        GLenum internalFormat = texture->getInternalFormat(baseTarget, 0);
         const TextureCaps &formatCaps = context->getTextureCaps().get(internalFormat);
         const InternalFormat &formatInfo = GetInternalFormatInfo(internalFormat);
 
@@ -1484,7 +1485,7 @@ void GL_APIENTRY GenerateMipmap(GLenum target)
         }
 
         // Non-power of 2 ES2 check
-        if (!context->getExtensions().textureNPOT && (!isPow2(texture->getBaseLevelWidth()) || !isPow2(texture->getBaseLevelHeight())))
+        if (!context->getExtensions().textureNPOT && (!isPow2(texture->getWidth(baseTarget, 0)) || !isPow2(texture->getHeight(baseTarget, 0))))
         {
             ASSERT(context->getClientVersion() <= 2 && (target == GL_TEXTURE_2D || target == GL_TEXTURE_CUBE_MAP));
             context->recordError(Error(GL_INVALID_OPERATION));
@@ -1492,14 +1493,10 @@ void GL_APIENTRY GenerateMipmap(GLenum target)
         }
 
         // Cube completeness check
-        if (target == GL_TEXTURE_CUBE_MAP)
+        if (target == GL_TEXTURE_CUBE_MAP && !texture->isCubeComplete())
         {
-            TextureCubeMap *textureCube = static_cast<TextureCubeMap *>(texture);
-            if (!textureCube->isCubeComplete())
-            {
-                context->recordError(Error(GL_INVALID_OPERATION));
-                return;
-            }
+            context->recordError(Error(GL_INVALID_OPERATION));
+            return;
         }
 
         Error error = texture->generateMipmaps();
@@ -2369,39 +2366,66 @@ void GL_APIENTRY GetShaderPrecisionFormat(GLenum shadertype, GLenum precisiontyp
         switch (shadertype)
         {
           case GL_VERTEX_SHADER:
+            switch (precisiontype)
+            {
+              case GL_LOW_FLOAT:
+                context->getCaps().vertexLowpFloat.get(range, precision);
+                break;
+              case GL_MEDIUM_FLOAT:
+                context->getCaps().vertexMediumpFloat.get(range, precision);
+                break;
+              case GL_HIGH_FLOAT:
+                context->getCaps().vertexHighpFloat.get(range, precision);
+                break;
+
+              case GL_LOW_INT:
+                context->getCaps().vertexLowpInt.get(range, precision);
+                break;
+              case GL_MEDIUM_INT:
+                context->getCaps().vertexMediumpInt.get(range, precision);
+                break;
+              case GL_HIGH_INT:
+                context->getCaps().vertexHighpInt.get(range, precision);
+                break;
+
+              default:
+                context->recordError(Error(GL_INVALID_ENUM));
+                return;
+            }
+            break;
           case GL_FRAGMENT_SHADER:
-            break;
+            switch (precisiontype)
+            {
+              case GL_LOW_FLOAT:
+                context->getCaps().fragmentLowpFloat.get(range, precision);
+                break;
+              case GL_MEDIUM_FLOAT:
+                context->getCaps().fragmentMediumpFloat.get(range, precision);
+                break;
+              case GL_HIGH_FLOAT:
+                context->getCaps().fragmentHighpFloat.get(range, precision);
+                break;
 
+              case GL_LOW_INT:
+                context->getCaps().fragmentLowpInt.get(range, precision);
+                break;
+              case GL_MEDIUM_INT:
+                context->getCaps().fragmentMediumpInt.get(range, precision);
+                break;
+              case GL_HIGH_INT:
+                context->getCaps().fragmentHighpInt.get(range, precision);
+                break;
+
+              default:
+                context->recordError(Error(GL_INVALID_ENUM));
+                return;
+            }
+            break;
           default:
             context->recordError(Error(GL_INVALID_ENUM));
             return;
         }
 
-        switch (precisiontype)
-        {
-          case GL_LOW_FLOAT:
-          case GL_MEDIUM_FLOAT:
-          case GL_HIGH_FLOAT:
-            // Assume IEEE 754 precision
-            range[0] = 127;
-            range[1] = 127;
-            *precision = 23;
-            break;
-
-          case GL_LOW_INT:
-          case GL_MEDIUM_INT:
-          case GL_HIGH_INT:
-            // Some (most) hardware only supports single-precision floating-point numbers,
-            // which can accurately represent integers up to +/-16777216
-            range[0] = 24;
-            range[1] = 24;
-            *precision = 0;
-            break;
-
-          default:
-            context->recordError(Error(GL_INVALID_ENUM));
-            return;
-        }
     }
 }
 
@@ -2832,7 +2856,6 @@ void GL_APIENTRY GetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params)
             return;
         }
 
-        const VertexAttribute &attribState = context->getState().getVertexAttribState(index);
         if (!ValidateGetVertexAttribParameters(context, pname))
         {
             return;
@@ -2848,6 +2871,7 @@ void GL_APIENTRY GetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params)
         }
         else
         {
+            const VertexAttribute &attribState = context->getState().getVertexArray()->getVertexAttribute(index);
             *params = QuerySingleVertexAttributeParameter<GLfloat>(attribState, pname);
         }
     }
@@ -2866,8 +2890,6 @@ void GL_APIENTRY GetVertexAttribiv(GLuint index, GLenum pname, GLint* params)
             return;
         }
 
-        const VertexAttribute &attribState = context->getState().getVertexAttribState(index);
-
         if (!ValidateGetVertexAttribParameters(context, pname))
         {
             return;
@@ -2884,6 +2906,7 @@ void GL_APIENTRY GetVertexAttribiv(GLuint index, GLenum pname, GLint* params)
         }
         else
         {
+            const VertexAttribute &attribState = context->getState().getVertexArray()->getVertexAttribute(index);
             *params = QuerySingleVertexAttributeParameter<GLint>(attribState, pname);
         }
     }
@@ -3131,6 +3154,31 @@ void GL_APIENTRY PixelStorei(GLenum pname, GLint param)
     Context *context = GetValidGlobalContext();
     if (context)
     {
+        if (context->getClientVersion() < 3)
+        {
+            switch (pname)
+            {
+              case GL_UNPACK_IMAGE_HEIGHT:
+              case GL_UNPACK_SKIP_IMAGES:
+              case GL_UNPACK_ROW_LENGTH:
+              case GL_UNPACK_SKIP_ROWS:
+              case GL_UNPACK_SKIP_PIXELS:
+              case GL_PACK_ROW_LENGTH:
+              case GL_PACK_SKIP_ROWS:
+              case GL_PACK_SKIP_PIXELS:
+                context->recordError(Error(GL_INVALID_ENUM));
+                return;
+            }
+        }
+
+        if (param < 0)
+        {
+            context->recordError(Error(GL_INVALID_VALUE, "Cannot use negative values in PixelStorei"));
+            return;
+        }
+
+        State &state = context->getState();
+
         switch (pname)
         {
           case GL_UNPACK_ALIGNMENT:
@@ -3140,7 +3188,7 @@ void GL_APIENTRY PixelStorei(GLenum pname, GLint param)
                 return;
             }
 
-            context->getState().setUnpackAlignment(param);
+            state.setUnpackAlignment(param);
             break;
 
           case GL_PACK_ALIGNMENT:
@@ -3150,27 +3198,51 @@ void GL_APIENTRY PixelStorei(GLenum pname, GLint param)
                 return;
             }
 
-            context->getState().setPackAlignment(param);
+            state.setPackAlignment(param);
             break;
 
           case GL_PACK_REVERSE_ROW_ORDER_ANGLE:
-            context->getState().setPackReverseRowOrder(param != 0);
+            state.setPackReverseRowOrder(param != 0);
+            break;
+
+          case GL_UNPACK_ROW_LENGTH:
+            ASSERT(context->getClientVersion() >= 3);
+            state.setUnpackRowLength(param);
             break;
 
           case GL_UNPACK_IMAGE_HEIGHT:
+            ASSERT(context->getClientVersion() >= 3);
+            state.getUnpackState().imageHeight = param;
+            break;
+
           case GL_UNPACK_SKIP_IMAGES:
-          case GL_UNPACK_ROW_LENGTH:
+            ASSERT(context->getClientVersion() >= 3);
+            state.getUnpackState().skipImages = param;
+            break;
+
           case GL_UNPACK_SKIP_ROWS:
+            ASSERT(context->getClientVersion() >= 3);
+            state.getUnpackState().skipRows = param;
+            break;
+
           case GL_UNPACK_SKIP_PIXELS:
+            ASSERT(context->getClientVersion() >= 3);
+            state.getUnpackState().skipPixels = param;
+            break;
+
           case GL_PACK_ROW_LENGTH:
+            ASSERT(context->getClientVersion() >= 3);
+            state.getPackState().rowLength = param;
+            break;
+
           case GL_PACK_SKIP_ROWS:
+            ASSERT(context->getClientVersion() >= 3);
+            state.getPackState().skipRows = param;
+            break;
+
           case GL_PACK_SKIP_PIXELS:
-            if (context->getClientVersion() < 3)
-            {
-                context->recordError(Error(GL_INVALID_ENUM));
-                return;
-            }
-            UNIMPLEMENTED();
+            ASSERT(context->getClientVersion() >= 3);
+            state.getPackState().skipPixels = param;
             break;
 
           default:
@@ -3246,8 +3318,8 @@ void GL_APIENTRY ReleaseShaderCompiler(void)
 
 void GL_APIENTRY RenderbufferStorage(GLenum target, GLenum internalformat, GLsizei width, GLsizei height)
 {
-    EVENT("(GLenum target = 0x%X, GLsizei samples = %d, GLenum internalformat = 0x%X, GLsizei width = %d, GLsizei height = %d)",
-          target, samples, internalformat, width, height);
+    EVENT("(GLenum target = 0x%X, GLenum internalformat = 0x%X, GLsizei width = %d, GLsizei height = %d)",
+          target, internalformat, width, height);
 
     Context *context = GetValidGlobalContext();
     if (context)
@@ -3259,7 +3331,7 @@ void GL_APIENTRY RenderbufferStorage(GLenum target, GLenum internalformat, GLsiz
         }
 
         Renderbuffer *renderbuffer = context->getState().getCurrentRenderbuffer();
-        Error error = renderbuffer->setStorage(width, height, internalformat, 0);
+        Error error = renderbuffer->setStorage(internalformat, width, height);
         if (error.isError())
         {
             context->recordError(error);
@@ -3554,7 +3626,7 @@ void GL_APIENTRY TexImage2D(GLenum target, GLint level, GLint internalformat, GL
         }
 
         Extents size(width, height, 1);
-        Texture *texture = context->getTargetTexture(IsCubemapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
+        Texture *texture = context->getTargetTexture(IsCubeMapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
         Error error = texture->setImage(target, level, internalformat, size, format, type, context->getState().getUnpackState(),
                                         reinterpret_cast<const uint8_t *>(pixels));
         if (error.isError())
@@ -3695,7 +3767,7 @@ void GL_APIENTRY TexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint 
         }
 
         Box area(xoffset, yoffset, 0, width, height, 1);
-        Texture *texture = context->getTargetTexture(IsCubemapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
+        Texture *texture = context->getTargetTexture(IsCubeMapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
         Error error = texture->setSubImage(target, level, area, format, type, context->getState().getUnpackState(),
                                            reinterpret_cast<const uint8_t *>(pixels));
         if (error.isError())

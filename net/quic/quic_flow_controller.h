@@ -27,7 +27,7 @@ class NET_EXPORT_PRIVATE QuicFlowController {
  public:
   QuicFlowController(QuicConnection* connection,
                      QuicStreamId id,
-                     bool is_server,
+                     Perspective perspective,
                      QuicStreamOffset send_window_offset,
                      QuicStreamOffset receive_window_offset,
                      QuicByteCount max_receive_window);
@@ -56,12 +56,6 @@ class NET_EXPORT_PRIVATE QuicFlowController {
   // Send a BLOCKED frame if appropriate.
   void MaybeSendBlocked();
 
-  // Disable flow control.
-  void Disable();
-
-  // Returns true if flow control is enabled.
-  bool IsEnabled() const;
-
   // Returns true if flow control send limits have been reached.
   bool IsBlocked() const;
 
@@ -89,11 +83,8 @@ class NET_EXPORT_PRIVATE QuicFlowController {
   // connection level flow controller.
   QuicStreamId id_;
 
-  // True if flow control is enabled.
-  bool is_enabled_;
-
-  // True if this is owned by a server.
-  bool is_server_;
+  // Tracks if this is owned by a server or a client.
+  Perspective perspective_;
 
   // Track number of bytes received from the peer, which have been consumed
   // locally.

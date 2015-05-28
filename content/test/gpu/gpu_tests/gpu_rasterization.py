@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import cloud_storage_test_base
+import gpu_rasterization_expectations
 import optparse
 import page_sets
 
@@ -67,8 +68,15 @@ class GpuRasterization(cloud_storage_test_base.TestBase):
   """Tests that GPU rasterization produces valid content"""
   test = _GpuRasterizationValidator
 
+  @classmethod
+  def Name(cls):
+    return 'gpu_rasterization'
+
   def CreatePageSet(self, options):
     page_set = page_sets.GpuRasterizationTestsPageSet()
     for page in page_set.pages:
       page.script_to_evaluate_on_commit = test_harness_script
     return page_set
+
+  def CreateExpectations(self):
+    return gpu_rasterization_expectations.GpuRasterizationExpectations()

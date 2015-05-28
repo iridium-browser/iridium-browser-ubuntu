@@ -27,11 +27,8 @@ public:
         }
 
 protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         SkString str("glyph_pos");
         if (fStrokeWidth == 0.0f) {
             str.append("_h"); // h == Hairline.
@@ -48,9 +45,9 @@ protected:
         return str;
     }
 
-    virtual SkISize onISize() SK_OVERRIDE { return SkISize::Make(800, 600); }
+    SkISize onISize() override { return SkISize::Make(800, 600); }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         if (!fProp) {
             fProp.reset(sk_tool_utils::create_portable_typeface("Helvetica", SkTypeface::kNormal));
         }

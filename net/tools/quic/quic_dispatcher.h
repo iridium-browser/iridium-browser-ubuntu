@@ -8,30 +8,24 @@
 #ifndef NET_TOOLS_QUIC_QUIC_DISPATCHER_H_
 #define NET_TOOLS_QUIC_QUIC_DISPATCHER_H_
 
-#include <list>
-
 #include "base/basictypes.h"
 #include "base/containers/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/linked_hash_map.h"
 #include "net/quic/quic_blocked_writer_interface.h"
+#include "net/quic/quic_connection.h"
 #include "net/quic/quic_protocol.h"
 #include "net/tools/quic/quic_server_session.h"
 #include "net/tools/quic/quic_time_wait_list_manager.h"
 
 namespace net {
 
-class EpollServer;
 class QuicConfig;
 class QuicCryptoServerConfig;
-class QuicSession;
+class QuicServerSession;
 
 namespace tools {
-
-class DeleteSessionsAlarm;
-class QuicEpollConnectionHelper;
-class QuicPacketWriterWrapper;
 
 namespace test {
 class QuicDispatcherPeer;
@@ -46,7 +40,8 @@ class ProcessPacketInterface {
 };
 
 class QuicDispatcher : public QuicServerSessionVisitor,
-                       public ProcessPacketInterface {
+                       public ProcessPacketInterface,
+                       public QuicBlockedWriterInterface {
  public:
   // Creates per-connection packet writers out of the QuicDispatcher's shared
   // QuicPacketWriter. The per-connection writers' IsWriteBlocked() state must
@@ -74,18 +69,19 @@ class QuicDispatcher : public QuicServerSessionVisitor,
   typedef linked_hash_map<QuicBlockedWriterInterface*, bool> WriteBlockedList;
 
   // Due to the way delete_sessions_closure_ is registered, the Dispatcher must
-  // live until epoll_server Shutdown. |supported_versions| specifies the list
+  // live until server Shutdown. |supported_versions| specifies the std::list
   // of supported QUIC versions. Takes ownership of |packet_writer_factory|,
   // which is used to create per-connection writers.
   QuicDispatcher(const QuicConfig& config,
-                 const QuicCryptoServerConfig& crypto_config,
+                 const QuicCryptoServerConfig* crypto_config,
                  const QuicVersionVector& supported_versions,
                  PacketWriterFactory* packet_writer_factory,
-                 EpollServer* epoll_server);
+                 QuicConnectionHelperInterface* helper);
 
   ~QuicDispatcher() override;
 
-  virtual void Initialize(int fd);
+  // Takes ownership of |writer|.
+  void InitializeWithWriter(QuicPacketWriter* writer);
 
   // Process the incoming packet by creating a new session, passing it to
   // an existing session, or passing it to the TimeWaitListManager.
@@ -94,7 +90,7 @@ class QuicDispatcher : public QuicServerSessionVisitor,
                      const QuicEncryptedPacket& packet) override;
 
   // Called when the socket becomes writable to allow queued writes to happen.
-  virtual void OnCanWrite();
+  void OnCanWrite() override;
 
   // Returns true if there's anything in the blocked writer list.
   virtual bool HasPendingWrites() const;
@@ -119,23 +115,15 @@ class QuicDispatcher : public QuicServerSessionVisitor,
   void OnConnectionRemovedFromTimeWaitList(
       QuicConnectionId connection_id) override;
 
-  typedef base::hash_map<QuicConnectionId, QuicSession*> SessionMap;
+  typedef base::hash_map<QuicConnectionId, QuicServerSession*> SessionMap;
+
+  const SessionMap& session_map() const { return session_map_; }
 
   // Deletes all sessions on the closed session list and clears the list.
   void DeleteSessions();
 
-  const SessionMap& session_map() const { return session_map_; }
-
  protected:
-  // Instantiates a new low-level packet writer. Caller takes ownership of the
-  // returned object.
-  virtual QuicPacketWriter* CreateWriter(int fd);
-
-  virtual QuicSession* CreateQuicSession(QuicConnectionId connection_id,
-                                         const IPEndPoint& server_address,
-                                         const IPEndPoint& client_address);
-
-  virtual QuicConnection* CreateQuicConnection(
+  virtual QuicServerSession* CreateQuicSession(
       QuicConnectionId connection_id,
       const IPEndPoint& server_address,
       const IPEndPoint& client_address);
@@ -144,20 +132,24 @@ class QuicDispatcher : public QuicServerSessionVisitor,
   virtual bool OnUnauthenticatedPublicHeader(
       const QuicPacketPublicHeader& header);
 
+  // Called by OnUnauthenticatedPublicHeader when the packet is not for a
+  // connection that the dispatcher has a record of, but is not handled by
+  // certain simple processing rules.  This method may apply validity checks to
+  // reject stray packets.  If the packet appears to be valid, it calls
+  // CreateQuicSession to create a new session for the packet.  Returns the
+  // QuicServerSession that was created, or nullptr if the packet failed the
+  // validity checks.
+  virtual QuicServerSession* AdditionalValidityChecksThenCreateSession(
+      const QuicPacketPublicHeader& header,
+      QuicConnectionId connection_id);
+
   // Create and return the time wait list manager for this dispatcher, which
   // will be owned by the dispatcher as time_wait_list_manager_
   virtual QuicTimeWaitListManager* CreateQuicTimeWaitListManager();
 
-  // Replaces the packet writer with |writer|. Takes ownership of |writer|.
-  void set_writer(QuicPacketWriter* writer) {
-    writer_.reset(writer);
-  }
-
   QuicTimeWaitListManager* time_wait_list_manager() {
     return time_wait_list_manager_.get();
   }
-
-  EpollServer* epoll_server() { return epoll_server_; }
 
   const QuicVersionVector& supported_versions() const {
     return supported_versions_;
@@ -175,11 +167,13 @@ class QuicDispatcher : public QuicServerSessionVisitor,
 
   const QuicConfig& config() const { return config_; }
 
-  const QuicCryptoServerConfig& crypto_config() const { return crypto_config_; }
+  const QuicCryptoServerConfig* crypto_config() const {
+    return crypto_config_;
+  }
 
   QuicFramer* framer() { return &framer_; }
 
-  QuicEpollConnectionHelper* helper() { return helper_.get(); }
+  QuicConnectionHelperInterface* helper() { return helper_.get(); }
 
   QuicPacketWriter* writer() { return writer_.get(); }
 
@@ -197,7 +191,7 @@ class QuicDispatcher : public QuicServerSessionVisitor,
   class PacketWriterFactoryAdapter :
     public QuicConnection::PacketWriterFactory {
    public:
-    PacketWriterFactoryAdapter(QuicDispatcher* dispatcher);
+    explicit PacketWriterFactoryAdapter(QuicDispatcher* dispatcher);
     ~PacketWriterFactoryAdapter() override;
 
     QuicPacketWriter* Create(QuicConnection* connection) const override;
@@ -218,7 +212,7 @@ class QuicDispatcher : public QuicServerSessionVisitor,
 
   const QuicConfig& config_;
 
-  const QuicCryptoServerConfig& crypto_config_;
+  const QuicCryptoServerConfig* crypto_config_;
 
   // The list of connections waiting to write.
   WriteBlockedList write_blocked_list_;
@@ -228,16 +222,14 @@ class QuicDispatcher : public QuicServerSessionVisitor,
   // Entity that manages connection_ids in time wait state.
   scoped_ptr<QuicTimeWaitListManager> time_wait_list_manager_;
 
-  // An alarm which deletes closed sessions.
-  scoped_ptr<DeleteSessionsAlarm> delete_sessions_alarm_;
-
   // The list of closed but not-yet-deleted sessions.
-  std::list<QuicSession*> closed_session_list_;
-
-  EpollServer* epoll_server_;  // Owned by the server.
+  std::list<QuicServerSession*> closed_session_list_;
 
   // The helper used for all connections.
-  scoped_ptr<QuicEpollConnectionHelper> helper_;
+  scoped_ptr<QuicConnectionHelperInterface> helper_;
+
+  // An alarm which deletes closed sessions.
+  scoped_ptr<QuicAlarm> delete_sessions_alarm_;
 
   // The writer to write to the socket with.
   scoped_ptr<QuicPacketWriter> writer_;

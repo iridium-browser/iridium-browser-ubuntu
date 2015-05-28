@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_BROWSER_COMPOSITOR_NO_TRANSPORT_IMAGE_TRANSPORT_FACTORY_H_
-#define CONTENT_BROWSER_COMPOSITOR_NO_TRANSPORT_IMAGE_TRANSPORT_FACTORY_H_
+#ifndef CONTENT_BROWSER_COMPOSITOR_TEST_NO_TRANSPORT_IMAGE_TRANSPORT_FACTORY_H_
+#define CONTENT_BROWSER_COMPOSITOR_TEST_NO_TRANSPORT_IMAGE_TRANSPORT_FACTORY_H_
 
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
@@ -35,10 +35,10 @@ class NoTransportImageTransportFactory : public ImageTransportFactory {
 #endif
 
  private:
+  scoped_ptr<cc::SurfaceManager> surface_manager_;
   scoped_ptr<ui::ContextFactory> context_factory_;
   scoped_refptr<cc::ContextProvider> context_provider_;
   scoped_ptr<GLHelper> gl_helper_;
-  scoped_ptr<cc::SurfaceManager> surface_manager_;
   ObserverList<ImageTransportFactoryObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(NoTransportImageTransportFactory);
@@ -46,4 +46,4 @@ class NoTransportImageTransportFactory : public ImageTransportFactory {
 
 }  // namespace content
 
-#endif  // CONTENT_BROWSER_COMPOSITOR_NO_TRANSPORT_IMAGE_TRANSPORT_FACTORY_H_
+#endif  // CONTENT_BROWSER_COMPOSITOR_TEST_NO_TRANSPORT_IMAGE_TRANSPORT_FACTORY_H_

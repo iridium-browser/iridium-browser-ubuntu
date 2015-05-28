@@ -32,15 +32,13 @@ import android.widget.Spinner;
 import android.widget.TextView;
 
 import org.chromium.base.CalledByNative;
-import org.chromium.base.CommandLine;
-import org.chromium.chrome.ChromeSwitches;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.omnibox.OmniboxUrlEmphasizer;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.toolbar.ToolbarModel;
 import org.chromium.chrome.browser.ui.toolbar.ToolbarModelSecurityLevel;
-import org.chromium.content.browser.WebContentsObserver;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.ui.base.Clipboard;
 import org.chromium.ui.base.DeviceFormFactor;
 
@@ -76,11 +74,19 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         }
     }
 
-    private static class ElidedUrlTextView extends TextView {
+    /**
+     * A TextView which truncates and displays a URL such that the origin is always visible.
+     * The URL can be expanded by clicking on the it.
+     */
+    public static class ElidedUrlTextView extends TextView {
         // The number of lines to display when the URL is truncated. This number
         // should still allow the origin to be displayed. NULL before
         // setUrlAfterLayout() is called.
         private Integer mTruncatedUrlLinesToDisplay;
+
+        // The number of lines to display when the URL is expanded. This should be enough to display
+        // at most two lines of the fragment if there is one in the URL.
+        private Integer mFullLinesToDisplay;
 
         // If true, the text view will show the truncated text. If false, it
         // will show the full, expanded text.
@@ -103,33 +109,51 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
             mCurrentMaxLines = maxlines;
         }
 
+        /**
+         * Find the number of lines of text which must be shown in order to display the character at
+         * a given index.
+         */
+        private int getLineForIndex(int index) {
+            Layout layout = getLayout();
+            int endLine = 0;
+            while (endLine < layout.getLineCount() && layout.getLineEnd(endLine) < index) {
+                endLine++;
+            }
+            // Since endLine is an index, add 1 to get the number of lines.
+            return endLine + 1;
+        }
+
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             setMaxLines(Integer.MAX_VALUE);
             super.onMeasure(widthMeasureSpec, heightMeasureSpec);
             assert mProfile != null : "setProfile() must be called before layout.";
+            String urlText = getText().toString();
 
             // Lay out the URL in a StaticLayout that is the same size as our final
             // container.
-            Layout layout = getLayout();
-            int originEndIndex =
-                    OmniboxUrlEmphasizer.getOriginEndIndex(getText().toString(), mProfile);
+            int originEndIndex = OmniboxUrlEmphasizer.getOriginEndIndex(urlText, mProfile);
 
             // Find the range of lines containing the origin.
-            int originEndLineIndex = 0;
-            while (originEndLineIndex < layout.getLineCount()
-                    && layout.getLineEnd(originEndLineIndex) < originEndIndex) {
-                originEndLineIndex++;
-            }
+            int originEndLine = getLineForIndex(originEndIndex);
 
             // Display an extra line so we don't accidentally hide the origin with
             // ellipses
-            int lastLineIndexToDisplay = originEndLineIndex + 1;
+            mTruncatedUrlLinesToDisplay = originEndLine + 1;
 
-            // Since lastLineToDisplay is an index, add 1 to get the maximum number
-            // of lines. This will always be at least 2 lines (when the origin is
-            // fully contained on line 0).
-            mTruncatedUrlLinesToDisplay = lastLineIndexToDisplay + 1;
+            // Find the line where the fragment starts. Since # is a reserved character, it is safe
+            // to just search for the first # to appear in the url.
+            int fragmentStartIndex = urlText.indexOf('#');
+            if (fragmentStartIndex == -1) fragmentStartIndex = urlText.length();
+
+            int fragmentStartLine = getLineForIndex(fragmentStartIndex);
+            mFullLinesToDisplay = fragmentStartLine + 1;
+
+            // If there is no origin (according to OmniboxUrlEmphasizer), make sure the fragment is
+            // still hidden correctly.
+            if (mFullLinesToDisplay < mTruncatedUrlLinesToDisplay) {
+                mTruncatedUrlLinesToDisplay = mFullLinesToDisplay;
+            }
 
             if (updateMaxLines()) super.onMeasure(widthMeasureSpec, heightMeasureSpec);
         }
@@ -154,7 +178,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         }
 
         private boolean updateMaxLines() {
-            int maxLines = Integer.MAX_VALUE;
+            int maxLines = mFullLinesToDisplay;
             if (mIsShowingTruncatedText) maxLines = mTruncatedUrlLinesToDisplay;
             if (maxLines != mCurrentMaxLines) {
                 setMaxLines(maxLines);
@@ -203,6 +227,9 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
 
     // The security level of the page (a valid ToolbarModelSecurityLevel).
     private int mSecurityLevel;
+
+    // Whether the security level of the page was deprecated due to SHA-1.
+    private boolean mDeprecatedSHA1Present;
 
     /**
      * Creates the WebsiteSettingsPopup, but does not display it. Also initializes the corresponding
@@ -275,7 +302,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
             @Override
             public void onDismiss(DialogInterface dialog) {
                 assert mNativeWebsiteSettingsPopup != 0;
-                webContentsObserver.detachFromWebContents();
+                webContentsObserver.destroy();
                 nativeDestroy(mNativeWebsiteSettingsPopup);
             }
         });
@@ -290,6 +317,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
             mIsInternalPage = false;
         }
         mSecurityLevel = ToolbarModel.getSecurityLevelForWebContents(mWebContents);
+        mDeprecatedSHA1Present = ToolbarModel.isDeprecatedSHA1Present(mWebContents);
 
         SpannableStringBuilder urlBuilder = new SpannableStringBuilder(mFullUrl);
         OmniboxUrlEmphasizer.emphasizeUrl(urlBuilder, mContext.getResources(), mProfile,
@@ -327,9 +355,11 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
                 return R.drawable.permission_javascript;
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION:
                 return R.drawable.permission_location;
-            case ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM:
+            case ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
                 return R.drawable.permission_media;
-            case ContentSettingsType.CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
+            case ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
+                return R.drawable.permission_mic;
+            case ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
                 return R.drawable.permission_push_notification;
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS:
                 return R.drawable.permission_popups;
@@ -373,7 +403,10 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
     private Spannable getUrlConnectionMessage() {
         // Display the appropriate connection message.
         SpannableStringBuilder messageBuilder = new SpannableStringBuilder();
-        if (mSecurityLevel != ToolbarModelSecurityLevel.SECURITY_ERROR) {
+        if (mDeprecatedSHA1Present) {
+            messageBuilder.append(
+                    mContext.getResources().getString(R.string.page_info_connection_sha1));
+        } else if (mSecurityLevel != ToolbarModelSecurityLevel.SECURITY_ERROR) {
             messageBuilder.append(mContext.getResources().getString(
                     getConnectionMessageId(mSecurityLevel, mIsInternalPage)));
         } else {
@@ -533,11 +566,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
      */
     @SuppressWarnings("unused")
     public static void show(Context context, Profile profile, WebContents webContents) {
-        if (!CommandLine.getInstance().hasSwitch(ChromeSwitches.DISABLE_NEW_WEBSITE_SETTINGS)) {
-            new WebsiteSettingsPopup(context, profile, webContents);
-        } else {
-            WebsiteSettingsPopupLegacy.show(context, webContents);
-        }
+        new WebsiteSettingsPopup(context, profile, webContents);
     }
 
     private static native long nativeInit(WebsiteSettingsPopup popup, WebContents webContents);

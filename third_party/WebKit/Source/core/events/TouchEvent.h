@@ -52,7 +52,7 @@ public:
             ctrlKey, altKey, shiftKey, metaKey, cancelable, causesScrollingIfUncanceled, uiCreateTime));
     }
 
-    void initTouchEvent(TouchList* touches, TouchList* targetTouches,
+    void initTouchEvent(ScriptState*, TouchList* touches, TouchList* targetTouches,
         TouchList* changedTouches, const AtomicString& type,
         PassRefPtrWillBeRawPtr<AbstractView>,
         int, int, int, int, // unused useless members of web exposed API
@@ -74,7 +74,7 @@ public:
 
     virtual void preventDefault() override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     TouchEvent();

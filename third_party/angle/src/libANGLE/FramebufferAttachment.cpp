@@ -8,15 +8,14 @@
 // objects and related functionality. [OpenGL ES 2.0.24] section 4.4.3 page 108.
 
 #include "libANGLE/FramebufferAttachment.h"
-#include "libANGLE/Texture.h"
-#include "libANGLE/formatutils.h"
-#include "libANGLE/Renderbuffer.h"
-#include "libANGLE/renderer/FramebufferImpl.h"
-#include "libANGLE/renderer/RenderTarget.h"
-#include "libANGLE/renderer/Renderer.h"
-#include "libANGLE/renderer/d3d/TextureStorage.h"
 
 #include "common/utilities.h"
+#include "libANGLE/Config.h"
+#include "libANGLE/Renderbuffer.h"
+#include "libANGLE/Surface.h"
+#include "libANGLE/Texture.h"
+#include "libANGLE/formatutils.h"
+#include "libANGLE/renderer/FramebufferImpl.h"
 
 namespace gl
 {
@@ -98,17 +97,17 @@ GLuint TextureAttachment::id() const
 
 GLsizei TextureAttachment::getWidth() const
 {
-    return mTexture->getWidth(mIndex);
+    return mTexture->getWidth(mIndex.type, mIndex.mipIndex);
 }
 
 GLsizei TextureAttachment::getHeight() const
 {
-    return mTexture->getHeight(mIndex);
+    return mTexture->getHeight(mIndex.type, mIndex.mipIndex);
 }
 
 GLenum TextureAttachment::getInternalFormat() const
 {
-    return mTexture->getInternalFormat(mIndex);
+    return mTexture->getInternalFormat(mIndex.type, mIndex.mipIndex);
 }
 
 GLenum TextureAttachment::type() const
@@ -123,7 +122,7 @@ GLint TextureAttachment::mipLevel() const
 
 GLenum TextureAttachment::cubeMapFace() const
 {
-    return IsCubemapTextureTarget(mIndex.type) ? mIndex.type : GL_NONE;
+    return IsCubeMapTextureTarget(mIndex.type) ? mIndex.type : GL_NONE;
 }
 
 GLint TextureAttachment::layer() const
@@ -224,36 +223,37 @@ Renderbuffer *RenderbufferAttachment::getRenderbuffer() const
 }
 
 
-DefaultAttachment::DefaultAttachment(GLenum binding, rx::DefaultAttachmentImpl *impl)
-    : FramebufferAttachment(binding),
-      mImpl(impl)
+DefaultAttachment::DefaultAttachment(GLenum binding, egl::Surface *surface)
+    : FramebufferAttachment(binding)
 {
-    ASSERT(mImpl);
+    mSurface.set(surface);
 }
 
 DefaultAttachment::~DefaultAttachment()
 {
-    SafeDelete(mImpl);
+    mSurface.set(nullptr);
 }
 
 GLsizei DefaultAttachment::getWidth() const
 {
-    return mImpl->getWidth();
+    return mSurface->getWidth();
 }
 
 GLsizei DefaultAttachment::getHeight() const
 {
-    return mImpl->getHeight();
+    return mSurface->getHeight();
 }
 
 GLenum DefaultAttachment::getInternalFormat() const
 {
-    return mImpl->getInternalFormat();
+    const egl::Config *config = mSurface->getConfig();
+    return (getBinding() == GL_BACK ? config->renderTargetFormat : config->depthStencilFormat);
 }
 
 GLsizei DefaultAttachment::getSamples() const
 {
-    return mImpl->getSamples();
+    const egl::Config *config = mSurface->getConfig();
+    return config->samples;
 }
 
 GLuint DefaultAttachment::id() const
@@ -297,11 +297,6 @@ Renderbuffer *DefaultAttachment::getRenderbuffer() const
 {
     UNREACHABLE();
     return NULL;
-}
-
-rx::DefaultAttachmentImpl *DefaultAttachment::getImplementation() const
-{
-    return mImpl;
 }
 
 }

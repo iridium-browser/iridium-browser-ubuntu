@@ -403,6 +403,12 @@ below:
       <message name="IDS_AX_ROLE_STATUS" desc="accessibility role description for status">
         status
       </message>
+      <message name="IDS_AX_ROLE_SEARCH_BOX" desc="accessibility role description for search text field">
+        search text field
+      </message>
+      <message name="IDS_AX_ROLE_SWITCH" desc="accessibility role description for switch">
+        switch
+      </message>
 
       <message name="IDS_AX_BUTTON_ACTION_VERB" desc="Verb stating the action that will occur when a button is pressed, as used by accessibility.">
         press
@@ -743,8 +749,8 @@ below:
         Please lengthen this text to <ph name="MIN_CHARACTERS">$2<ex>101</ex></ph> characters or more (you are currently using <ph name="CURRENT_LENGTH">$1<ex>100</ex></ph> characters).
       </message>
 
-      <message name="IDS_PLUGIN_INITIALIZATION_ERROR" desc="A message displayed when a plug-in failed to load">
-        Couldn't load plug-in.
+      <message name="IDS_PLUGIN_INITIALIZATION_ERROR" desc="A message displayed when a plugin failed to load">
+        Couldn't load plugin.
       </message>
 
     </messages>

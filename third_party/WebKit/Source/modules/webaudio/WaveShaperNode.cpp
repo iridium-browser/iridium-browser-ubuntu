@@ -23,9 +23,7 @@
  */
 
 #include "config.h"
-
 #if ENABLE(WEB_AUDIO)
-
 #include "modules/webaudio/WaveShaperNode.h"
 
 #include "bindings/core/v8/ExceptionMessages.h"
@@ -36,16 +34,29 @@
 namespace blink {
 
 WaveShaperNode::WaveShaperNode(AudioContext* context)
-    : AudioBasicProcessorNode(NodeTypeWaveShaper, context, context->sampleRate())
+    : AudioNode(*context)
 {
-    m_processor = new WaveShaperProcessor(context->sampleRate(), 1);
+    setHandler(new AudioBasicProcessorHandler(AudioHandler::NodeTypeWaveShaper, *this, context->sampleRate(), adoptPtr(new WaveShaperProcessor(context->sampleRate(), 1))));
 
-    initialize();
+    handler().initialize();
 }
 
-void WaveShaperNode::setCurve(DOMFloat32Array* curve)
+WaveShaperProcessor* WaveShaperNode::waveShaperProcessor() const
+{
+    return static_cast<WaveShaperProcessor*>(static_cast<AudioBasicProcessorHandler&>(handler()).processor());
+}
+
+void WaveShaperNode::setCurve(DOMFloat32Array* curve, ExceptionState& exceptionState)
 {
     ASSERT(isMainThread());
+
+    if (curve && curve->length() < 2) {
+        exceptionState.throwDOMException(
+            InvalidAccessError,
+            "curve length cannot be less than 2: " + String::number(curve->length()));
+        return;
+    }
+
     waveShaperProcessor()->setCurve(curve);
 }
 
@@ -54,7 +65,7 @@ DOMFloat32Array* WaveShaperNode::curve()
     return waveShaperProcessor()->curve();
 }
 
-void WaveShaperNode::setOversample(const String& type, ExceptionState& exceptionState)
+void WaveShaperNode::setOversample(const String& type)
 {
     ASSERT(isMainThread());
 

@@ -48,6 +48,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chromeos/chromeos_switches.h"
 #endif
 
@@ -144,12 +145,12 @@ class TestSafeBrowsingDatabase :  public SafeBrowsingDatabase {
                        std::vector<GURL>(1, url),
                        prefix_hits);
   }
-  bool ContainsDownloadUrl(const std::vector<GURL>& urls,
-                           std::vector<SBPrefix>* prefix_hits) override {
-    bool found = ContainsUrl(safe_browsing_util::BINURL,
-                             safe_browsing_util::BINURL,
-                             urls,
-                             prefix_hits);
+  bool ContainsDownloadUrlPrefixes(
+      const std::vector<SBPrefix>& prefixes,
+      std::vector<SBPrefix>* prefix_hits) override {
+    bool found =
+        ContainsUrlPrefixes(safe_browsing_util::BINURL,
+                            safe_browsing_util::BINURL, prefixes, prefix_hits);
     if (!found)
       return false;
     DCHECK_LE(1U, prefix_hits->size());
@@ -160,9 +161,12 @@ class TestSafeBrowsingDatabase :  public SafeBrowsingDatabase {
     return true;
   }
   bool ContainsDownloadWhitelistedUrl(const GURL& url) override { return true; }
+  bool ContainsInclusionWhitelistedUrl(const GURL& url) override {
+    return true;
+  }
   bool ContainsExtensionPrefixes(const std::vector<SBPrefix>& prefixes,
                                  std::vector<SBPrefix>* prefix_hits) override {
-    return true;
+    return false;
   }
   bool ContainsSideEffectFreeWhitelistUrl(const GURL& url) override {
     return true;
@@ -194,18 +198,15 @@ class TestSafeBrowsingDatabase :  public SafeBrowsingDatabase {
 
   // Fill up the database with test URL.
   void AddUrl(const GURL& url,
-              int list_id,
+              const SBFullHashResult& full_hash,
               const std::vector<SBPrefix>& prefix_hits) {
     Hits* hits_for_url = &badurls_[url.spec()];
-    hits_for_url->list_ids.push_back(list_id);
+    hits_for_url->list_ids.push_back(full_hash.list_id);
     hits_for_url->prefix_hits.insert(hits_for_url->prefix_hits.end(),
                                      prefix_hits.begin(),
                                      prefix_hits.end());
-  }
-
-  // Fill up the database with test hash digest.
-  void AddDownloadPrefix(SBPrefix prefix) {
-    download_digest_prefix_.insert(prefix);
+    bad_prefixes_.insert(
+        std::make_pair(full_hash.list_id, full_hash.hash.prefix));
   }
 
  private:
@@ -220,8 +221,7 @@ class TestSafeBrowsingDatabase :  public SafeBrowsingDatabase {
                    const std::vector<GURL>& urls,
                    std::vector<SBPrefix>* prefix_hits) {
     bool hit = false;
-    for (size_t i = 0; i < urls.size(); ++i) {
-      const GURL& url = urls[i];
+    for (const GURL& url : urls) {
       base::hash_map<std::string, Hits>::const_iterator
           badurls_it = badurls_.find(url.spec());
 
@@ -242,8 +242,27 @@ class TestSafeBrowsingDatabase :  public SafeBrowsingDatabase {
     return hit;
   }
 
+  bool ContainsUrlPrefixes(int list_id0,
+                           int list_id1,
+                           const std::vector<SBPrefix>& prefixes,
+                           std::vector<SBPrefix>* prefix_hits) {
+    bool hit = false;
+    for (const SBPrefix& prefix : prefixes) {
+      for (const std::pair<int, SBPrefix>& entry : bad_prefixes_) {
+        if (entry.second == prefix &&
+            (entry.first == list_id0 || entry.first == list_id1)) {
+          prefix_hits->push_back(prefix);
+          hit = true;
+        }
+      }
+    }
+    return hit;
+  }
+
   base::hash_map<std::string, Hits> badurls_;
-  base::hash_set<SBPrefix> download_digest_prefix_;
+  base::hash_set<std::pair<int, SBPrefix>> bad_prefixes_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestSafeBrowsingDatabase);
 };
 
 // Factory that creates TestSafeBrowsingDatabase instances.
@@ -253,6 +272,7 @@ class TestSafeBrowsingDatabaseFactory : public SafeBrowsingDatabaseFactory {
   ~TestSafeBrowsingDatabaseFactory() override {}
 
   SafeBrowsingDatabase* CreateSafeBrowsingDatabase(
+      const scoped_refptr<base::SequencedTaskRunner>& db_task_runner,
       bool enable_download_protection,
       bool enable_client_side_whitelist,
       bool enable_download_whitelist,
@@ -441,7 +461,7 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
     // Make sure the full hits is empty unless we need to test the
     // full hash is hit in database's local cache.
     TestSafeBrowsingDatabase* db = db_factory_.GetDb();
-    db->AddUrl(url, full_hash.list_id, prefix_hits);
+    db->AddUrl(url, full_hash, prefix_hits);
 
     TestProtocolManager* pm = pm_factory_.GetProtocolManager();
     pm->AddGetFullHashResponse(full_hash);
@@ -1024,6 +1044,18 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest, StartAndStop) {
   // Change the other pref. SBS should stop now.
   pref_service2->SetBoolean(prefs::kSafeBrowsingEnabled, false);
   WaitForIOThread();
+
+// TODO(mattm): Remove this when crbug.com/461493 is fixed.
+#if defined(OS_CHROMEOS)
+  // On Chrome OS we should disable safe browsing for signin profile.
+  EXPECT_TRUE(sb_service->enabled());
+  EXPECT_TRUE(csd_service->enabled());
+  chromeos::ProfileHelper::GetSigninProfile()
+      ->GetOriginalProfile()
+      ->GetPrefs()
+      ->SetBoolean(prefs::kSafeBrowsingEnabled, false);
+  WaitForIOThread();
+#endif
   EXPECT_FALSE(sb_service->enabled());
   EXPECT_FALSE(csd_service->enabled());
 

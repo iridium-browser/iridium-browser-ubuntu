@@ -92,10 +92,8 @@ public:
         }
     };
 
-    DocumentMarker();
     DocumentMarker(MarkerType, unsigned startOffset, unsigned endOffset, const String& description, uint32_t hash);
     DocumentMarker(unsigned startOffset, unsigned endOffset, bool activeMatch);
-    DocumentMarker(MarkerType, unsigned startOffset, unsigned endOffset, PassRefPtrWillBeRawPtr<DocumentMarkerDetails>);
     DocumentMarker(const DocumentMarker&);
 
     MarkerType type() const { return m_type; }
@@ -126,7 +124,7 @@ public:
         return !(*this == o);
     }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     MarkerType m_type;
@@ -151,7 +149,7 @@ public:
     virtual bool isDescription() const { return false; }
     virtual bool isTextMatch() const { return false; }
 
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 };
 
 } // namespace blink

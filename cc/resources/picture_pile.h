@@ -12,37 +12,35 @@
 #include "base/containers/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "cc/base/tiling_data.h"
-#include "cc/resources/recording_source.h"
+#include "cc/resources/picture.h"
 
 namespace cc {
 class PicturePileImpl;
 
 class CC_EXPORT PicturePile : public RecordingSource {
  public:
-  PicturePile();
+  PicturePile(float min_contents_scale, const gfx::Size& tile_grid_size);
   ~PicturePile() override;
 
   // RecordingSource overrides.
-  bool UpdateAndExpandInvalidation(
-      ContentLayerClient* painter,
-      Region* invalidation,
-      bool can_use_lcd_text,
-      const gfx::Size& layer_size,
-      const gfx::Rect& visible_layer_rect,
-      int frame_number,
-      Picture::RecordingMode recording_mode) override;
-  scoped_refptr<RasterSource> CreateRasterSource() const override;
+  bool UpdateAndExpandInvalidation(ContentLayerClient* painter,
+                                   Region* invalidation,
+                                   const gfx::Size& layer_size,
+                                   const gfx::Rect& visible_layer_rect,
+                                   int frame_number,
+                                   RecordingMode recording_mode) override;
+  void DidMoveToNewCompositor() override;
+  scoped_refptr<RasterSource> CreateRasterSource(
+      bool can_use_lcd_text) const override;
   gfx::Size GetSize() const final;
   void SetEmptyBounds() override;
-  void SetMinContentsScale(float min_contents_scale) override;
   void SetSlowdownRasterScaleFactor(int factor) override;
+  void SetGatherPixelRefs(bool gather_pixel_refs) override;
+  void SetBackgroundColor(SkColor background_color) override;
+  void SetRequiresClear(bool requires_clear) override;
   bool IsSuitableForGpuRasterization() const override;
-  void SetTileGridSize(const gfx::Size& tile_grid_size) override;
   void SetUnsuitableForGpuRasterizationForTesting() override;
-  SkTileGridFactory::TileGridInfo GetTileGridInfoForTesting() const override;
-
-  static void ComputeTileGridInfo(const gfx::Size& tile_grid_size,
-                                  SkTileGridFactory::TileGridInfo* info);
+  gfx::Size GetTileGridSizeForTesting() const override;
 
  protected:
   class CC_EXPORT PictureInfo {
@@ -60,6 +58,8 @@ class CC_EXPORT PicturePile : public RecordingSource {
     float GetInvalidationFrequencyForTesting() const {
       return GetInvalidationFrequency();
     }
+
+    void ResetInvalidationHistory();
 
    private:
     void AdvanceInvalidationHistory(int frame_number);
@@ -79,6 +79,9 @@ class CC_EXPORT PicturePile : public RecordingSource {
 
   void Clear();
 
+  void SetMinContentsScale(float min_contents_scale);
+  void SetTileGridSize(const gfx::Size& tile_grid_size);
+
   gfx::Rect PaddedRect(const PictureMapKey& key) const;
   gfx::Rect PadRect(const gfx::Rect& rect) const;
 
@@ -94,21 +97,24 @@ class CC_EXPORT PicturePile : public RecordingSource {
   // recorded.
   gfx::Rect recorded_viewport_;
   float min_contents_scale_;
-  SkTileGridFactory::TileGridInfo tile_grid_info_;
+  gfx::Size tile_grid_size_;
   int slow_down_raster_scale_factor_for_debug_;
-  bool can_use_lcd_text_;
+  bool gather_pixel_refs_;
   // A hint about whether there are any recordings. This may be a false
   // positive.
   bool has_any_recordings_;
+  bool clear_canvas_with_debug_color_;
+  bool requires_clear_;
   bool is_solid_color_;
   SkColor solid_color_;
+  SkColor background_color_;
   int pixel_record_distance_;
 
  private:
   friend class PicturePileImpl;
 
   void CreatePictures(ContentLayerClient* painter,
-                      Picture::RecordingMode recording_mode,
+                      RecordingMode recording_mode,
                       const std::vector<gfx::Rect>& record_rects);
   void GetInvalidTileRects(const gfx::Rect& interest_rect,
                            Region* invalidation,
@@ -118,8 +124,7 @@ class CC_EXPORT PicturePile : public RecordingSource {
   bool ApplyInvalidationAndResize(const gfx::Rect& interest_rect,
                                   Region* invalidation,
                                   const gfx::Size& layer_size,
-                                  int frame_number,
-                                  bool can_use_lcd_text_changed);
+                                  int frame_number);
   void DetermineIfSolidColor();
   void SetBufferPixels(int buffer_pixels);
 

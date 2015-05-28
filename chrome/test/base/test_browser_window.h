@@ -66,7 +66,7 @@ class TestBrowserWindow : public BrowserWindow {
                        ExclusiveAccessBubbleType type,
                        bool with_toolbar) override {}
   void ExitFullscreen() override {}
-  void UpdateFullscreenExitBubbleContent(
+  void UpdateExclusiveAccessExitBubbleContent(
       const GURL& url,
       ExclusiveAccessBubbleType bubble_type) override {}
   bool ShouldHideUIForFullscreen() const override;
@@ -104,8 +104,9 @@ class TestBrowserWindow : public BrowserWindow {
                                 Profile* profile) override {}
   void ShowUpdateChromeDialog() override {}
   void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) override {}
-  void ShowBookmarkAppBubble(const WebApplicationInfo& web_app_info,
-                             const std::string& extension_id) override {}
+  void ShowBookmarkAppBubble(
+      const WebApplicationInfo& web_app_info,
+      const ShowBookmarkAppBubbleCallback& callback) override {}
   void ShowTranslateBubble(content::WebContents* contents,
                            translate::TranslateStep step,
                            translate::TranslateErrors::Type error_type,
@@ -129,7 +130,6 @@ class TestBrowserWindow : public BrowserWindow {
       bool app_modal,
       const base::Callback<void(bool)>& callback) override {}
   void UserChangedTheme() override {}
-  int GetExtraRenderViewHeight() const override;
   void WebContentsFocused(content::WebContents* contents) override {}
   void ShowWebsiteSettings(Profile* profile,
                            content::WebContents* web_contents,
@@ -149,6 +149,7 @@ class TestBrowserWindow : public BrowserWindow {
   int GetRenderViewHeightInsetWithDetachedBookmarkBar() override;
   void ExecuteExtensionCommand(const extensions::Extension* extension,
                                const extensions::Command& command) override;
+  ExclusiveAccessContext* GetExclusiveAccessContext() override;
 
  protected:
   void DestroyBrowser() override {}

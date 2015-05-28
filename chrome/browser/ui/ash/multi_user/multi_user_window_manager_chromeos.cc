@@ -20,6 +20,7 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_notification_blocker_chromeos.h"
@@ -191,10 +192,10 @@ class AnimationSetter {
 class AppObserver : public extensions::AppWindowRegistry::Observer {
  public:
   explicit AppObserver(const std::string& user_id) : user_id_(user_id) {}
-  virtual ~AppObserver() {}
+  ~AppObserver() override {}
 
   // AppWindowRegistry::Observer overrides:
-  virtual void OnAppWindowAdded(extensions::AppWindow* app_window) override {
+  void OnAppWindowAdded(extensions::AppWindow* app_window) override {
     aura::Window* window = app_window->GetNativeWindow();
     DCHECK(window);
     MultiUserWindowManagerChromeOS::GetInstance()->SetWindowOwner(window,
@@ -395,10 +396,16 @@ void MultiUserWindowManagerChromeOS::AddUser(content::BrowserContext* context) {
   if (user_id_to_app_observer_.size() == 1)
     return;
 
-  // Immediately hide the windows of the current user.
-  base::AutoReset<AnimationSpeed> animation_speed(&animation_speed_,
-                                                  ANIMATION_SPEED_DISABLED);
-  ActiveUserChanged(user_id);
+  // Don't do anything special in case of user session restore after crash.
+  // In that case session restore process will automatically switch to the
+  // last active user session after whole process is complete.
+  if (!chromeos::UserSessionManager::GetInstance()->
+      UserSessionsRestoreInProgress()) {
+    // Immediately hide the windows of the current user.
+    base::AutoReset<AnimationSpeed> animation_speed(&animation_speed_,
+                                                    ANIMATION_SPEED_DISABLED);
+    ActiveUserChanged(user_id);
+  }
 }
 
 void MultiUserWindowManagerChromeOS::AddObserver(Observer* observer) {
@@ -415,7 +422,7 @@ void MultiUserWindowManagerChromeOS::ActiveUserChanged(
   current_user_id_ = user_id;
 
   animation_.reset(
-      new UserSwichAnimatorChromeOS(
+      new UserSwitchAnimatorChromeOS(
           this, user_id, GetAdjustedAnimationTimeInMS(kUserFadeTimeMS)));
   // Call notifier here instead of observing ActiveUserChanged because
   // this must happen after MultiUserWindowManagerChromeOS is notified.

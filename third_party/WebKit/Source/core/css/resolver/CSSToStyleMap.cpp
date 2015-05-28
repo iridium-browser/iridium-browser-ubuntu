@@ -36,9 +36,10 @@
 #include "core/css/CSSTimingFunctionValue.h"
 #include "core/css/Pair.h"
 #include "core/css/Rect.h"
+#include "core/css/resolver/StyleBuilderConverter.h"
 #include "core/css/resolver/StyleResolverState.h"
-#include "core/rendering/style/BorderImageLengthBox.h"
-#include "core/rendering/style/FillLayer.h"
+#include "core/style/BorderImageLengthBox.h"
+#include "core/style/FillLayer.h"
 
 namespace blink {
 
@@ -194,10 +195,10 @@ void CSSToStyleMap::mapFillSize(StyleResolverState& state, FillLayer* layer, CSS
     Length secondLength;
 
     if (Pair* pair = primitiveValue->getPairValue()) {
-        firstLength = pair->first()->convertToLength<AnyConversion>(state.cssToLengthConversionData());
-        secondLength = pair->second()->convertToLength<AnyConversion>(state.cssToLengthConversionData());
+        firstLength = StyleBuilderConverter::convertLengthOrAuto(state, pair->first());
+        secondLength = StyleBuilderConverter::convertLengthOrAuto(state, pair->second());
     } else {
-        firstLength = primitiveValue->convertToLength<AnyConversion>(state.cssToLengthConversionData());
+        firstLength = StyleBuilderConverter::convertLengthOrAuto(state, primitiveValue);
         secondLength = Length();
     }
 
@@ -221,7 +222,7 @@ void CSSToStyleMap::mapFillXPosition(StyleResolverState& state, FillLayer* layer
     if (pair)
         primitiveValue = pair->second();
 
-    Length length = primitiveValue->convertToLength<FixedConversion | PercentConversion>(state.cssToLengthConversionData());
+    Length length = primitiveValue->convertToLength(state.cssToLengthConversionData());
 
     layer->setXPosition(length);
     if (pair)
@@ -243,7 +244,7 @@ void CSSToStyleMap::mapFillYPosition(StyleResolverState& state, FillLayer* layer
     if (pair)
         primitiveValue = pair->second();
 
-    Length length = primitiveValue->convertToLength<FixedConversion | PercentConversion>(state.cssToLengthConversionData());
+    Length length = primitiveValue->convertToLength(state.cssToLengthConversionData());
 
     layer->setYPosition(length);
     if (pair)
@@ -497,19 +498,19 @@ void CSSToStyleMap::mapNinePieceImageSlice(StyleResolverState&, CSSValue* value,
     if (slices->top()->isPercentage())
         box.m_top = Length(slices->top()->getDoubleValue(), Percent);
     else
-        box.m_top = Length(slices->top()->getIntValue(CSSPrimitiveValue::CSS_NUMBER), Fixed);
+        box.m_top = Length(slices->top()->getIntValue(), Fixed);
     if (slices->bottom()->isPercentage())
         box.m_bottom = Length(slices->bottom()->getDoubleValue(), Percent);
     else
-        box.m_bottom = Length((int)slices->bottom()->getFloatValue(CSSPrimitiveValue::CSS_NUMBER), Fixed);
+        box.m_bottom = Length(slices->bottom()->getIntValue(), Fixed);
     if (slices->left()->isPercentage())
         box.m_left = Length(slices->left()->getDoubleValue(), Percent);
     else
-        box.m_left = Length(slices->left()->getIntValue(CSSPrimitiveValue::CSS_NUMBER), Fixed);
+        box.m_left = Length(slices->left()->getIntValue(), Fixed);
     if (slices->right()->isPercentage())
         box.m_right = Length(slices->right()->getDoubleValue(), Percent);
     else
-        box.m_right = Length(slices->right()->getIntValue(CSSPrimitiveValue::CSS_NUMBER), Fixed);
+        box.m_right = Length(slices->right()->getIntValue(), Fixed);
     image.setImageSlices(box);
 
     // Set our fill mode.
@@ -521,7 +522,7 @@ static BorderImageLength toBorderImageLength(CSSPrimitiveValue& value, const CSS
     if (value.isNumber())
         return value.getDoubleValue();
     if (value.isPercentage())
-        return Length(value.getDoubleValue(CSSPrimitiveValue::CSS_PERCENTAGE), Percent);
+        return Length(value.getDoubleValue(), Percent);
     if (value.getValueID() != CSSValueAuto)
         return value.computeLength<Length>(conversionData);
     return Length(Auto);

@@ -40,8 +40,9 @@ importer.TaskQueue = function() {
  */
 importer.TaskQueue.UpdateType = {
   PROGRESS: 'PROGRESS',
-  SUCCESS: 'SUCCESS',
-  ERROR: 'ERROR'
+  COMPLETE: 'COMPLETE',
+  ERROR: 'ERROR',
+  CANCELED: 'CANCELED'
 };
 
 /**
@@ -51,7 +52,7 @@ importer.TaskQueue.prototype.queueTask = function(task) {
   // The Tasks that are pushed onto the queue aren't required to be inherently
   // asynchronous.  This code force task execution to occur asynchronously.
   Promise.resolve().then(function() {
-    task.addObserver(this.onTaskUpdate_.bind(this));
+    task.addObserver(this.onTaskUpdate_.bind(this, task));
     this.tasks_.push(task);
     // If more than one task is queued, then the queue is already running.
     if (this.tasks_.length === 1) {
@@ -80,7 +81,7 @@ importer.TaskQueue.prototype.setActiveCallback = function(callback) {
 
 /**
  * Sets a callback that is triggered each time the queue goes from an active to
- * an idle state.  Also see #onActive.
+ * an idle state.  Also see #setActiveCallback.
  * @param {function()} callback
  */
 importer.TaskQueue.prototype.setIdleCallback = function(callback) {
@@ -90,11 +91,11 @@ importer.TaskQueue.prototype.setIdleCallback = function(callback) {
 /**
  * Sends out notifications when a task updates.  This is meant to be called by
  * the running tasks owned by this queue.
- * @param {!importer.TaskQueue.UpdateType} updateType
  * @param {!importer.TaskQueue.Task} task
+ * @param {!importer.TaskQueue.UpdateType} updateType
  * @private
  */
-importer.TaskQueue.prototype.onTaskUpdate_ = function(updateType, task) {
+importer.TaskQueue.prototype.onTaskUpdate_ = function(task, updateType) {
   // Send a task update to clients.
   this.updateCallbacks_.forEach(function(callback) {
     callback.call(null, updateType, task);
@@ -102,7 +103,8 @@ importer.TaskQueue.prototype.onTaskUpdate_ = function(updateType, task) {
 
   // If the task update is a terminal one, move on to the next task.
   var UpdateType = importer.TaskQueue.UpdateType;
-  if (updateType === UpdateType.SUCCESS || updateType === UpdateType.ERROR) {
+  if (updateType === UpdateType.COMPLETE ||
+      updateType === UpdateType.CANCELED) {
     // Assumption: the currently running task is at the head of the queue.
     console.assert(this.tasks_[0] === task,
         'Only tasks that are at the head of the queue should be active');
@@ -145,7 +147,13 @@ importer.TaskQueue.prototype.runPending_ = function() {
 importer.TaskQueue.Task = function() {};
 
 /**
- * @typedef {function(!importer.TaskQueue.UpdateType, !importer.TaskQueue.Task)}
+ * A callback that is triggered whenever an update is reported on the observed
+ * task.  The first argument is a string specifying the type of the update.
+ * Standard values used by all tasks are enumerated in
+ * importer.TaskQueue.UpdateType, but child classes may add supplementary update
+ * types of their own.  The second argument is an Object containing
+ * supplementary information pertaining to the update.
+ * @typedef {function(!importer.TaskQueue.UpdateType, Object=)}
  */
 importer.TaskQueue.Task.Observer;
 
@@ -174,16 +182,19 @@ importer.TaskQueue.BaseTask = function(taskId) {
   this.taskId_ = taskId;
   /** @private {!Array<!importer.TaskQueue.Task.Observer>} */
   this.observers_ = [];
+
+  /** @private {!importer.Resolver<!importer.TaskQueue.UpdateType>} */
+  this.finishedResolver_ = new importer.Resolver();
 };
 
 /** @struct */
 importer.TaskQueue.BaseTask.prototype = {
-  /**
-   * @return {string} The task ID.
-   */
-  get taskId() {
-    return this.taskId_;
-  }
+  /** @return {string} The task ID. */
+  get taskId() { return this.taskId_; },
+
+  /** @return {!Promise<!importer.TaskQueue.UpdateType>} Resolves when task
+      is complete, or cancelled, rejects on error. */
+  get whenFinished() { return this.finishedResolver_.promise; }
 };
 
 /** @override */
@@ -195,13 +206,20 @@ importer.TaskQueue.BaseTask.prototype.addObserver = function(observer) {
 importer.TaskQueue.BaseTask.prototype.run = function() {};
 
 /**
- * @param {!importer.TaskQueue.UpdateType} updateType
+ * @param {string} updateType
+ * @param {Object=} opt_data
  * @protected
  */
-importer.TaskQueue.BaseTask.prototype.notify = function(updateType) {
+importer.TaskQueue.BaseTask.prototype.notify = function(updateType, opt_data) {
+  switch (updateType) {
+    case importer.TaskQueue.UpdateType.CANCELED:
+    case importer.TaskQueue.UpdateType.COMPLETE:
+      this.finishedResolver_.resolve(updateType);
+  }
+
   this.observers_.forEach(
       /** @param {!importer.TaskQueue.Task.Observer} callback */
       function(callback) {
-        callback.call(null, updateType, this);
+        callback.call(null, updateType, opt_data);
       }.bind(this));
 };

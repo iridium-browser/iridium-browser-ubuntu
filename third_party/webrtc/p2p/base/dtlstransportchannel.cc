@@ -186,6 +186,14 @@ bool DtlsTransportChannelWrapper::GetSslRole(rtc::SSLRole* role) const {
   return true;
 }
 
+bool DtlsTransportChannelWrapper::GetSslCipher(std::string* cipher) {
+  if (dtls_state_ != STATE_OPEN) {
+    return false;
+  }
+
+  return dtls_->GetSslCipher(cipher);
+}
+
 bool DtlsTransportChannelWrapper::SetRemoteFingerprint(
     const std::string& digest_alg,
     const uint8* digest,
@@ -255,8 +263,8 @@ bool DtlsTransportChannelWrapper::SetupDtls() {
   dtls_->SignalEvent.connect(this, &DtlsTransportChannelWrapper::OnDtlsEvent);
   if (!dtls_->SetPeerCertificateDigest(
           remote_fingerprint_algorithm_,
-          reinterpret_cast<unsigned char *>(remote_fingerprint_value_.data()),
-          remote_fingerprint_value_.length())) {
+          reinterpret_cast<unsigned char*>(remote_fingerprint_value_.data()),
+          remote_fingerprint_value_.size())) {
     LOG_J(LS_ERROR, this) << "Couldn't set DTLS certificate digest.";
     return false;
   }

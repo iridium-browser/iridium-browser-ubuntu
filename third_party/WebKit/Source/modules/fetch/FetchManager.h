@@ -22,11 +22,11 @@ public:
         return adoptPtrWillBeNoop(new FetchManager(executionContext));
     }
     ~FetchManager();
-    ScriptPromise fetch(ScriptState*, const FetchRequestData*);
+    ScriptPromise fetch(ScriptState*, FetchRequestData*);
     void stop();
     bool isStopped() const { return m_isStopped; }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     class Loader;

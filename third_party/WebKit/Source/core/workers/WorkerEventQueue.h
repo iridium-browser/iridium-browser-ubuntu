@@ -39,12 +39,12 @@ class Event;
 class ExecutionContext;
 
 class WorkerEventQueue final : public EventQueue {
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(WorkerEventQueue);
 public:
 
     static PassOwnPtrWillBeRawPtr<WorkerEventQueue> create(ExecutionContext*);
     virtual ~WorkerEventQueue();
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     // EventQueue
     virtual bool enqueueEvent(PassRefPtrWillBeRawPtr<Event>) override;

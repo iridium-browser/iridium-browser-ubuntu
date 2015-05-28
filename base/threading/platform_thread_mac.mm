@@ -161,16 +161,22 @@ void PlatformThread::SetThreadPriority(PlatformThreadHandle handle,
   mach_port_t mach_thread_id = pthread_mach_thread_np(handle.handle_);
 
   switch (priority) {
-    case kThreadPriority_Normal:
+    case ThreadPriority::NORMAL:
       SetPriorityNormal(mach_thread_id);
       break;
-    case kThreadPriority_RealtimeAudio:
+    case ThreadPriority::REALTIME_AUDIO:
       SetPriorityRealtimeAudio(mach_thread_id);
       break;
     default:
       NOTREACHED() << "Unknown priority.";
       break;
   }
+}
+
+// static
+ThreadPriority PlatformThread::GetThreadPriority(PlatformThreadHandle handle) {
+  NOTIMPLEMENTED();
+  return ThreadPriority::NORMAL;
 }
 
 size_t GetDefaultThreadStackSize(const pthread_attr_t& attributes) {

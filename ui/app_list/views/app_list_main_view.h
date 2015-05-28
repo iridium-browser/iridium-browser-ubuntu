@@ -58,11 +58,6 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
 
   SearchBoxView* search_box_view() const { return search_box_view_; }
 
-  // Gets the invisible widget that sits partly over the bottom of the app list,
-  // covering the collapsed-state custom page. May return nullptr, if the widget
-  // has not been initialized or has already been destroyed.
-  views::Widget* GetCustomPageClickzone() const;
-
   // If |drag_and_drop_host| is not NULL it will be called upon drag and drop
   // operations outside the application list.
   void SetDragAndDropHostOfCurrentAppList(
@@ -78,11 +73,12 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
   // Called when the search box's visibility is changed.
   void NotifySearchBoxVisibilityChanged();
 
-  // Initialize widgets that live inside the app list's main widget.
-  void InitWidgets();
+  bool ShouldShowCustomLauncherPage() const;
+  void UpdateCustomLauncherPageVisibility();
 
   // Overridden from AppListModelObserver:
   void OnCustomLauncherPageEnabledStateChanged(bool enabled) override;
+  void OnSearchEngineIsGoogleChanged(bool is_google) override;
 
  private:
   class IconLoader;
@@ -113,6 +109,7 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
   // Overridden from SearchBoxViewDelegate:
   void QueryChanged(SearchBoxView* sender) override;
   void BackButtonPressed() override;
+  void SetSearchResultSelection(bool select) override;
 
   // Overridden from SearchResultListViewDelegate:
   void OnResultInstalled(SearchResult* result) override;
@@ -123,11 +120,6 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
   // Created by AppListView. Owned by views hierarchy.
   SearchBoxView* search_box_view_;
   ContentsView* contents_view_;  // Owned by views hierarchy.
-
-  // Invisible widget that sits partly over the bottom of the app list, covering
-  // the collapsed-state custom page, and intercepts click events. Always use
-  // GetCustomPageClickzone() to access this (do not access it directly).
-  views::Widget* custom_page_clickzone_;  // Owned by the app list widget.
 
   // A timer that fires when maximum allowed time to wait for icon loading has
   // passed.

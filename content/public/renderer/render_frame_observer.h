@@ -16,6 +16,7 @@
 namespace blink {
 class WebFormElement;
 class WebFrame;
+class WebNode;
 struct WebURLError;
 }
 
@@ -45,24 +46,28 @@ class CONTENT_EXPORT RenderFrameObserver : public IPC::Listener,
   virtual void WasShown() {}
 
   // These match the Blink API notifications
-  virtual void DidCommitProvisionalLoad(bool is_new_navigation) {}
+  virtual void DidCommitProvisionalLoad(bool is_new_navigation,
+                                        bool is_same_page_navigation) {}
   virtual void DidStartProvisionalLoad() {}
   virtual void DidFailProvisionalLoad(const blink::WebURLError& error) {}
   virtual void DidFinishLoad() {}
   virtual void DidFinishDocumentLoad() {}
+  virtual void DidCreateScriptContext(v8::Handle<v8::Context> context,
+                                      int extension_group,
+                                      int world_id) {}
   virtual void WillReleaseScriptContext(v8::Handle<v8::Context> context,
                                         int world_id) {}
   virtual void DidClearWindowObject() {}
-  virtual void DidChangeName(const base::string16& name) {}
   virtual void DidChangeManifest() {}
+  virtual void DidChangeDefaultPresentation() {}
   virtual void DidChangeScrollOffset() {}
   virtual void WillSendSubmitEvent(const blink::WebFormElement& form) {}
   virtual void WillSubmitForm(const blink::WebFormElement& form) {}
 
   // Called before FrameWillClose, when this frame has been detached from the
   // view, but has not been closed yet. This *will* be called when parent frames
-  // are closing. NB: IPCs to the browser will fail silently by the time this
-  // notification is sent.
+  // are closing. Since the frame is already detached from the DOM at this time
+  // it should not be inspected.
   virtual void FrameDetached() {}
 
   // Called when the frame will soon be closed. This is the last opportunity to
@@ -84,6 +89,9 @@ class CONTENT_EXPORT RenderFrameObserver : public IPC::Listener,
 
   // Called when a compositor frame has committed.
   virtual void DidCommitCompositorFrame() {}
+
+  // Called when the focused node has changed to |node|.
+  virtual void FocusedNodeChanged(const blink::WebNode& node) {}
 
   // IPC::Listener implementation.
   bool OnMessageReceived(const IPC::Message& message) override;

@@ -1,6 +1,6 @@
 /*
  * libjingle
- * Copyright 2014, Google Inc.
+ * Copyright 2014 Google Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,15 +27,15 @@
 
 #import <Foundation/Foundation.h>
 
+@class ARDJoinResponse;
 @class ARDMessageResponse;
-@class ARDRegisterResponse;
 @class ARDSignalingMessage;
 
 @protocol ARDRoomServerClient <NSObject>
 
-- (void)registerForRoomId:(NSString *)roomId
-    completionHandler:(void (^)(ARDRegisterResponse *response,
-                                NSError *error))completionHandler;
+- (void)joinRoomWithRoomId:(NSString *)roomId
+         completionHandler:(void (^)(ARDJoinResponse *response,
+                                     NSError *error))completionHandler;
 
 - (void)sendMessage:(ARDSignalingMessage *)message
             forRoomId:(NSString *)roomId
@@ -43,7 +43,7 @@
     completionHandler:(void (^)(ARDMessageResponse *response,
                                 NSError *error))completionHandler;
 
-- (void)deregisterForRoomId:(NSString *)roomId
+- (void)leaveRoomWithRoomId:(NSString *)roomId
                    clientId:(NSString *)clientId
           completionHandler:(void (^)(NSError *error))completionHandler;
 

@@ -30,9 +30,10 @@
 #include "bindings/core/v8/ScheduledAction.h"
 #include "core/frame/SuspendableTimer.h"
 #include "platform/UserGestureIndicator.h"
-#include "wtf/Compiler.h"
+#include "platform/heap/Handle.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
+#include "wtf/RefPtr.h"
 
 namespace blink {
 
@@ -42,12 +43,10 @@ class DOMTimer final : public RefCountedWillBeGarbageCollectedFinalized<DOMTimer
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(DOMTimer);
 public:
     // Creates a new timer owned by the ExecutionContext, starts it and returns its ID.
-    static int install(ExecutionContext*, PassOwnPtr<ScheduledAction>, int timeout, bool singleShot);
+    static int install(ExecutionContext*, PassOwnPtrWillBeRawPtr<ScheduledAction>, int timeout, bool singleShot);
     static void removeByID(ExecutionContext*, int timeoutID);
 
     virtual ~DOMTimer();
-
-    int timeoutID() const;
 
     // ActiveDOMObject
     virtual void stop() override;
@@ -56,20 +55,19 @@ public:
     static double hiddenPageAlignmentInterval();
     static double visiblePageAlignmentInterval();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     void dispose();
 
 private:
-    friend class ExecutionContext; // For create().
+    friend class DOMTimerCoordinator; // For create().
 
-    // Should only be used by ExecutionContext.
-    static PassRefPtrWillBeRawPtr<DOMTimer> create(ExecutionContext* context, PassOwnPtr<ScheduledAction> action, int timeout, bool singleShot, int timeoutID)
+    static PassRefPtrWillBeRawPtr<DOMTimer> create(ExecutionContext* context, PassOwnPtrWillBeRawPtr<ScheduledAction> action, int timeout, bool singleShot, int timeoutID)
     {
         return adoptRefWillBeNoop(new DOMTimer(context, action, timeout, singleShot, timeoutID));
     }
 
-    DOMTimer(ExecutionContext*, PassOwnPtr<ScheduledAction>, int interval, bool singleShot, int timeoutID);
+    DOMTimer(ExecutionContext*, PassOwnPtrWillBeRawPtr<ScheduledAction>, int interval, bool singleShot, int timeoutID);
     virtual void fired() override;
 
     // Retuns timer fire time rounded to the next multiple of timer alignment interval.
@@ -77,7 +75,7 @@ private:
 
     int m_timeoutID;
     int m_nestingLevel;
-    OwnPtr<ScheduledAction> m_action;
+    OwnPtrWillBeMember<ScheduledAction> m_action;
     RefPtr<UserGestureToken> m_userGestureToken;
 };
 

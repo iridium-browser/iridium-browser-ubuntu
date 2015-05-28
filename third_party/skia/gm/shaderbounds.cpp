@@ -34,17 +34,14 @@ public:
     }
 
 protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return fName;
     }
 
-    virtual SkISize onISize() SK_OVERRIDE { return SkISize::Make(320, 240); }
+    SkISize onISize() override { return SkISize::Make(320, 240); }
 
-    virtual SkMatrix onGetInitialTransform() const SK_OVERRIDE {
+    SkMatrix onGetInitialTransform() const override {
         SkMatrix result;
         SkScalar scale = 0.8f;
         result.setScale(scale, scale);
@@ -52,7 +49,7 @@ protected:
         return result;
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         // The PDF device has already clipped to the content area, but we
         // do it again here so that the raster and pdf results are consistent.
         canvas->clipRect(SkRect::MakeWH(SkIntToScalar(320),

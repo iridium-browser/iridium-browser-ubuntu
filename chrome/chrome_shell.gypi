@@ -14,27 +14,23 @@
     {
       # GN: //chrome/android:chrome_shell_base
       'target_name': 'libchromeshell_base',
-      'type': 'static_library',
+      'type': 'none',
       'dependencies': [
         '../base/base.gyp:base',
         'chrome_android_core',
         'chrome.gyp:browser_ui',
-        '../content/content.gyp:content_app_browser',
+        '../content/content.gyp:content_app_both',
       ],
-      'sources': [
-        'android/shell/chrome_shell_google_location_settings_helper.cc',
-        'android/shell/chrome_shell_google_location_settings_helper.h',
-      ],
-      'include_dirs': [
-        '../skia/config',
-      ],
+      'direct_dependent_settings': {
+        'ldflags': [
+          # Some android targets still depend on --gc-sections to link.
+          # TODO: remove --gc-sections for Debug builds (crbug.com/159847).
+          '-Wl,--gc-sections',
+        ],
+      },
       'conditions': [
         [ 'order_profiling!=0', {
-          'conditions': [
-            [ 'OS=="android"', {
-              'dependencies': [ '../tools/cygprofile/cygprofile.gyp:cygprofile', ],
-            }],
-          ],
+          'dependencies': [ '../tools/cygprofile/cygprofile.gyp:cygprofile', ],
         }],
         [ 'use_allocator!="none"', {
           'dependencies': [
@@ -45,15 +41,6 @@
             # Chrome shell should always use the statically-linked CLD data.
             '<(DEPTH)/third_party/cld_2/cld_2.gyp:cld2_static', ],
         }],
-        ['OS=="android"', {
-          'direct_dependent_settings': {
-            'ldflags': [
-              # Some android targets still depend on --gc-sections to link.
-              # TODO: remove --gc-sections for Debug builds (crbug.com/159847).
-              '-Wl,--gc-sections',
-            ],
-          },
-        }],
       ],
     },
     {
@@ -61,9 +48,7 @@
       'target_name': 'libchromeshell',
       'type': 'shared_library',
       'sources': [
-        # This file must always be included in the shared_library step to ensure
-        # JNI_OnLoad is exported.
-        'app/android/chrome_jni_onload.cc',
+        'android/shell/chrome_shell_entry_point.cc',
         'android/shell/chrome_main_delegate_chrome_shell_android.cc',
         'android/shell/chrome_main_delegate_chrome_shell_android.h',
       ],
@@ -81,14 +66,13 @@
       'target_name': 'libchromesyncshell',
       'type': 'shared_library',
       'sources': [
-        # This file must always be included in the shared_library step to ensure
-        # JNI_OnLoad is exported.
-        'app/android/chrome_jni_onload.cc',
+        'android/shell/chrome_shell_entry_point.cc',
         'android/sync_shell/chrome_main_delegate_chrome_sync_shell_android.cc',
         'android/sync_shell/chrome_main_delegate_chrome_sync_shell_android.h',
       ],
       'dependencies': [
         'libchromeshell_base',
+        '../sync/sync.gyp:sync_core',
         '../sync/sync.gyp:test_support_sync_fake_server_android',
       ],
     },
@@ -108,7 +92,7 @@
       'type': 'none',
       'dependencies': [
         'chrome_java',
-        'chrome_shell_paks',
+        'chrome_android_paks_copy',
         'libchromeshell',
         '../media/media.gyp:media_java',
       ],
@@ -142,22 +126,6 @@
       'includes': [ '../build/apk_fake_jar.gypi' ],
     },
     {
-      'target_name': 'chrome_shell_paks',
-      'type': 'none',
-      'dependencies': [
-        '<(DEPTH)/chrome/chrome_resources.gyp:packed_resources',
-        '<(DEPTH)/chrome/chrome_resources.gyp:packed_extra_resources',
-      ],
-      'copies': [
-        {
-          'destination': '<(chrome_android_pak_output_folder)',
-          'files': [
-            '<@(chrome_android_pak_input_resources)',
-          ],
-        }
-      ],
-    },
-    {
       # GN: //chrome/android:chrome_sync_shell_manifest
       'target_name': 'chrome_sync_shell_manifest',
       'type': 'none',
@@ -173,7 +141,7 @@
       'type': 'none',
       'dependencies': [
         'chrome_java',
-        'chrome_shell_paks',
+        'chrome_android_paks_copy',
         'libchromesyncshell',
         '../media/media.gyp:media_java',
         '../sync/sync.gyp:sync_java_test_support',

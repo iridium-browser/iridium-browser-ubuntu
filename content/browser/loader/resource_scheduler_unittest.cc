@@ -171,7 +171,7 @@ class ResourceSchedulerTest : public testing::Test {
       int route_id,
       bool is_async) {
     scoped_ptr<net::URLRequest> url_request(
-        context_.CreateRequest(GURL(url), priority, NULL, NULL));
+        context_.CreateRequest(GURL(url), priority, NULL));
     ResourceRequestInfoImpl* info = new ResourceRequestInfoImpl(
         PROCESS_TYPE_RENDERER,                   // process_type
         child_id,                                // child_id
@@ -191,6 +191,7 @@ class ResourceSchedulerTest : public testing::Test {
         false,                                   // has_user_gesture
         false,                                   // enable_load_timing
         false,                                   // enable_upload_progress
+        false,                                   // do_not_prompt_for_login
         blink::WebReferrerPolicyDefault,         // referrer_policy
         blink::WebPageVisibilityStateVisible,    // visibility_state
         NULL,                                    // context

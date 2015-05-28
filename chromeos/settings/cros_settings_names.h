@@ -57,6 +57,11 @@ CHROMEOS_EXPORT extern const char kReportDeviceLocation[];
 CHROMEOS_EXPORT extern const char kReportDeviceNetworkInterfaces[];
 CHROMEOS_EXPORT extern const char kReportDeviceUsers[];
 CHROMEOS_EXPORT extern const char kReportDeviceHardwareStatus[];
+CHROMEOS_EXPORT extern const char kReportDeviceSessionStatus[];
+CHROMEOS_EXPORT extern const char kReportUploadFrequency[];
+
+CHROMEOS_EXPORT extern const char kHeartbeatEnabled[];
+CHROMEOS_EXPORT extern const char kHeartbeatFrequency[];
 
 CHROMEOS_EXPORT extern const char kPolicyMissingMitigationMode[];
 
@@ -81,6 +86,8 @@ CHROMEOS_EXPORT extern const char kDeviceDisabled[];
 CHROMEOS_EXPORT extern const char kDeviceDisabledMessage[];
 
 CHROMEOS_EXPORT extern const char kRebootOnShutdown[];
+
+CHROMEOS_EXPORT extern const char kExtensionCacheSize[];
 }  // namespace chromeos
 
 #endif  // CHROMEOS_SETTINGS_CROS_SETTINGS_NAMES_H_

@@ -30,33 +30,34 @@ LayoutTestNotificationManager::PersistentNotification::PersistentNotification()
 
 LayoutTestNotificationManager::~LayoutTestNotificationManager() {}
 
-blink::WebNotificationPermission
-LayoutTestNotificationManager::CheckPermission(
-    ResourceContext* resource_context,
-    const GURL& origin,
-    int render_process_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  const auto& iter = permission_map_.find(origin);
-  if (iter == permission_map_.end())
-    return blink::WebNotificationPermissionDefault;
-
-  return iter->second;
+PermissionStatus LayoutTestNotificationManager::RequestPermission(
+    const GURL& origin) {
+  return GetPermissionStatus(origin);
 }
 
-bool LayoutTestNotificationManager::RequestPermission(const GURL& origin) {
-  return CheckPermission(nullptr, origin, 0) ==
-      blink::WebNotificationPermissionAllowed;
+blink::WebNotificationPermission
+LayoutTestNotificationManager::CheckPermission(const GURL& origin) {
+  base::AutoLock lock(permission_lock_);
+  const auto& iter = permission_map_.find(origin);
+  if (iter != permission_map_.end())
+    return iter->second;
+
+  return blink::WebNotificationPermissionDefault;
 }
 
 void LayoutTestNotificationManager::SetPermission(
     const GURL& origin,
     blink::WebNotificationPermission permission) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  base::AutoLock lock(permission_lock_);
+
   permission_map_[origin] = permission;
 }
 
 void LayoutTestNotificationManager::ClearPermissions() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  base::AutoLock lock(permission_lock_);
+
   permission_map_.clear();
 }
 
@@ -66,9 +67,8 @@ void LayoutTestNotificationManager::DisplayNotification(
     const SkBitmap& icon,
     const PlatformNotificationData& notification_data,
     scoped_ptr<DesktopNotificationDelegate> delegate,
-    int render_process_id,
     base::Closure* cancel_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::string title = base::UTF16ToUTF8(notification_data.title);
 
   DCHECK(cancel_callback);
@@ -87,9 +87,8 @@ void LayoutTestNotificationManager::DisplayPersistentNotification(
     int64 service_worker_registration_id,
     const GURL& origin,
     const SkBitmap& icon,
-    const PlatformNotificationData& notification_data,
-    int render_process_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    const PlatformNotificationData& notification_data) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::string title = base::UTF16ToUTF8(notification_data.title);
 
   ReplaceNotificationIfNeeded(notification_data);
@@ -117,7 +116,7 @@ void LayoutTestNotificationManager::ClosePersistentNotification(
 }
 
 void LayoutTestNotificationManager::SimulateClick(const std::string& title) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // First check for page-notifications with the given title.
   const auto& page_iterator = page_notifications_.find(title);
@@ -142,13 +141,46 @@ void LayoutTestNotificationManager::SimulateClick(const std::string& title) {
           base::Bind(&OnEventDispatchComplete));
 }
 
+PermissionStatus LayoutTestNotificationManager::GetPermissionStatus(
+    const GURL& origin) {
+  switch (CheckPermission(origin)) {
+    case blink::WebNotificationPermissionAllowed:
+      return PERMISSION_STATUS_GRANTED;
+    case blink::WebNotificationPermissionDenied:
+      return PERMISSION_STATUS_DENIED;
+    case blink::WebNotificationPermissionDefault:
+      return PERMISSION_STATUS_ASK;
+  }
+
+  NOTREACHED();
+  return PERMISSION_STATUS_DENIED;
+}
+
+blink::WebNotificationPermission
+LayoutTestNotificationManager::CheckPermissionOnUIThread(
+    BrowserContext* browser_context,
+    const GURL& origin,
+    int render_process_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  return CheckPermission(origin);
+}
+
+blink::WebNotificationPermission
+LayoutTestNotificationManager::CheckPermissionOnIOThread(
+    ResourceContext* resource_context,
+    const GURL& origin,
+    int render_process_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  return CheckPermission(origin);
+}
+
 void LayoutTestNotificationManager::Close(const std::string& title) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   auto iterator = page_notifications_.find(title);
   if (iterator == page_notifications_.end())
     return;
 
-  iterator->second->NotificationClosed(false);
+  iterator->second->NotificationClosed();
 }
 
 void LayoutTestNotificationManager::ReplaceNotificationIfNeeded(
@@ -156,8 +188,8 @@ void LayoutTestNotificationManager::ReplaceNotificationIfNeeded(
   if (!notification_data.tag.length())
     return;
 
-  std::string replace_id = base::UTF16ToUTF8(notification_data.tag);
-  const auto& replace_iter = replacements_.find(replace_id);
+  std::string tag = notification_data.tag;
+  const auto& replace_iter = replacements_.find(tag);
   if (replace_iter != replacements_.end()) {
     const std::string& previous_title = replace_iter->second;
 
@@ -167,7 +199,7 @@ void LayoutTestNotificationManager::ReplaceNotificationIfNeeded(
       DesktopNotificationDelegate* previous_delegate =
           page_notification_iter->second;
 
-      previous_delegate->NotificationClosed(false);
+      previous_delegate->NotificationClosed();
 
       page_notifications_.erase(page_notification_iter);
       delete previous_delegate;
@@ -179,7 +211,7 @@ void LayoutTestNotificationManager::ReplaceNotificationIfNeeded(
       persistent_notifications_.erase(persistent_notification_iter);
   }
 
-  replacements_[replace_id] = base::UTF16ToUTF8(notification_data.title);
+  replacements_[tag] = base::UTF16ToUTF8(notification_data.title);
 }
 
 }  // namespace content

@@ -34,7 +34,6 @@
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/browser/extension_prefs.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/test/extension_test_message_listener.h"
 #import "ui/events/test/cocoa_test_event_utils.h"
 
@@ -45,6 +44,11 @@ class AppShimInteractiveTest : public extensions::PlatformAppBrowserTest {
  protected:
   AppShimInteractiveTest()
       : auto_reset_(&g_app_shims_allow_update_and_launch_in_tests, true) {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    PlatformAppBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kEnableNewBookmarkApps);
+  }
 
  private:
   // Temporarily enable app shims.
@@ -375,9 +379,8 @@ IN_PROC_BROWSER_TEST_F(AppShimInteractiveTest, MAYBE_HostedAppLaunch) {
   NSString* bundle_id = GetBundleID(shim_path);
 
   // Explicitly set the launch type to open in a new window.
-  extensions::SetLaunchType(
-      extensions::ExtensionSystem::Get(profile())->extension_service(),
-      app->id(), extensions::LAUNCH_TYPE_WINDOW);
+  extensions::SetLaunchType(profile(), app->id(),
+                            extensions::LAUNCH_TYPE_WINDOW);
 
   // Case 1: Launch the hosted app, it should start the shim.
   {
@@ -427,8 +430,10 @@ IN_PROC_BROWSER_TEST_F(AppShimInteractiveTest, MAYBE_HostedAppLaunch) {
     GetFirstHostedAppWindow()->window()->Close();
     // Wait for the window to be closed.
     listener.WaitUntilRemoved();
-    ASSERT_TRUE(
-        base::WaitForSingleProcess(shim_pid, TestTimeouts::action_timeout()));
+    base::Process shim_process(shim_pid);
+    int exit_code;
+    ASSERT_TRUE(shim_process.WaitForExitWithTimeout(
+                    TestTimeouts::action_timeout(), &exit_code));
 
     EXPECT_FALSE(GetFirstHostedAppWindow());
     EXPECT_FALSE(HasAppShimHost(profile(), app->id()));
@@ -499,8 +504,10 @@ IN_PROC_BROWSER_TEST_F(AppShimInteractiveTest, MAYBE_Launch) {
     pid_t shim_pid;
     EXPECT_EQ(noErr, GetProcessPID(&shim_psn, &shim_pid));
     GetFirstAppWindow()->GetBaseWindow()->Close();
-    ASSERT_TRUE(
-        base::WaitForSingleProcess(shim_pid, TestTimeouts::action_timeout()));
+    base::Process shim_process(shim_pid);
+    int exit_code;
+    ASSERT_TRUE(shim_process.WaitForExitWithTimeout(
+                    TestTimeouts::action_timeout(), &exit_code));
 
     EXPECT_FALSE(GetFirstAppWindow());
     EXPECT_FALSE(HasAppShimHost(profile(), app->id()));

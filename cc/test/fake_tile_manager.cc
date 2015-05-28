@@ -46,6 +46,7 @@ class FakeTileTaskRunnerImpl : public TileTaskRunner, public TileTaskClient {
     }
     completed_tasks_.clear();
   }
+  ResourceFormat GetResourceFormat() override { return RGBA_8888; }
 
   // Overridden from TileTaskClient:
   scoped_ptr<RasterBuffer> AcquireBufferForRaster(
@@ -67,7 +68,6 @@ FakeTileManager::FakeTileManager(TileManagerClient* client)
                   base::MessageLoopProxy::current(),
                   nullptr,
                   g_fake_tile_task_runner.Pointer(),
-                  nullptr,
                   std::numeric_limits<size_t>::max()) {
 }
 
@@ -77,7 +77,6 @@ FakeTileManager::FakeTileManager(TileManagerClient* client,
                   base::MessageLoopProxy::current(),
                   resource_pool,
                   g_fake_tile_task_runner.Pointer(),
-                  nullptr,
                   std::numeric_limits<size_t>::max()) {
 }
 

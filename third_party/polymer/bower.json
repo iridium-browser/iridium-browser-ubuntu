@@ -7,6 +7,7 @@
     "core-a11y-keys": "Polymer/core-a11y-keys#0.5.2",
     "core-ajax": "Polymer/core-ajax#0.5.2",
     "core-animated-pages": "Polymer/core-animated-pages#0.5.2",
+    "core-animation": "Polymer/core-animation#0.5.4",
     "core-collapse": "Polymer/core-collapse#0.5.2",
     "core-drag-drop": "Polymer/core-drag-drop#0.5.2",
     "core-drawer-panel": "Polymer/core-drawer-panel#0.5.2",
@@ -48,14 +49,16 @@
     "core-transition": "Polymer/core-transition#0.5.2",
 
     "paper-button": "Polymer/paper-button#0.5.2",
-    "paper-checkbox": "Polymer/paper-checkbox#0.5.2",
+    "paper-checkbox": "Polymer/paper-checkbox#0.5.4",
     "paper-dialog": "Polymer/paper-dialog#0.5.2",
+    "paper-dropdown": "Polymer/paper-dropdown#0.5.2",
+    "paper-dropdown-menu": "Polymer/paper-dropdown-menu#0.5.2",
     "paper-fab": "Polymer/paper-fab#0.5.2",
     "paper-icon-button": "Polymer/paper-icon-button#0.5.2",
     "paper-input": "Polymer/paper-input#0.5.2",
     "paper-item": "Polymer/paper-item#0.5.2",
     "paper-progress": "Polymer/paper-progress#0.5.2",
-    "paper-radio-button": "Polymer/paper-radio-button#0.5.2",
+    "paper-radio-button": "Polymer/paper-radio-button#0.5.4",
     "paper-radio-group": "Polymer/paper-radio-group#0.5.2",
     "paper-ripple": "Polymer/paper-ripple#0.5.2",
     "paper-shadow": "Polymer/paper-shadow#0.5.2",
@@ -63,6 +66,8 @@
     "paper-spinner": "Polymer/paper-spinner#0.5.2",
     "paper-tabs": "Polymer/paper-tabs#0.5.2",
     "paper-toast": "Polymer/paper-toast#0.5.2",
-    "paper-toggle-button": "Polymer/paper-toggle-button#0.5.2"
+    "paper-toggle-button": "Polymer/paper-toggle-button#0.5.4",
+
+    "web-animations-js": "web-animations/web-animations-js#1.0.5"
   }
 }

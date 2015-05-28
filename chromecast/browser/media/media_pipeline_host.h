@@ -30,6 +30,7 @@ class VideoDecoderConfig;
 namespace chromecast {
 namespace media {
 struct AvPipelineClient;
+class BrowserCdmCast;
 struct MediaPipelineClient;
 class MediaPipelineImpl;
 struct VideoPipelineClient;
@@ -60,7 +61,7 @@ class MediaPipelineHost {
 
   void SetPlaybackRate(float playback_rate);
   void SetVolume(TrackId track_id, float playback_rate);
-  void SetCdm(int render_process_id, int render_frame_id, int cdm_id);
+  void SetCdm(BrowserCdmCast* cdm);
 
   void NotifyPipeWrite(TrackId track_id);
 

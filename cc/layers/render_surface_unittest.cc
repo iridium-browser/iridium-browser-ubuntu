@@ -38,7 +38,7 @@ TEST(RenderSurfaceTest, VerifySurfaceChangesAreTrackedProperly) {
 
   FakeImplProxy proxy;
   TestSharedBitmapManager shared_bitmap_manager;
-  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
+  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager, nullptr);
   scoped_ptr<LayerImpl> owning_layer =
       LayerImpl::Create(host_impl.active_tree(), 1);
   owning_layer->SetHasRenderSurface(true);
@@ -83,7 +83,7 @@ TEST(RenderSurfaceTest, VerifySurfaceChangesAreTrackedProperly) {
 TEST(RenderSurfaceTest, SanityCheckSurfaceCreatesCorrectSharedQuadState) {
   FakeImplProxy proxy;
   TestSharedBitmapManager shared_bitmap_manager;
-  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
+  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager, nullptr);
   scoped_ptr<LayerImpl> root_layer =
       LayerImpl::Create(host_impl.active_tree(), 1);
 
@@ -102,23 +102,17 @@ TEST(RenderSurfaceTest, SanityCheckSurfaceCreatesCorrectSharedQuadState) {
   gfx::Rect content_rect(0, 0, 50, 50);
   gfx::Rect clip_rect(5, 5, 40, 40);
   gfx::Transform origin;
-
   origin.Translate(30, 40);
 
-  render_surface->SetDrawTransform(origin);
   render_surface->SetContentRect(content_rect);
   render_surface->SetClipRect(clip_rect);
   render_surface->SetDrawOpacity(1.f);
 
-  MockOcclusionTracker<LayerImpl> occlusion_tracker;
   scoped_ptr<RenderPass> render_pass = RenderPass::Create();
   AppendQuadsData append_quads_data;
 
-  bool for_replica = false;
-  render_surface->AppendQuads(render_pass.get(),
-                              occlusion_tracker,
-                              &append_quads_data,
-                              for_replica,
+  render_surface->AppendQuads(render_pass.get(), origin, Occlusion(),
+                              SK_ColorBLACK, 1.f, nullptr, &append_quads_data,
                               RenderPassId(2, 0));
 
   ASSERT_EQ(1u, render_pass->shared_quad_state_list.size());
@@ -153,7 +147,7 @@ class TestRenderPassSink : public RenderPassSink {
 TEST(RenderSurfaceTest, SanityCheckSurfaceCreatesCorrectRenderPass) {
   FakeImplProxy proxy;
   TestSharedBitmapManager shared_bitmap_manager;
-  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
+  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager, nullptr);
   scoped_ptr<LayerImpl> root_layer =
       LayerImpl::Create(host_impl.active_tree(), 1);
 

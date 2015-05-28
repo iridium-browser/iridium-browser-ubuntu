@@ -9,8 +9,8 @@
 #include <limits>
 #include <string>
 
-#include "base/debug/trace_event_argument.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "cc/base/cc_export.h"
 
 namespace base {
@@ -24,7 +24,7 @@ enum WhichTree {
   // e.g. in Tile::priority_.
   ACTIVE_TREE = 0,
   PENDING_TREE = 1,
-  NUM_TREES = 2
+  LAST_TREE = 1
   // Be sure to update WhichTreeAsValue when adding new fields.
 };
 scoped_ptr<base::Value> WhichTreeAsValue(WhichTree tree);
@@ -74,7 +74,7 @@ struct CC_EXPORT TilePriority {
     }
   }
 
-  void AsValueInto(base::debug::TracedValue* dict) const;
+  void AsValueInto(base::trace_event::TracedValue* dict) const;
 
   bool operator ==(const TilePriority& other) const {
     return resolution == other.resolution &&
@@ -118,7 +118,7 @@ enum TreePriority {
   SAME_PRIORITY_FOR_BOTH_TREES,
   SMOOTHNESS_TAKES_PRIORITY,
   NEW_CONTENT_TAKES_PRIORITY,
-  NUM_TREE_PRIORITIES
+  LAST_TREE_PRIORITY = NEW_CONTENT_TAKES_PRIORITY
   // Be sure to update TreePriorityAsValue when adding new fields.
 };
 std::string TreePriorityToString(TreePriority prio);
@@ -151,7 +151,7 @@ class GlobalStateThatImpactsTilePriority {
     return !(*this == other);
   }
 
-  void AsValueInto(base::debug::TracedValue* dict) const;
+  void AsValueInto(base::trace_event::TracedValue* dict) const;
 };
 
 }  // namespace cc

@@ -30,16 +30,19 @@ namespace media {
 // Contains information about an EME key system as well as how to instantiate
 // the corresponding CDM.
 struct MEDIA_EXPORT KeySystemInfo {
-  explicit KeySystemInfo(const std::string& key_system);
+  KeySystemInfo();
   ~KeySystemInfo();
 
   std::string key_system;
 
-  // Specifies registered initialization data types supported by |key_system|.
-  SupportedInitDataTypes supported_init_data_types;
-
-  // Specifies codecs supported by |key_system|.
+  InitDataTypeMask supported_init_data_types;
   SupportedCodecs supported_codecs;
+  EmeRobustness max_audio_robustness;
+  EmeRobustness max_video_robustness;
+  EmeSessionTypeSupport persistent_license_support;
+  EmeSessionTypeSupport persistent_release_message_support;
+  EmeFeatureSupport persistent_state_support;
+  EmeFeatureSupport distinctive_identifier_support;
 
   // A hierarchical parent for |key_system|. This value can be used to check
   // supported types but cannot be used to instantiate a MediaKeys object.

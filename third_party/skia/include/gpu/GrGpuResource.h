@@ -12,17 +12,16 @@
 #include "GrTypesPriv.h"
 #include "SkData.h"
 #include "SkInstCnt.h"
-#include "SkTInternalLList.h"
 
 class GrContext;
 class GrGpu;
-class GrResourceCache2;
+class GrResourceCache;
 
 /**
  * Base class for GrGpuResource. Handles the various types of refs we need. Separated out as a base
  * class to isolate the ref-cnting behavior and provide friendship without exposing all of
  * GrGpuResource.
- * 
+ *
  * Gpu resources can have three types of refs:
  *   1) Normal ref (+ by ref(), - by unref()): These are used by code that is issuing draw calls
  *      that read and write the resource via GrDrawTarget and by any object that must own a
@@ -34,13 +33,13 @@ class GrResourceCache2;
  *
  * The latter two ref types are private and intended only for Gr core code.
  *
- * When an item is purgable DERIVED:notifyIsPurgable() will be called (static poly morphism using
+ * When an item is purgeable DERIVED:notifyIsPurgeable() will be called (static poly morphism using
  * CRTP). GrIORef and GrGpuResource are separate classes for organizational reasons and to be
  * able to give access via friendship to only the functions related to pending IO operations.
  */
 template <typename DERIVED> class GrIORef : public SkNoncopyable {
 public:
-    SK_DECLARE_INST_COUNT_ROOT(GrIORef)
+    SK_DECLARE_INST_COUNT(GrIORef)
 
     // Some of the signatures are written to mirror SkRefCnt so that GrGpuResource can work with
     // templated helper classes (e.g. SkAutoTUnref). However, we have different categories of
@@ -69,7 +68,7 @@ public:
 protected:
     GrIORef() : fRefCnt(1), fPendingReads(0), fPendingWrites(0) { }
 
-    bool isPurgable() const { return !this->internalHasRef() && !this->internalHasPendingIO(); }
+    bool isPurgeable() const { return !this->internalHasRef() && !this->internalHasPendingIO(); }
 
     bool internalHasPendingRead() const { return SkToBool(fPendingReads); }
     bool internalHasPendingWrite() const { return SkToBool(fPendingWrites); }
@@ -103,7 +102,7 @@ private:
 private:
     void didUnref() const {
         if (0 == fPendingReads && 0 == fPendingWrites && 0 == fRefCnt) {
-            static_cast<const DERIVED*>(this)->notifyIsPurgable();
+            static_cast<const DERIVED*>(this)->notifyIsPurgeable();
         }
     }
 
@@ -113,13 +112,13 @@ private:
 
     // This class is used to manage conversion of refs to pending reads/writes.
     friend class GrGpuResourceRef;
-    friend class GrResourceCache2; // to check IO ref counts.
+    friend class GrResourceCache; // to check IO ref counts.
 
     template <typename, GrIOType> friend class GrPendingIOResource;
 };
 
 /**
- * Base class for objects that can be kept in the GrResourceCache2.
+ * Base class for objects that can be kept in the GrResourceCache.
  */
 class SK_API GrGpuResource : public GrIORef<GrGpuResource> {
 public:
@@ -128,7 +127,7 @@ public:
     enum LifeCycle {
         /**
          * The resource is cached and owned by Skia. Resources with this status may be kept alive
-         * by the cache as either scratch or content resources even when there are no refs to them.
+         * by the cache as either scratch or unique resources even when there are no refs to them.
          * The cache may release them whenever there are no refs.
          */
         kCached_LifeCycle,
@@ -188,6 +187,10 @@ public:
      */
     uint32_t getUniqueID() const { return fUniqueID; }
 
+    /** Returns the current unique key for the resource. It will be invalid if the resource has no
+        associated unique key. */
+    const GrUniqueKey& getUniqueKey() const { return fUniqueKey; }
+
     /**
      * Attach a custom data object to this resource. The data will remain attached
      * for the lifetime of this resource (until it is abandoned or released).
@@ -203,11 +206,18 @@ public:
     const SkData* getCustomData() const { return fData.get(); }
 
     /**
-     * Internal-only helper class used for cache manipulations of the reosurce.
+     * Internal-only helper class used for manipulations of the resource by the cache.
      */
     class CacheAccess;
     inline CacheAccess cacheAccess();
     inline const CacheAccess cacheAccess() const;
+
+    /**
+     * Internal-only helper class used for manipulations of the resource by internal code.
+     */
+    class ResourcePriv;
+    inline ResourcePriv resourcePriv();
+    inline const ResourcePriv resourcePriv() const;
 
     /**
      * Removes references to objects in the underlying 3D API without freeing them.
@@ -258,11 +268,13 @@ private:
 
     virtual size_t onGpuMemorySize() const = 0;
 
-    // See comments in CacheAccess.
-    bool setContentKey(const GrResourceKey& contentKey);
-    void notifyIsPurgable() const;
+    // See comments in CacheAccess and ResourcePriv.
+    void setUniqueKey(const GrUniqueKey&);
+    void removeUniqueKey();
+    void notifyIsPurgeable() const;
     void removeScratchKey();
     void makeBudgeted();
+    void makeUnbudgeted();
 
 #ifdef SK_DEBUG
     friend class GrGpu; // for assert in GrGpu to access getGpu
@@ -270,35 +282,29 @@ private:
 
     static uint32_t CreateUniqueID();
 
-    // We're in an internal doubly linked list owned by GrResourceCache2
-    SK_DECLARE_INTERNAL_LLIST_INTERFACE(GrGpuResource);
-
+    // An index into a heap when this resource is purgeable or an array when not. This is maintained
+    // by the cache.
+    int                         fCacheArrayIndex;
+    // This value reflects how recently this resource was accessed in the cache. This is maintained
+    // by the cache.
+    uint32_t                    fTimestamp;
 
     static const size_t kInvalidGpuMemorySize = ~static_cast<size_t>(0);
-    enum Flags {
-        /**
-         * If set then fContentKey is valid and the resource is cached based on its content.
-         */
-        kContentKeySet_Flag = 0x1,
-    };
-
-    GrScratchKey            fScratchKey;
-    // TODO(bsalomon): Remove GrResourceKey and use different simpler type for content keys.
-    GrResourceKey           fContentKey;
+    GrScratchKey                fScratchKey;
+    GrUniqueKey                 fUniqueKey;
 
     // This is not ref'ed but abandon() or release() will be called before the GrGpu object
     // is destroyed. Those calls set will this to NULL.
-    GrGpu*                  fGpu;
-    mutable size_t          fGpuMemorySize;
+    GrGpu*                      fGpu;
+    mutable size_t              fGpuMemorySize;
 
-    uint32_t                fFlags;
-    LifeCycle               fLifeCycle;
-    const uint32_t          fUniqueID;
+    LifeCycle                   fLifeCycle;
+    const uint32_t              fUniqueID;
 
-    SkAutoTUnref<const SkData> fData;
+    SkAutoTUnref<const SkData>  fData;
 
     typedef GrIORef<GrGpuResource> INHERITED;
-    friend class GrIORef<GrGpuResource>; // to access notifyIsPurgable.
+    friend class GrIORef<GrGpuResource>; // to access notifyIsPurgeable.
 };
 
 #endif

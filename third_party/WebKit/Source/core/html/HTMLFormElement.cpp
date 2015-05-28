@@ -52,10 +52,10 @@
 #include "core/html/RadioNodeList.h"
 #include "core/html/forms/FormController.h"
 #include "core/inspector/ConsoleMessage.h"
+#include "core/layout/LayoutTextControl.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/MixedContentChecker.h"
-#include "core/rendering/RenderTextControl.h"
 #include "platform/UserGestureIndicator.h"
 #include "wtf/text/AtomicString.h"
 #include <limits>
@@ -78,7 +78,6 @@ HTMLFormElement::HTMLFormElement(Document& document)
     , m_shouldSubmit(false)
     , m_isInResetFunction(false)
     , m_wasDemoted(false)
-    , m_invalidControlsCount(0)
     , m_pendingAutocompleteEventsQueue(GenericEventQueue::create(this))
 {
 }
@@ -99,7 +98,7 @@ HTMLFormElement::~HTMLFormElement()
 #endif
 }
 
-void HTMLFormElement::trace(Visitor* visitor)
+DEFINE_TRACE(HTMLFormElement)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_pastNamesMap);
@@ -121,21 +120,21 @@ bool HTMLFormElement::isValidElement()
     return !checkInvalidControlsAndCollectUnhandled(0, CheckValidityDispatchNoEvent);
 }
 
-bool HTMLFormElement::rendererIsNeeded(const RenderStyle& style)
+bool HTMLFormElement::layoutObjectIsNeeded(const ComputedStyle& style)
 {
     if (!m_wasDemoted)
-        return HTMLElement::rendererIsNeeded(style);
+        return HTMLElement::layoutObjectIsNeeded(style);
 
     ContainerNode* node = parentNode();
-    if (!node || !node->renderer())
-        return HTMLElement::rendererIsNeeded(style);
-    RenderObject* parentRenderer = node->renderer();
+    if (!node || !node->layoutObject())
+        return HTMLElement::layoutObjectIsNeeded(style);
+    LayoutObject* parentRenderer = node->layoutObject();
     // FIXME: Shouldn't we also check for table caption (see |formIsTablePart| below).
     // FIXME: This check is not correct for Shadow DOM.
     bool parentIsTableElementPart = (parentRenderer->isTable() && isHTMLTableElement(*node))
         || (parentRenderer->isTableRow() && isHTMLTableRowElement(*node))
         || (parentRenderer->isTableSection() && node->hasTagName(tbodyTag))
-        || (parentRenderer->isRenderTableCol() && node->hasTagName(colTag))
+        || (parentRenderer->isLayoutTableCol() && node->hasTagName(colTag))
         || (parentRenderer->isTableCell() && isHTMLTableRowElement(*node));
 
     if (!parentIsTableElementPart)
@@ -288,7 +287,7 @@ bool HTMLFormElement::validateInteractively()
     // show a validation message on a focusable form control.
 
     // Needs to update layout now because we'd like to call isFocusable(), which
-    // has !renderer()->needsLayout() assertion.
+    // has !layoutObject()->needsLayout() assertion.
     document().updateLayoutIgnorePendingStylesheets();
 
     RefPtrWillBeRawPtr<HTMLFormElement> protector(this);
@@ -714,31 +713,6 @@ HTMLFormControlElement* HTMLFormElement::defaultButton() const
     return 0;
 }
 
-void HTMLFormElement::setNeedsValidityCheck(ValidityRecalcReason reason, bool isValid)
-{
-    bool formWasInvalid = m_invalidControlsCount > 0;
-    switch (reason) {
-    case ElementRemoval:
-        if (!isValid)
-            --m_invalidControlsCount;
-        break;
-    case ElementAddition:
-        if (!isValid)
-            ++m_invalidControlsCount;
-        break;
-    case ElementModification:
-        if (isValid)
-            --m_invalidControlsCount;
-        else
-            ++m_invalidControlsCount;
-        break;
-    }
-    if (formWasInvalid && !m_invalidControlsCount)
-        pseudoStateChanged(CSSSelector::PseudoValid);
-    if (!formWasInvalid && m_invalidControlsCount)
-        pseudoStateChanged(CSSSelector::PseudoInvalid);
-}
-
 bool HTMLFormElement::checkValidity()
 {
     return !checkInvalidControlsAndCollectUnhandled(0, CheckValidityDispatchInvalidEvent);
@@ -746,9 +720,6 @@ bool HTMLFormElement::checkValidity()
 
 bool HTMLFormElement::checkInvalidControlsAndCollectUnhandled(WillBeHeapVector<RefPtrWillBeMember<HTMLFormControlElement>>* unhandledInvalidControls, CheckValidityEventBehavior eventBehavior)
 {
-    if (!unhandledInvalidControls && eventBehavior == CheckValidityDispatchNoEvent)
-        return m_invalidControlsCount;
-
     RefPtrWillBeRawPtr<HTMLFormElement> protector(this);
     // Copy associatedElements because event handlers called from
     // HTMLFormControlElement::checkValidity() might change associatedElements.
@@ -761,12 +732,13 @@ bool HTMLFormElement::checkInvalidControlsAndCollectUnhandled(WillBeHeapVector<R
     for (unsigned i = 0; i < elements.size(); ++i) {
         if (elements[i]->form() == this && elements[i]->isFormControlElement()) {
             HTMLFormControlElement* control = toHTMLFormControlElement(elements[i].get());
-            if (!control->checkValidity(unhandledInvalidControls, eventBehavior) && control->formOwner() == this)
+            if (!control->checkValidity(unhandledInvalidControls, eventBehavior) && control->formOwner() == this) {
                 ++invalidControlsCount;
+                if (!unhandledInvalidControls && eventBehavior == CheckValidityDispatchNoEvent)
+                    return true;
+            }
         }
     }
-    if (eventBehavior == CheckValidityDispatchNoEvent)
-        ASSERT(invalidControlsCount == m_invalidControlsCount);
     return invalidControlsCount;
 }
 

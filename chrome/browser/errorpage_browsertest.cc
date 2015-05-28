@@ -15,9 +15,9 @@
 #include "base/synchronization/lock.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
-#include "chrome/browser/google/google_profile_helper.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -52,6 +52,18 @@
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/chrome_browser_main_chromeos.h"
+#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chrome/browser/chromeos/policy/stub_enterprise_install_attributes.h"
+#include "chrome/grit/generated_resources.h"
+#include "components/policy/core/common/mock_configuration_policy_provider.h"
+#include "components/policy/core/common/policy_types.h"
+#include "content/public/test/browser_test_utils.h"
+#include "ui/base/l10n/l10n_util.h"
+#endif
 
 using content::BrowserThread;
 using content::NavigationController;
@@ -136,8 +148,8 @@ void ExpectDisplayingNavigationCorrections(Browser* browser,
   EXPECT_TRUE(search_box_populated);
 }
 
-std::string GetLoadStaleButtonLabel() {
-  return l10n_util::GetStringUTF8(IDS_ERRORPAGES_BUTTON_LOAD_STALE);
+std::string GetShowSavedButtonLabel() {
+  return l10n_util::GetStringUTF8(IDS_ERRORPAGES_BUTTON_SHOW_SAVED_COPY);
 }
 
 void AddInterceptorForURL(
@@ -279,10 +291,11 @@ void InstallMockInterceptors(
   // Add a mock for the search engine the error page will use.
   base::FilePath root_http;
   PathService::Get(chrome::DIR_TEST_DATA, &root_http);
-  net::URLRequestMockHTTPJob::AddHostnameToFileHandler(
-      search_url.host(),
-      root_http.AppendASCII("title3.html"),
-      BrowserThread::GetBlockingPool());
+  net::URLRequestFilter::GetInstance()->AddHostnameInterceptor(
+      search_url.scheme(), search_url.host(),
+      net::URLRequestMockHTTPJob::CreateInterceptorForSingleFile(
+          root_http.AppendASCII("title3.html"),
+          BrowserThread::GetBlockingPool()));
 }
 
 class ErrorPageTest : public InProcessBrowserTest {
@@ -298,7 +311,8 @@ class ErrorPageTest : public InProcessBrowserTest {
   // Navigates the active tab to a mock url created for the file at |file_path|.
   // Needed for StaleCacheStatus and StaleCacheStatusFailedCorrections tests.
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kEnableOfflineLoadStaleCache);
+    command_line->AppendSwitchASCII(switches::kShowSavedCopy,
+                                    switches::kEnableShowSavedCopyPrimary);
   }
 
   // Navigates the active tab to a mock url created for the file at |file_path|.
@@ -357,7 +371,8 @@ class ErrorPageTest : public InProcessBrowserTest {
     const char* js_cache_probe =
         "try {\n"
         "    domAutomationController.send(\n"
-        "        loadTimeData.valueExists('staleLoadButton') ? 'yes' : 'no');\n"
+        "        loadTimeData.valueExists('showSavedCopyButton') ?"
+        "            'yes' : 'no');\n"
         "} catch (e) {\n"
         "    domAutomationController.send(e.message);\n"
         "}\n";
@@ -382,7 +397,7 @@ class ErrorPageTest : public InProcessBrowserTest {
   testing::AssertionResult ReloadStaleCopyFromCache() {
     const char* js_reload_script =
         "try {\n"
-        "    document.getElementById('stale-load-button').click();\n"
+        "    document.getElementById('show-saved-copy-button').click();\n"
         "    domAutomationController.send('success');\n"
         "} catch (e) {\n"
         "    domAutomationController.send(e.message);\n"
@@ -412,12 +427,11 @@ class ErrorPageTest : public InProcessBrowserTest {
     // Ownership of the |interceptor_| is passed to an object the IO thread, but
     // a pointer is kept in the test fixture.  As soon as anything calls
     // URLRequestFilter::ClearHandlers(), |interceptor_| can become invalid.
+    UIThreadSearchTermsData search_terms_data(browser()->profile());
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&InstallMockInterceptors,
-                   google_util::GetGoogleSearchURL(
-                       google_profile_helper::GetGoogleHomePageURL(
-                           browser()->profile())),
+                   GURL(search_terms_data.GoogleBaseURLValue()),
                    base::Passed(&owned_interceptor)));
   }
 
@@ -845,10 +859,10 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, StaleCacheStatus) {
       base::Bind(&InterceptNetworkTransactions, url_request_context_getter,
                  net::ERR_FAILED));
 
-      // With no navigation corrections to load, there's only one navigation.
+  // With no navigation corrections to load, there's only one navigation.
   ui_test_utils::NavigateToURL(browser(), test_url);
   EXPECT_TRUE(ProbeStaleCopyValue(true));
-  EXPECT_TRUE(IsDisplayingText(browser(), GetLoadStaleButtonLabel()));
+  EXPECT_TRUE(IsDisplayingText(browser(), GetShowSavedButtonLabel()));
   EXPECT_NE(base::ASCIIToUTF16("Nocache Test Page"),
             browser()->tab_strip_model()->GetActiveWebContents()->GetTitle());
 
@@ -860,6 +874,13 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, StaleCacheStatus) {
   EXPECT_EQ(base::ASCIIToUTF16("Nocache Test Page"),
             browser()->tab_strip_model()->GetActiveWebContents()->GetTitle());
 
+  // Reload the same URL with a post request; confirm the error page is told
+  // that there is no cached copy.
+  ui_test_utils::NavigateToURLWithPost(browser(), test_url);
+  EXPECT_TRUE(ProbeStaleCopyValue(false));
+  EXPECT_FALSE(IsDisplayingText(browser(), GetShowSavedButtonLabel()));
+  EXPECT_EQ(0, link_doctor_interceptor()->num_requests());
+
   // Clear the cache and reload the same URL; confirm the error page is told
   // that there is no cached copy.
   BrowsingDataRemover* remover =
@@ -868,8 +889,34 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, StaleCacheStatus) {
                   BrowsingDataHelper::UNPROTECTED_WEB);
   ui_test_utils::NavigateToURL(browser(), test_url);
   EXPECT_TRUE(ProbeStaleCopyValue(false));
-  EXPECT_FALSE(IsDisplayingText(browser(), GetLoadStaleButtonLabel()));
+  EXPECT_FALSE(IsDisplayingText(browser(), GetShowSavedButtonLabel()));
   EXPECT_EQ(0, link_doctor_interceptor()->num_requests());
+}
+
+// Check that the easter egg is present and initialised and is not disabled.
+IN_PROC_BROWSER_TEST_F(ErrorPageTest, CheckEasterEggIsNotDisabled) {
+  ui_test_utils::NavigateToURL(browser(),
+      URLRequestFailedJob::GetMockHttpUrl(net::ERR_INTERNET_DISCONNECTED));
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  // Check for no disabled message container.
+  std::string command = base::StringPrintf(
+      "var hasDisableContainer = document.querySelectorAll('.snackbar').length;"
+      "domAutomationController.send(hasDisableContainer);");
+  int result;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(
+               web_contents, command, &result));
+  EXPECT_EQ(0, result);
+
+  // Presence of the canvas container.
+  command = base::StringPrintf(
+    "var runnerCanvas = document.querySelectorAll('.runner-canvas').length;"
+    "domAutomationController.send(runnerCanvas);");
+  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(
+               web_contents, command, &result));
+  EXPECT_EQ(1, result);
 }
 
 class ErrorPageAutoReloadTest : public InProcessBrowserTest {
@@ -941,7 +988,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, ManualReloadNotSuppressed) {
   EXPECT_EQ(2, interceptor()->requests());
 
   ToggleHelpBox(browser());
-  EXPECT_TRUE(IsDisplayingNetError(browser(), net::ERR_CONNECTION_RESET));
+  EXPECT_TRUE(IsDisplayingText(browser(), "error.page.auto.reload"));
 
   content::WebContents* web_contents =
     browser()->tab_strip_model()->GetActiveWebContents();
@@ -949,7 +996,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, ManualReloadNotSuppressed) {
   web_contents->GetMainFrame()->ExecuteJavaScript(
       base::ASCIIToUTF16("document.getElementById('reload-button').click();"));
   nav_observer.Wait();
-  EXPECT_FALSE(IsDisplayingNetError(browser(), net::ERR_CONNECTION_RESET));
+  EXPECT_FALSE(IsDisplayingText(browser(), "error.page.auto.reload"));
 }
 
 // Interceptor that fails all requests with net::ERR_ADDRESS_UNREACHABLE.
@@ -1047,7 +1094,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageNavigationCorrectionsFailTest,
 
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(), test_url, 2);
-  EXPECT_TRUE(IsDisplayingText(browser(), GetLoadStaleButtonLabel()));
+  EXPECT_TRUE(IsDisplayingText(browser(), GetShowSavedButtonLabel()));
   EXPECT_TRUE(ProbeStaleCopyValue(true));
 
   // Confirm that loading the stale copy from the cache works.
@@ -1067,8 +1114,58 @@ IN_PROC_BROWSER_TEST_F(ErrorPageNavigationCorrectionsFailTest,
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(), test_url, 2);
   EXPECT_TRUE(ProbeStaleCopyValue(false));
-  EXPECT_FALSE(IsDisplayingText(browser(), GetLoadStaleButtonLabel()));
+  EXPECT_FALSE(IsDisplayingText(browser(), GetShowSavedButtonLabel()));
 }
+
+#if defined(OS_CHROMEOS)
+class ErrorPageOfflineTest : public ErrorPageTest {
+ protected:
+  // Mock policy provider for both user and device policies.
+  policy::MockConfigurationPolicyProvider policy_provider_;
+
+  void SetUpInProcessBrowserTestFixture() override {
+    // Set up fake install attributes.
+    scoped_ptr<policy::StubEnterpriseInstallAttributes> attributes(
+        new policy::StubEnterpriseInstallAttributes());
+    attributes->SetDomain("example.com");
+    attributes->SetRegistrationUser("user@example.com");
+    policy::BrowserPolicyConnectorChromeOS::SetInstallAttributesForTesting(
+        attributes.release());
+
+    // Sets up a mock policy provider for user and device policies.
+    EXPECT_CALL(policy_provider_, IsInitializationComplete(testing::_))
+        .WillRepeatedly(testing::Return(true));
+    policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
+        &policy_provider_);
+
+    ErrorPageTest::SetUpInProcessBrowserTestFixture();
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(ErrorPageOfflineTest, CheckEasterEggIsDisabled) {
+  // Check for enterprise enrollment.
+  policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  EXPECT_TRUE(connector->IsEnterpriseManaged());
+
+  ui_test_utils::NavigateToURL(browser(),
+      URLRequestFailedJob::GetMockHttpUrl(net::ERR_INTERNET_DISCONNECTED));
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  std::string command = base::StringPrintf(
+      "var hasText = document.querySelector('.snackbar').innerText;"
+      "domAutomationController.send(hasText);");
+  std::string result = "";
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+               web_contents, command, &result));
+
+  std::string disabled_text =
+      l10n_util::GetStringUTF8(IDS_ERRORPAGE_FUN_DISABLED);
+  EXPECT_EQ(disabled_text, result);
+}
+#endif
 
 // A test fixture that simulates failing requests for an IDN domain name.
 class ErrorPageForIDNTest : public InProcessBrowserTest {

@@ -23,23 +23,24 @@ extern "C" {
 #include "base/pickle.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/synchronization/waitable_event.h"
+#include "ipc/ipc_message_attachment_set.h"
 #include "ipc/ipc_message_utils.h"
 #include "ipc/ipc_test_base.h"
 
 #if defined(OS_POSIX)
 #include "base/macros.h"
-#include "ipc/file_descriptor_set_posix.h"
 #endif
 
 namespace {
 
-const unsigned kNumFDsToSend = 7;  // per message
-const unsigned kNumMessages = 20;
+const unsigned kNumFDsToSend = 128;  // per message
+const unsigned kNumMessages = 3;
 const char* kDevZeroPath = "/dev/zero";
 
 #if defined(OS_POSIX)
-COMPILE_ASSERT(kNumFDsToSend == FileDescriptorSet::kMaxDescriptorsPerMessage,
-  num_fds_to_send_must_be_the_same_as_the_max_desc_per_message);
+static_assert(kNumFDsToSend ==
+                  IPC::MessageAttachmentSet::kMaxDescriptorsPerMessage,
+              "The number of FDs to send must be kMaxDescriptorsPerMessage.");
 #endif
 
 class MyChannelDescriptorListenerBase : public IPC::Listener {

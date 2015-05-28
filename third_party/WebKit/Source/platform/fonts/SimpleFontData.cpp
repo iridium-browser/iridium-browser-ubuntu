@@ -57,7 +57,7 @@ SimpleFontData::SimpleFontData(const FontPlatformData& platformData, PassRefPtr<
     : m_maxCharWidth(-1)
     , m_avgCharWidth(-1)
     , m_platformData(platformData)
-    , m_treatAsFixedPitch(false)
+    , m_pitch(UnknownPitchFont)
     , m_isTextOrientationFallback(isTextOrientationFallback)
     , m_isBrokenIdeographFallback(false)
     , m_verticalData(nullptr)
@@ -66,7 +66,7 @@ SimpleFontData::SimpleFontData(const FontPlatformData& platformData, PassRefPtr<
 {
     platformInit();
     platformGlyphInit();
-    if (platformData.orientation() == Vertical && !isTextOrientationFallback) {
+    if (platformData.isVerticalAnyUpright() && !isTextOrientationFallback) {
         m_verticalData = platformData.verticalData();
         m_hasVerticalGlyphs = m_verticalData.get() && m_verticalData->hasVerticalMetrics();
     }
@@ -74,7 +74,7 @@ SimpleFontData::SimpleFontData(const FontPlatformData& platformData, PassRefPtr<
 
 SimpleFontData::SimpleFontData(PassRefPtr<CustomFontData> customData, float fontSize, bool syntheticBold, bool syntheticItalic)
     : m_platformData(FontPlatformData(fontSize, syntheticBold, syntheticItalic))
-    , m_treatAsFixedPitch(false)
+    , m_pitch(UnknownPitchFont)
     , m_isTextOrientationFallback(false)
     , m_isBrokenIdeographFallback(false)
     , m_verticalData(nullptr)
@@ -151,6 +151,22 @@ void SimpleFontData::platformInit()
 #endif
     }
 
+#if OS(MACOSX)
+    // We are preserving this ascent hack to match Safari's ascent adjustment
+    // in their SimpleFontDataMac.mm, for details see crbug.com/445830.
+    // We need to adjust Times, Helvetica, and Courier to closely match the
+    // vertical metrics of their Microsoft counterparts that are the de facto
+    // web standard. The AppKit adjustment of 20% is too big and is
+    // incorrectly added to line spacing, so we use a 15% adjustment instead
+    // and add it to the ascent.
+    DEFINE_STATIC_LOCAL(AtomicString, timesName, ("Times", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, helveticaName, ("Helvetica", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, courierName, ("Courier", AtomicString::ConstructFromLiteral));
+    String familyName = m_platformData.fontFamilyName();
+    if (familyName == timesName || familyName == helveticaName || familyName == courierName)
+        ascent += floorf(((ascent + descent) * 0.15f) + 0.5f);
+#endif
+
     m_fontMetrics.setAscent(ascent);
     m_fontMetrics.setDescent(descent);
 
@@ -168,7 +184,7 @@ void SimpleFontData::platformInit()
     m_fontMetrics.setLineGap(lineGap);
     m_fontMetrics.setLineSpacing(lroundf(ascent) + lroundf(descent) + lroundf(lineGap));
 
-    if (platformData().orientation() == Vertical && !isTextOrientationFallback()) {
+    if (platformData().isVerticalAnyUpright() && !isTextOrientationFallback()) {
         static const uint32_t vheaTag = SkSetFourByteTag('v', 'h', 'e', 'a');
         static const uint32_t vorgTag = SkSetFourByteTag('V', 'O', 'R', 'G');
         size_t vheaSize = face->getTableSize(vheaTag);
@@ -302,7 +318,7 @@ PassRefPtr<SimpleFontData> SimpleFontData::verticalRightOrientationFontData() co
         m_derivedFontData = DerivedFontData::create(isCustomFont());
     if (!m_derivedFontData->verticalRightOrientation) {
         FontPlatformData verticalRightPlatformData(m_platformData);
-        verticalRightPlatformData.setOrientation(Horizontal);
+        verticalRightPlatformData.setOrientation(FontOrientation::Horizontal);
         m_derivedFontData->verticalRightOrientation = create(verticalRightPlatformData, isCustomFont() ? CustomFontData::create(): nullptr, true);
     }
     return m_derivedFontData->verticalRightOrientation;
@@ -383,7 +399,7 @@ PassRefPtr<SimpleFontData> SimpleFontData::platformCreateScaledFontData(const Fo
 
 void SimpleFontData::determinePitch()
 {
-    m_treatAsFixedPitch = platformData().isFixedPitch();
+    m_pitch = platformData().isFixedPitch() ? FixedPitchFont : VariablePitchFont;
 }
 
 static inline void getSkiaBoundsForGlyph(SkPaint& paint, Glyph glyph, SkRect& bounds)
@@ -445,19 +461,20 @@ bool SimpleFontData::canRenderCombiningCharacterSequence(const UChar* characters
 
     UErrorCode error = U_ZERO_ERROR;
     Vector<UChar, 4> normalizedCharacters(length);
-    int32_t normalizedLength = unorm_normalize(characters, length, UNORM_NFC, UNORM_UNICODE_3_2, &normalizedCharacters[0], length, &error);
+    size_t normalizedLength = unorm_normalize(characters, length, UNORM_NFC, UNORM_UNICODE_3_2, &normalizedCharacters[0], length, &error);
     // Can't render if we have an error or no composition occurred.
-    if (U_FAILURE(error) || (static_cast<size_t>(normalizedLength) == length))
+    if (U_FAILURE(error) || normalizedLength == length)
         return false;
 
-    SkPaint paint;
-    m_platformData.setupPaint(&paint);
-    paint.setTextEncoding(SkPaint::kUTF16_TextEncoding);
-    if (paint.textToGlyphs(&normalizedCharacters[0], normalizedLength * 2, 0)) {
-        addResult.storedValue->value = true;
-        return true;
+    for (size_t offset = 0; offset < normalizedLength;) {
+        UChar32 character;
+        U16_NEXT(normalizedCharacters, offset, normalizedLength, character);
+        if (!glyphForCharacter(character))
+            return false;
     }
-    return false;
+
+    addResult.storedValue->value = true;
+    return true;
 }
 
 bool SimpleFontData::fillGlyphPage(GlyphPage* pageToFill, unsigned offset, unsigned length, UChar* buffer, unsigned bufferLength) const

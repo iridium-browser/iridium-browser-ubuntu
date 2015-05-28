@@ -18,6 +18,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
+#include "components/device_event_log/device_event_log.h"
 #include "device/hid/hid_connection_win.h"
 #include "device/hid/hid_device_info.h"
 #include "net/base/io_buffer.h"
@@ -28,7 +29,18 @@
 
 namespace device {
 
-HidServiceWin::HidServiceWin() : device_observer_(this) {
+namespace {
+
+void Noop() {
+  // This function does nothing.
+}
+}
+
+HidServiceWin::HidServiceWin(
+    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner)
+    : device_observer_(this),
+      file_task_runner_(file_task_runner),
+      weak_factory_(this) {
   task_runner_ = base::ThreadTaskRunnerHandle::Get();
   DCHECK(task_runner_.get());
   DeviceMonitorWin* device_monitor =
@@ -36,7 +48,9 @@ HidServiceWin::HidServiceWin() : device_observer_(this) {
   if (device_monitor) {
     device_observer_.Add(device_monitor);
   }
-  DoInitialEnumeration();
+  file_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&HidServiceWin::EnumerateOnFileThread,
+                            weak_factory_.GetWeakPtr(), task_runner_));
 }
 
 void HidServiceWin::Connect(const HidDeviceId& device_id,
@@ -51,7 +65,7 @@ void HidServiceWin::Connect(const HidDeviceId& device_id,
 
   base::win::ScopedHandle file(OpenDevice(device_info->device_id()));
   if (!file.IsValid()) {
-    PLOG(ERROR) << "Failed to open device";
+    HID_PLOG(EVENT) << "Failed to open device";
     task_runner_->PostTask(FROM_HERE, base::Bind(callback, nullptr));
     return;
   }
@@ -64,7 +78,10 @@ void HidServiceWin::Connect(const HidDeviceId& device_id,
 HidServiceWin::~HidServiceWin() {
 }
 
-void HidServiceWin::DoInitialEnumeration() {
+// static
+void HidServiceWin::EnumerateOnFileThread(
+    base::WeakPtr<HidServiceWin> service,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   HDEVINFO device_info_set =
       SetupDiGetClassDevs(&GUID_DEVINTERFACE_HID, NULL, NULL,
                           DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
@@ -103,11 +120,13 @@ void HidServiceWin::DoInitialEnumeration() {
       std::string device_path(
           base::SysWideToUTF8(device_interface_detail_data->DevicePath));
       DCHECK(base::IsStringASCII(device_path));
-      OnDeviceAdded(base::StringToLowerASCII(device_path));
+      AddDeviceOnFileThread(service, task_runner,
+                            base::StringToLowerASCII(device_path));
     }
   }
 
-  FirstEnumerationComplete();
+  task_runner->PostTask(
+      FROM_HERE, base::Bind(&HidServiceWin::FirstEnumerationComplete, service));
 }
 
 // static
@@ -155,91 +174,124 @@ void HidServiceWin::CollectInfoFromValueCaps(
   }
 }
 
-void HidServiceWin::OnDeviceAdded(const std::string& device_path) {
-  // Try to open the device.
+// static
+void HidServiceWin::AddDeviceOnFileThread(
+    base::WeakPtr<HidServiceWin> service,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    const std::string& device_path) {
   base::win::ScopedHandle device_handle(OpenDevice(device_path));
   if (!device_handle.IsValid()) {
     return;
   }
 
-  // Get VID/PID pair.
   HIDD_ATTRIBUTES attrib = {0};
   attrib.Size = sizeof(HIDD_ATTRIBUTES);
   if (!HidD_GetAttributes(device_handle.Get(), &attrib)) {
+    HID_LOG(EVENT) << "Failed to get device attributes.";
     return;
   }
 
-  scoped_refptr<HidDeviceInfo> device_info(new HidDeviceInfo());
-  device_info->device_id_ = device_path;
-  device_info->vendor_id_ = attrib.VendorID;
-  device_info->product_id_ = attrib.ProductID;
-
-  // Get usage and usage page (optional).
-  PHIDP_PREPARSED_DATA preparsed_data;
-  if (HidD_GetPreparsedData(device_handle.Get(), &preparsed_data) &&
-      preparsed_data) {
-    HIDP_CAPS capabilities = {0};
-    if (HidP_GetCaps(preparsed_data, &capabilities) == HIDP_STATUS_SUCCESS) {
-      device_info->max_input_report_size_ = capabilities.InputReportByteLength;
-      device_info->max_output_report_size_ =
-          capabilities.OutputReportByteLength;
-      device_info->max_feature_report_size_ =
-          capabilities.FeatureReportByteLength;
-      HidCollectionInfo collection_info;
-      collection_info.usage = HidUsageAndPage(
-          capabilities.Usage,
-          static_cast<HidUsageAndPage::Page>(capabilities.UsagePage));
-      CollectInfoFromButtonCaps(preparsed_data,
-                                HidP_Input,
-                                capabilities.NumberInputButtonCaps,
-                                &collection_info);
-      CollectInfoFromButtonCaps(preparsed_data,
-                                HidP_Output,
-                                capabilities.NumberOutputButtonCaps,
-                                &collection_info);
-      CollectInfoFromButtonCaps(preparsed_data,
-                                HidP_Feature,
-                                capabilities.NumberFeatureButtonCaps,
-                                &collection_info);
-      CollectInfoFromValueCaps(preparsed_data,
-                               HidP_Input,
-                               capabilities.NumberInputValueCaps,
-                               &collection_info);
-      CollectInfoFromValueCaps(preparsed_data,
-                               HidP_Output,
-                               capabilities.NumberOutputValueCaps,
-                               &collection_info);
-      CollectInfoFromValueCaps(preparsed_data,
-                               HidP_Feature,
-                               capabilities.NumberFeatureValueCaps,
-                               &collection_info);
-      if (!collection_info.report_ids.empty()) {
-        device_info->has_report_id_ = true;
-      }
-      device_info->collections_.push_back(collection_info);
-    }
-    // Whether or not the device includes report IDs in its reports the size
-    // of the report ID is included in the value provided by Windows. This
-    // appears contrary to the MSDN documentation.
-    if (device_info->max_input_report_size() > 0) {
-      device_info->max_input_report_size_--;
-    }
-    if (device_info->max_output_report_size() > 0) {
-      device_info->max_output_report_size_--;
-    }
-    if (device_info->max_feature_report_size() > 0) {
-      device_info->max_feature_report_size_--;
-    }
-    HidD_FreePreparsedData(preparsed_data);
+  PHIDP_PREPARSED_DATA preparsed_data = nullptr;
+  if (!HidD_GetPreparsedData(device_handle.Get(), &preparsed_data) ||
+      !preparsed_data) {
+    HID_LOG(EVENT) << "Failed to get device data.";
+    return;
   }
 
-  AddDevice(device_info);
+  HIDP_CAPS capabilities = {0};
+  if (HidP_GetCaps(preparsed_data, &capabilities) != HIDP_STATUS_SUCCESS) {
+    HID_LOG(EVENT) << "Failed to get device capabilities.";
+    HidD_FreePreparsedData(preparsed_data);
+    return;
+  }
+
+  // Whether or not the device includes report IDs in its reports the size
+  // of the report ID is included in the value provided by Windows. This
+  // appears contrary to the MSDN documentation.
+  size_t max_input_report_size = 0;
+  size_t max_output_report_size = 0;
+  size_t max_feature_report_size = 0;
+  if (capabilities.InputReportByteLength > 0) {
+    max_input_report_size = capabilities.InputReportByteLength - 1;
+  }
+  if (capabilities.OutputReportByteLength > 0) {
+    max_output_report_size = capabilities.OutputReportByteLength - 1;
+  }
+  if (capabilities.FeatureReportByteLength > 0) {
+    max_feature_report_size = capabilities.FeatureReportByteLength - 1;
+  }
+
+  HidCollectionInfo collection_info;
+  collection_info.usage = HidUsageAndPage(
+      capabilities.Usage,
+      static_cast<HidUsageAndPage::Page>(capabilities.UsagePage));
+  CollectInfoFromButtonCaps(preparsed_data, HidP_Input,
+                            capabilities.NumberInputButtonCaps,
+                            &collection_info);
+  CollectInfoFromButtonCaps(preparsed_data, HidP_Output,
+                            capabilities.NumberOutputButtonCaps,
+                            &collection_info);
+  CollectInfoFromButtonCaps(preparsed_data, HidP_Feature,
+                            capabilities.NumberFeatureButtonCaps,
+                            &collection_info);
+  CollectInfoFromValueCaps(preparsed_data, HidP_Input,
+                           capabilities.NumberInputValueCaps, &collection_info);
+  CollectInfoFromValueCaps(preparsed_data, HidP_Output,
+                           capabilities.NumberOutputValueCaps,
+                           &collection_info);
+  CollectInfoFromValueCaps(preparsed_data, HidP_Feature,
+                           capabilities.NumberFeatureValueCaps,
+                           &collection_info);
+
+  // 1023 characters plus NULL terminator is more than enough for a USB string
+  // descriptor which is limited to 126 characters.
+  wchar_t buffer[1024];
+  std::string product_name;
+  if (HidD_GetProductString(device_handle.Get(), &buffer[0], sizeof(buffer))) {
+    // NULL termination guaranteed by the API.
+    product_name = base::SysWideToUTF8(buffer);
+  }
+  std::string serial_number;
+  if (HidD_GetSerialNumberString(device_handle.Get(), &buffer[0],
+                                 sizeof(buffer))) {
+    // NULL termination guaranteed by the API.
+    serial_number = base::SysWideToUTF8(buffer);
+  }
+
+  // This populates the HidDeviceInfo instance without a raw report descriptor.
+  // The descriptor is unavailable on Windows because HID devices are exposed to
+  // user-space as individual top-level collections.
+  scoped_refptr<HidDeviceInfo> device_info(new HidDeviceInfo(
+      device_path, attrib.VendorID, attrib.ProductID, product_name,
+      serial_number,
+      kHIDBusTypeUSB,  // TODO(reillyg): Detect Bluetooth. crbug.com/443335
+      collection_info, max_input_report_size, max_output_report_size,
+      max_feature_report_size));
+
+  HidD_FreePreparsedData(preparsed_data);
+  task_runner->PostTask(
+      FROM_HERE, base::Bind(&HidServiceWin::AddDevice, service, device_info));
 }
 
-void HidServiceWin::OnDeviceRemoved(const std::string& device_path) {
-  RemoveDevice(device_path);
+void HidServiceWin::OnDeviceAdded(const GUID& class_guid,
+                                  const std::string& device_path) {
+  file_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&HidServiceWin::AddDeviceOnFileThread,
+                 weak_factory_.GetWeakPtr(), task_runner_, device_path));
 }
 
+void HidServiceWin::OnDeviceRemoved(const GUID& class_guid,
+                                    const std::string& device_path) {
+  // Execute a no-op closure on the file task runner to synchronize with any
+  // devices that are still being enumerated.
+  file_task_runner_->PostTaskAndReply(
+      FROM_HERE, base::Bind(&Noop),
+      base::Bind(&HidServiceWin::RemoveDevice, weak_factory_.GetWeakPtr(),
+                 device_path));
+}
+
+// static
 base::win::ScopedHandle HidServiceWin::OpenDevice(
     const std::string& device_path) {
   base::win::ScopedHandle file(

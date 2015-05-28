@@ -101,8 +101,9 @@ class TestOcclusionTrackerWithClip : public TestOcclusionTracker<LayerType> {
   gfx::Rect UnoccludedSurfaceContentRect(const LayerType* layer,
                                          const gfx::Rect& content_rect) const {
     typename LayerType::RenderSurfaceType* surface = layer->render_surface();
-    return this->UnoccludedContributingSurfaceContentRect(
-        content_rect, surface->draw_transform());
+    return this->GetCurrentOcclusionForContributingSurface(
+                     surface->draw_transform())
+        .GetUnoccludedContentRect(content_rect);
   }
 };
 
@@ -1539,56 +1540,6 @@ class OcclusionTrackerTestLayerBehindCameraDoesNotOcclude
   }
 };
 
-// This test requires accumulating occlusion of 3d layers, which are skipped by
-// the occlusion tracker on the main thread. So this test should run on the impl
-// thread.
-IMPL_THREAD_TEST(OcclusionTrackerTestLayerBehindCameraDoesNotOcclude);
-
-template <class Types>
-class OcclusionTrackerTestLargePixelsOccludeInsideClipRect
-    : public OcclusionTrackerTest<Types> {
- protected:
-  explicit OcclusionTrackerTestLargePixelsOccludeInsideClipRect(
-      bool opaque_layers)
-      : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() override {
-    gfx::Transform transform;
-    transform.Translate(50.0, 50.0);
-    transform.ApplyPerspectiveDepth(100.0);
-    transform.Translate3d(0.0, 0.0, 99.0);
-    transform.Translate(-50.0, -50.0);
-
-    typename Types::ContentLayerType* parent = this->CreateRoot(
-        this->identity_matrix, gfx::PointF(), gfx::Size(100, 100));
-    parent->SetMasksToBounds(true);
-    typename Types::ContentLayerType* layer = this->CreateDrawingLayer(
-        parent, transform, gfx::PointF(), gfx::Size(100, 100), true);
-    parent->SetShouldFlattenTransform(false);
-    parent->Set3dSortingContextId(1);
-    layer->SetShouldFlattenTransform(false);
-    layer->Set3dSortingContextId(1);
-    this->CalcDrawEtc(parent);
-
-    TestOcclusionTrackerWithClip<typename Types::LayerType> occlusion(
-        gfx::Rect(0, 0, 1000, 1000));
-
-    // This is very close to the camera, so pixels in its visible_content_rect()
-    // will actually go outside of the layer's clip rect.  Ensure that those
-    // pixels don't occlude things outside the clip rect.
-    this->VisitLayer(layer, &occlusion);
-    this->EnterLayer(parent, &occlusion);
-    EXPECT_EQ(gfx::Rect(0, 0, 100, 100).ToString(),
-              occlusion.occlusion_from_inside_target().ToString());
-    EXPECT_EQ(gfx::Rect().ToString(),
-              occlusion.occlusion_from_outside_target().ToString());
-  }
-};
-
-// This test requires accumulating occlusion of 3d layers, which are skipped by
-// the occlusion tracker on the main thread. So this test should run on the impl
-// thread.
-IMPL_THREAD_TEST(OcclusionTrackerTestLargePixelsOccludeInsideClipRect);
-
 template <class Types>
 class OcclusionTrackerTestAnimationOpacity1OnMainThread
     : public OcclusionTrackerTest<Types> {
@@ -2671,6 +2622,53 @@ ALL_OCCLUSIONTRACKER_TEST(
     OcclusionTrackerTestReduceOcclusionWhenBackgroundFilterIsPartiallyOccluded);
 
 template <class Types>
+class OcclusionTrackerTestBlendModeDoesNotOcclude
+    : public OcclusionTrackerTest<Types> {
+ protected:
+  explicit OcclusionTrackerTestBlendModeDoesNotOcclude(bool opaque_layers)
+      : OcclusionTrackerTest<Types>(opaque_layers) {}
+  void RunMyTest() override {
+    typename Types::ContentLayerType* parent = this->CreateRoot(
+        this->identity_matrix, gfx::PointF(), gfx::Size(100, 100));
+    typename Types::LayerType* blend_mode_layer = this->CreateDrawingLayer(
+        parent, this->identity_matrix, gfx::PointF(0.f, 0.f),
+        gfx::Size(100, 100), true);
+    typename Types::LayerType* top_layer = this->CreateDrawingLayer(
+        parent, this->identity_matrix, gfx::PointF(10.f, 12.f),
+        gfx::Size(20, 22), true);
+
+    // Blend mode makes the layer own a surface.
+    Types::SetForceRenderSurface(blend_mode_layer, true);
+    blend_mode_layer->SetBlendMode(SkXfermode::kMultiply_Mode);
+
+    this->CalcDrawEtc(parent);
+
+    TestOcclusionTrackerWithClip<typename Types::LayerType> occlusion(
+        gfx::Rect(0, 0, 1000, 1000));
+
+    this->VisitLayer(top_layer, &occlusion);
+    // |top_layer| occludes.
+    EXPECT_EQ(gfx::Rect(10, 12, 20, 22).ToString(),
+              occlusion.occlusion_from_inside_target().ToString());
+    EXPECT_TRUE(occlusion.occlusion_from_outside_target().IsEmpty());
+
+    this->VisitLayer(blend_mode_layer, &occlusion);
+    // |top_layer| occludes but not |blend_mode_layer|.
+    EXPECT_EQ(gfx::Rect(10, 12, 20, 22).ToString(),
+              occlusion.occlusion_from_outside_target().ToString());
+    EXPECT_TRUE(occlusion.occlusion_from_inside_target().IsEmpty());
+
+    this->VisitContributingSurface(blend_mode_layer, &occlusion);
+    // |top_layer| occludes but not |blend_mode_layer|.
+    EXPECT_EQ(gfx::Rect(10, 12, 20, 22).ToString(),
+              occlusion.occlusion_from_inside_target().ToString());
+    EXPECT_TRUE(occlusion.occlusion_from_outside_target().IsEmpty());
+  }
+};
+
+ALL_OCCLUSIONTRACKER_TEST(OcclusionTrackerTestBlendModeDoesNotOcclude);
+
+template <class Types>
 class OcclusionTrackerTestMinimumTrackingSize
     : public OcclusionTrackerTest<Types> {
  protected:
@@ -2816,12 +2814,22 @@ class OcclusionTrackerTestCopyRequestDoesOcclude
         gfx::PointF(),
         gfx::Size(200, 400),
         true);
+    typename Types::LayerType* top_layer =
+        this->CreateDrawingLayer(root, this->identity_matrix,
+                                 gfx::PointF(50, 0), gfx::Size(50, 400), true);
     this->CalcDrawEtc(root);
 
     TestOcclusionTrackerWithClip<typename Types::LayerType> occlusion(
         gfx::Rect(0, 0, 1000, 1000));
 
+    this->VisitLayer(top_layer, &occlusion);
+    EXPECT_EQ(gfx::Rect().ToString(),
+              occlusion.occlusion_from_outside_target().ToString());
+    EXPECT_EQ(gfx::Rect(50, 0, 50, 400).ToString(),
+              occlusion.occlusion_from_inside_target().ToString());
+
     this->VisitLayer(copy_child, &occlusion);
+    // Layers outside the copy request do not occlude.
     EXPECT_EQ(gfx::Rect().ToString(),
               occlusion.occlusion_from_outside_target().ToString());
     EXPECT_EQ(gfx::Rect(200, 400).ToString(),
@@ -2833,7 +2841,7 @@ class OcclusionTrackerTestCopyRequestDoesOcclude
     // The occlusion from the copy should be kept.
     EXPECT_EQ(gfx::Rect().ToString(),
               occlusion.occlusion_from_outside_target().ToString());
-    EXPECT_EQ(gfx::Rect(100, 0, 200, 400).ToString(),
+    EXPECT_EQ(gfx::Rect(50, 0, 250, 400).ToString(),
               occlusion.occlusion_from_inside_target().ToString());
   }
 };

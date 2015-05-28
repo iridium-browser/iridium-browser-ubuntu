@@ -46,6 +46,7 @@ namespace blink {
 
 class KURL;
 class SharedBuffer;
+class WebDragData;
 
 // A data object for holding data that would be in a clipboard or moved
 // during a drag-n-drop operation. This is the data that WebCore is aware
@@ -55,8 +56,7 @@ class DataObject : public RefCountedWillBeGarbageCollectedFinalized<DataObject>,
 public:
     static PassRefPtrWillBeRawPtr<DataObject> createFromPasteboard(PasteMode);
     static PassRefPtrWillBeRawPtr<DataObject> create();
-
-    PassRefPtrWillBeRawPtr<DataObject> copy() const;
+    static PassRefPtrWillBeRawPtr<DataObject> create(WebDragData);
 
     virtual ~DataObject();
 
@@ -94,23 +94,24 @@ public:
     // Used to handle files (images) being dragged out.
     void addSharedBuffer(const String& name, PassRefPtr<SharedBuffer>);
 
-    int modifierKeyState() const { return m_modifierKeyState; }
-    void setModifierKeyState(int modifierKeyState) { m_modifierKeyState = modifierKeyState; }
+    int modifiers() const { return m_modifiers; }
+    void setModifiers(int modifiers) { m_modifiers = modifiers; }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
+
+    WebDragData toWebDragData();
 
 private:
     DataObject();
-    explicit DataObject(const DataObject&);
 
     PassRefPtrWillBeRawPtr<DataObjectItem> findStringItem(const String& type) const;
     bool internalAddStringItem(PassRefPtrWillBeRawPtr<DataObjectItem>);
     void internalAddFileItem(PassRefPtrWillBeRawPtr<DataObjectItem>);
 
-    WillBeHeapVector<RefPtrWillBeMember<DataObjectItem> > m_itemList;
+    WillBeHeapVector<RefPtrWillBeMember<DataObjectItem>> m_itemList;
 
-    // State of Shift/Ctrl/Alt/Meta keys.
-    int m_modifierKeyState;
+    // State of Shift/Ctrl/Alt/Meta keys and Left/Right/Middle mouse buttons
+    int m_modifiers;
     String m_filesystemId;
 };
 

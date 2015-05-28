@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_AUTOFILL_CONTENT_RENDERER_AUTOFILL_AGENT_H_
 #define COMPONENTS_AUTOFILL_CONTENT_RENDERER_AUTOFILL_AGENT_H_
 
+#include <set>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -14,7 +15,6 @@
 #include "base/time/time.h"
 #include "components/autofill/content/renderer/form_cache.h"
 #include "components/autofill/content/renderer/page_click_listener.h"
-#include "components/autofill/content/renderer/page_click_tracker.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/public/web/WebAutofillClient.h"
@@ -55,6 +55,11 @@ class AutofillAgent : public content::RenderFrameObserver,
   virtual ~AutofillAgent();
 
  private:
+  // Functor used as a simplified comparison function for FormData.
+  struct FormDataCompare {
+    bool operator()(const FormData& lhs, const FormData& rhs) const;
+  };
+
   // Thunk class for RenderViewObserver methods that haven't yet been migrated
   // to RenderFrameObserver. Should eventually be removed.
   // http://crbug.com/433486
@@ -66,8 +71,7 @@ class AutofillAgent : public content::RenderFrameObserver,
    private:
     // content::RenderViewObserver:
     void OnDestruct() override;
-    void FocusedNodeChanged(const blink::WebNode& node) override;
-    void Resized() override;
+    void FocusChangeComplete() override;
 
     AutofillAgent* agent_;
 
@@ -110,15 +114,17 @@ class AutofillAgent : public content::RenderFrameObserver,
 
   // content::RenderFrameObserver:
   bool OnMessageReceived(const IPC::Message& message) override;
-  void DidCommitProvisionalLoad(bool is_new_navigation) override;
+  void DidCommitProvisionalLoad(bool is_new_navigation,
+                                bool is_same_page_navigation) override;
   void DidFinishDocumentLoad() override;
+  void WillSendSubmitEvent(const blink::WebFormElement& form) override;
   void WillSubmitForm(const blink::WebFormElement& form) override;
   void DidChangeScrollOffset() override;
+  void FocusedNodeChanged(const blink::WebNode& node) override;
 
-  // Pass-throughs from LegacyAutofillAgent. These correlate with
-  // RenderViewObserver methods.
-  void FocusedNodeChanged(const blink::WebNode& node);
-  void Resized();
+  // Pass-through from LegacyAutofillAgent. This correlates with the
+  // RenderViewObserver method.
+  void FocusChangeComplete();
 
   // PageClickListener:
   void FormControlElementClicked(const blink::WebFormControlElement& element,
@@ -140,6 +146,7 @@ class AutofillAgent : public content::RenderFrameObserver,
   virtual void openTextDataListChooser(const blink::WebInputElement& element);
   virtual void dataListOptionsChanged(const blink::WebInputElement& element);
   virtual void firstUserGestureObserved();
+  virtual void xhrSucceeded();
 
   void OnFieldTypePredictionsAvailable(
       const std::vector<FormDataPredictions>& forms);
@@ -209,6 +216,14 @@ class AutofillAgent : public content::RenderFrameObserver,
   // Notifies browser of new fillable forms in |render_frame|.
   void ProcessForms();
 
+  // Sends a message to the browser that the form is about to be submitted,
+  // only if the particular message has not been previously submitted for the
+  // form in the current frame.
+  // Additionally, depending on |send_submitted_event| a message is sent to the
+  // browser that the form was submitted.
+  void SendFormEvents(const blink::WebFormElement& form,
+                      bool send_submitted_event);
+
   // Hides any currently showing Autofill popup.
   void HidePopup();
 
@@ -216,14 +231,15 @@ class AutofillAgent : public content::RenderFrameObserver,
   // frame.
   FormCache form_cache_;
 
+  // Keeps track of the forms for which a "will submit" message has been sent in
+  // this frame's current load. We use a simplified comparison function.
+  std::set<FormData, FormDataCompare> submitted_forms_;
+
   PasswordAutofillAgent* password_autofill_agent_;  // Weak reference.
   PasswordGenerationAgent* password_generation_agent_;  // Weak reference.
 
   // Passes through RenderViewObserver methods to |this|.
   LegacyAutofillAgent legacy_;
-
-  // Tracks clicks on the RenderViewHost, informs |this|.
-  PageClickTracker page_click_tracker_;
 
   // The ID of the last request sent for form field Autofill.  Used to ignore
   // out of date responses.

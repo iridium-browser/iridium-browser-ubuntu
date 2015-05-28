@@ -42,7 +42,7 @@ SVGTests::SVGTests(SVGElement* contextElement)
     contextElement->addToPropertyMap(m_systemLanguage);
 }
 
-void SVGTests::trace(Visitor* visitor)
+DEFINE_TRACE(SVGTests)
 {
     visitor->trace(m_requiredFeatures);
     visitor->trace(m_requiredExtensions);

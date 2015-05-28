@@ -1,20 +1,15 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Test the urilib module."""
 
-# pylint: disable=bad-continuation
-
 from __future__ import print_function
 
 import os
 
-import fixup_path
-fixup_path.FixupPath()
-
 from chromite.lib import cros_test_lib
+from chromite.lib import osutils
 
 from chromite.lib.paygen import filelib
 from chromite.lib.paygen import gslib
@@ -22,7 +17,7 @@ from chromite.lib.paygen import urilib
 
 
 # We access private members to test them.
-# pylint: disable=E1101,W0201
+# pylint: disable=protected-access
 
 
 class FakeHttpResponse(object):
@@ -30,6 +25,7 @@ class FakeHttpResponse(object):
 
   class FakeHeaders(object):
     """Helper class for faking HTTP headers in a response."""
+
     def __init__(self, headers_dict):
       self.headers_dict = headers_dict
 
@@ -46,7 +42,8 @@ class FakeHttpResponse(object):
 
 class TestFileManipulation(cros_test_lib.TempDirTestCase):
   """Test general urilib file methods together."""
-  # pylint: disable=E1101
+
+  # pylint: disable=attribute-defined-outside-init
 
   FILE1 = 'file1'
   FILE2 = 'file2'
@@ -59,11 +56,17 @@ class TestFileManipulation(cros_test_lib.TempDirTestCase):
 
   GS_DIR = 'gs://chromeos-releases-public/unittest'
 
+  def setUp(self):
+    # Use a subdir specifically for the cache so we can use the tempdir for
+    # other things (including tempfiles by gsutil/etc...).
+    self.filesdir = os.path.join(self.tempdir, 'unittest-cache')
+    osutils.SafeMakedirs(self.filesdir)
+
   def _SetUpDirs(self):
-    self.file1_local = os.path.join(self.tempdir, self.FILE1)
-    self.file2_local = os.path.join(self.tempdir, self.FILE2)
-    self.subdir_local = os.path.join(self.tempdir, self.SUBDIR)
-    self.subfile_local = os.path.join(self.tempdir, self.SUBFILE)
+    self.file1_local = os.path.join(self.filesdir, self.FILE1)
+    self.file2_local = os.path.join(self.filesdir, self.FILE2)
+    self.subdir_local = os.path.join(self.filesdir, self.SUBDIR)
+    self.subfile_local = os.path.join(self.filesdir, self.SUBFILE)
 
     self.file1_gs = os.path.join(self.GS_DIR, self.FILE1)
     self.file2_gs = os.path.join(self.GS_DIR, self.FILE2)
@@ -90,7 +93,7 @@ class TestFileManipulation(cros_test_lib.TempDirTestCase):
   def testIntegration(self):
     self._SetUpDirs()
 
-    self.assertTrue(urilib.Exists(self.tempdir, as_dir=True))
+    self.assertTrue(urilib.Exists(self.filesdir, as_dir=True))
     self.assertTrue(urilib.Exists(self.file1_local))
     self.assertTrue(urilib.Exists(self.file2_local))
     self.assertTrue(urilib.Exists(self.subfile_local))
@@ -107,13 +110,13 @@ class TestFileManipulation(cros_test_lib.TempDirTestCase):
 
     # Test ListFiles, local version.
     self.assertEquals(set(shallow_local_files),
-                      set(urilib.ListFiles(self.tempdir)))
+                      set(urilib.ListFiles(self.filesdir)))
     self.assertEquals(set(deep_local_files),
-                      set(urilib.ListFiles(self.tempdir, recurse=True)))
+                      set(urilib.ListFiles(self.filesdir, recurse=True)))
 
     # Test CopyFiles, from local to GS.
     self.assertEquals(set(deep_gs_files),
-                      set(urilib.CopyFiles(self.tempdir, self.GS_DIR)))
+                      set(urilib.CopyFiles(self.filesdir, self.GS_DIR)))
 
     # Test ListFiles, GS version.
     self.assertEquals(set(shallow_gs_files),
@@ -126,12 +129,12 @@ class TestFileManipulation(cros_test_lib.TempDirTestCase):
     self.assertFalse(urilib.Cmp(self.file2_local, self.file1_gs))
 
     # Test RemoveDirContents, local version.
-    urilib.RemoveDirContents(self.tempdir)
-    self.assertFalse(urilib.ListFiles(self.tempdir))
+    urilib.RemoveDirContents(self.filesdir)
+    self.assertFalse(urilib.ListFiles(self.filesdir))
 
     # Test CopyFiles, from GS to local.
     self.assertEquals(set(deep_local_files),
-                      set(urilib.CopyFiles(self.GS_DIR, self.tempdir)))
+                      set(urilib.CopyFiles(self.GS_DIR, self.filesdir)))
 
     # Test RemoveDirContents, GS version.
     urilib.RemoveDirContents(self.GS_DIR)
@@ -144,17 +147,13 @@ class TestUrilib(cros_test_lib.MoxTempDirTestCase):
   def testExtractProtocol(self):
     tests = {'gs': ['gs://',
                     'gs://foo',
-                    'gs://foo/bar'
-                    ],
+                    'gs://foo/bar'],
              'abc': ['abc://',
                      'abc://foo',
-                     'abc://foo/bar',
-                     ],
+                     'abc://foo/bar'],
              None: ['foo/bar',
                     '/foo/bar',
-                    '://garbage/path',
-                    ],
-             }
+                    '://garbage/path']}
 
     for protocol in tests:
       for uri in tests[protocol]:
@@ -163,18 +162,14 @@ class TestUrilib(cros_test_lib.MoxTempDirTestCase):
   def testGetUriType(self):
     tests = {'gs': ['gs://',
                     'gs://foo',
-                    'gs://foo/bar'
-                    ],
+                    'gs://foo/bar'],
              'abc': ['abc://',
                      'abc://foo',
-                     'abc://foo/bar',
-                     ],
+                     'abc://foo/bar'],
              'file': ['foo/bar',
                       '/foo/bar',
                       '://garbage/path',
-                      '/cnsfoo/bar',
-                      ],
-             }
+                      '/cnsfoo/bar']}
 
     for uri_type in tests:
       for uri in tests[uri_type]:
@@ -182,11 +177,11 @@ class TestUrilib(cros_test_lib.MoxTempDirTestCase):
 
   def testSplitURI(self):
     tests = [
-      ['gs', 'foo', 'gs://foo'],
-      ['gs', 'foo/bar', 'gs://foo/bar'],
-      ['file', '/foo/bar', 'file:///foo/bar'],
-      [None, '/foo/bar', '/foo/bar'],
-      ]
+        ['gs', 'foo', 'gs://foo'],
+        ['gs', 'foo/bar', 'gs://foo/bar'],
+        ['file', '/foo/bar', 'file:///foo/bar'],
+        [None, '/foo/bar', '/foo/bar'],
+    ]
 
     for test in tests:
       uri = test[2]
@@ -197,8 +192,7 @@ class TestUrilib(cros_test_lib.MoxTempDirTestCase):
   def testIsGsURI(self):
     tests_true = ('gs://',
                   'gs://foo',
-                  'gs://foo/bar',
-                  )
+                  'gs://foo/bar')
     for test in tests_true:
       self.assertTrue(urilib.IsGsURI(test))
 
@@ -209,8 +203,7 @@ class TestUrilib(cros_test_lib.MoxTempDirTestCase):
                    '/gs',
                    '/gs/foo/bar'
                    'file://foo/bar',
-                   'http://foo/bar',
-                   )
+                   'http://foo/bar')
     for test in tests_false:
       self.assertFalse(urilib.IsGsURI(test))
 
@@ -221,30 +214,26 @@ class TestUrilib(cros_test_lib.MoxTempDirTestCase):
                   '/foo/bar',
                   'foo/bar',
                   'foo',
-                  '',
-                  )
+                  '')
     for test in tests_true:
       self.assertTrue(urilib.IsFileURI(test))
 
     tests_false = ('gs://',
                    'foo://',
-                   'gs://foo/bar',
-                   )
+                   'gs://foo/bar')
     for test in tests_false:
       self.assertFalse(urilib.IsFileURI(test))
 
   def testIsHttpURI(self):
     tests_true = ('http://',
                   'http://foo',
-                  'http://foo/bar',
-                  )
+                  'http://foo/bar')
     for test in tests_true:
       self.assertTrue(urilib.IsHttpURI(test))
 
     tests_https_true = ('https://',
                         'https://foo',
-                        'https://foo/bar',
-                        )
+                        'https://foo/bar')
     for test in tests_https_true:
       self.assertTrue(urilib.IsHttpURI(test, https_ok=True))
     for test in tests_https_true:
@@ -257,16 +246,14 @@ class TestUrilib(cros_test_lib.MoxTempDirTestCase):
                    '/http',
                    '/http/foo/bar'
                    'file:///foo/bar',
-                   'gs://foo/bar',
-                   )
+                   'gs://foo/bar')
     for test in tests_false:
       self.assertFalse(urilib.IsHttpURI(test))
 
   def testIsHttpsURI(self):
     tests_true = ('https://',
                   'https://foo',
-                  'https://foo/bar',
-                  )
+                  'https://foo/bar')
     for test in tests_true:
       self.assertTrue(urilib.IsHttpsURI(test))
 
@@ -280,8 +267,7 @@ class TestUrilib(cros_test_lib.MoxTempDirTestCase):
                    '/http',
                    '/http/foo/bar'
                    'file:///foo/bar',
-                   'gs://foo/bar',
-                   )
+                   'gs://foo/bar')
     for test in tests_false:
       self.assertFalse(urilib.IsHttpsURI(test))
 
@@ -369,7 +355,6 @@ index %s..%s 100644
 
     self.assertRaises(IOError, urilib.URLRetrieve, good_url, bad_local_path)
 
-
   def testCopy(self):
     gs_path = 'gs://bucket/some/path'
     local_path = '/some/local/path'
@@ -417,7 +402,7 @@ index %s..%s 100644
     gslib.Remove(local_path, gs_path, ignore_no_match=True)
     # Run 4, GS and GS
     gslib.Remove(gs_path, gs_path + '.1',
-                   ignore_no_match=True, recurse=True)
+                 ignore_no_match=True, recurse=True)
     # Run 7, local and HTTP
     self.mox.ReplayAll()
 
@@ -513,11 +498,12 @@ index %s..%s 100644
 
     # Set up the test replay script.
     # Run 1, local.
-    filelib.ListFiles(local_path, recurse=True, filepattern=None, sort=False
-                      ).AndReturn(result)
+    filelib.ListFiles(
+        local_path, recurse=True, filepattern=None,
+        sort=False).AndReturn(result)
     # Run 2, GS.
-    gslib.ListFiles(gs_path, recurse=False, filepattern=patt, sort=True
-                      ).AndReturn(result)
+    gslib.ListFiles(
+        gs_path, recurse=False, filepattern=patt, sort=True).AndReturn(result)
     # Run 4, HTTP.
     self.mox.ReplayAll()
 
@@ -527,7 +513,3 @@ index %s..%s 100644
                                                sort=True))
     self.assertRaises(urilib.NotSupportedForType, urilib.ListFiles, http_path)
     self.mox.VerifyAll()
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()

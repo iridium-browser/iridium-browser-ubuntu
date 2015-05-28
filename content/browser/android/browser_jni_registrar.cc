@@ -12,7 +12,6 @@
 #include "content/browser/android/child_process_launcher_android.h"
 #include "content/browser/android/composited_touch_handle_drawable.h"
 #include "content/browser/android/content_readback_handler.h"
-#include "content/browser/android/content_settings.h"
 #include "content/browser/android/content_video_view.h"
 #include "content/browser/android/content_view_core_impl.h"
 #include "content/browser/android/content_view_render_view.h"
@@ -23,7 +22,7 @@
 #include "content/browser/android/load_url_params.h"
 #include "content/browser/android/popup_touch_handle_drawable.h"
 #include "content/browser/android/tracing_controller_android.h"
-#include "content/browser/android/web_contents_observer_android.h"
+#include "content/browser/android/web_contents_observer_proxy.h"
 #include "content/browser/device_sensors/sensor_manager_android.h"
 #include "content/browser/frame_host/navigation_controller_android.h"
 #include "content/browser/gamepad/gamepad_platform_data_fetcher_android.h"
@@ -52,7 +51,6 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
     {"ChildProcessLauncher", content::RegisterChildProcessLauncher},
     {"ContentReadbackHandler",
      content::ContentReadbackHandler::RegisterContentReadbackHandler},
-    {"ContentSettings", content::ContentSettings::RegisterContentSettings},
     {"ContentVideoView", content::ContentVideoView::RegisterContentVideoView},
     {"ContentViewCore", content::RegisterContentViewCore},
     {"ContentViewRenderView",
@@ -94,7 +92,7 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
      content::SyntheticGestureTargetAndroid::RegisterTouchEventSynthesizer},
     {"TracingControllerAndroid", content::RegisterTracingControllerAndroid},
     {"WebContentsAndroid", content::WebContentsAndroid::Register},
-    {"WebContentsObserver", content::RegisterWebContentsObserverAndroid},
+    {"WebContentsObserver", content::RegisterWebContentsObserverProxy},
     {"WebViewStatics", content::RegisterWebViewStatics},
 };
 

@@ -10,37 +10,49 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/observer_list.h"
-#include "components/favicon/core/browser/favicon_client.h"
 #include "components/favicon/core/favicon_driver.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "content/public/common/favicon_url.h"
 
+class GURL;
+class SkBitmap;
+
 namespace gfx {
 class Image;
+}
+
+namespace bookmarks {
+class BookmarkModel;
 }
 
 namespace content {
 struct FaviconStatus;
 }
 
-class GURL;
+namespace favicon {
+class FaviconDriverObserver;
 class FaviconHandler;
-class FaviconTabHelperObserver;
-class Profile;
-class SkBitmap;
+class FaviconService;
+}
 
-// FaviconTabHelper works with FaviconHandlers to fetch the favicons.
+namespace history {
+class HistoryService;
+}
+
+// FaviconTabHelper works with favicon::FaviconHandlers to fetch the favicons.
 //
 // FetchFavicon fetches the given page's icons. It requests the icons from the
 // history backend. If the icon is not available or expired, the icon will be
 // downloaded and saved in the history backend.
 //
 class FaviconTabHelper : public content::WebContentsObserver,
-                         public FaviconDriver,
+                         public favicon::FaviconDriver,
                          public content::WebContentsUserData<FaviconTabHelper> {
  public:
   ~FaviconTabHelper() override;
+
+  static void CreateForWebContents(content::WebContents* web_contents);
 
   // Initiates loading the favicon for the specified url.
   void FetchFavicon(const GURL& url);
@@ -56,7 +68,7 @@ class FaviconTabHelper : public content::WebContentsObserver,
 
   // Returns whether the favicon should be displayed. If this returns false, no
   // space is provided for the favicon, and the favicon is never displayed.
-  virtual bool ShouldDisplayFavicon();
+  bool ShouldDisplayFavicon();
 
   // Returns the current tab's favicon urls. If this is empty,
   // DidUpdateFaviconURL has not yet been called for the current navigation.
@@ -72,16 +84,21 @@ class FaviconTabHelper : public content::WebContentsObserver,
   // Saves the favicon for the current page.
   void SaveFavicon();
 
-  void AddObserver(FaviconTabHelperObserver* observer);
-  void RemoveObserver(FaviconTabHelperObserver* observer);
+  void AddObserver(favicon::FaviconDriverObserver* observer);
+  void RemoveObserver(favicon::FaviconDriverObserver* observer);
 
-  // FaviconDriver methods.
+  // favicon::FaviconDriver methods.
   int StartDownload(const GURL& url, int max_bitmap_size) override;
   bool IsOffTheRecord() override;
-  const gfx::Image GetActiveFaviconImage() override;
-  const GURL GetActiveFaviconURL() override;
+  bool IsBookmarked(const GURL& url) override;
+  GURL GetActiveURL() override;
+  base::string16 GetActiveTitle() override;
   bool GetActiveFaviconValidity() override;
-  const GURL GetActiveURL() override;
+  void SetActiveFaviconValidity(bool valid) override;
+  GURL GetActiveFaviconURL() override;
+  void SetActiveFaviconURL(const GURL& url) override;
+  gfx::Image GetActiveFaviconImage() override;
+  void SetActiveFaviconImage(const gfx::Image& image) override;
   void OnFaviconAvailable(const gfx::Image& image,
                           const GURL& url,
                           bool is_active_favicon) override;
@@ -95,8 +112,16 @@ class FaviconTabHelper : public content::WebContentsObserver,
       const std::vector<gfx::Size>& original_bitmap_sizes);
 
  private:
-  explicit FaviconTabHelper(content::WebContents* web_contents);
   friend class content::WebContentsUserData<FaviconTabHelper>;
+  friend class FaviconTabHelperTest;
+
+  // Creates a new FaviconTabHelper bound to |web_contents|. Initialize
+  // |favicon_service_|, |bookmark_model_| and |history_service_| from the
+  // corresponding parameter.
+  FaviconTabHelper(content::WebContents* web_contents,
+                   favicon::FaviconService* favicon_service,
+                   history::HistoryService* history_service,
+                   bookmarks::BookmarkModel* bookmark_model);
 
   // content::WebContentsObserver overrides.
   void DidStartNavigationToPendingEntry(
@@ -106,32 +131,28 @@ class FaviconTabHelper : public content::WebContentsObserver,
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) override;
 
-  // Sets whether the page's favicon is valid (if false, the default favicon is
-  // being used). Requires GetActiveURL() to be valid.
-  void SetActiveFaviconValidity(bool validity);
-
-  // Sets the URL of the favicon's bitmap.
-  void SetActiveFaviconURL(GURL url);
-
-  // Sets the bitmap of the current page's favicon.
-  void SetActiveFaviconImage(gfx::Image image);
-
   // Helper method that returns the active navigation entry's favicon.
   content::FaviconStatus& GetFaviconStatus();
 
-  Profile* profile_;
-
-  FaviconClient* client_;
+  // KeyedService used by FaviconTabHelper. They may be null during testing, but
+  // if they are defined, they must outlive the FaviconTabHelper.
+  favicon::FaviconService* favicon_service_;
+  history::HistoryService* history_service_;
+  bookmarks::BookmarkModel* bookmark_model_;
 
   std::vector<content::FaviconURL> favicon_urls_;
 
-  scoped_ptr<FaviconHandler> favicon_handler_;
+  // Bypass cache when downloading favicons for this page URL.
+  GURL bypass_cache_page_url_;
 
-  // Handles downloading touchicons. It is NULL if
-  // browser_defaults::kEnableTouchIcon is false.
-  scoped_ptr<FaviconHandler> touch_icon_handler_;
+  // FaviconHandlers used to download the different kind of favicons. Both
+  // |touch_icon_handler_| and |large_icon_handler_| may be null depending
+  // on the platform or variations.
+  scoped_ptr<favicon::FaviconHandler> favicon_handler_;
+  scoped_ptr<favicon::FaviconHandler> touch_icon_handler_;
+  scoped_ptr<favicon::FaviconHandler> large_icon_handler_;
 
-  ObserverList<FaviconTabHelperObserver> observer_list_;
+  ObserverList<favicon::FaviconDriverObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(FaviconTabHelper);
 };

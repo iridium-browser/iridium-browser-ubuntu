@@ -33,7 +33,7 @@
 
 namespace blink {
 
-class RenderObject;
+class LayoutObject;
 
 template <class Iterator> class MidpointState {
 public:
@@ -61,9 +61,9 @@ public:
         addMidpoint(midpoint);
     }
 
-    // When ignoring spaces, this needs to be called for objects that need line boxes such as RenderInlines or
+    // When ignoring spaces, this needs to be called for objects that need line boxes such as LayoutInlines or
     // hard line breaks to ensure that they're not ignored.
-    void ensureLineBoxInsideIgnoredSpaces(RenderObject* renderer)
+    void ensureLineBoxInsideIgnoredSpaces(LayoutObject* renderer)
     {
         Iterator midpoint(0, renderer, 0);
         stopIgnoringSpaces(midpoint);
@@ -312,7 +312,7 @@ private:
     void applyL1Rule(BidiRunList<Run>&);
 
     Vector<BidiEmbedding, 8> m_currentExplicitEmbeddingSequence;
-    HashMap<Run *, MidpointState<Iterator> > m_midpointStateForIsolatedRun;
+    HashMap<Run *, MidpointState<Iterator>> m_midpointStateForIsolatedRun;
 };
 
 #if ENABLE(ASSERT)
@@ -336,8 +336,20 @@ void BidiResolver<Iterator, Run>::appendRun(BidiRunList<Run>& runs)
             endOffset = m_endOfRunAtEndOfLine.offset();
         }
 
-        if (endOffset >= startOffset)
-            runs.addRun(new Run(startOffset, endOffset + 1, context(), m_direction));
+        // m_eor and m_endOfRunAtEndOfLine are inclusive while BidiRun's stop is
+        // exclusive so offset needs to be increased by one.
+        endOffset += 1;
+
+        // Append BidiRun objects, at most 64K chars at a time, until all
+        // text between |startOffset| and |endOffset| is represented.
+        while (startOffset < endOffset) {
+            unsigned end = endOffset;
+            const int limit = USHRT_MAX; // InlineTextBox stores text length as unsigned short.
+            if (end - startOffset > limit)
+                end = startOffset + limit;
+            runs.addRun(new Run(startOffset, end, context(), m_direction));
+            startOffset = end;
+        }
 
         m_eor.increment();
         m_sor = m_eor;
@@ -656,6 +668,14 @@ TextDirection BidiResolver<Iterator, Run>::determineParagraphDirectionality(bool
     }
     if (hasStrongDirectionality)
         *hasStrongDirectionality = false;
+    return LTR;
+}
+
+inline TextDirection directionForCharacter(UChar32 character)
+{
+    WTF::Unicode::Direction charDirection = WTF::Unicode::direction(character);
+    if (charDirection == WTF::Unicode::RightToLeft || charDirection == WTF::Unicode::RightToLeftArabic)
+        return RTL;
     return LTR;
 }
 

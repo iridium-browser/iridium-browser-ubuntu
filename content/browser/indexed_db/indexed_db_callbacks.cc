@@ -22,9 +22,8 @@
 #include "content/common/indexed_db/indexed_db_constants.h"
 #include "content/common/indexed_db/indexed_db_messages.h"
 #include "storage/browser/blob/blob_storage_context.h"
+#include "storage/browser/blob/shareable_file_reference.h"
 #include "storage/browser/quota/quota_manager.h"
-#include "storage/common/blob/blob_data.h"
-#include "storage/common/blob/shareable_file_reference.h"
 
 using storage::ShareableFileReference;
 
@@ -263,7 +262,7 @@ static void CreateBlobsAndSend(
     scoped_refptr<IndexedDBDispatcherHost> dispatcher_host,
     const std::vector<IndexedDBBlobInfo>& blob_info,
     std::vector<IndexedDBMsg_BlobOrFileInfo>* blob_or_file_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (CreateAllBlobs(blob_info, blob_or_file_info, dispatcher_host))
     dispatcher_host->Send(new MsgType(*params));
 }
@@ -272,17 +271,15 @@ static void BlobLookupForCursorPrefetch(
     IndexedDBMsg_CallbacksSuccessCursorPrefetch_Params* params,
     scoped_refptr<IndexedDBDispatcherHost> dispatcher_host,
     const std::vector<IndexedDBValue>& values) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK_EQ(values.size(), params->blob_or_file_infos.size());
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_EQ(values.size(), params->values.size());
 
-  std::vector<IndexedDBValue>::const_iterator value_iter;
-  std::vector<std::vector<IndexedDBMsg_BlobOrFileInfo> >::iterator blob_iter;
-  for (value_iter = values.begin(), blob_iter =
-       params->blob_or_file_infos.begin(); value_iter != values.end();
-       ++value_iter, ++blob_iter) {
-    if (!CreateAllBlobs(value_iter->blob_info, &*blob_iter, dispatcher_host))
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (!CreateAllBlobs(values[i].blob_info,
+                        &params->values[i].blob_or_file_info, dispatcher_host))
       return;
   }
+
   dispatcher_host->Send(
       new IndexedDBMsg_CallbacksSuccessCursorPrefetch(*params));
 }
@@ -341,23 +338,21 @@ void IndexedDBCallbacks::OnSuccess(scoped_refptr<IndexedDBCursor> cursor,
   params->key = key;
   params->primary_key = primary_key;
   if (value && !value->empty())
-    std::swap(params->value, value->bits);
+    std::swap(params->value.bits, value->bits);
   // TODO(alecflett): Avoid a copy here: the whole params object is
   // being copied into the message.
   if (!value || value->blob_info.empty()) {
     dispatcher_host_->Send(new IndexedDBMsg_CallbacksSuccessIDBCursor(*params));
   } else {
     IndexedDBMsg_CallbacksSuccessIDBCursor_Params* p = params.get();
-    FillInBlobData(value->blob_info, &p->blob_or_file_info);
+    FillInBlobData(value->blob_info, &p->value.blob_or_file_info);
     RegisterBlobsAndSend(
         value->blob_info,
         base::Bind(
             CreateBlobsAndSend<IndexedDBMsg_CallbacksSuccessIDBCursor_Params,
                                IndexedDBMsg_CallbacksSuccessIDBCursor>,
-            base::Owned(params.release()),
-            dispatcher_host_,
-            value->blob_info,
-            base::Unretained(&p->blob_or_file_info)));
+            base::Owned(params.release()), dispatcher_host_, value->blob_info,
+            base::Unretained(&p->value.blob_or_file_info)));
   }
   dispatcher_host_ = NULL;
 }
@@ -388,7 +383,7 @@ void IndexedDBCallbacks::OnSuccess(const IndexedDBKey& key,
   params->key = key;
   params->primary_key = primary_key;
   if (value && !value->empty())
-    std::swap(params->value, value->bits);
+    std::swap(params->value.bits, value->bits);
   // TODO(alecflett): Avoid a copy here: the whole params object is
   // being copied into the message.
   if (!value || value->blob_info.empty()) {
@@ -396,16 +391,15 @@ void IndexedDBCallbacks::OnSuccess(const IndexedDBKey& key,
         new IndexedDBMsg_CallbacksSuccessCursorContinue(*params));
   } else {
     IndexedDBMsg_CallbacksSuccessCursorContinue_Params* p = params.get();
-    FillInBlobData(value->blob_info, &p->blob_or_file_info);
+    FillInBlobData(value->blob_info, &p->value.blob_or_file_info);
     RegisterBlobsAndSend(
         value->blob_info,
         base::Bind(CreateBlobsAndSend<
                        IndexedDBMsg_CallbacksSuccessCursorContinue_Params,
                        IndexedDBMsg_CallbacksSuccessCursorContinue>,
-                   base::Owned(params.release()),
-                   dispatcher_host_,
+                   base::Owned(params.release()), dispatcher_host_,
                    value->blob_info,
-                   base::Unretained(&p->blob_or_file_info)));
+                   base::Unretained(&p->value.blob_or_file_info)));
   }
   dispatcher_host_ = NULL;
 }
@@ -425,12 +419,12 @@ void IndexedDBCallbacks::OnSuccessWithPrefetch(
   DCHECK_EQ(kNoDatabaseCallbacks, ipc_database_callbacks_id_);
   DCHECK_EQ(blink::WebIDBDataLossNone, data_loss_);
 
-  std::vector<IndexedDBKey> msgKeys;
-  std::vector<IndexedDBKey> msgPrimaryKeys;
+  std::vector<IndexedDBKey> msg_keys;
+  std::vector<IndexedDBKey> msg_primary_keys;
 
   for (size_t i = 0; i < keys.size(); ++i) {
-    msgKeys.push_back(keys[i]);
-    msgPrimaryKeys.push_back(primary_keys[i]);
+    msg_keys.push_back(keys[i]);
+    msg_primary_keys.push_back(primary_keys[i]);
   }
 
   scoped_ptr<IndexedDBMsg_CallbacksSuccessCursorPrefetch_Params> params(
@@ -438,22 +432,18 @@ void IndexedDBCallbacks::OnSuccessWithPrefetch(
   params->ipc_thread_id = ipc_thread_id_;
   params->ipc_callbacks_id = ipc_callbacks_id_;
   params->ipc_cursor_id = ipc_cursor_id_;
-  params->keys = msgKeys;
-  params->primary_keys = msgPrimaryKeys;
-  std::vector<std::string>& values_bits = params->values;
-  values_bits.resize(values->size());
-  std::vector<std::vector<IndexedDBMsg_BlobOrFileInfo> >& values_blob_infos =
-      params->blob_or_file_infos;
-  values_blob_infos.resize(values->size());
+  params->keys = msg_keys;
+  params->primary_keys = msg_primary_keys;
+  params->values.resize(values->size());
 
   bool found_blob_info = false;
-  std::vector<IndexedDBValue>::iterator iter = values->begin();
-  for (size_t i = 0; iter != values->end(); ++iter, ++i) {
-    values_bits[i].swap(iter->bits);
-    if (iter->blob_info.size()) {
+  for (size_t i = 0; i < values->size(); ++i) {
+    params->values[i].bits.swap(values->at(i).bits);
+    if (!values->at(i).blob_info.empty()) {
       found_blob_info = true;
-      FillInBlobData(iter->blob_info, &values_blob_infos[i]);
-      for (const auto& blob_iter : iter->blob_info) {
+      FillInBlobData(values->at(i).blob_info,
+                     &params->values[i].blob_or_file_info);
+      for (const auto& blob_iter : values->at(i).blob_info) {
         if (!blob_iter.mark_used_callback().is_null())
           blob_iter.mark_used_callback().Run();
       }
@@ -492,22 +482,20 @@ void IndexedDBCallbacks::OnSuccess(IndexedDBValue* value,
   params->primary_key = key;
   params->key_path = key_path;
   if (value && !value->empty())
-    std::swap(params->value, value->bits);
+    std::swap(params->value.bits, value->bits);
   if (!value || value->blob_info.empty()) {
     dispatcher_host_->Send(
         new IndexedDBMsg_CallbacksSuccessValueWithKey(*params));
   } else {
     IndexedDBMsg_CallbacksSuccessValueWithKey_Params* p = params.get();
-    FillInBlobData(value->blob_info, &p->blob_or_file_info);
+    FillInBlobData(value->blob_info, &p->value.blob_or_file_info);
     RegisterBlobsAndSend(
         value->blob_info,
         base::Bind(
             CreateBlobsAndSend<IndexedDBMsg_CallbacksSuccessValueWithKey_Params,
                                IndexedDBMsg_CallbacksSuccessValueWithKey>,
-            base::Owned(params.release()),
-            dispatcher_host_,
-            value->blob_info,
-            base::Unretained(&p->blob_or_file_info)));
+            base::Owned(params.release()), dispatcher_host_, value->blob_info,
+            base::Unretained(&p->value.blob_or_file_info)));
   }
   dispatcher_host_ = NULL;
 }
@@ -525,20 +513,19 @@ void IndexedDBCallbacks::OnSuccess(IndexedDBValue* value) {
   params->ipc_thread_id = ipc_thread_id_;
   params->ipc_callbacks_id = ipc_callbacks_id_;
   if (value && !value->empty())
-    std::swap(params->value, value->bits);
+    std::swap(params->value.bits, value->bits);
   if (!value || value->blob_info.empty()) {
     dispatcher_host_->Send(new IndexedDBMsg_CallbacksSuccessValue(*params));
   } else {
     IndexedDBMsg_CallbacksSuccessValue_Params* p = params.get();
-    FillInBlobData(value->blob_info, &p->blob_or_file_info);
+    FillInBlobData(value->blob_info, &p->value.blob_or_file_info);
     RegisterBlobsAndSend(
         value->blob_info,
         base::Bind(CreateBlobsAndSend<IndexedDBMsg_CallbacksSuccessValue_Params,
                                       IndexedDBMsg_CallbacksSuccessValue>,
-                   base::Owned(params.release()),
-                   dispatcher_host_,
+                   base::Owned(params.release()), dispatcher_host_,
                    value->blob_info,
-                   base::Unretained(&p->blob_or_file_info)));
+                   base::Unretained(&p->value.blob_or_file_info)));
   }
   dispatcher_host_ = NULL;
 }

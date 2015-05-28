@@ -105,6 +105,7 @@ Status WebCryptoCurveToJwkCrv(blink::WebCryptoNamedCurve named_curve,
 
 // Verifies that an EC key imported from PKCS8 or SPKI format is correct.
 // This involves verifying the key validity, and the NID for the named curve.
+// Also removes the EC_PKEY_NO_PUBKEY flag if present.
 Status VerifyEcKeyAfterSpkiOrPkcs8Import(
     EVP_PKEY* pkey,
     blink::WebCryptoNamedCurve expected_named_curve) {
@@ -114,8 +115,14 @@ Status VerifyEcKeyAfterSpkiOrPkcs8Import(
   if (!ec.get())
     return Status::ErrorUnexpected();
 
-  // TODO(eroman): Is this necessary? From my tests it seems that BoringSSL
-  // already does these checks when setting the public key's affine coordinates.
+  // When importing an ECPrivateKey, the public key is optional. If it was
+  // omitted then the public key will be calculated by BoringSSL and added into
+  // the EC_KEY. However an encoding flag is set such that when exporting to
+  // PKCS8 format the public key is once again omitted. Remove this flag.
+  unsigned int enc_flags = EC_KEY_get_enc_flags(ec.get());
+  enc_flags &= ~EC_PKEY_NO_PUBKEY;
+  EC_KEY_set_enc_flags(ec.get(), enc_flags);
+
   if (!EC_KEY_check_key(ec.get()))
     return Status::ErrorEcKeyInvalid();
 
@@ -154,8 +161,10 @@ Status WritePaddedBIGNUM(const std::string& member_name,
                          size_t padded_length,
                          JwkWriter* jwk) {
   std::vector<uint8_t> padded_bytes(padded_length);
-  if (!BN_bn2bin_padded(&padded_bytes.front(), padded_bytes.size(), value))
+  if (!BN_bn2bin_padded(vector_as_array(&padded_bytes), padded_bytes.size(),
+                        value)) {
     return Status::OperationError();
+  }
   jwk->SetBytes(member_name, CryptoData(padded_bytes));
   return Status::Success();
 }
@@ -398,10 +407,11 @@ Status EcAlgorithm::ImportKeyJwk(const CryptoData& key_data,
   if (status.IsError())
     return status;
 
-  // TODO(eroman): This internally runs EC_KEY_check_key(). Can avoid calling it
-  // again by the JWK import code if private key were set before public key.
+  // TODO(eroman): Distinguish more accurately between a DataError and
+  // OperationError. In general if this fails it was due to the key being an
+  // invalid EC key.
   if (!EC_KEY_set_public_key_affine_coordinates(ec.get(), x.get(), y.get()))
-    return Status::OperationError();
+    return Status::DataError();
 
   // Extract the "d" parameters.
   if (is_private_key) {

@@ -81,7 +81,7 @@ class CaptivePortalTabHelper
                               int error_code,
                               const base::string16& error_description) override;
 
-  void DidStopLoading(content::RenderViewHost* render_view_host) override;
+  void DidStopLoading() override;
 
   // content::NotificationObserver:
   void Observe(int type,
@@ -136,8 +136,6 @@ class CaptivePortalTabHelper
   // Neither of these will ever be NULL.
   scoped_ptr<CaptivePortalTabReloader> tab_reloader_;
   scoped_ptr<CaptivePortalLoginDetector> login_detector_;
-
-  content::WebContents* web_contents_;
 
   // If a provisional load has failed, and the tab is loading an error page, the
   // error code associated with the error page we're loading.

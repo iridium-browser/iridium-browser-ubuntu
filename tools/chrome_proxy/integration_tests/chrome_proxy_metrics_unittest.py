@@ -7,12 +7,12 @@ import unittest
 
 from integration_tests import chrome_proxy_metrics as metrics
 from integration_tests import network_metrics_unittest as network_unittest
-from metrics import test_page_test_results
+from telemetry.unittest_util import test_page_test_results
 
 
 # Timeline events used in tests.
 # An HTML not via proxy.
-EVENT_HTML_PROXY = network_unittest.NetworkMetricTest.MakeNetworkTimelineEvent(
+EVENT_HTML_DIRECT = network_unittest.NetworkMetricTest.MakeNetworkTimelineEvent(
     url='http://test.html1',
     response_headers={
         'Content-Type': 'text/html',
@@ -20,18 +20,59 @@ EVENT_HTML_PROXY = network_unittest.NetworkMetricTest.MakeNetworkTimelineEvent(
         },
     body=network_unittest.HTML_BODY)
 
-# An HTML via proxy with the deprecated Via header.
-EVENT_HTML_PROXY_DEPRECATED_VIA = (
+# An HTML via proxy.
+EVENT_HTML_PROXY_VIA = (
     network_unittest.NetworkMetricTest.MakeNetworkTimelineEvent(
     url='http://test.html2',
     response_headers={
         'Content-Type': 'text/html',
         'Content-Encoding': 'gzip',
         'X-Original-Content-Length': str(len(network_unittest.HTML_BODY)),
-        'Via': (metrics.CHROME_PROXY_VIA_HEADER_DEPRECATED +
-                ',other-via'),
+        'Via': '1.1 ' + metrics.CHROME_PROXY_VIA_HEADER,
         },
-    body=network_unittest.HTML_BODY))
+    body=network_unittest.HTML_BODY,
+    remote_port=443))
+
+# An HTML via the HTTP fallback proxy.
+EVENT_HTML_PROXY_VIA_HTTP_FALLBACK = (
+    network_unittest.NetworkMetricTest.MakeNetworkTimelineEvent(
+    url='http://test.html2',
+    response_headers={
+        'Content-Type': 'text/html',
+        'Content-Encoding': 'gzip',
+        'X-Original-Content-Length': str(len(network_unittest.HTML_BODY)),
+        'Via': '1.1 ' + metrics.CHROME_PROXY_VIA_HEADER,
+        },
+    body=network_unittest.HTML_BODY,
+    remote_port=80))
+
+# An image via proxy with Via header.
+EVENT_IMAGE_PROXY_VIA = (
+    network_unittest.NetworkMetricTest.MakeNetworkTimelineEvent(
+    url='http://test.image',
+    response_headers={
+        'Content-Type': 'image/jpeg',
+        'Content-Encoding': 'gzip',
+        'X-Original-Content-Length': str(network_unittest.IMAGE_OCL),
+        'Via': '1.1 ' + metrics.CHROME_PROXY_VIA_HEADER,
+        },
+    body=base64.b64encode(network_unittest.IMAGE_BODY),
+    base64_encoded_body=True,
+    remote_port=443))
+
+# An image via the HTTP fallback proxy.
+EVENT_IMAGE_PROXY_VIA_HTTP_FALLBACK = (
+    network_unittest.NetworkMetricTest.MakeNetworkTimelineEvent(
+    url='http://test.image',
+    response_headers={
+        'Content-Type': 'image/jpeg',
+        'Content-Encoding': 'gzip',
+        'X-Original-Content-Length': str(network_unittest.IMAGE_OCL),
+        'Via': '1.1 ' + metrics.CHROME_PROXY_VIA_HEADER,
+        },
+    body=base64.b64encode(network_unittest.IMAGE_BODY),
+    base64_encoded_body=True,
+    remote_port=80))
 
 # An image via proxy with Via header and it is cached.
 EVENT_IMAGE_PROXY_CACHED = (
@@ -69,7 +110,7 @@ EVENT_MALWARE_PROXY = (
         },
     status=307))
 
-# An HTML via proxy with the deprecated Via header.
+# An HTML via proxy with the Via header.
 EVENT_IMAGE_BYPASS = (
     network_unittest.NetworkMetricTest.MakeNetworkTimelineEvent(
     url='http://test.image',
@@ -136,8 +177,8 @@ class ChromeProxyMetricTest(unittest.TestCase):
   def testChromeProxyMetricForDataSaving(self):
     metric = metrics.ChromeProxyMetric()
     events = [
-        EVENT_HTML_PROXY,
-        EVENT_HTML_PROXY_DEPRECATED_VIA,
+        EVENT_HTML_DIRECT,
+        EVENT_HTML_PROXY_VIA,
         EVENT_IMAGE_PROXY_CACHED,
         EVENT_IMAGE_DIRECT]
     metric.SetEvents(events)
@@ -150,11 +191,20 @@ class ChromeProxyMetricTest(unittest.TestCase):
     results.AssertHasPageSpecificScalarValue('resources_from_cache', 'count', 1)
     results.AssertHasPageSpecificScalarValue('resources_direct', 'count', 2)
 
+    # Passing in zero responses should cause a failure.
+    metric.SetEvents([])
+    no_responses_exception = False
+    try:
+      metric.AddResultsForDataSaving(None, results)
+    except metrics.ChromeProxyMetricException:
+      no_responses_exception = True
+    self.assertTrue(no_responses_exception)
+
   def testChromeProxyMetricForHeaderValidation(self):
     metric = metrics.ChromeProxyMetric()
     metric.SetEvents([
-        EVENT_HTML_PROXY,
-        EVENT_HTML_PROXY_DEPRECATED_VIA,
+        EVENT_HTML_DIRECT,
+        EVENT_HTML_PROXY_VIA,
         EVENT_IMAGE_PROXY_CACHED,
         EVENT_IMAGE_DIRECT])
 
@@ -170,16 +220,25 @@ class ChromeProxyMetricTest(unittest.TestCase):
 
     # Two events with valid Via headers.
     metric.SetEvents([
-        EVENT_HTML_PROXY_DEPRECATED_VIA,
+        EVENT_HTML_PROXY_VIA,
         EVENT_IMAGE_PROXY_CACHED])
     metric.AddResultsForHeaderValidation(None, results)
     results.AssertHasPageSpecificScalarValue('checked_via_header', 'count', 2)
 
+    # Passing in zero responses should cause a failure.
+    metric.SetEvents([])
+    no_responses_exception = False
+    try:
+      metric.AddResultsForHeaderValidation(None, results)
+    except metrics.ChromeProxyMetricException:
+      no_responses_exception = True
+    self.assertTrue(no_responses_exception)
+
   def testChromeProxyMetricForBypass(self):
     metric = metrics.ChromeProxyMetric()
     metric.SetEvents([
-        EVENT_HTML_PROXY,
-        EVENT_HTML_PROXY_DEPRECATED_VIA,
+        EVENT_HTML_DIRECT,
+        EVENT_HTML_PROXY_VIA,
         EVENT_IMAGE_PROXY_CACHED,
         EVENT_IMAGE_DIRECT])
     results = test_page_test_results.TestPageTestResults(self)
@@ -197,64 +256,152 @@ class ChromeProxyMetricTest(unittest.TestCase):
     metric.AddResultsForBypass(None, results)
     results.AssertHasPageSpecificScalarValue('bypass', 'count', 1)
 
+    # Passing in zero responses should cause a failure.
+    metric.SetEvents([])
+    no_responses_exception = False
+    try:
+      metric.AddResultsForBypass(None, results)
+    except metrics.ChromeProxyMetricException:
+      no_responses_exception = True
+    self.assertTrue(no_responses_exception)
+
   def testChromeProxyMetricForCorsBypass(self):
     metric = metrics.ChromeProxyMetric()
-    metric.SetEvents([EVENT_HTML_PROXY_DEPRECATED_VIA,
+    metric.SetEvents([EVENT_HTML_PROXY_VIA,
                       EVENT_IMAGE_BYPASS,
                       EVENT_IMAGE_DIRECT])
     results = test_page_test_results.TestPageTestResults(self)
     metric.AddResultsForCorsBypass(None, results)
     results.AssertHasPageSpecificScalarValue('cors_bypass', 'count', 1)
 
+    # Passing in zero responses should cause a failure.
+    metric.SetEvents([])
+    no_responses_exception = False
+    try:
+      metric.AddResultsForCorsBypass(None, results)
+    except metrics.ChromeProxyMetricException:
+      no_responses_exception = True
+    self.assertTrue(no_responses_exception)
 
-  def testChromeProxyMetricForHTTPFallback(self):
+  def testChromeProxyMetricForBlockOnce(self):
     metric = metrics.ChromeProxyMetric()
-    metric.SetEvents([
-        EVENT_HTML_PROXY,
-        EVENT_HTML_PROXY_DEPRECATED_VIA])
+    metric.SetEvents([EVENT_HTML_DIRECT,
+                      EVENT_IMAGE_PROXY_VIA])
     results = test_page_test_results.TestPageTestResults(self)
+    metric.AddResultsForBlockOnce(None, results)
+    results.AssertHasPageSpecificScalarValue('eligible_responses', 'count', 2)
+    results.AssertHasPageSpecificScalarValue('bypass', 'count', 1)
 
-    fallback_exception = False
-    info = {}
-    info['enabled'] = False
-    self._StubGetProxyInfo(info)
+    metric.SetEvents([EVENT_HTML_DIRECT,
+                      EVENT_IMAGE_DIRECT])
+    exception_occurred = False
     try:
-      metric.AddResultsForBypass(None, results)
+      metric.AddResultsForBlockOnce(None, results)
     except metrics.ChromeProxyMetricException:
-      fallback_exception = True
-    self.assertTrue(fallback_exception)
+      exception_occurred = True
+    # The second response was over direct, but was expected via proxy.
+    self.assertTrue(exception_occurred)
 
-    fallback_exception = False
-    info['enabled'] = True
-    info['proxies'] = [
-        'something.else.com:80',
-        metrics.PROXY_SETTING_DIRECT
-        ]
-    self._StubGetProxyInfo(info)
+    # Passing in zero responses should cause a failure.
+    metric.SetEvents([])
+    no_responses_exception = False
     try:
-      metric.AddResultsForBypass(None, results)
+      metric.AddResultsForBlockOnce(None, results)
     except metrics.ChromeProxyMetricException:
-      fallback_exception = True
-    self.assertTrue(fallback_exception)
+      no_responses_exception = True
+    self.assertTrue(no_responses_exception)
 
-    info['enabled'] = True
-    info['proxies'] = [
-        metrics.PROXY_SETTING_HTTP,
-        metrics.PROXY_SETTING_DIRECT
-        ]
-    self._StubGetProxyInfo(info)
-    metric.AddResultsForHTTPFallback(None, results)
-
-  def testChromeProxyMetricForSafebrowsing(self):
+  def testChromeProxyMetricForSafebrowsingOn(self):
     metric = metrics.ChromeProxyMetric()
     metric.SetEvents([EVENT_MALWARE_PROXY])
     results = test_page_test_results.TestPageTestResults(self)
 
-    metric.AddResultsForSafebrowsing(None, results)
-    results.AssertHasPageSpecificScalarValue('safebrowsing', 'boolean', True)
+    metric.AddResultsForSafebrowsingOn(None, results)
+    results.AssertHasPageSpecificScalarValue(
+        'safebrowsing', 'timeout responses', 1)
 
     # Clear results and metrics to test no response for safebrowsing
     results = test_page_test_results.TestPageTestResults(self)
     metric.SetEvents([])
-    metric.AddResultsForSafebrowsing(None, results)
-    results.AssertHasPageSpecificScalarValue('safebrowsing', 'boolean', True)
+    metric.AddResultsForSafebrowsingOn(None, results)
+    results.AssertHasPageSpecificScalarValue(
+        'safebrowsing', 'timeout responses', 1)
+
+  def testChromeProxyMetricForHTTPFallback(self):
+    metric = metrics.ChromeProxyMetric()
+    metric.SetEvents([EVENT_HTML_PROXY_VIA_HTTP_FALLBACK,
+                      EVENT_IMAGE_PROXY_VIA_HTTP_FALLBACK])
+    results = test_page_test_results.TestPageTestResults(self)
+    metric.AddResultsForHTTPFallback(None, results)
+    results.AssertHasPageSpecificScalarValue('via_fallback', 'count', 2)
+
+    metric.SetEvents([EVENT_HTML_PROXY_VIA,
+                      EVENT_IMAGE_PROXY_VIA])
+    exception_occurred = False
+    try:
+      metric.AddResultsForHTTPFallback(None, results)
+    except metrics.ChromeProxyMetricException:
+      exception_occurred = True
+    # The responses came through the SPDY proxy, but were expected through the
+    # HTTP fallback proxy.
+    self.assertTrue(exception_occurred)
+
+    # Passing in zero responses should cause a failure.
+    metric.SetEvents([])
+    no_responses_exception = False
+    try:
+      metric.AddResultsForHTTPFallback(None, results)
+    except metrics.ChromeProxyMetricException:
+      no_responses_exception = True
+    self.assertTrue(no_responses_exception)
+
+  def testChromeProxyMetricForHTTPToDirectFallback(self):
+    metric = metrics.ChromeProxyMetric()
+    metric.SetEvents([EVENT_HTML_PROXY_VIA_HTTP_FALLBACK,
+                      EVENT_HTML_DIRECT,
+                      EVENT_IMAGE_DIRECT])
+    results = test_page_test_results.TestPageTestResults(self)
+    metric.AddResultsForHTTPToDirectFallback(None, results, 'test.html2')
+    results.AssertHasPageSpecificScalarValue('via_fallback', 'count', 1)
+    results.AssertHasPageSpecificScalarValue('bypass', 'count', 2)
+
+    metric.SetEvents([EVENT_HTML_PROXY_VIA,
+                      EVENT_HTML_DIRECT])
+    exception_occurred = False
+    try:
+      metric.AddResultsForHTTPToDirectFallback(None, results, 'test.html2')
+    except metrics.ChromeProxyMetricException:
+      exception_occurred = True
+    # The first response was expected through the HTTP fallback proxy.
+    self.assertTrue(exception_occurred)
+
+    metric.SetEvents([EVENT_HTML_PROXY_VIA_HTTP_FALLBACK,
+                      EVENT_HTML_PROXY_VIA_HTTP_FALLBACK,
+                      EVENT_IMAGE_PROXY_VIA_HTTP_FALLBACK])
+    exception_occurred = False
+    try:
+      metric.AddResultsForHTTPToDirectFallback(None, results, 'test.html2')
+    except metrics.ChromeProxyMetricException:
+      exception_occurred = True
+    # All but the first response were expected to be over direct.
+    self.assertTrue(exception_occurred)
+
+    metric.SetEvents([EVENT_HTML_DIRECT,
+                      EVENT_HTML_DIRECT,
+                      EVENT_IMAGE_DIRECT])
+    exception_occurred = False
+    try:
+      metric.AddResultsForHTTPToDirectFallback(None, results, 'test.html2')
+    except metrics.ChromeProxyMetricException:
+      exception_occurred = True
+    # The first response was expected through the HTTP fallback proxy.
+    self.assertTrue(exception_occurred)
+
+    # Passing in zero responses should cause a failure.
+    metric.SetEvents([])
+    no_responses_exception = False
+    try:
+      metric.AddResultsForHTTPToDirectFallback(None, results, 'test.html2')
+    except metrics.ChromeProxyMetricException:
+      no_responses_exception = True
+    self.assertTrue(no_responses_exception)

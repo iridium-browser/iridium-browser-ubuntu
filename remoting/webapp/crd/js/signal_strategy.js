@@ -22,7 +22,10 @@ remoting.SignalStrategy = function() {};
  *    HANDSHAKE -> CONNECTED (authenticated successfully).
  *    CONNECTING -> FAILED (connection failed).
  *    HANDSHAKE -> FAILED (authentication failed).
+ *    CONNECTED -> FAILED (connection was terminated).
  *    * -> CLOSED (dispose() called).
+ *
+ * Do not re-order these values without updating fallback_signal_strategy.js.
  */
 remoting.SignalStrategy.State = {
   NOT_CONNECTED: 0,
@@ -33,7 +36,23 @@ remoting.SignalStrategy.State = {
   CLOSED: 5
 };
 
+/**
+ * @enum {string} SignalStrategy types. Do not add to these values without
+ *     updating the corresponding enum in chromoting_extensions.proto.
+ */
+remoting.SignalStrategy.Type = {
+  XMPP: 'xmpp',
+  WCS: 'wcs'
+};
+
 remoting.SignalStrategy.prototype.dispose = function() {};
+
+/**
+ * @param {function(remoting.SignalStrategy.State):void} onStateChangedCallback
+ *   Callback to call on state change.
+ */
+remoting.SignalStrategy.prototype.setStateChangedCallback =
+    function(onStateChangedCallback) {};
 
 /**
  * @param {?function(Element):void} onIncomingStanzaCallback Callback to call on
@@ -57,27 +76,48 @@ remoting.SignalStrategy.prototype.connect =
  */
 remoting.SignalStrategy.prototype.sendMessage = function(message) {};
 
+/**
+ * Send any messages accumulated during connection set-up.
+ *
+ * @param {remoting.LogToServer} logToServer The LogToServer instance for the
+ *     connection.
+ */
+remoting.SignalStrategy.prototype.sendConnectionSetupResults =
+    function(logToServer) {
+};
+
 /** @return {remoting.SignalStrategy.State} Current state */
 remoting.SignalStrategy.prototype.getState = function() {};
 
-/** @return {remoting.Error} Error when in FAILED state. */
+/** @return {!remoting.Error} Error when in FAILED state. */
 remoting.SignalStrategy.prototype.getError = function() {};
 
 /** @return {string} Current JID when in CONNECTED state. */
 remoting.SignalStrategy.prototype.getJid = function() {};
 
+/** @return {remoting.SignalStrategy.Type} The signal strategy type. */
+remoting.SignalStrategy.prototype.getType = function() {};
+
 /**
  * Creates the appropriate signal strategy for the current environment.
- * @param {function(remoting.SignalStrategy.State): void} onStateChangedCallback
  * @return {remoting.SignalStrategy} New signal strategy object.
  */
-remoting.SignalStrategy.create = function(onStateChangedCallback) {
+remoting.SignalStrategy.create = function() {
   // Only use XMPP when TCP API is available and TLS support is enabled. That's
   // not the case for V1 app (socket API is available only to platform apps)
   // and for Chrome releases before 38.
   if (chrome.socket && chrome.socket.secure) {
-    return new remoting.XmppConnection(onStateChangedCallback);
+    /**
+     * @param {remoting.FallbackSignalStrategy.Progress} progress
+     */
+    var progressCallback = function(progress) {
+      console.log('FallbackSignalStrategy progress: ' + progress);
+    };
+
+    return new remoting.FallbackSignalStrategy(
+        new remoting.DnsBlackholeChecker(new remoting.XmppConnection()),
+        new remoting.WcsAdapter());
   } else {
-    return new remoting.WcsAdapter(onStateChangedCallback);
+    return new remoting.WcsAdapter();
   }
 };

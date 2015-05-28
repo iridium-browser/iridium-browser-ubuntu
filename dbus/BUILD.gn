@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//testing/test.gni")
 import("//third_party/protobuf/proto_library.gni")
 
 component("dbus") {
@@ -29,17 +30,19 @@ component("dbus") {
     "scoped_dbus_error.h",
     "string_util.cc",
     "string_util.h",
-    "values_util.cc",
-    "values_util.h",
     "util.cc",
     "util.h",
+    "values_util.cc",
+    "values_util.h",
   ]
 
   defines = [ "DBUS_IMPLEMENTATION" ]
 
   deps = [
-    "//base",
     "//third_party/protobuf:protobuf_lite",
+  ]
+  public_deps = [
+    "//base",
   ]
 
   public_configs = [ "//build/config/linux:dbus" ]
@@ -66,8 +69,10 @@ source_set("test_support") {
     "mock_object_proxy.h",
   ]
 
-  deps = [
+  public_deps = [
     ":dbus",
+  ]
+  deps = [
     "//testing/gmock",
   ]
 

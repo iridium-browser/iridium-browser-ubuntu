@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "cc/output/filter_operations.h"
 #include "chrome/browser/android/compositor/layer/layer.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -36,6 +37,7 @@ class ContentLayer : public Layer {
                      bool should_override_content_alpha,
                      float content_alpha_override,
                      float saturation,
+                     float brightness,
                      const gfx::Rect& desired_bounds,
                      const gfx::Size& content_size);
   bool ShowingLiveLayer() { return !static_attached_ && content_attached_; }
@@ -60,7 +62,9 @@ class ContentLayer : public Layer {
   scoped_refptr<ThumbnailLayer> static_layer_;
   bool content_attached_;
   bool static_attached_;
-  float saturation_;
+
+  cc::FilterOperations static_filter_operations_;
+  cc::FilterOperations content_filter_operations_;
 
   TabContentManager* tab_content_manager_;
 

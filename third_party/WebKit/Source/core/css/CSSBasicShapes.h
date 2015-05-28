@@ -13,7 +13,7 @@
  *    disclaimer in the documentation and/or other materials
  *    provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER “AS IS” AND ANY
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER "AS IS" AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
  * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
@@ -55,7 +55,12 @@ public:
     CSSPrimitiveValue* referenceBox() const { return m_referenceBox.get(); }
     void setReferenceBox(PassRefPtrWillBeRawPtr<CSSPrimitiveValue> referenceBox) { m_referenceBox = referenceBox; }
 
-    virtual void trace(Visitor* visitor) { visitor->trace(m_referenceBox); }
+    bool isEllipse() const { return type() == CSSBasicShapeEllipseType; }
+    bool isPolygon() const { return type() == CSSBasicShapePolygonType; }
+    bool isCircle() const { return type() == CSSBasicShapeCircleType; }
+    bool isInset() const { return type() == CSSBasicShapeInsetType; }
+
+    DEFINE_INLINE_VIRTUAL_TRACE() { visitor->trace(m_referenceBox); }
 
 protected:
     CSSBasicShape() { }
@@ -77,7 +82,7 @@ public:
     void setCenterY(PassRefPtrWillBeRawPtr<CSSPrimitiveValue> centerY) { m_centerY = centerY; }
     void setRadius(PassRefPtrWillBeRawPtr<CSSPrimitiveValue> radius) { m_radius = radius; }
 
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     CSSBasicShapeCircle() { }
@@ -106,7 +111,7 @@ public:
     void setRadiusX(PassRefPtrWillBeRawPtr<CSSPrimitiveValue> radiusX) { m_radiusX = radiusX; }
     void setRadiusY(PassRefPtrWillBeRawPtr<CSSPrimitiveValue> radiusY) { m_radiusY = radiusY; }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     CSSBasicShapeEllipse() { }
@@ -131,7 +136,7 @@ public:
 
     PassRefPtrWillBeRawPtr<CSSPrimitiveValue> getXAt(unsigned i) const { return m_values.at(i * 2); }
     PassRefPtrWillBeRawPtr<CSSPrimitiveValue> getYAt(unsigned i) const { return m_values.at(i * 2 + 1); }
-    const WillBeHeapVector<RefPtrWillBeMember<CSSPrimitiveValue> >& values() const { return m_values; }
+    const WillBeHeapVector<RefPtrWillBeMember<CSSPrimitiveValue>>& values() const { return m_values; }
 
     void setWindRule(WindRule w) { m_windRule = w; }
     WindRule windRule() const { return m_windRule; }
@@ -139,7 +144,7 @@ public:
     virtual String cssText() const override;
     virtual bool equals(const CSSBasicShape&) const override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     CSSBasicShapePolygon()
@@ -149,7 +154,7 @@ private:
 
     virtual Type type() const override { return CSSBasicShapePolygonType; }
 
-    WillBeHeapVector<RefPtrWillBeMember<CSSPrimitiveValue> > m_values;
+    WillBeHeapVector<RefPtrWillBeMember<CSSPrimitiveValue>> m_values;
     WindRule m_windRule;
 };
 
@@ -204,7 +209,7 @@ public:
     virtual String cssText() const override;
     virtual bool equals(const CSSBasicShape&) const override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     CSSBasicShapeInset() { }
@@ -221,6 +226,11 @@ private:
     RefPtrWillBeMember<CSSPrimitiveValue> m_bottomRightRadius;
     RefPtrWillBeMember<CSSPrimitiveValue> m_bottomLeftRadius;
 };
+
+DEFINE_TYPE_CASTS(CSSBasicShapeCircle, CSSBasicShape, shape, shape->isCircle(), shape.isCircle());
+DEFINE_TYPE_CASTS(CSSBasicShapeEllipse, CSSBasicShape, shape, shape->isEllipse(), shape.isEllipse());
+DEFINE_TYPE_CASTS(CSSBasicShapePolygon, CSSBasicShape, shape, shape->isPolygon(), shape.isPolygon());
+DEFINE_TYPE_CASTS(CSSBasicShapeInset, CSSBasicShape, shape, shape->isInset(), shape.isInset());
 
 } // namespace blink
 

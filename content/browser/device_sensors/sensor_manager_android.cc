@@ -7,9 +7,11 @@
 #include <string.h>
 
 #include "base/android/jni_android.h"
+#include "base/bind.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
 #include "content/browser/device_sensors/inertial_sensor_consts.h"
+#include "content/public/browser/browser_thread.h"
 #include "jni/DeviceSensors_jni.h"
 
 using base::android::AttachCurrentThread;
@@ -23,25 +25,26 @@ enum OrientationSensorType {
   ORIENTATION_SENSOR_MAX = 3,
 };
 
-static void UpdateDeviceOrientationHistogram(OrientationSensorType type) {
+void UpdateDeviceOrientationHistogram(OrientationSensorType type) {
   UMA_HISTOGRAM_ENUMERATION("InertialSensor.DeviceOrientationSensorAndroid",
                             type,
                             ORIENTATION_SENSOR_MAX);
 }
 
-}
+}  // namespace
 
 namespace content {
 
 SensorManagerAndroid::SensorManagerAndroid()
     : number_active_device_motion_sensors_(0),
-      device_light_buffer_(NULL),
-      device_motion_buffer_(NULL),
-      device_orientation_buffer_(NULL),
+      device_light_buffer_(nullptr),
+      device_motion_buffer_(nullptr),
+      device_orientation_buffer_(nullptr),
       is_light_buffer_ready_(false),
       is_motion_buffer_ready_(false),
       is_orientation_buffer_ready_(false),
-      is_using_backup_sensors_for_orientation_(false) {
+      is_using_backup_sensors_for_orientation_(false),
+      is_shutdown_(false) {
   memset(received_motion_data_, 0, sizeof(received_motion_data_));
   device_sensors_.Reset(Java_DeviceSensors_getInstance(
       AttachCurrentThread(), base::android::GetApplicationContext()));
@@ -196,7 +199,25 @@ bool SensorManagerAndroid::isUsingBackupSensorsForOrientation() {
 
 bool SensorManagerAndroid::StartFetchingDeviceLightData(
     DeviceLightHardwareBuffer* buffer) {
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    StartFetchingLightDataOnUI(buffer);
+  } else {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&SensorManagerAndroid::StartFetchingLightDataOnUI,
+                   base::Unretained(this),
+                   buffer));
+  }
+  return true;
+}
+
+void SensorManagerAndroid::StartFetchingLightDataOnUI(
+    DeviceLightHardwareBuffer* buffer) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(buffer);
+  if (is_shutdown_)
+    return;
+
   {
     base::AutoLock autolock(light_buffer_lock_);
     device_light_buffer_ = buffer;
@@ -207,16 +228,31 @@ bool SensorManagerAndroid::StartFetchingDeviceLightData(
     base::AutoLock autolock(light_buffer_lock_);
     SetLightBufferValue(std::numeric_limits<double>::infinity());
   }
-  return success;
 }
 
 void SensorManagerAndroid::StopFetchingDeviceLightData() {
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    StopFetchingLightDataOnUI();
+    return;
+  }
+
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&SensorManagerAndroid::StopFetchingLightDataOnUI,
+                 base::Unretained(this)));
+}
+
+void SensorManagerAndroid::StopFetchingLightDataOnUI() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (is_shutdown_)
+    return;
+
   Stop(kTypeLight);
   {
     base::AutoLock autolock(light_buffer_lock_);
     if (device_light_buffer_) {
       SetLightBufferValue(-1);
-      device_light_buffer_ = NULL;
+      device_light_buffer_ = nullptr;
     }
   }
 }
@@ -226,17 +262,36 @@ void SensorManagerAndroid::SetLightBufferValue(double lux) {
   device_light_buffer_->data.value = lux;
   device_light_buffer_->seqlock.WriteEnd();
 }
+
 // --- Device Motion
 
 bool SensorManagerAndroid::StartFetchingDeviceMotionData(
     DeviceMotionHardwareBuffer* buffer) {
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    StartFetchingMotionDataOnUI(buffer);
+  } else {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&SensorManagerAndroid::StartFetchingMotionDataOnUI,
+                   base::Unretained(this),
+                   buffer));
+  }
+  return true;
+}
+
+void SensorManagerAndroid::StartFetchingMotionDataOnUI(
+    DeviceMotionHardwareBuffer* buffer) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(buffer);
+  if (is_shutdown_)
+    return;
+
   {
     base::AutoLock autolock(motion_buffer_lock_);
     device_motion_buffer_ = buffer;
     ClearInternalMotionBuffers();
   }
-  bool success = Start(kTypeMotion);
+  Start(kTypeMotion);
 
   // If no motion data can ever be provided, the number of active device motion
   // sensors will be zero. In that case flag the shared memory buffer
@@ -246,16 +301,31 @@ bool SensorManagerAndroid::StartFetchingDeviceMotionData(
     base::AutoLock autolock(motion_buffer_lock_);
     CheckMotionBufferReadyToRead();
   }
-  return success;
 }
 
 void SensorManagerAndroid::StopFetchingDeviceMotionData() {
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    StopFetchingMotionDataOnUI();
+    return;
+  }
+
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&SensorManagerAndroid::StopFetchingMotionDataOnUI,
+                 base::Unretained(this)));
+}
+
+void SensorManagerAndroid::StopFetchingMotionDataOnUI() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (is_shutdown_)
+    return;
+
   Stop(kTypeMotion);
   {
     base::AutoLock autolock(motion_buffer_lock_);
     if (device_motion_buffer_) {
       ClearInternalMotionBuffers();
-      device_motion_buffer_ = NULL;
+      device_motion_buffer_ = nullptr;
     }
   }
 }
@@ -308,7 +378,25 @@ void SensorManagerAndroid::SetOrientationBufferReadyStatus(bool ready) {
 
 bool SensorManagerAndroid::StartFetchingDeviceOrientationData(
     DeviceOrientationHardwareBuffer* buffer) {
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    StartFetchingOrientationDataOnUI(buffer);
+  } else {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&SensorManagerAndroid::StartFetchingOrientationDataOnUI,
+                   base::Unretained(this),
+                   buffer));
+  }
+  return true;
+}
+
+void SensorManagerAndroid::StartFetchingOrientationDataOnUI(
+    DeviceOrientationHardwareBuffer* buffer) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(buffer);
+  if (is_shutdown_)
+    return;
+
   {
     base::AutoLock autolock(orientation_buffer_lock_);
     device_orientation_buffer_ = buffer;
@@ -328,19 +416,38 @@ bool SensorManagerAndroid::StartFetchingDeviceOrientationData(
     is_using_backup_sensors_for_orientation_ =
         isUsingBackupSensorsForOrientation();
   }
-
-  return success;
 }
 
 void SensorManagerAndroid::StopFetchingDeviceOrientationData() {
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    StopFetchingOrientationDataOnUI();
+    return;
+  }
+
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&SensorManagerAndroid::StopFetchingOrientationDataOnUI,
+                 base::Unretained(this)));
+}
+
+void SensorManagerAndroid::StopFetchingOrientationDataOnUI() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (is_shutdown_)
+    return;
+
   Stop(kTypeOrientation);
   {
     base::AutoLock autolock(orientation_buffer_lock_);
     if (device_orientation_buffer_) {
       SetOrientationBufferReadyStatus(false);
-      device_orientation_buffer_ = NULL;
+      device_orientation_buffer_ = nullptr;
     }
   }
+}
+
+void SensorManagerAndroid::Shutdown() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  is_shutdown_ = true;
 }
 
 }  // namespace content

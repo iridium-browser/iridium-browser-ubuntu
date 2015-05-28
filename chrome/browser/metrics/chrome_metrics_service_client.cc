@@ -11,18 +11,19 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
-#include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/metrics/chrome_stability_metrics_provider.h"
+#include "chrome/browser/metrics/drive_metrics_provider.h"
 #include "chrome/browser/metrics/omnibox_metrics_provider.h"
+#include "chrome/browser/metrics/time_ticks_experiment_win.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -30,12 +31,14 @@
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
+#include "components/metrics/call_stack_profile_metrics_provider.h"
 #include "components/metrics/gpu/gpu_metrics_provider.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/net/net_metrics_log_uploader.h"
 #include "components/metrics/net/network_metrics_provider.h"
 #include "components/metrics/profiler/profiler_metrics_provider.h"
 #include "components/metrics/profiler/tracking_synchronizer.h"
+#include "components/metrics/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/histogram_fetcher.h"
 #include "content/public/browser/notification_service.h"
@@ -64,7 +67,6 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
-#include "base/win/registry.h"
 #include "chrome/browser/metrics/google_update_metrics_provider_win.h"
 #include "components/browser_watcher/watcher_metrics_provider_win.h"
 #endif
@@ -97,45 +99,44 @@ metrics::SystemProfileProto::Channel AsProtobufChannel(
   return metrics::SystemProfileProto::CHANNEL_UNKNOWN;
 }
 
-// Handles asynchronous fetching of memory details.
-// Will run the provided task after finished.
-class MetricsMemoryDetails : public MemoryDetails {
- public:
-  MetricsMemoryDetails(
-      const base::Closure& callback,
-      MemoryGrowthTracker* memory_growth_tracker)
-      : callback_(callback) {
-    SetMemoryGrowthTracker(memory_growth_tracker);
-  }
+// Standard interval between log uploads, in seconds.
+#if defined(OS_ANDROID) || defined(OS_IOS)
+const int kStandardUploadIntervalSeconds = 5 * 60;  // Five minutes.
+const int kStandardUploadIntervalCellularSeconds = 15 * 60;  // Fifteen minutes.
+#else
+const int kStandardUploadIntervalSeconds = 30 * 60;  // Thirty minutes.
+#endif
 
-  void OnDetailsAvailable() override {
-    base::MessageLoop::current()->PostTask(FROM_HERE, callback_);
-  }
-
- private:
-  ~MetricsMemoryDetails() override {}
-
-  base::Closure callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(MetricsMemoryDetails);
-};
+#if defined(OS_ANDROID) || defined(OS_IOS)
+// Returns true if the user is assigned to the experiment group for enabled
+// cellular uploads.
+bool IsCellularEnabledByExperiment() {
+  const std::string group_name =
+      base::FieldTrialList::FindFullName("UMA_EnableCellularLogUpload");
+  return group_name == "Enabled";
+}
+#endif
 
 }  // namespace
 
 ChromeMetricsServiceClient::ChromeMetricsServiceClient(
     metrics::MetricsStateManager* state_manager)
     : metrics_state_manager_(state_manager),
-      chromeos_metrics_provider_(NULL),
+      chromeos_metrics_provider_(nullptr),
       waiting_for_collect_final_metrics_step_(false),
       num_async_histogram_fetches_in_progress_(0),
+      profiler_metrics_provider_(nullptr),
+#if defined(ENABLE_PLUGINS)
+      plugin_metrics_provider_(nullptr),
+#endif
+#if defined(OS_WIN)
+      google_update_metrics_provider_(nullptr),
+#endif
+      drive_metrics_provider_(nullptr),
       weak_ptr_factory_(this) {
   DCHECK(thread_checker_.CalledOnValidThread());
   RecordCommandLineMetrics();
   RegisterForNotifications();
-
-#if defined(OS_WIN)
-  CountBrowserCrashDumpAttempts();
-#endif  // defined(OS_WIN)
 }
 
 ChromeMetricsServiceClient::~ChromeMetricsServiceClient() {
@@ -174,7 +175,11 @@ void ChromeMetricsServiceClient::RegisterPrefs(PrefRegistrySimple* registry) {
 
 void ChromeMetricsServiceClient::SetMetricsClientId(
     const std::string& client_id) {
-  crash_keys::SetCrashClientIdFromGUID(client_id);
+  crash_keys::SetMetricsClientIdFromGUID(client_id);
+}
+
+void ChromeMetricsServiceClient::OnRecordingDisabled() {
+  crash_keys::ClearMetricsClientId();
 }
 
 bool ChromeMetricsServiceClient::IsOffTheRecordSessionActive() {
@@ -209,8 +214,10 @@ std::string ChromeMetricsServiceClient::GetVersionString() {
 }
 
 void ChromeMetricsServiceClient::OnLogUploadComplete() {
-  // Collect network stats after each UMA upload.
-  network_stats_uploader_.CollectAndReportNetworkStats();
+  // Collect time ticks stats after each UMA upload.
+#if defined(OS_WIN)
+  chrome::CollectTimeTicksStats();
+#endif
 }
 
 void ChromeMetricsServiceClient::StartGatheringMetrics(
@@ -247,7 +254,7 @@ void ChromeMetricsServiceClient::CollectFinalMetrics(
 
   scoped_refptr<MetricsMemoryDetails> details(
       new MetricsMemoryDetails(callback, &memory_growth_tracker_));
-  details->StartFetch(MemoryDetails::UPDATE_USER_METRICS);
+  details->StartFetch(MemoryDetails::FROM_CHROME_ONLY);
 
   // Collect WebCore cache information to put into a histogram.
   for (content::RenderProcessHost::iterator i(
@@ -259,13 +266,24 @@ void ChromeMetricsServiceClient::CollectFinalMetrics(
 
 scoped_ptr<metrics::MetricsLogUploader>
 ChromeMetricsServiceClient::CreateUploader(
-    const std::string& server_url,
-    const std::string& mime_type,
     const base::Callback<void(int)>& on_upload_complete) {
   return scoped_ptr<metrics::MetricsLogUploader>(
       new metrics::NetMetricsLogUploader(
-          g_browser_process->system_request_context(), server_url, mime_type,
+          g_browser_process->system_request_context(),
+          metrics::kDefaultMetricsServerUrl,
+          metrics::kDefaultMetricsMimeType,
           on_upload_complete));
+}
+
+base::TimeDelta ChromeMetricsServiceClient::GetStandardUploadInterval() {
+#if defined(OS_ANDROID) || defined(OS_IOS)
+  bool is_cellular = false;
+  cellular_callback_.Run(&is_cellular);
+
+  if (is_cellular && IsCellularEnabledByExperiment())
+    return base::TimeDelta::FromSeconds(kStandardUploadIntervalCellularSeconds);
+#endif
+  return base::TimeDelta::FromSeconds(kStandardUploadIntervalSeconds);
 }
 
 base::string16 ChromeMetricsServiceClient::GetRegistryBackupKey() {
@@ -295,18 +313,31 @@ void ChromeMetricsServiceClient::Initialize() {
       scoped_ptr<metrics::MetricsProvider>(
           new ExtensionsMetricsProvider(metrics_state_manager_)));
 #endif
-  metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(new metrics::NetworkMetricsProvider(
-          content::BrowserThread::GetBlockingPool())));
+  scoped_ptr<metrics::NetworkMetricsProvider> network_metrics_provider(
+      new metrics::NetworkMetricsProvider(
+          content::BrowserThread::GetBlockingPool()));
+  cellular_callback_ = network_metrics_provider->GetConnectionCallback();
+  metrics_service_->RegisterMetricsProvider(network_metrics_provider.Pass());
+
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(new OmniboxMetricsProvider));
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(new ChromeStabilityMetricsProvider));
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(new metrics::GPUMetricsProvider()));
-  profiler_metrics_provider_ = new metrics::ProfilerMetricsProvider;
+      scoped_ptr<metrics::MetricsProvider>(new metrics::GPUMetricsProvider));
+
+  drive_metrics_provider_ = new DriveMetricsProvider;
+  metrics_service_->RegisterMetricsProvider(
+      scoped_ptr<metrics::MetricsProvider>(drive_metrics_provider_));
+
+  profiler_metrics_provider_ =
+      new metrics::ProfilerMetricsProvider(cellular_callback_);
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(profiler_metrics_provider_));
+
+  metrics_service_->RegisterMetricsProvider(
+      scoped_ptr<metrics::MetricsProvider>(
+          new metrics::CallStackProfileMetricsProvider));
 
 #if defined(OS_ANDROID)
   metrics_service_->RegisterMetricsProvider(
@@ -392,14 +423,24 @@ void ChromeMetricsServiceClient::OnInitTaskGotGoogleUpdateData() {
       weak_ptr_factory_.GetWeakPtr());
 }
 
+// TODO(vadimt): Consider wrapping params in a struct after the list of params
+// to ReceivedProfilerData settles. crbug/456354.
 void ChromeMetricsServiceClient::ReceivedProfilerData(
-    const tracked_objects::ProcessDataSnapshot& process_data,
-    int process_type) {
-  profiler_metrics_provider_->RecordProfilerData(process_data, process_type);
+    const tracked_objects::ProcessDataPhaseSnapshot& process_data_phase,
+    base::ProcessId process_id,
+    content::ProcessType process_type,
+    int profiling_phase,
+    base::TimeDelta phase_start,
+    base::TimeDelta phase_finish,
+    const metrics::ProfilerEvents& past_events) {
+  profiler_metrics_provider_->RecordProfilerData(
+      process_data_phase, process_id, process_type, profiling_phase,
+      phase_start, phase_finish, past_events);
 }
 
 void ChromeMetricsServiceClient::FinishedReceivingProfilerData() {
-  finished_gathering_initial_metrics_callback_.Run();
+  drive_metrics_provider_->GetDriveMetrics(
+      finished_gathering_initial_metrics_callback_);
 }
 
 void ChromeMetricsServiceClient::OnMemoryDetailCollectionDone() {
@@ -523,55 +564,3 @@ void ChromeMetricsServiceClient::Observe(
       NOTREACHED();
   }
 }
-
-#if defined(OS_WIN)
-void ChromeMetricsServiceClient::CountBrowserCrashDumpAttempts() {
-  // Open the registry key for iteration.
-  base::win::RegKey regkey;
-  if (regkey.Open(HKEY_CURRENT_USER,
-                  chrome::kBrowserCrashDumpAttemptsRegistryPath,
-                  KEY_ALL_ACCESS) != ERROR_SUCCESS) {
-    return;
-  }
-
-  // The values we're interested in counting are all prefixed with the version.
-  base::string16 chrome_version(base::ASCIIToUTF16(chrome::kChromeVersion));
-
-  // Track a list of values to delete. We don't modify the registry key while
-  // we're iterating over its values.
-  typedef std::vector<base::string16> StringVector;
-  StringVector to_delete;
-
-  // Iterate over the values in the key counting dumps with and without crashes.
-  // We directly walk the values instead of using RegistryValueIterator in order
-  // to read all of the values as DWORDS instead of strings.
-  base::string16 name;
-  DWORD value = 0;
-  int dumps_with_crash = 0;
-  int dumps_with_no_crash = 0;
-  for (int i = regkey.GetValueCount() - 1; i >= 0; --i) {
-    if (regkey.GetValueNameAt(i, &name) == ERROR_SUCCESS &&
-        StartsWith(name, chrome_version, false) &&
-        regkey.ReadValueDW(name.c_str(), &value) == ERROR_SUCCESS) {
-      to_delete.push_back(name);
-      if (value == 0)
-        ++dumps_with_no_crash;
-      else
-        ++dumps_with_crash;
-    }
-  }
-
-  // Delete the registry keys we've just counted.
-  for (StringVector::iterator i = to_delete.begin(); i != to_delete.end(); ++i)
-    regkey.DeleteValue(i->c_str());
-
-  // Capture the histogram samples.
-  if (dumps_with_crash != 0)
-    UMA_HISTOGRAM_COUNTS("Chrome.BrowserDumpsWithCrash", dumps_with_crash);
-  if (dumps_with_no_crash != 0)
-    UMA_HISTOGRAM_COUNTS("Chrome.BrowserDumpsWithNoCrash", dumps_with_no_crash);
-  int total_dumps = dumps_with_crash + dumps_with_no_crash;
-  if (total_dumps != 0)
-    UMA_HISTOGRAM_COUNTS("Chrome.BrowserCrashDumpAttempts", total_dumps);
-}
-#endif  // defined(OS_WIN)

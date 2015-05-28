@@ -27,6 +27,7 @@
 #ifndef MessagePort_h
 #define MessagePort_h
 
+#include "core/CoreExport.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/events/EventListener.h"
 #include "core/events/EventTarget.h"
@@ -43,8 +44,9 @@
 namespace blink {
 
 class ExceptionState;
-class MessagePort;
 class ExecutionContext;
+class MessagePort;
+class ScriptState;
 class SerializedScriptValue;
 
 // The overwhelmingly common case is sending a single port, so handle that efficiently with an inline buffer of size 1.
@@ -53,7 +55,7 @@ typedef WillBeHeapVector<RefPtrWillBeMember<MessagePort>, 1> MessagePortArray;
 // Not to be confused with WebMessagePortChannelArray; this one uses Vector and OwnPtr instead of WebVector and raw pointers.
 typedef Vector<OwnPtr<WebMessagePortChannel>, 1> MessagePortChannelArray;
 
-class MessagePort final
+class CORE_EXPORT MessagePort final
     : public EventTargetWithInlineData
     , public RefCountedWillBeNoBase<MessagePort>
     , public ActiveDOMObject
@@ -105,13 +107,15 @@ public:
     // A port gets neutered when it is transferred to a new owner via postMessage().
     bool isNeutered() const { return !m_entangledChannel; }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit MessagePort(ExecutionContext&);
 
     // WebMessagePortChannelClient implementation.
     virtual void messageAvailable() override;
+    virtual v8::Isolate* scriptIsolate() override;
+    virtual v8::Local<v8::Context> scriptContextForMessageConversion() override;
     void dispatchMessages();
 
     OwnPtr<WebMessagePortChannel> m_entangledChannel;
@@ -120,6 +124,8 @@ private:
     bool m_closed;
 
     WeakPtrFactory<MessagePort> m_weakFactory;
+
+    RefPtr<ScriptState> m_scriptStateForConversion;
 };
 
 } // namespace blink

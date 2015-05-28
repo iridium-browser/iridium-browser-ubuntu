@@ -45,23 +45,23 @@ public:
 private:
     explicit HTMLOptGroupElement(Document&);
 
-    virtual bool rendererIsFocusable() const override { return true; }
+    virtual bool supportsFocus() const override;
     virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void childrenChanged(const ChildrenChange&) override;
     virtual void accessKeyAction(bool sendMouseEvents) override;
-    virtual void didAddUserAgentShadowRoot(ShadowRoot&) override;
+    virtual void didAddClosedShadowRoot(ShadowRoot&) override;
     virtual void attach(const AttachContext& = AttachContext()) override;
     virtual void detach(const AttachContext& = AttachContext()) override;
 
     // <optgroup> might not have a renderer so we manually manage a cached style.
-    void updateNonRenderStyle();
-    virtual RenderStyle* nonRendererStyle() const override;
-    virtual PassRefPtr<RenderStyle> customStyleForRenderer() override;
+    void updateNonComputedStyle();
+    virtual ComputedStyle* nonLayoutObjectComputedStyle() const override;
+    virtual PassRefPtr<ComputedStyle> customStyleForLayoutObject() override;
 
     void updateGroupLabel();
     void recalcSelectOptions();
 
-    RefPtr<RenderStyle> m_style;
+    RefPtr<ComputedStyle> m_style;
 };
 
 } // namespace blink

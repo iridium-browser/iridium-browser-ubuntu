@@ -23,7 +23,6 @@
 #include "storage/common/quota/quota_types.h"
 #include "url/gurl.h"
 
-class ExtensionSpecialStoragePolicy;
 class IOThread;
 class Profile;
 
@@ -36,22 +35,8 @@ class PluginDataRemover;
 class StoragePartition;
 }
 
-namespace disk_cache {
-class Backend;
-}
-
 namespace net {
 class URLRequestContextGetter;
-}
-
-namespace storage {
-class QuotaManager;
-}
-
-namespace content {
-class DOMStorageContext;
-struct LocalStorageUsageInfo;
-struct SessionStorageUsageInfo;
 }
 
 // BrowsingDataRemover is responsible for removing data related to browsing:
@@ -152,6 +137,10 @@ class BrowsingDataRemover
     virtual ~Observer() {}
   };
 
+  using Callback = base::Callback<void(const NotificationDetails&)>;
+  using CallbackSubscription = scoped_ptr<
+      base::CallbackList<void(const NotificationDetails&)>::Subscription>;
+
   // The completion inhibitor can artificially delay completion of the browsing
   // data removal process. It is used during testing to simulate scenarios in
   // which the deletion stalls or takes a very long time.
@@ -200,6 +189,12 @@ class BrowsingDataRemover
     completion_inhibitor_ = inhibitor;
   }
 
+  // Add a callback to the list of callbacks to be called during a browsing data
+  // removal event. Returns a subscription object that can be used to
+  // un-register the callback.
+  static CallbackSubscription RegisterOnBrowsingDataRemovedCallback(
+      const Callback& callback);
+
   // Removes the specified items related to browsing for all origins that match
   // the provided |origin_set_mask| (see BrowsingDataHelper::OriginSetMask).
   void Remove(int remove_mask, int origin_set_mask);
@@ -226,15 +221,6 @@ class BrowsingDataRemover
   //
   // TODO(mkwst): See http://crbug.com/113621
   friend class BrowsingDataRemoverTest;
-
-  enum CacheState {
-    STATE_NONE,
-    STATE_CREATE_MAIN,
-    STATE_CREATE_MEDIA,
-    STATE_DELETE_MAIN,
-    STATE_DELETE_MEDIA,
-    STATE_DONE
-  };
 
   // Setter for |is_removing_|; DCHECKs that we can only start removing if we're
   // not already removing, and vice-versa.
@@ -263,7 +249,7 @@ class BrowsingDataRemover
   // clears the respective waiting flag, and invokes NotifyAndDeleteIfDone.
   void OnKeywordsLoaded();
 
-  // Called when plug-in data has been cleared. Invokes NotifyAndDeleteIfDone.
+  // Called when plugin data has been cleared. Invokes NotifyAndDeleteIfDone.
   void OnWaitableEventSignaled(base::WaitableEvent* waitable_event);
 
 #if defined(ENABLE_PLUGINS)
@@ -322,13 +308,6 @@ class BrowsingDataRemover
   // Callback for when the cache has been deleted. Invokes
   // NotifyAndDeleteIfDone.
   void ClearedCache();
-
-  // Invoked on the IO thread to delete from the cache.
-  void ClearCacheOnIOThread();
-
-  // Performs the actual work to delete the cache.
-  void DoClearCache(int rv);
-
 #if !defined(DISABLE_NACL)
   // Callback for when the NaCl cache has been deleted. Invokes
   // NotifyAndDeleteIfDone.
@@ -406,9 +385,6 @@ class BrowsingDataRemover
   // is about to complete a browsing data removal process, and has the ability
   // to artificially delay completion. Used for testing.
   static CompletionInhibitor* completion_inhibitor_;
-
-  CacheState next_cache_state_;
-  disk_cache::Backend* cache_;
 
   // Used to delete data from HTTP cache.
   scoped_refptr<net::URLRequestContextGetter> main_context_getter_;

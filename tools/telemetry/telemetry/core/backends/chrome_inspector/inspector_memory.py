@@ -3,24 +3,21 @@
 # found in the LICENSE file.
 import json
 
+from telemetry.core import exceptions
 
-class InspectorMemoryException(Exception):
+
+class InspectorMemoryException(exceptions.Error):
   pass
+
 
 class InspectorMemory(object):
   """Communicates with the remote inspector's Memory domain."""
 
   def __init__(self, inspector_websocket):
     self._inspector_websocket = inspector_websocket
-    self._inspector_websocket.RegisterDomain(
-        'Memory',
-        self._OnNotification,
-        self._OnClose)
+    self._inspector_websocket.RegisterDomain('Memory', self._OnNotification)
 
   def _OnNotification(self, msg):
-    pass
-
-  def _OnClose(self):
     pass
 
   def GetDOMCounters(self, timeout):
@@ -33,6 +30,11 @@ class InspectorMemory(object):
     Returns:
       A dictionary containing the counts associated with "nodes", "documents",
       and "jsEventListeners".
+    Raises:
+      InspectorMemoryException
+      websocket.WebSocketException
+      socket.error
+      exceptions.WebSocketDisconnected
     """
     res = self._inspector_websocket.SyncRequest({
       'method': 'Memory.getDOMCounters'

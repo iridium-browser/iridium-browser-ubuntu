@@ -40,12 +40,13 @@ class CmaRenderer : public ::media::Renderer {
   // ::media::Renderer implementation:
   void Initialize(
       ::media::DemuxerStreamProvider* demuxer_stream_provider,
-      const base::Closure& init_cb,
+      const ::media::PipelineStatusCB& init_cb,
       const ::media::StatisticsCB& statistics_cb,
       const ::media::BufferingStateCB& buffering_state_cb,
       const PaintCB& paint_cb,
       const base::Closure& ended_cb,
-      const ::media::PipelineStatusCB& error_cb) override;
+      const ::media::PipelineStatusCB& error_cb,
+      const base::Closure& waiting_for_decryption_key_cb) override;
   void Flush(const base::Closure& flush_cb) override;
   void StartPlayingFrom(base::TimeDelta time) override;
   void SetPlaybackRate(float playback_rate) override;
@@ -86,8 +87,6 @@ class CmaRenderer : public ::media::Renderer {
   void OnFlushDone(::media::PipelineStatus status);
   void OnError(::media::PipelineStatus status);
 
-  void FireAllPendingCallbacks();
-
   // Begin a state transition.
   // Return true if delayed because of a pending state transition.
   void BeginStateTransition();
@@ -104,12 +103,13 @@ class CmaRenderer : public ::media::Renderer {
 
   // Set of callbacks.
   PaintCB paint_cb_;
-  base::Closure init_cb_;
+  ::media::PipelineStatusCB init_cb_;
   ::media::StatisticsCB statistics_cb_;
   base::Closure ended_cb_;
   ::media::PipelineStatusCB error_cb_;
   ::media::BufferingStateCB buffering_state_cb_;
   base::Closure flush_cb_;
+  base::Closure waiting_for_decryption_key_cb_;
 
   // Renderer state.
   // Used mostly for checking that transitions are correct.

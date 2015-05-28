@@ -15,6 +15,17 @@ function RemoteCall(extensionId) {
 }
 
 /**
+ * Checks whether step by step tests are enabled or not.
+ * @return {Promise<bool>}
+ */
+RemoteCall.isStepByStepEnabled = function() {
+  return new Promise(function(fulfill) {
+    chrome.commandLinePrivate.hasSwitch(
+        'enable-file-manager-step-by-step-tests', fulfill);
+  });
+};
+
+/**
  * Calls a remote test util in Files.app's extension. See: test_util.js.
  *
  * @param {string} func Function name.
@@ -27,19 +38,37 @@ function RemoteCall(extensionId) {
  */
 RemoteCall.prototype.callRemoteTestUtil =
     function(func, appId, args, opt_callback) {
-  return new Promise(function(onFulfilled) {
-    chrome.runtime.sendMessage(
-        this.extensionId_,
-        {
-          func: func,
-          appId: appId,
-          args: args
-        },
-        function() {
-          if (opt_callback)
-            opt_callback.apply(null, arguments);
-          onFulfilled(arguments[0]);
-        });
+  return RemoteCall.isStepByStepEnabled().then(function(stepByStep) {
+    if (!stepByStep)
+      return false;
+    return new Promise(function(onFulfilled) {
+      console.info('Executing: ' + func + ' on ' + appId + ' with args: ');
+      console.info(args);
+      console.info('Type step() to continue...');
+      window.step = function() {
+        window.step = null;
+        onFulfilled(stepByStep);
+      };
+    });
+  }).then(function(stepByStep) {
+    return new Promise(function(onFulfilled) {
+      chrome.runtime.sendMessage(
+          this.extensionId_,
+          {
+            func: func,
+            appId: appId,
+            args: args
+          },
+          function(var_args) {
+            if (stepByStep) {
+              console.info('Returned value:');
+              console.info(arguments);
+            }
+            if (opt_callback)
+              opt_callback.apply(null, arguments);
+            onFulfilled(arguments[0]);
+          });
+    }.bind(this));
   }.bind(this));
 };
 
@@ -190,6 +219,19 @@ RemoteCall.prototype.fakeKeyDown =
 };
 
 /**
+ * Gets file entries just under the volume.
+ *
+ * @param {VolumeManagerCommon.VolumeType} volumeType Volume type.
+ * @param {Array.<string>} names File name list.
+ * @return {Promise} Promise to be fulfilled with file entries or rejected
+ *     depending on the result.
+ */
+RemoteCall.prototype.getFilesUnderVolume = function(volumeType, names) {
+  return this.callRemoteTestUtil(
+      'getFilesUnderVolume', null, [volumeType, names]);
+};
+
+/**
  * Class to manipulate the window in the remote extension.
  *
  * @param {string} extensionId ID of extension to be manipulated.
@@ -290,6 +332,37 @@ RemoteCallFilesApp.prototype.waitUntilTaskExecutes =
 };
 
 /**
+ * Check if the next tabforcus'd element has the given ID or not.
+ * @param {string} windowId Target window ID.
+ * @param {string} elementId String of 'id' attribute which the next tabfocus'd
+ *     element should have.
+ * @return {Promise} Promise to be fulfilled with the result.
+ */
+RemoteCallFilesApp.prototype.checkNextTabFocus =
+    function(windowId, elementId) {
+  return remoteCall.callRemoteTestUtil('fakeKeyDown',
+                                       windowId,
+                                       ['body', 'U+0009', false]).then(
+  function(result) {
+    chrome.test.assertTrue(result);
+    return remoteCall.callRemoteTestUtil('getActiveElement',
+                                         windowId,
+                                         []);
+  }).then(function(element) {
+    if (!element || !element.attributes['id'])
+      return false;
+
+    if (element.attributes['id'] === elementId) {
+      return true;
+    } else {
+      console.error('The ID of the element should be "' + elementId +
+                    '", but "' + element.attributes['id'] + '"');
+      return false;
+    }
+  });
+};
+
+/**
  * Waits until the current directory is changed.
  * @param {string} windowId Target window ID.
  * @param {string} expectedPath Path to be changed to.
@@ -305,4 +378,95 @@ RemoteCallFilesApp.prototype.waitUntilCurrentDirectoryIsChanged =
           return pending('Expected path is %s', expectedPath);
       });
   }.bind(this));
+};
+
+/**
+ * Class to manipulate the window in the remote extension.
+ *
+ * @param {string} extensionId ID of extension to be manipulated.
+ * @extends {RemoteCall}
+ * @constructor
+ */
+function RemoteCallGallery() {
+  RemoteCall.apply(this, arguments);
+}
+
+RemoteCallGallery.prototype.__proto__ = RemoteCall.prototype;
+
+/**
+ * Waits until the expected image is shown.
+ *
+ * @param {document} document Document.
+ * @param {number} width Expected width of the image.
+ * @param {number} height Expected height of the image.
+ * @param {string|null} name Expected name of the image.
+ * @return {Promise} Promsie to be fulfilled when the check is passed.
+ */
+RemoteCallGallery.prototype.waitForSlideImage =
+    function(windowId, width, height, name) {
+  var expected = {};
+  if (width)
+    expected.width = width;
+  if (height)
+    expected.height = height;
+  if (name)
+    expected.name = name;
+
+  return repeatUntil(function() {
+    var query = '.gallery[mode="slide"] .content canvas.fullres';
+    return Promise.all([
+        this.waitForElement(windowId, '.namebox'),
+        this.waitForElement(windowId, query)
+    ]).then(function(args) {
+      var nameBox = args[0];
+      var fullResCanvas = args[1];
+      var actual = {};
+      if (width && fullResCanvas)
+        actual.width = Number(fullResCanvas.attributes.width);
+      if (height && fullResCanvas)
+        actual.height = Number(fullResCanvas.attributes.height);
+      if (name && nameBox)
+        actual.name = nameBox.value;
+
+      if (!chrome.test.checkDeepEq(expected, actual)) {
+        return pending('Slide mode state, expected is %j, actual is %j.',
+                       expected, actual);
+      }
+      return actual;
+    });
+  }.bind(this));
+};
+
+RemoteCallGallery.prototype.changeNameAndWait = function(windowId, newName) {
+  return this.callRemoteTestUtil('changeName', windowId, [newName]
+  ).then(function() {
+    return this.waitForSlideImage(windowId, 0, 0, newName);
+  }.bind(this));
+};
+
+/**
+ * Shorthand for clicking an element.
+ * @param {AppWindow} appWindow Application window.
+ * @param {string} query Query for the element.
+ * @param {Promise} Promise to be fulfilled with the clicked element.
+ */
+RemoteCallGallery.prototype.waitAndClickElement = function(windowId, query) {
+  return this.waitForElement(windowId, query).then(function(element) {
+    return this.callRemoteTestUtil('fakeMouseClick', windowId, [query])
+    .then(function() { return element; });
+  }.bind(this));
+};
+
+/**
+ * Waits for the "Press Enter" message.
+ *
+ * @param {AppWindow} appWindow App window.
+ * @return {Promise} Promise to be fulfilled when the element appears.
+ */
+RemoteCallGallery.prototype.waitForPressEnterMessage = function(appId) {
+  return this.waitForElement(appId, '.prompt-wrapper .prompt').
+      then(function(element) {
+        chrome.test.assertEq(
+            'Press Enter when done', element.text.trim());
+      });
 };

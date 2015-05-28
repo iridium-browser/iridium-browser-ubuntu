@@ -19,6 +19,7 @@
 #include "SkRasterWidget.h"
 #include "SkDrawCommandGeometryWidget.h"
 #include "SkSettingsWidget.h"
+#include <QtCore/QSignalMapper>
 #include <QtCore/QVariant>
 #include <QtGui/QAction>
 #include <QtGui/QApplication>
@@ -75,11 +76,6 @@ private slots:
         Toggles breakpoint view in the list widget.
      */
     void actionBreakpoints();
-
-    /**
-        Toggles between count and offset style of command indexing in GUI
-     */
-    void actionToggleIndexStyle();
 
     /**
         Profile the commands
@@ -233,6 +229,8 @@ private slots:
     void toggleFilter(QString string);
 
     void updateHit(int newHit);
+
+    void updateImage();
 private:
     QSplitter fCentralSplitter;
     QStatusBar fStatusBar;
@@ -240,7 +238,6 @@ private:
 
     QAction fActionOpen;
     QAction fActionBreakpoint;
-    QAction fActionToggleIndexStyle;
     QAction fActionProfile;
     QAction fActionCancel;
     QAction fActionClearBreakpoints;

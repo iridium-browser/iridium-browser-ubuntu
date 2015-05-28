@@ -45,6 +45,9 @@ struct NET_EXPORT_PRIVATE QuicConnectionStats {
   QuicPacketCount packets_spuriously_retransmitted;
   // Number of packets abandoned as lost by the loss detection algorithm.
   QuicPacketCount packets_lost;
+
+  // Number of packets sent in slow start.
+  QuicPacketCount slowstart_packets_sent;
   // Number of packets lost exiting slow start.
   QuicPacketCount slowstart_packets_lost;
 
@@ -56,7 +59,6 @@ struct NET_EXPORT_PRIVATE QuicConnectionStats {
   size_t loss_timeout_count;
   size_t tlp_count;
   size_t rto_count;  // Count of times the rto timer fired.
-  size_t spurious_rto_count;
 
   int64 min_rtt_us;  // Minimum RTT in microseconds.
   int64 srtt_us;  // Smoothed RTT in microseconds.
@@ -75,10 +77,6 @@ struct NET_EXPORT_PRIVATE QuicConnectionStats {
   // The number of loss events from TCP's perspective.  Each loss event includes
   // one or more lost packets.
   uint32 tcp_loss_events;
-  // Total amount of cwnd increase by TCPCubic in congestion avoidance.
-  QuicPacketCount cwnd_increase_congestion_avoidance;
-  // Total amount of cwnd increase by TCPCubic in cubic mode.
-  QuicPacketCount cwnd_increase_cubic_mode;
 
   // Creation time, as reported by the QuicClock.
   QuicTime connection_creation_time;

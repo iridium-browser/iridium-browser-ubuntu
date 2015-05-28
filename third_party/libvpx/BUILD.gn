@@ -10,19 +10,19 @@ import("//third_party/yasm/yasm_assemble.gni")
 if (is_posix && !is_mac) {
   os_category = "linux"
 } else {
-  os_category = os
+  os_category = current_os
 }
 
 # Sets the architecture name for building libvpx.
-if (cpu_arch == "x86") {
+if (current_cpu == "x86") {
   cpu_arch_full = "ia32"
-} else if (cpu_arch == "x64") {
+} else if (current_cpu == "x64") {
   if (is_msan) {
     cpu_arch_full = "generic"
   } else {
     cpu_arch_full = "x64"
   }
-} else if (cpu_arch == "arm") {
+} else if (current_cpu == "arm") {
   if (arm_use_neon) {
     cpu_arch_full = "arm-neon"
   } else if (is_android) {
@@ -31,7 +31,7 @@ if (cpu_arch == "x86") {
     cpu_arch_full = "arm"
   }
 } else {
-  cpu_arch_full = cpu_arch
+  cpu_arch_full = current_cpu
 }
 
 config("libvpx_config") {
@@ -53,11 +53,11 @@ config("libvpx_external_config") {
   ]
 }
 
-if (cpu_arch == "x86" || cpu_arch == "x64") {
+if (current_cpu == "x86" || current_cpu == "x64") {
   yasm_assemble("libvpx_yasm") {
-    if (cpu_arch == "x86") {
+    if (current_cpu == "x86") {
       sources = libvpx_srcs_x86_assembly
-    } else if (cpu_arch == "x64") {
+    } else if (current_cpu == "x64") {
       sources = libvpx_srcs_x86_64_assembly
     }
 
@@ -78,9 +78,9 @@ static_library("libvpx_intrinsics_mmx") {
   if (!is_win) {
     cflags = [ "-mmmx" ]
   }
-  if (cpu_arch == "x86") {
+  if (current_cpu == "x86") {
     sources = libvpx_srcs_x86_mmx
-  } else if (cpu_arch == "x64") {
+  } else if (current_cpu == "x64") {
     sources = libvpx_srcs_x86_64_mmx
   }
 }
@@ -92,9 +92,9 @@ static_library("libvpx_intrinsics_sse2") {
   if (!is_win) {
     cflags = [ "-msse2" ]
   }
-  if (cpu_arch == "x86") {
+  if (current_cpu == "x86") {
     sources = libvpx_srcs_x86_sse2
-  } else if (cpu_arch == "x64") {
+  } else if (current_cpu == "x64") {
     sources = libvpx_srcs_x86_64_sse2
   }
 }
@@ -106,9 +106,9 @@ static_library("libvpx_intrinsics_ssse3") {
   if (!is_win) {
     cflags = [ "-mssse3" ]
   }
-  if (cpu_arch == "x86") {
+  if (current_cpu == "x86") {
     sources = libvpx_srcs_x86_ssse3
-  } else if (cpu_arch == "x64") {
+  } else if (current_cpu == "x64") {
     sources = libvpx_srcs_x86_64_ssse3
   }
 }
@@ -120,10 +120,26 @@ static_library("libvpx_intrinsics_sse4_1") {
   if (!is_win) {
     cflags = [ "-msse4.1" ]
   }
-  if (cpu_arch == "x86") {
+  if (current_cpu == "x86") {
     sources = libvpx_srcs_x86_sse4_1
-  } else if (cpu_arch == "x64") {
+  } else if (current_cpu == "x64") {
     sources = libvpx_srcs_x86_64_sse4_1
+  }
+}
+
+static_library("libvpx_intrinsics_avx2") {
+  configs += [ ":libvpx_config" ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  if (is_win) {
+    cflags = [ "/arch:AVX2" ]
+  } else {
+    cflags = [ "-mavx2" ]
+  }
+  if (current_cpu == "x86") {
+    sources = libvpx_srcs_x86_avx2
+  } else if (current_cpu == "x64") {
+    sources = libvpx_srcs_x86_64_avx2
   }
 }
 
@@ -137,7 +153,7 @@ if (cpu_arch_full == "arm-neon-cpu-detect") {
 }
 
 # Converts ARM assembly files to GAS style.
-if (cpu_arch == "arm") {
+if (current_cpu == "arm") {
   action_foreach("convert_arm_assembly") {
     script = "//third_party/libvpx/run_perl.py"
     if (cpu_arch_full == "arm-neon") {
@@ -177,17 +193,17 @@ static_library("libvpx") {
     configs += [ "//build/config/compiler:optimize_max" ]
   }
 
-  if (cpu_arch == "x86") {
+  if (current_cpu == "x86") {
     sources = libvpx_srcs_x86
-  } else if (cpu_arch == "x64") {
+  } else if (current_cpu == "x64") {
     if (is_msan) {
       sources = libvpx_srcs_generic
     } else {
       sources = libvpx_srcs_x86_64
     }
-  } else if (cpu_arch == "mipsel") {
-    sources = libvpx_srcs_generic
-  } else if (cpu_arch == "arm") {
+  } else if (current_cpu == "mipsel") {
+    sources = libvpx_srcs_mips
+  } else if (current_cpu == "arm") {
     if (arm_use_neon) {
       sources = libvpx_srcs_arm_neon
     } else if (is_android) {
@@ -195,7 +211,7 @@ static_library("libvpx") {
     } else {
       sources = libvpx_srcs_arm
     }
-  } else if (cpu_arch == "arm64") {
+  } else if (current_cpu == "arm64") {
     sources = libvpx_srcs_arm64
   }
 
@@ -213,13 +229,14 @@ static_library("libvpx") {
   configs += [ "//build/config/compiler:no_chromium_code" ]
   configs += [ ":libvpx_warnings" ]
   deps = []
-  if (cpu_arch == "x86" || (cpu_arch == "x64" && !is_msan)) {
+  if (current_cpu == "x86" || (current_cpu == "x64" && !is_msan)) {
     deps += [
       ":libvpx_yasm",
       ":libvpx_intrinsics_mmx",
       ":libvpx_intrinsics_sse2",
       ":libvpx_intrinsics_ssse3",
       ":libvpx_intrinsics_sse4_1",
+      ":libvpx_intrinsics_avx2",
     ]
   }
   if (cpu_arch_full == "arm-neon-cpu-detect") {
@@ -228,7 +245,7 @@ static_library("libvpx") {
   if (is_android) {
     deps += [ "//third_party/android_tools:cpu_features" ]
   }
-  if (cpu_arch == "arm") {
+  if (current_cpu == "arm") {
     deps += [ ":libvpx_assembly_arm" ]
   }
 

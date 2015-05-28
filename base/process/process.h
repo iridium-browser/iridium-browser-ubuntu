@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BASE_PROCESS_PROCESS_PROCESS_H_
-#define BASE_PROCESS_PROCESS_PROCESS_H_
+#ifndef BASE_PROCESS_PROCESS_H_
+#define BASE_PROCESS_PROCESS_H_
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
@@ -49,6 +49,20 @@ class BASE_EXPORT Process {
   // Returns an object for the current process.
   static Process Current();
 
+  // Returns a Process for the given |pid|.
+  static Process Open(ProcessId pid);
+
+  // Returns a Process for the given |pid|. On Windows the handle is opened
+  // with more access rights and must only be used by trusted code (can read the
+  // address space and duplicate handles).
+  static Process OpenWithExtraPrivileges(ProcessId pid);
+
+#if defined(OS_WIN)
+  // Returns a Process for the given |pid|, using some |desired_access|.
+  // See ::OpenProcess documentation for valid |desired_access|.
+  static Process OpenWithAccess(ProcessId pid, DWORD desired_access);
+#endif
+
   // Creates an object from a |handle| owned by someone else.
   // Don't use this for new code. It is only intended to ease the migration to
   // a strict ownership model.
@@ -69,7 +83,7 @@ class BASE_EXPORT Process {
   Process Duplicate() const;
 
   // Get the PID for this process.
-  ProcessId pid() const;
+  ProcessId Pid() const;
 
   // Returns true if this process is the current process.
   bool is_current() const;
@@ -77,13 +91,17 @@ class BASE_EXPORT Process {
   // Close the process handle. This will not terminate the process.
   void Close();
 
-  // Terminates the process with extreme prejudice. The given |result_code| will
-  // be the exit code of the process.
-  // NOTE: On POSIX |result_code| is ignored.
-  void Terminate(int result_code);
+  // Terminates the process with extreme prejudice. The given |exit_code| will
+  // be the exit code of the process. If |wait| is true, this method will wait
+  // for up to one minute for the process to actually terminate.
+  // Returns true if the process terminates within the allowed time.
+  // NOTE: On POSIX |exit_code| is ignored.
+  bool Terminate(int exit_code, bool wait) const;
 
   // Waits for the process to exit. Returns true on success.
   // On POSIX, if the process has been signaled then |exit_code| is set to -1.
+  // On Linux this must be a child process, however on Mac and Windows it can be
+  // any process.
   bool WaitForExit(int* exit_code);
 
   // Same as WaitForExit() but only waits for up to |timeout|.
@@ -114,4 +132,4 @@ class BASE_EXPORT Process {
 
 }  // namespace base
 
-#endif  // BASE_PROCESS_PROCESS_PROCESS_H_
+#endif  // BASE_PROCESS_PROCESS_H_

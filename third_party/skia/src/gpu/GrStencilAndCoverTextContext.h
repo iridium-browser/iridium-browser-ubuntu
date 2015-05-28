@@ -23,7 +23,8 @@ class GrPathRange;
  */
 class GrStencilAndCoverTextContext : public GrTextContext {
 public:
-    static GrStencilAndCoverTextContext* Create(GrContext*, const SkDeviceProperties&);
+    static GrStencilAndCoverTextContext* Create(GrContext*, SkGpuDevice*,
+                                                const SkDeviceProperties&);
 
     virtual ~GrStencilAndCoverTextContext();
 
@@ -51,36 +52,40 @@ private:
         kMaxPerformance_RenderMode,
     };
 
-    GrDrawState                     fDrawState;
-    GrDrawState::AutoRestoreEffects fStateRestore;
-    SkScalar                        fTextRatio;
-    float                           fTextInverseRatio;
-    SkGlyphCache*                   fGlyphCache;
-    GrPathRange*                    fGlyphs;
-    SkStrokeRec                     fStroke;
-    uint16_t                        fGlyphIndices[kGlyphBufferSize];
-    SkPoint                         fGlyphPositions[kGlyphBufferSize];
-    int                             fQueuedGlyphCount;
-    int                             fFallbackGlyphsIdx;
-    SkMatrix                        fContextInitialMatrix;
-    SkMatrix                        fViewMatrix;
-    SkMatrix                        fLocalMatrix;
-    bool                            fUsingDeviceSpaceGlyphs;
+    GrPipelineBuilder                                   fPipelineBuilder;
+    GrPipelineBuilder::AutoRestoreFragmentProcessors    fStateRestore;
+    SkScalar                                            fTextRatio;
+    float                                               fTextInverseRatio;
+    SkGlyphCache*                                       fGlyphCache;
+    GrPathRange*                                        fGlyphs;
+    SkStrokeRec                                         fStroke;
+    uint16_t                                            fGlyphIndices[kGlyphBufferSize];
+    SkPoint                                             fGlyphPositions[kGlyphBufferSize];
+    int                                                 fQueuedGlyphCount;
+    int                                                 fFallbackGlyphsIdx;
+    SkMatrix                                            fContextInitialMatrix;
+    SkMatrix                                            fViewMatrix;
+    SkMatrix                                            fLocalMatrix;
+    bool                                                fUsingDeviceSpaceGlyphs;
 
-    GrStencilAndCoverTextContext(GrContext*, const SkDeviceProperties&);
+    GrStencilAndCoverTextContext(GrContext*, SkGpuDevice*, const SkDeviceProperties&);
 
-    virtual bool canDraw(const SkPaint& paint, const SkMatrix& viewMatrix) SK_OVERRIDE;
+    bool canDraw(const GrRenderTarget*, const GrClip&, const GrPaint&,
+                 const SkPaint&, const SkMatrix& viewMatrix) override;
 
-    virtual void onDrawText(const GrPaint&, const SkPaint&, const SkMatrix& viewMatrix,
-                            const char text[], size_t byteLength,
-                            SkScalar x, SkScalar y) SK_OVERRIDE;
-    virtual void onDrawPosText(const GrPaint&, const SkPaint&, const SkMatrix& viewMatrix,
-                               const char text[], size_t byteLength,
-                               const SkScalar pos[], int scalarsPerPosition,
-                               const SkPoint& offset) SK_OVERRIDE;
+    void onDrawText(GrRenderTarget*, const GrClip&, const GrPaint&, const SkPaint&,
+                    const SkMatrix& viewMatrix,
+                    const char text[], size_t byteLength,
+                    SkScalar x, SkScalar y, const SkIRect& regionClipBounds) override;
+    void onDrawPosText(GrRenderTarget*, const GrClip&, const GrPaint&, const SkPaint&,
+                       const SkMatrix& viewMatrix,
+                       const char text[], size_t byteLength,
+                       const SkScalar pos[], int scalarsPerPosition,
+                       const SkPoint& offset, const SkIRect& regionClipBounds) override;
 
-    void init(const GrPaint&, const SkPaint&, size_t textByteLength, RenderMode,
-              const SkMatrix& viewMatrix);
+    void init(GrRenderTarget*, const GrClip&, const GrPaint&, const SkPaint&,
+              size_t textByteLength, RenderMode, const SkMatrix& viewMatrix,
+              const SkIRect& regionClipBounds);
     bool mapToFallbackContext(SkMatrix* inverse);
     void appendGlyph(const SkGlyph&, const SkPoint&);
     void flush();

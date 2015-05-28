@@ -25,10 +25,10 @@
 
 #include "gflags/gflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/audio_coding/neteq/tools/audio_loop.h"
 #include "webrtc/modules/audio_coding/neteq/tools/rtp_file_source.h"
 #include "webrtc/modules/audio_coding/codecs/pcm16b/include/pcm16b.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/test/testsupport/fileutils.h"
 #include "webrtc/test/testsupport/gtest_disable.h"
 #include "webrtc/typedefs.h"
@@ -137,13 +137,44 @@ void RefFiles::WriteToFile(const NetEqNetworkStatistics& stats) {
 
 void RefFiles::ReadFromFileAndCompare(
     const NetEqNetworkStatistics& stats) {
+  // TODO(minyue): Update resource/audio_coding/neteq_network_stats.dat and
+  // resource/audio_coding/neteq_network_stats_win32.dat.
+  struct NetEqNetworkStatisticsOld {
+    uint16_t current_buffer_size_ms;  // Current jitter buffer size in ms.
+    uint16_t preferred_buffer_size_ms;  // Target buffer size in ms.
+    uint16_t jitter_peaks_found;  // 1 if adding extra delay due to peaky
+                                  // jitter; 0 otherwise.
+    uint16_t packet_loss_rate;  // Loss rate (network + late) in Q14.
+    uint16_t packet_discard_rate;  // Late loss rate in Q14.
+    uint16_t expand_rate;  // Fraction (of original stream) of synthesized
+                           // audio inserted through expansion (in Q14).
+    uint16_t preemptive_rate;  // Fraction of data inserted through pre-emptive
+                               // expansion (in Q14).
+    uint16_t accelerate_rate;  // Fraction of data removed through acceleration
+                               // (in Q14).
+    int32_t clockdrift_ppm;  // Average clock-drift in parts-per-million
+                             // (positive or negative).
+    int added_zero_samples;  // Number of zero samples added in "off" mode.
+  };
   if (input_fp_) {
     // Read from ref file.
-    size_t stat_size = sizeof(NetEqNetworkStatistics);
-    NetEqNetworkStatistics ref_stats;
+    size_t stat_size = sizeof(NetEqNetworkStatisticsOld);
+    NetEqNetworkStatisticsOld ref_stats;
     ASSERT_EQ(1u, fread(&ref_stats, stat_size, 1, input_fp_));
     // Compare
-    ASSERT_EQ(0, memcmp(&stats, &ref_stats, stat_size));
+    ASSERT_EQ(stats.current_buffer_size_ms, ref_stats.current_buffer_size_ms);
+    ASSERT_EQ(stats.preferred_buffer_size_ms,
+              ref_stats.preferred_buffer_size_ms);
+    ASSERT_EQ(stats.jitter_peaks_found, ref_stats.jitter_peaks_found);
+    ASSERT_EQ(stats.packet_loss_rate, ref_stats.packet_loss_rate);
+    ASSERT_EQ(stats.packet_discard_rate, ref_stats.packet_discard_rate);
+    ASSERT_EQ(stats.expand_rate, ref_stats.expand_rate);
+    ASSERT_EQ(stats.preemptive_rate, ref_stats.preemptive_rate);
+    ASSERT_EQ(stats.accelerate_rate, ref_stats.accelerate_rate);
+    ASSERT_EQ(stats.clockdrift_ppm, ref_stats.clockdrift_ppm);
+    ASSERT_EQ(stats.added_zero_samples, ref_stats.added_zero_samples);
+    ASSERT_EQ(stats.secondary_decoded_rate, 0);
+    ASSERT_LE(stats.speech_expand_rate, ref_stats.expand_rate);
   }
 }
 
@@ -231,8 +262,8 @@ class NetEqDecodingTest : public ::testing::Test {
 
   NetEq* neteq_;
   NetEq::Config config_;
-  scoped_ptr<test::RtpFileSource> rtp_source_;
-  scoped_ptr<test::Packet> packet_;
+  rtc::scoped_ptr<test::RtpFileSource> rtp_source_;
+  rtc::scoped_ptr<test::Packet> packet_;
   unsigned int sim_clock_;
   int16_t out_data_[kMaxBlockSize];
   int output_sample_rate_;
@@ -912,10 +943,8 @@ class NetEqBgnTest : public NetEqDecodingTest {
 
     uint32_t receive_timestamp = 0;
     for (int n = 0; n < 10; ++n) {  // Insert few packets and get audio.
-      int16_t enc_len_bytes =
-          WebRtcPcm16b_EncodeW16(input.GetNextBlock(),
-                                 expected_samples_per_channel,
-                                 reinterpret_cast<int16_t*>(payload));
+      int16_t enc_len_bytes = WebRtcPcm16b_Encode(
+          input.GetNextBlock(), expected_samples_per_channel, payload);
       ASSERT_EQ(enc_len_bytes, expected_samples_per_channel * 2);
 
       number_channels = 0;

@@ -7,9 +7,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "content/public/common/platform_notification_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/platform/WebNotificationData.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
+#include "third_party/WebKit/public/platform/modules/notifications/WebNotificationData.h"
 
 namespace content {
 namespace {
@@ -29,7 +29,8 @@ TEST(NotificationDataConversionsTest, ToPlatformNotificationData) {
       blink::WebString::fromUTF8(kNotificationLang),
       blink::WebString::fromUTF8(kNotificationBody),
       blink::WebString::fromUTF8(kNotificationTag),
-      blink::WebURL(GURL(kNotificationIconUrl)));
+      blink::WebURL(GURL(kNotificationIconUrl)),
+      true /* silent */);
 
   PlatformNotificationData platform_data = ToPlatformNotificationData(web_data);
   EXPECT_EQ(base::ASCIIToUTF16(kNotificationTitle), platform_data.title);
@@ -37,8 +38,9 @@ TEST(NotificationDataConversionsTest, ToPlatformNotificationData) {
             platform_data.direction);
   EXPECT_EQ(kNotificationLang, platform_data.lang);
   EXPECT_EQ(base::ASCIIToUTF16(kNotificationBody), platform_data.body);
-  EXPECT_EQ(base::ASCIIToUTF16(kNotificationTag), platform_data.tag);
+  EXPECT_EQ(kNotificationTag, platform_data.tag);
   EXPECT_EQ(kNotificationIconUrl, platform_data.icon.spec());
+  EXPECT_TRUE(platform_data.silent);
 }
 
 TEST(NotificationDataConversionsTest,
@@ -64,8 +66,9 @@ TEST(NotificationDataConversionsTest, ToWebNotificationData) {
       PlatformNotificationData::NotificationDirectionLeftToRight;
   platform_data.lang = kNotificationLang;
   platform_data.body = base::ASCIIToUTF16(kNotificationBody);
-  platform_data.tag = base::ASCIIToUTF16(kNotificationTag);
+  platform_data.tag = kNotificationTag;
   platform_data.icon = GURL(kNotificationIconUrl);
+  platform_data.silent = true;
 
   blink::WebNotificationData web_data = ToWebNotificationData(platform_data);
   EXPECT_EQ(kNotificationTitle, web_data.title);
@@ -75,6 +78,7 @@ TEST(NotificationDataConversionsTest, ToWebNotificationData) {
   EXPECT_EQ(kNotificationBody, web_data.body);
   EXPECT_EQ(kNotificationTag, web_data.tag);
   EXPECT_EQ(kNotificationIconUrl, web_data.icon.string());
+  EXPECT_TRUE(web_data.silent);
 }
 
 TEST(NotificationDataConversionsTest, ToWebNotificationDataDirectionality) {

@@ -14,10 +14,11 @@
 #include "cc/layers/layer.h"
 #include "content/common/input/synthetic_gesture_params.h"
 #include "content/common/input/synthetic_pinch_gesture_params.h"
+#include "content/common/input/synthetic_smooth_drag_gesture_params.h"
 #include "content/common/input/synthetic_smooth_scroll_gesture_params.h"
 #include "content/common/input/synthetic_tap_gesture_params.h"
+#include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/render_thread.h"
-#include "content/public/renderer/v8_value_converter.h"
 #include "content/renderer/chrome_object_extensions_utils.h"
 #include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/render_thread_impl.h"
@@ -263,50 +264,6 @@ void OnMicroBenchmarkCompleted(
   }
 }
 
-void OnSnapshotCompleted(CallbackAndContext* callback_and_context,
-                         const gfx::Size& size,
-                         const std::vector<unsigned char>& png) {
-  v8::Isolate* isolate = callback_and_context->isolate();
-  v8::HandleScope scope(isolate);
-  v8::Handle<v8::Context> context = callback_and_context->GetContext();
-  v8::Context::Scope context_scope(context);
-  WebLocalFrame* frame = WebLocalFrame::frameForContext(context);
-  if (frame) {
-    v8::Handle<v8::Value> result;
-
-    if (!size.IsEmpty()) {
-      v8::Handle<v8::Object> result_object;
-      result_object = v8::Object::New(isolate);
-
-      result_object->Set(v8::String::NewFromUtf8(isolate, "width"),
-                         v8::Number::New(isolate, size.width()));
-      result_object->Set(v8::String::NewFromUtf8(isolate, "height"),
-                         v8::Number::New(isolate, size.height()));
-
-      std::string base64_png;
-      base::Base64Encode(
-          base::StringPiece(reinterpret_cast<const char*>(&*png.begin()),
-                            png.size()),
-          &base64_png);
-
-      result_object->Set(v8::String::NewFromUtf8(isolate, "data"),
-                         v8::String::NewFromUtf8(isolate,
-                                                 base64_png.c_str(),
-                                                 v8::String::kNormalString,
-                                                 base64_png.size()));
-
-      result = result_object;
-    } else {
-      result = v8::Null(isolate);
-    }
-
-    v8::Handle<v8::Value> argv[] = {result};
-
-    frame->callFunctionEvenIfScriptDisabled(
-        callback_and_context->GetCallback(), v8::Object::New(isolate), 1, argv);
-  }
-}
-
 void OnSyntheticGestureCompleted(CallbackAndContext* callback_and_context) {
   v8::Isolate* isolate = callback_and_context->isolate();
   v8::HandleScope scope(isolate);
@@ -320,14 +277,14 @@ void OnSyntheticGestureCompleted(CallbackAndContext* callback_and_context) {
 }
 
 bool BeginSmoothScroll(v8::Isolate* isolate,
-                       int pixels_to_scroll,
+                       float pixels_to_scroll,
                        v8::Handle<v8::Function> callback,
                        int gesture_source_type,
                        const std::string& direction,
-                       int speed_in_pixels_s,
+                       float speed_in_pixels_s,
                        bool prevent_fling,
-                       int start_x,
-                       int start_y) {
+                       float start_x,
+                       float start_y) {
   GpuBenchmarkingContext context;
   if (!context.Init(false))
     return false;
@@ -356,8 +313,8 @@ bool BeginSmoothScroll(v8::Isolate* isolate,
   gesture_params->anchor.SetPoint(start_x * page_scale_factor,
                                   start_y * page_scale_factor);
 
-  int distance_length = pixels_to_scroll * page_scale_factor;
-  gfx::Vector2d distance;
+  float distance_length = pixels_to_scroll * page_scale_factor;
+  gfx::Vector2dF distance;
   if (direction == "down")
     distance.set_y(-distance_length);
   else if (direction == "up")
@@ -366,10 +323,64 @@ bool BeginSmoothScroll(v8::Isolate* isolate,
     distance.set_x(-distance_length);
   else if (direction == "left")
     distance.set_x(distance_length);
-  else {
+  else if (direction == "upleft") {
+    distance.set_y(distance_length);
+    distance.set_x(distance_length);
+  } else if (direction == "upright") {
+    distance.set_y(distance_length);
+    distance.set_x(-distance_length);
+  } else if (direction == "downleft") {
+    distance.set_y(-distance_length);
+    distance.set_x(distance_length);
+  } else if (direction == "downright") {
+    distance.set_y(-distance_length);
+    distance.set_x(-distance_length);
+  } else {
     return false;
   }
   gesture_params->distances.push_back(distance);
+
+  // TODO(nduca): If the render_view_impl is destroyed while the gesture is in
+  // progress, we will leak the callback and context. This needs to be fixed,
+  // somehow.
+  context.render_view_impl()->QueueSyntheticGesture(
+      gesture_params.Pass(),
+      base::Bind(&OnSyntheticGestureCompleted, callback_and_context));
+
+  return true;
+}
+
+bool BeginSmoothDrag(v8::Isolate* isolate,
+                     float start_x,
+                     float start_y,
+                     float end_x,
+                     float end_y,
+                     v8::Handle<v8::Function> callback,
+                     int gesture_source_type,
+                     float speed_in_pixels_s) {
+  GpuBenchmarkingContext context;
+  if (!context.Init(false))
+    return false;
+  scoped_refptr<CallbackAndContext> callback_and_context =
+      new CallbackAndContext(isolate, callback,
+                             context.web_frame()->mainWorldScriptContext());
+
+  scoped_ptr<SyntheticSmoothDragGestureParams> gesture_params(
+      new SyntheticSmoothDragGestureParams);
+
+  // Convert coordinates from CSS pixels to density independent pixels (DIPs).
+  float page_scale_factor = context.web_view()->pageScaleFactor();
+
+  gesture_params->start_point.SetPoint(start_x * page_scale_factor,
+                                       start_y * page_scale_factor);
+  gfx::PointF end_point(end_x * page_scale_factor,
+                        end_y * page_scale_factor);
+  gfx::Vector2dF distance = end_point - gesture_params->start_point;
+  gesture_params->distances.push_back(distance);
+  gesture_params->speed_in_pixels_s = speed_in_pixels_s * page_scale_factor;
+  gesture_params->gesture_source_type =
+      static_cast<SyntheticGestureParams::GestureSourceType>(
+          gesture_source_type);
 
   // TODO(nduca): If the render_view_impl is destroyed while the gesture is in
   // progress, we will leak the callback and context. This needs to be fixed,
@@ -425,6 +436,7 @@ gin::ObjectTemplateBuilder GpuBenchmarking::GetObjectTemplateBuilder(
       .SetMethod("gestureSourceTypeSupported",
                  &GpuBenchmarking::GestureSourceTypeSupported)
       .SetMethod("smoothScrollBy", &GpuBenchmarking::SmoothScrollBy)
+      .SetMethod("smoothDrag", &GpuBenchmarking::SmoothDrag)
       .SetMethod("swipe", &GpuBenchmarking::Swipe)
       .SetMethod("scrollBounce", &GpuBenchmarking::ScrollBounce)
       // TODO(dominikg): Remove once JS interface changes have rolled into
@@ -432,8 +444,6 @@ gin::ObjectTemplateBuilder GpuBenchmarking::GetObjectTemplateBuilder(
       .SetValue("newPinchInterface", true)
       .SetMethod("pinchBy", &GpuBenchmarking::PinchBy)
       .SetMethod("tap", &GpuBenchmarking::Tap)
-      .SetMethod("beginWindowSnapshotPNG",
-                 &GpuBenchmarking::BeginWindowSnapshotPNG)
       .SetMethod("clearImageCache", &GpuBenchmarking::ClearImageCache)
       .SetMethod("runMicroBenchmark", &GpuBenchmarking::RunMicroBenchmark)
       .SetMethod("sendMessageToMicroBenchmark",
@@ -500,13 +510,13 @@ bool GpuBenchmarking::SmoothScrollBy(gin::Arguments* args) {
   float page_scale_factor = context.web_view()->pageScaleFactor();
   blink::WebRect rect = context.render_view_impl()->windowRect();
 
-  int pixels_to_scroll = 0;
+  float pixels_to_scroll = 0;
   v8::Handle<v8::Function> callback;
-  int start_x = rect.width / (page_scale_factor * 2);
-  int start_y = rect.height / (page_scale_factor * 2);
-  int gesture_source_type = 0;  // DEFAULT_INPUT
+  float start_x = rect.width / (page_scale_factor * 2);
+  float start_y = rect.height / (page_scale_factor * 2);
+  int gesture_source_type = SyntheticGestureParams::DEFAULT_INPUT;
   std::string direction = "down";
-  int speed_in_pixels_s = 800;
+  float speed_in_pixels_s = 800;
 
   if (!GetOptionalArg(args, &pixels_to_scroll) ||
       !GetOptionalArg(args, &callback) ||
@@ -529,6 +539,39 @@ bool GpuBenchmarking::SmoothScrollBy(gin::Arguments* args) {
                            start_y);
 }
 
+bool GpuBenchmarking::SmoothDrag(gin::Arguments* args) {
+  GpuBenchmarkingContext context;
+  if (!context.Init(true))
+    return false;
+
+  float start_x;
+  float start_y;
+  float end_x;
+  float end_y;
+  v8::Handle<v8::Function> callback;
+  int gesture_source_type = SyntheticGestureParams::DEFAULT_INPUT;
+  float speed_in_pixels_s = 800;
+
+  if (!GetArg(args, &start_x) ||
+      !GetArg(args, &start_y) ||
+      !GetArg(args, &end_x) ||
+      !GetArg(args, &end_y) ||
+      !GetOptionalArg(args, &callback) ||
+      !GetOptionalArg(args, &gesture_source_type) ||
+      !GetOptionalArg(args, &speed_in_pixels_s)) {
+    return false;
+  }
+
+  return BeginSmoothDrag(args->isolate(),
+                         start_x,
+                         start_y,
+                         end_x,
+                         end_y,
+                         callback,
+                         gesture_source_type,
+                         speed_in_pixels_s);
+}
+
 bool GpuBenchmarking::Swipe(gin::Arguments* args) {
   GpuBenchmarkingContext context;
   if (!context.Init(true))
@@ -538,11 +581,11 @@ bool GpuBenchmarking::Swipe(gin::Arguments* args) {
   blink::WebRect rect = context.render_view_impl()->windowRect();
 
   std::string direction = "up";
-  int pixels_to_scroll = 0;
+  float pixels_to_scroll = 0;
   v8::Handle<v8::Function> callback;
-  int start_x = rect.width / (page_scale_factor * 2);
-  int start_y = rect.height / (page_scale_factor * 2);
-  int speed_in_pixels_s = 800;
+  float start_x = rect.width / (page_scale_factor * 2);
+  float start_y = rect.height / (page_scale_factor * 2);
+  float speed_in_pixels_s = 800;
 
   if (!GetOptionalArg(args, &direction) ||
       !GetOptionalArg(args, &pixels_to_scroll) ||
@@ -573,13 +616,13 @@ bool GpuBenchmarking::ScrollBounce(gin::Arguments* args) {
   blink::WebRect rect = context.render_view_impl()->windowRect();
 
   std::string direction = "down";
-  int distance_length = 0;
-  int overscroll_length = 0;
+  float distance_length = 0;
+  float overscroll_length = 0;
   int repeat_count = 1;
   v8::Handle<v8::Function> callback;
-  int start_x = rect.width / (page_scale_factor * 2);
-  int start_y = rect.height / (page_scale_factor * 2);
-  int speed_in_pixels_s = 800;
+  float start_x = rect.width / (page_scale_factor * 2);
+  float start_y = rect.height / (page_scale_factor * 2);
+  float speed_in_pixels_s = 800;
 
   if (!GetOptionalArg(args, &direction) ||
       !GetOptionalArg(args, &distance_length) ||
@@ -607,8 +650,8 @@ bool GpuBenchmarking::ScrollBounce(gin::Arguments* args) {
 
   distance_length *= page_scale_factor;
   overscroll_length *= page_scale_factor;
-  gfx::Vector2d distance;
-  gfx::Vector2d overscroll;
+  gfx::Vector2dF distance;
+  gfx::Vector2dF overscroll;
   if (direction == "down") {
     distance.set_y(-distance_length);
     overscroll.set_y(overscroll_length);
@@ -646,10 +689,10 @@ bool GpuBenchmarking::PinchBy(gin::Arguments* args) {
     return false;
 
   float scale_factor;
-  int anchor_x;
-  int anchor_y;
+  float anchor_x;
+  float anchor_y;
   v8::Handle<v8::Function> callback;
-  int relative_pointer_speed_in_pixels_s = 800;
+  float relative_pointer_speed_in_pixels_s = 800;
 
 
   if (!GetArg(args, &scale_factor) ||
@@ -693,11 +736,11 @@ bool GpuBenchmarking::Tap(gin::Arguments* args) {
   if (!context.Init(false))
     return false;
 
-  int position_x;
-  int position_y;
+  float position_x;
+  float position_y;
   v8::Handle<v8::Function> callback;
   int duration_ms = 50;
-  int gesture_source_type = 0;  // DEFAULT_INPUT
+  int gesture_source_type = SyntheticGestureParams::DEFAULT_INPUT;
 
   if (!GetArg(args, &position_x) ||
       !GetArg(args, &position_y) ||
@@ -738,22 +781,6 @@ bool GpuBenchmarking::Tap(gin::Arguments* args) {
       base::Bind(&OnSyntheticGestureCompleted, callback_and_context));
 
   return true;
-}
-
-void GpuBenchmarking::BeginWindowSnapshotPNG(
-    v8::Isolate* isolate,
-    v8::Handle<v8::Function> callback) {
-  GpuBenchmarkingContext context;
-  if (!context.Init(false))
-    return;
-
-  scoped_refptr<CallbackAndContext> callback_and_context =
-      new CallbackAndContext(isolate,
-                             callback,
-                             context.web_frame()->mainWorldScriptContext());
-
-  context.render_view_impl()->GetWindowSnapshot(
-      base::Bind(&OnSnapshotCompleted, callback_and_context));
 }
 
 void GpuBenchmarking::ClearImageCache() {

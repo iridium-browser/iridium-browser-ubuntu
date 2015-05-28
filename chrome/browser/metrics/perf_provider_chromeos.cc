@@ -105,9 +105,7 @@ class WindowedIncognitoObserver : public chrome::BrowserListObserver {
     BrowserList::AddObserver(this);
   }
 
-  virtual ~WindowedIncognitoObserver() {
-    BrowserList::RemoveObserver(this);
-  }
+  ~WindowedIncognitoObserver() override { BrowserList::RemoveObserver(this); }
 
   // This method can be checked to see whether any incognito window has been
   // opened since the time this object was created.
@@ -117,7 +115,7 @@ class WindowedIncognitoObserver : public chrome::BrowserListObserver {
 
  private:
   // chrome::BrowserListObserver implementation.
-  virtual void OnBrowserAdded(Browser* browser) override {
+  void OnBrowserAdded(Browser* browser) override {
     if (browser->profile()->IsOffTheRecord())
       incognito_launched_ = true;
   }
@@ -212,7 +210,7 @@ void PerfProvider::SuspendDone(const base::TimeDelta& sleep_duration) {
                           collection_delay));
 }
 
-void PerfProvider::OnSessionRestoreDone() {
+void PerfProvider::OnSessionRestoreDone(int num_tabs_restored) {
   // Do not collect a profile unless logged in as a normal user.
   if (!IsNormalUserLoggedIn())
     return;
@@ -247,7 +245,8 @@ void PerfProvider::OnSessionRestoreDone() {
       collection_delay,
       base::Bind(&PerfProvider::CollectPerfDataAfterSessionRestore,
                  weak_factory_.GetWeakPtr(),
-                 collection_delay));
+                 collection_delay,
+                 num_tabs_restored));
 }
 
 void PerfProvider::OnUserLoggedIn() {
@@ -349,11 +348,13 @@ void PerfProvider::CollectPerfDataAfterResume(
 }
 
 void PerfProvider::CollectPerfDataAfterSessionRestore(
-    const base::TimeDelta& time_after_restore) {
+    const base::TimeDelta& time_after_restore,
+    int num_tabs_restored) {
   // Fill out a SampledProfile protobuf that will contain the collected data.
   scoped_ptr<SampledProfile> sampled_profile(new SampledProfile);
   sampled_profile->set_trigger_event(SampledProfile::RESTORE_SESSION);
   sampled_profile->set_ms_after_restore(time_after_restore.InMilliseconds());
+  sampled_profile->set_num_tabs_restored(num_tabs_restored);
 
   CollectIfNecessary(sampled_profile.Pass());
   last_session_restore_collection_time_ = base::TimeTicks::Now();

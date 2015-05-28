@@ -79,7 +79,7 @@ void PublicURLManager::revoke(const String& uuid)
         for (auto& registeredUrl : registeredURLs) {
             if (uuid == registeredUrl.value) {
                 KURL url(ParsedURLString, registeredUrl.key);
-                MemoryCache::removeURLFromCache(executionContext(), url);
+                executionContext()->removeURLFromMemoryCache(url);
                 registry->unregisterURL(url);
                 urlsToRemove.append(registeredUrl.key);
             }
@@ -104,7 +104,7 @@ void PublicURLManager::stop()
     m_registryToURL.clear();
 }
 
-void PublicURLManager::trace(Visitor* visitor)
+DEFINE_TRACE(PublicURLManager)
 {
     ActiveDOMObject::trace(visitor);
 }

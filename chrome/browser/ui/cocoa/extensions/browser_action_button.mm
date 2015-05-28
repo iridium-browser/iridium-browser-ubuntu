@@ -8,18 +8,22 @@
 #include <cmath>
 
 #include "base/logging.h"
+#include "base/memory/weak_ptr.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
-#import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu_controller.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
-#import "chrome/browser/ui/cocoa/toolbar/toolbar_action_view_delegate_cocoa.h"
+#import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#import "chrome/browser/ui/cocoa/wrench_menu/wrench_menu_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
+#include "chrome/browser/ui/toolbar/toolbar_action_view_delegate.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
+#import "ui/base/cocoa/menu_controller.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image.h"
@@ -34,27 +38,35 @@ static const CGFloat kBrowserActionBadgeOriginYOffset = 5;
 static const CGFloat kAnimationDuration = 0.2;
 static const CGFloat kMinimumDragDistance = 5;
 
+@interface BrowserActionButton ()
+- (void)endDrag;
+- (void)updateHighlightedState;
+@end
+
 // A class to bridge the ToolbarActionViewController and the
 // BrowserActionButton.
-class ToolbarActionViewDelegateBridge : public ToolbarActionViewDelegateCocoa {
+class ToolbarActionViewDelegateBridge : public ToolbarActionViewDelegate {
  public:
   ToolbarActionViewDelegateBridge(BrowserActionButton* owner,
                                   BrowserActionsController* controller,
                                   ToolbarActionViewController* viewController);
   ~ToolbarActionViewDelegateBridge() override;
 
-  ExtensionActionContextMenuController* menuController() {
-    return menuController_;
-  }
+  // Shows the context menu for the owning action.
+  void ShowContextMenu();
+
+  bool user_shown_popup_visible() const { return user_shown_popup_visible_; }
 
  private:
-  // ToolbarActionViewDelegateCocoa:
+  // ToolbarActionViewDelegate:
   ToolbarActionViewController* GetPreferredPopupViewController() override;
   content::WebContents* GetCurrentWebContents() const override;
   void UpdateState() override;
-  NSPoint GetPopupPoint() override;
-  void SetContextMenuController(
-      ExtensionActionContextMenuController* menuController) override;
+  void OnPopupShown(bool by_user) override;
+  void OnPopupClosed() override;
+
+  // A helper method to implement showing the context menu.
+  void DoShowContextMenu();
 
   // The owning button. Weak.
   BrowserActionButton* owner_;
@@ -65,8 +77,10 @@ class ToolbarActionViewDelegateBridge : public ToolbarActionViewDelegateCocoa {
   // The ToolbarActionViewController for which this is the delegate. Weak.
   ToolbarActionViewController* viewController_;
 
-  // The context menu controller. Weak.
-  ExtensionActionContextMenuController* menuController_;
+  // Whether or not a popup is visible from a user action.
+  bool user_shown_popup_visible_;
+
+  base::WeakPtrFactory<ToolbarActionViewDelegateBridge> weakFactory_;
 
   DISALLOW_COPY_AND_ASSIGN(ToolbarActionViewDelegateBridge);
 };
@@ -78,7 +92,8 @@ ToolbarActionViewDelegateBridge::ToolbarActionViewDelegateBridge(
     : owner_(owner),
       controller_(controller),
       viewController_(viewController),
-      menuController_(nil) {
+      user_shown_popup_visible_(false),
+      weakFactory_(this) {
   viewController_->SetDelegate(this);
 }
 
@@ -86,9 +101,32 @@ ToolbarActionViewDelegateBridge::~ToolbarActionViewDelegateBridge() {
   viewController_->SetDelegate(nullptr);
 }
 
+void ToolbarActionViewDelegateBridge::ShowContextMenu() {
+  // We should only be showing the context menu in this way if we're doing so
+  // for an overflowed action.
+  DCHECK(![owner_ superview]);
+
+  WrenchMenuController* wrenchMenuController =
+      [[[BrowserWindowController browserWindowControllerForWindow:
+          [controller_ browser]->window()->GetNativeWindow()]
+              toolbarController] wrenchMenuController];
+  // If the wrench menu is open, we have to first close it. Part of this happens
+  // asynchronously, so we have to use a posted task to open the next menu.
+  if ([wrenchMenuController isMenuOpen]) {
+    [wrenchMenuController cancel];
+    base::MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&ToolbarActionViewDelegateBridge::DoShowContextMenu,
+                   weakFactory_.GetWeakPtr()));
+  } else {
+    DoShowContextMenu();
+  }
+}
+
 ToolbarActionViewController*
 ToolbarActionViewDelegateBridge::GetPreferredPopupViewController() {
-  return viewController_;
+  return [[controller_ mainButtonForId:viewController_->GetId()]
+      viewController];
 }
 
 content::WebContents* ToolbarActionViewDelegateBridge::GetCurrentWebContents()
@@ -100,22 +138,41 @@ void ToolbarActionViewDelegateBridge::UpdateState() {
   [owner_ updateState];
 }
 
-NSPoint ToolbarActionViewDelegateBridge::GetPopupPoint() {
-  return [controller_ popupPointForId:[owner_ viewController]->GetId()];
+void ToolbarActionViewDelegateBridge::OnPopupShown(bool by_user) {
+  if (by_user)
+    user_shown_popup_visible_ = true;
+  [owner_ updateHighlightedState];
 }
 
-void ToolbarActionViewDelegateBridge::SetContextMenuController(
-    ExtensionActionContextMenuController* menuController) {
-  menuController_ = menuController;
+void ToolbarActionViewDelegateBridge::OnPopupClosed() {
+  user_shown_popup_visible_ = false;
+  [owner_ updateHighlightedState];
+}
+
+void ToolbarActionViewDelegateBridge::DoShowContextMenu() {
+  NSButton* wrenchButton =
+      [[[BrowserWindowController browserWindowControllerForWindow:
+          [controller_ browser]->window()->GetNativeWindow()]
+              toolbarController] wrenchButton];
+  // The point the menu shows matches that of the normal wrench menu - that is,
+  // the right-left most corner of the menu is left-aligned with the wrench
+  // button, and the menu is displayed "a little bit" lower. It would be nice to
+  // be able to avoid the magic '5' here, but since it's built into Cocoa, it's
+  // not too hopeful.
+  NSPoint menuPoint = NSMakePoint(0, NSHeight([wrenchButton bounds]) + 5);
+
+  // We set the wrench to be highlighted so it remains "pressed" when the menu
+  // is running.
+  [[wrenchButton cell] setHighlighted:YES];
+  [[owner_ menu] popUpMenuPositioningItem:nil
+                               atLocation:menuPoint
+                                   inView:wrenchButton];
+  [[wrenchButton cell] setHighlighted:NO];
 }
 
 @interface BrowserActionCell (Internals)
 - (void)drawBadgeWithinFrame:(NSRect)frame
               forWebContents:(content::WebContents*)webContents;
-@end
-
-@interface BrowserActionButton (Private)
-- (void)endDrag;
 @end
 
 @implementation BrowserActionButton
@@ -162,11 +219,6 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
     [self setButtonType:NSMomentaryChangeButton];
     [self setShowsBorderOnlyWhileMouseInside:YES];
 
-    base::scoped_nsobject<NSMenu> contextMenu(
-        [[NSMenu alloc] initWithTitle:@""]);
-    [contextMenu setDelegate:self];
-    [self setMenu:contextMenu];
-
     moveAnimation_.reset([[NSViewAnimation alloc] init]);
     [moveAnimation_ gtm_setDuration:kAnimationDuration
                           eventMask:NSLeftMouseUpMask];
@@ -182,14 +234,42 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
   return YES;
 }
 
+- (void)rightMouseDown:(NSEvent*)theEvent {
+  // Cocoa doesn't allow menus-running-in-menus, so in order to show the
+  // context menu for an overflowed action, we close the wrench menu and show
+  // the context menu over the wrench (similar to what we do for popups).
+  // Let the main bar's button handle showing the context menu, since the wrench
+  // menu will close..
+  if ([browserActionsController_ isOverflow]) {
+    [browserActionsController_ mainButtonForId:viewController_->GetId()]->
+        viewControllerDelegate_->ShowContextMenu();
+  } else {
+    [super rightMouseDown:theEvent];
+  }
+}
+
 - (void)mouseDown:(NSEvent*)theEvent {
   NSPoint location = [self convertPoint:[theEvent locationInWindow]
                                fromView:nil];
-  if (NSPointInRect(location, [self bounds])) {
-    [[self cell] setHighlighted:YES];
+  // We don't allow dragging in the overflow container because mouse events
+  // don't work well in menus in Cocoa. Specifically, the minute the mouse
+  // leaves the view, the view stops receiving events. This is bad, because the
+  // mouse can leave the view in many ways (user moves the mouse fast, user
+  // tries to drag the icon to a non-applicable place, like outside the menu,
+  // etc). When the mouse leaves, we get no indication (no mouseUp), so we can't
+  // even handle that case - and are left in the middle of a drag. Instead, we
+  // have to simply disable dragging.
+  //
+  // NOTE(devlin): If we use a greedy event loop that consumes all incoming
+  // events (i.e. using [NSWindow nextEventMatchingMask]), we can make this
+  // work. The downside to that is that all other events are lost. Disable this
+  // for now, and revisit it at a later date.
+  if (NSPointInRect(location, [self bounds]) &&
+      ![browserActionsController_ isOverflow]) {
     dragCouldStart_ = YES;
     dragStartPoint_ = [self convertPoint:[theEvent locationInWindow]
                                 fromView:nil];
+    [self updateHighlightedState];
   }
 }
 
@@ -261,13 +341,24 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
       [super mouseUp:theEvent];
     }
   }
+  [self updateHighlightedState];
 }
 
 - (void)endDrag {
   isBeingDragged_ = NO;
   [[NSNotificationCenter defaultCenter]
       postNotificationName:kBrowserActionButtonDragEndNotification object:self];
-  [[self cell] setHighlighted:NO];
+}
+
+- (void)updateHighlightedState {
+  // The button's cell is highlighted if either the popup is showing by a user
+  // action, or the user is about to drag the button, unless the button is
+  // overflowed (in which case it is never highlighted).
+  if ([self superview] && ![browserActionsController_ isOverflow]) {
+    BOOL highlighted = viewControllerDelegate_->user_shown_popup_visible() ||
+        dragCouldStart_;
+    [[self cell] setHighlighted:highlighted];
+  }
 }
 
 - (void)setFrame:(NSRect)frameRect animate:(BOOL)animate {
@@ -294,7 +385,7 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
     return;
 
   if (viewController_->WantsToRun(webContents)) {
-    [[self cell] setImageID:IDR_BROWSER_ACTION_H
+    [[self cell] setImageID:IDR_BROWSER_ACTION_R
         forButtonState:image_button_cell::kDefaultState];
   } else {
     [[self cell] setImageID:IDR_BROWSER_ACTION
@@ -317,9 +408,12 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
 - (void)onRemoved {
   // The button is being removed from the toolbar, and the backing controller
   // will also be removed. Destroy the delegate.
-  // We only need to do this because in cocoa's memory management, removing the
+  // We only need to do this because in Cocoa's memory management, removing the
   // button from the toolbar doesn't synchronously dealloc it.
   viewControllerDelegate_.reset();
+  // Also reset the context menu, since it has a dependency on the backing
+  // controller (which owns its model).
+  contextMenuController_.reset();
 }
 
 - (BOOL)isAnimating {
@@ -370,12 +464,27 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
   return image;
 }
 
-- (void)menuNeedsUpdate:(NSMenu*)menu {
-  [menu removeAllItems];
-  // |menuController()| can be nil if we don't show context menus for the given
-  // action.
-  if (viewControllerDelegate_->menuController())
-    [viewControllerDelegate_->menuController() populateMenu:menu];
+- (NSMenu*)menu {
+  if (testContextMenu_)
+    return testContextMenu_;
+
+  // Make sure we delete any references to an old menu.
+  contextMenuController_.reset();
+
+  ui::MenuModel* contextMenu = viewController_->GetContextMenu();
+  if (!contextMenu)
+    return nil;
+  contextMenuController_.reset(
+      [[MenuController alloc] initWithModel:contextMenu
+                     useWithPopUpButtonCell:NO]);
+  return [contextMenuController_ menu];
+}
+
+#pragma mark -
+#pragma mark Testing Methods
+
+- (void)setTestContextMenu:(NSMenu*)testContextMenu {
+  testContextMenu_ = testContextMenu;
 }
 
 @end

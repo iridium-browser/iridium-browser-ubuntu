@@ -10,6 +10,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
+#include "chrome/browser/media/media_stream_capture_indicator.h"
 #include "chrome/browser/media/protected_media_identifier_permission_context.h"
 #include "chrome/browser/media/protected_media_identifier_permission_context_factory.h"
 #include "chrome/browser/prerender/prerender_manager.h"
@@ -308,7 +309,7 @@ void ChromeWebContentsDelegateAndroid::AddNewContents(
     WebContents* source,
     WebContents* new_contents,
     WindowOpenDisposition disposition,
-    const gfx::Rect& initial_pos,
+    const gfx::Rect& initial_rect,
     bool user_gesture,
     bool* was_blocked) {
   // No code for this yet.
@@ -322,11 +323,18 @@ void ChromeWebContentsDelegateAndroid::AddNewContents(
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
   bool handled = false;
   if (!obj.is_null()) {
+    ScopedJavaLocalRef<jobject> jsource;
+    if (source)
+      jsource = source->GetJavaWebContents();
+    ScopedJavaLocalRef<jobject> jnew_contents;
+    if (new_contents)
+      jnew_contents = new_contents->GetJavaWebContents();
+
     handled = Java_ChromeWebContentsDelegateAndroid_addNewContents(
         env,
         obj.obj(),
-        reinterpret_cast<intptr_t>(source),
-        reinterpret_cast<intptr_t>(new_contents),
+        jsource.obj(),
+        jnew_contents.obj(),
         static_cast<jint>(disposition),
         NULL,
         user_gesture);
@@ -340,3 +348,33 @@ void ChromeWebContentsDelegateAndroid::AddNewContents(
 
 }  // namespace android
 }  // namespace chrome
+
+jboolean IsCapturingAudio(JNIEnv* env,
+                          jclass clazz,
+                          jobject java_web_contents) {
+  content::WebContents* web_contents =
+      content::WebContents::FromJavaWebContents(java_web_contents);
+  scoped_refptr<MediaStreamCaptureIndicator> indicator =
+      MediaCaptureDevicesDispatcher::GetInstance()->
+          GetMediaStreamCaptureIndicator();
+  return indicator->IsCapturingAudio(web_contents);
+}
+
+jboolean IsCapturingVideo(JNIEnv* env,
+                          jclass clazz,
+                          jobject java_web_contents) {
+  content::WebContents* web_contents =
+      content::WebContents::FromJavaWebContents(java_web_contents);
+  scoped_refptr<MediaStreamCaptureIndicator> indicator =
+      MediaCaptureDevicesDispatcher::GetInstance()->
+          GetMediaStreamCaptureIndicator();
+  return indicator->IsCapturingVideo(web_contents);
+}
+
+jboolean HasAudibleAudio(JNIEnv* env,
+                         jclass clazz,
+                         jobject java_web_contents) {
+  content::WebContents* web_contents =
+      content::WebContents::FromJavaWebContents(java_web_contents);
+  return web_contents->WasRecentlyAudible();
+}

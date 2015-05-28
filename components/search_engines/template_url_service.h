@@ -16,6 +16,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_change_registrar.h"
+#include "base/time/clock.h"
 #include "components/google/core/browser/google_url_tracker.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/search_engines/default_search_manager.h"
@@ -69,8 +70,6 @@ class TemplateURLService : public WebDataServiceConsumer,
  public:
   typedef std::map<std::string, std::string> QueryTerms;
   typedef std::vector<TemplateURL*> TemplateURLVector;
-  // Type for a static function pointer that acts as a time source.
-  typedef base::Time(TimeProvider)();
   typedef std::map<std::string, syncer::SyncData> SyncDataMap;
   typedef base::CallbackList<void(void)>::Subscription Subscription;
 
@@ -99,25 +98,9 @@ class TemplateURLService : public WebDataServiceConsumer,
   TemplateURLService(const Initializer* initializers, const int count);
   ~TemplateURLService() override;
 
-  // Creates a TemplateURLData that was previously saved to |prefs| via
-  // SaveDefaultSearchProviderToPrefs or set via policy.
-  // Returns true if successful, false otherwise.
-  // If the user or the policy has opted for no default search, this
-  // returns true but default_provider is set to NULL.
-  // |*is_managed| specifies whether the default is managed via policy.
-  static bool LoadDefaultSearchProviderFromPrefs(
-      PrefService* prefs,
-      scoped_ptr<TemplateURLData>* default_provider_data,
-      bool* is_managed);
-
   // Removes any unnecessary characters from a user input keyword.
   // This removes the leading scheme, "www." and any trailing slash.
   static base::string16 CleanUserInputKeyword(const base::string16& keyword);
-
-  // Saves enough of url to |prefs| so that it can be loaded from preferences on
-  // start up.
-  static void SaveDefaultSearchProviderToPrefs(const TemplateURL* url,
-                                               PrefService* prefs);
 
   // Returns true if there is no TemplateURL that conflicts with the
   // keyword/url pair, or there is one but it can be replaced. If there is an
@@ -366,11 +349,7 @@ class TemplateURLService : public WebDataServiceConsumer,
       const syncer::SyncDataList& sync_data);
 
 #if defined(UNIT_TEST)
-  // Sets a different time provider function, such as
-  // base::MockTimeProvider::StaticNow, for testing calls to base::Time::Now.
-  void set_time_provider(TimeProvider* time_provider) {
-    time_provider_ = time_provider;
-  }
+  void set_clock(scoped_ptr<base::Clock> clock) { clock_ = clock.Pass(); }
 #endif
 
  private:
@@ -706,8 +685,8 @@ class TemplateURLService : public WebDataServiceConsumer,
   // increasing integer that is initialized from the database.
   TemplateURLID next_id_;
 
-  // Function returning current time in base::Time units.
-  TimeProvider* time_provider_;
+  // Used to retrieve the current time, in base::Time units.
+  scoped_ptr<base::Clock> clock_;
 
   // Do we have an active association between the TemplateURLs and sync models?
   // Set in MergeDataAndStartSyncing, reset in StopSyncing. While this is not

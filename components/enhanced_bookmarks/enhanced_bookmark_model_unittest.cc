@@ -20,10 +20,13 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using enhanced_bookmarks::EnhancedBookmarkModel;
 
 namespace {
 const std::string BOOKMARK_URL("http://example.com/index.html");
+const std::string IMAGE_URL("http://example.com/image.jpg");
 }  // namespace
 
 class EnhancedBookmarkModelTest
@@ -676,85 +679,6 @@ TEST_F(EnhancedBookmarkModelTest, NodeRemovedWhileResetDuplicationScheduled) {
   base::RunLoop().RunUntilIdle();
 }
 
-// Verifies that the NEEDS_OFFLINE_PROCESSING flag is set for nodes added
-// with no remote id.
-TEST_F(EnhancedBookmarkModelTest, BookmarkAddedSetsOfflineProcessingFlag) {
-  const BookmarkNode* node =
-      bookmark_model_->AddURL(bookmark_model_->other_node(),
-                              0,
-                              base::ASCIIToUTF16("Some title"),
-                              GURL(BOOKMARK_URL));
-  std::string flags_str;
-  EXPECT_FALSE(node->GetMetaInfo("stars.flags", &flags_str));
-  base::RunLoop().RunUntilIdle();
-  ASSERT_TRUE(node->GetMetaInfo("stars.flags", &flags_str));
-  int flags;
-  ASSERT_TRUE(base::StringToInt(flags_str, &flags));
-  EXPECT_EQ(1, (flags & 1));
-}
-
-// Verifies that the NEEDS_OFFLINE_PROCESSING_FLAG is not set for added folders.
-TEST_F(EnhancedBookmarkModelTest, FolderAddedDoesNotSetOfflineProcessingFlag) {
-  const BookmarkNode* node = AddFolder();
-  base::RunLoop().RunUntilIdle();
-
-  std::string flags_str;
-  if (node->GetMetaInfo("stars.flags", &flags_str)) {
-    int flags;
-    ASSERT_TRUE(base::StringToInt(flags_str, &flags));
-    EXPECT_EQ(0, (flags & 1));
-  }
-}
-
-// Verifies that when a bookmark is added that has a remote id, the status of
-// the NEEDS_OFFLINE_PROCESSING flag doesn't change.
-TEST_F(EnhancedBookmarkModelTest,
-       BookmarkAddedWithIdKeepsOfflineProcessingFlag) {
-  BookmarkNode::MetaInfoMap meta_info;
-  meta_info["stars.id"] = "some_id";
-  meta_info["stars.flags"] = "1";
-
-  const BookmarkNode* node1 =
-      bookmark_model_->AddURLWithCreationTimeAndMetaInfo(
-          bookmark_model_->other_node(),
-          0,
-          base::ASCIIToUTF16("Some title"),
-          GURL(BOOKMARK_URL),
-          base::Time::Now(),
-          &meta_info);
-  base::RunLoop().RunUntilIdle();
-  std::string flags_str;
-  ASSERT_TRUE(node1->GetMetaInfo("stars.flags", &flags_str));
-  int flags;
-  ASSERT_TRUE(base::StringToInt(flags_str, &flags));
-  EXPECT_EQ(1, (flags & 1));
-
-  meta_info["stars.flags"] = "0";
-  const BookmarkNode* node2 =
-      bookmark_model_->AddURLWithCreationTimeAndMetaInfo(
-          bookmark_model_->other_node(),
-          0,
-          base::ASCIIToUTF16("Some title"),
-          GURL(BOOKMARK_URL),
-          base::Time::Now(),
-          &meta_info);
-  base::RunLoop().RunUntilIdle();
-  ASSERT_TRUE(node2->GetMetaInfo("stars.flags", &flags_str));
-  ASSERT_TRUE(base::StringToInt(flags_str, &flags));
-  EXPECT_EQ(0, (flags & 1));
-}
-
-TEST_F(EnhancedBookmarkModelTest,
-       NodeRemovedWhileSetNeedsOfflineProcessingIsScheduled) {
-  const BookmarkNode* node =
-      bookmark_model_->AddURL(bookmark_model_->other_node(),
-                              0,
-                              base::ASCIIToUTF16("Some title"),
-                              GURL(BOOKMARK_URL));
-  bookmark_model_->Remove(node->parent(), node->parent()->GetIndexOf(node));
-  base::RunLoop().RunUntilIdle();
-}
-
 TEST_F(EnhancedBookmarkModelTest,
        RemoveParentShouldRemoveChildrenFromMaps) {
   const BookmarkNode* parent = AddFolder();
@@ -771,4 +695,25 @@ TEST_F(EnhancedBookmarkModelTest, AddsRemoteIdToNonClonedKeys) {
   const std::set<std::string>& non_cloned_keys =
       bookmark_model_->non_cloned_keys();
   EXPECT_TRUE(non_cloned_keys.find("stars.id") != non_cloned_keys.end());
+}
+
+TEST_F(EnhancedBookmarkModelTest, RemoveImageData) {
+  const BookmarkNode* node = AddBookmark();
+  model_->SetAllImages(node, GURL(IMAGE_URL), 64, 64, GURL(IMAGE_URL), 16, 16);
+
+  GURL url;
+  int width, height;
+  EXPECT_TRUE(model_->GetOriginalImage(node, &url, &width, &height));
+  EXPECT_TRUE(model_->GetThumbnailImage(node, &url, &width, &height));
+
+  model_->RemoveImageData(node);
+  EXPECT_FALSE(model_->GetOriginalImage(node, &url, &width, &height));
+  EXPECT_FALSE(model_->GetThumbnailImage(node, &url, &width, &height));
+
+  std::string meta_info = GetMetaInfoField(node, "stars.imageData");
+  std::string decoded;
+  ASSERT_TRUE(base::Base64Decode(meta_info, &decoded));
+  image::collections::ImageData data;
+  ASSERT_TRUE(data.ParseFromString(decoded));
+  EXPECT_TRUE(data.user_removed_image());
 }

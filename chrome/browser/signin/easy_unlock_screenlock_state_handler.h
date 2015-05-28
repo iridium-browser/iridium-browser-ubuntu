@@ -45,6 +45,11 @@ class EasyUnlockScreenlockStateHandler : public ScreenlockBridge::Observer {
     // transmission power is too high, indicating that the phone is (probably)
     // more than 1 foot away, and therefore is not allowed to unlock the device.
     STATE_TX_POWER_TOO_HIGH,
+    // A phone eligible to unlock the device is found; but (a) the phone is
+    // locked, and (b) the local device's transmission power is too high,
+    // indicating that the phone is (probably) more than 1 foot away, and
+    // therefore is not allowed to unlock the device.
+    STATE_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH,
     // The device can be unlocked using Easy Unlock.
     STATE_AUTHENTICATED
   };
@@ -92,12 +97,18 @@ class EasyUnlockScreenlockStateHandler : public ScreenlockBridge::Observer {
   // Marks the current screenlock state as the one for trial Easy Unlock run.
   void SetTrialRun();
 
+  // Records that the user clicked on the lock icon during the trial run
+  // initiated by the Easy Unlock app.
+  void RecordClickOnLockIcon();
+
   State state() const { return state_; }
 
  private:
   // ScreenlockBridge::Observer:
-  void OnScreenDidLock() override;
-  void OnScreenDidUnlock() override;
+  void OnScreenDidLock(
+      ScreenlockBridge::LockHandler::ScreenType screen_type) override;
+  void OnScreenDidUnlock(
+      ScreenlockBridge::LockHandler::ScreenType screen_type) override;
   void OnFocusedUserChanged(const std::string& user_id) override;
 
   // Forces refresh of the Easy Unlock screenlock UI.
@@ -106,9 +117,7 @@ class EasyUnlockScreenlockStateHandler : public ScreenlockBridge::Observer {
   void ShowHardlockUI();
 
   // Updates icon's tooltip options.
-  // |trial_run|: Whether the trial Easy Unlock run is in progress.
   void UpdateTooltipOptions(
-      bool trial_run,
       ScreenlockBridge::UserPodCustomIconOptions* icon_options);
 
   // Gets the name to be used for the device. The name depends on the device
@@ -130,6 +139,9 @@ class EasyUnlockScreenlockStateHandler : public ScreenlockBridge::Observer {
   // tutorial message should be shown and hard-locking be disabled. The trial
   // run should be set if the screen was locked by the Easy Unlock setup app.
   bool is_trial_run_;
+
+  // Whether the user's phone was ever locked while on the current lock screen.
+  bool did_see_locked_phone_;
 
   DISALLOW_COPY_AND_ASSIGN(EasyUnlockScreenlockStateHandler);
 };

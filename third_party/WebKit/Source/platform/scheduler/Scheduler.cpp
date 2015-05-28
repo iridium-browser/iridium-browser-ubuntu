@@ -5,25 +5,26 @@
 #include "config.h"
 #include "platform/scheduler/Scheduler.h"
 
-#include "platform/TraceLocation.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebScheduler.h"
 #include "public/platform/WebTraceLocation.h"
 
 namespace blink {
 
-class IdleTaskRunner : public WebScheduler::IdleTask {
+class IdleTaskRunner : public WebThread::IdleTask {
+    WTF_MAKE_NONCOPYABLE(IdleTaskRunner);
+
 public:
     explicit IdleTaskRunner(PassOwnPtr<Scheduler::IdleTask> task)
         : m_task(task)
     {
     }
 
-    virtual ~IdleTaskRunner()
+    ~IdleTaskRunner() override
     {
     }
 
-    // WebScheduler::IdleTask implementation.
+    // WebThread::IdleTask implementation.
     void run(double deadlineSeconds) override
     {
         (*m_task)(deadlineSeconds);
@@ -47,6 +48,11 @@ Scheduler* Scheduler::shared()
     return s_sharedScheduler;
 }
 
+void Scheduler::setForTesting(Scheduler* scheduler)
+{
+    s_sharedScheduler = scheduler;
+}
+
 Scheduler::Scheduler(WebScheduler* webScheduler)
     : m_webScheduler(webScheduler)
 {
@@ -54,20 +60,43 @@ Scheduler::Scheduler(WebScheduler* webScheduler)
 
 Scheduler::~Scheduler()
 {
-    if (m_webScheduler)
-        m_webScheduler->shutdown();
 }
 
-void Scheduler::postIdleTask(const TraceLocation& location, PassOwnPtr<IdleTask> idleTask)
+void Scheduler::postIdleTask(const WebTraceLocation& location, PassOwnPtr<IdleTask> idleTask)
 {
     if (m_webScheduler)
-        m_webScheduler->postIdleTask(WebTraceLocation(location), new IdleTaskRunner(idleTask));
+        m_webScheduler->postIdleTask(location, new IdleTaskRunner(idleTask));
+}
+
+void Scheduler::postNonNestableIdleTask(const WebTraceLocation& location, PassOwnPtr<IdleTask> idleTask)
+{
+    if (m_webScheduler)
+        m_webScheduler->postNonNestableIdleTask(location, new IdleTaskRunner(idleTask));
+}
+
+void Scheduler::postIdleTaskAfterWakeup(const WebTraceLocation& location, PassOwnPtr<IdleTask> idleTask)
+{
+    if (m_webScheduler)
+        m_webScheduler->postIdleTaskAfterWakeup(location, new IdleTaskRunner(idleTask));
+}
+
+void Scheduler::postLoadingTask(const WebTraceLocation& location, WebThread::Task* task)
+{
+    if (m_webScheduler)
+        m_webScheduler->postLoadingTask(location, task);
 }
 
 bool Scheduler::shouldYieldForHighPriorityWork() const
 {
     if (m_webScheduler)
         return m_webScheduler->shouldYieldForHighPriorityWork();
+    return false;
+}
+
+bool Scheduler::canExceedIdleDeadlineIfRequired() const
+{
+    if (m_webScheduler)
+        return m_webScheduler->canExceedIdleDeadlineIfRequired();
     return false;
 }
 

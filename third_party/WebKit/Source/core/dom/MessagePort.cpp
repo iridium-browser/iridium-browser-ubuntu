@@ -61,6 +61,8 @@ MessagePort::MessagePort(ExecutionContext& executionContext)
 MessagePort::~MessagePort()
 {
     close();
+    if (m_scriptStateForConversion)
+        m_scriptStateForConversion->disposePerContextData();
 }
 
 void MessagePort::postMessage(ExecutionContext*, PassRefPtr<SerializedScriptValue> message, const MessagePortArray* ports, ExceptionState& exceptionState)
@@ -127,7 +129,7 @@ PassOwnPtr<WebMessagePortChannel> MessagePort::disentangle()
 void MessagePort::messageAvailable()
 {
     ASSERT(executionContext());
-    executionContext()->postTask(createCrossThreadTask(&MessagePort::dispatchMessages, m_weakFactory.createWeakPtr()));
+    executionContext()->postTask(FROM_HERE, createCrossThreadTask(&MessagePort::dispatchMessages, m_weakFactory.createWeakPtr()));
 }
 
 void MessagePort::start()
@@ -260,10 +262,26 @@ PassOwnPtrWillBeRawPtr<MessagePortArray> MessagePort::entanglePorts(ExecutionCon
     return portArray.release();
 }
 
-void MessagePort::trace(Visitor* visitor)
+DEFINE_TRACE(MessagePort)
 {
     ActiveDOMObject::trace(visitor);
     EventTargetWithInlineData::trace(visitor);
+}
+
+v8::Isolate* MessagePort::scriptIsolate()
+{
+    ASSERT(executionContext());
+    return toIsolate(executionContext());
+}
+
+v8::Local<v8::Context> MessagePort::scriptContextForMessageConversion()
+{
+    ASSERT(executionContext());
+    if (!m_scriptStateForConversion) {
+        v8::Isolate* isolate = scriptIsolate();
+        m_scriptStateForConversion = ScriptState::create(v8::Context::New(isolate), DOMWrapperWorld::create(isolate));
+    }
+    return m_scriptStateForConversion->context();
 }
 
 } // namespace blink

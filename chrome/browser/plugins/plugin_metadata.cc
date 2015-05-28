@@ -19,6 +19,8 @@ const char PluginMetadata::kRealPlayerGroupName[] = "RealPlayer";
 const char PluginMetadata::kSilverlightGroupName[] = "Silverlight";
 const char PluginMetadata::kWindowsMediaPlayerGroupName[] =
     "Windows Media Player";
+const char PluginMetadata::kGoogleTalkGroupName[] = "Google Talk";
+const char PluginMetadata::kGoogleEarthGroupName[] = "Google Earth";
 
 PluginMetadata::PluginMetadata(const std::string& identifier,
                                const base::string16& name,
@@ -61,7 +63,7 @@ bool PluginMetadata::HasMimeType(const std::string& mime_type) const {
 bool PluginMetadata::MatchesPlugin(const content::WebPluginInfo& plugin) {
   for (size_t i = 0; i < matching_mime_types_.size(); ++i) {
     // To have a match, every one of the |matching_mime_types_|
-    // must be handled by the plug-in.
+    // must be handled by the plugin.
     size_t j = 0;
     for (; j < plugin.mime_types.size(); ++j) {
       if (plugin.mime_types[j].mime_type == matching_mime_types_[i])

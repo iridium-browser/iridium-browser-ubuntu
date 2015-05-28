@@ -269,10 +269,10 @@ const char* FullscreenControllerStateTest::GetEventString(Event event) {
 
 // static
 bool FullscreenControllerStateTest::IsWindowFullscreenStateChangedReentrant() {
-#if defined(TOOLKIT_VIEWS)
-  return true;
-#else
+#if defined(OS_MACOSX)
   return false;
+#else
+  return true;
 #endif
 }
 
@@ -384,8 +384,13 @@ bool FullscreenControllerStateTest::InvokeEvent(Event event) {
     case TAB_FULLSCREEN_FALSE: {
       content::WebContents* const active_tab =
           GetBrowser()->tab_strip_model()->GetActiveWebContents();
-      GetFullscreenController()->
-          ToggleFullscreenModeForTab(active_tab, event == TAB_FULLSCREEN_TRUE);
+      if (event == TAB_FULLSCREEN_TRUE) {
+        GetFullscreenController()->EnterFullscreenModeForTab(active_tab,
+                                                             GURL());
+      } else {
+        GetFullscreenController()->ExitFullscreenModeForTab(active_tab);
+      }
+
       // Activating/Deactivating tab fullscreen on a captured tab should not
       // evoke a state change in the browser window.
       if (active_tab->GetCapturerCount() > 0)
@@ -410,15 +415,19 @@ bool FullscreenControllerStateTest::InvokeEvent(Event event) {
       break;
 
     case BUBBLE_EXIT_LINK:
-      GetFullscreenController()->ExitTabOrBrowserFullscreenToPreviousState();
+      GetFullscreenController()->ExitExclusiveAccessToPreviousState();
       break;
 
     case BUBBLE_ALLOW:
-      GetFullscreenController()->OnAcceptFullscreenPermission();
+      GetBrowser()
+          ->exclusive_access_manager()
+          ->OnAcceptExclusiveAccessPermission();
       break;
 
     case BUBBLE_DENY:
-      GetFullscreenController()->OnDenyFullscreenPermission();
+      GetBrowser()
+          ->exclusive_access_manager()
+          ->OnDenyExclusiveAccessPermission();
       break;
 
     case WINDOW_CHANGE:
@@ -744,14 +753,17 @@ void FullscreenControllerStateTest::VerifyWindowStateExpectations(
     EXPECT_EQ(GetFullscreenController()->IsWindowFullscreenForTabOrPending(),
               !!fullscreen_for_tab) << GetAndClearDebugLog();
   }
+
+#if defined(OS_WIN)
   if (in_metro_snap != IN_METRO_SNAP_NO_EXPECTATION) {
     EXPECT_EQ(GetFullscreenController()->IsInMetroSnapMode(),
               !!in_metro_snap) << GetAndClearDebugLog();
   }
+#endif  // OS_WIN
 }
 
 FullscreenController* FullscreenControllerStateTest::GetFullscreenController() {
-    return GetBrowser()->fullscreen_controller();
+  return GetBrowser()->exclusive_access_manager()->fullscreen_controller();
 }
 
 std::string FullscreenControllerStateTest::GetTransitionTableAsString() const {

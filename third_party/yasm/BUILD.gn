@@ -30,18 +30,14 @@
 if (current_toolchain == host_toolchain) {
   # Various files referenced by multiple targets.
   yasm_gen_include_dir = "$target_gen_dir/include"
-  yasm_os = os
-  if (is_chromeos) {
-    yasm_os = "linux"
-  }
-  config_makefile = "source/config/$yasm_os/Makefile"
+  config_makefile = "source/config/$host_os/Makefile"
   version_file = "version.mac"
 
   import("//build/compiled_action.gni")
 
   config("yasm_config") {
     include_dirs = [
-      "source/config/$yasm_os",
+      "source/config/$host_os",
       "source/patched-yasm",
     ]
     defines = [ "HAVE_CONFIG_H" ]
@@ -128,13 +124,13 @@ if (current_toolchain == host_toolchain) {
 
   executable("re2c") {
     sources = [
-      "source/patched-yasm/tools/re2c/main.c",
+      "source/patched-yasm/tools/re2c/actions.c",
       "source/patched-yasm/tools/re2c/code.c",
       "source/patched-yasm/tools/re2c/dfa.c",
-      "source/patched-yasm/tools/re2c/parser.c",
-      "source/patched-yasm/tools/re2c/actions.c",
-      "source/patched-yasm/tools/re2c/scanner.c",
+      "source/patched-yasm/tools/re2c/main.c",
       "source/patched-yasm/tools/re2c/mbo_getopt.c",
+      "source/patched-yasm/tools/re2c/parser.c",
+      "source/patched-yasm/tools/re2c/scanner.c",
       "source/patched-yasm/tools/re2c/substr.c",
       "source/patched-yasm/tools/re2c/translate.c",
     ]
@@ -148,8 +144,6 @@ if (current_toolchain == host_toolchain) {
     # re2c is missing CLOSEVOP from one switch.
     if (is_posix) {
       cflags = [ "-Wno-switch" ]
-    } else if (is_win) {
-      cflags = [ "/wd4267" ]  # size_t to int conversion.
     }
   }
 
@@ -209,8 +203,8 @@ if (current_toolchain == host_toolchain) {
       "source/patched-yasm/modules/objfmts/macho/macho-objfmt.c",
       "source/patched-yasm/modules/objfmts/rdf/rdf-objfmt.c",
       "source/patched-yasm/modules/objfmts/xdf/xdf-objfmt.c",
-      "source/patched-yasm/modules/parsers/gas/gas-parse.c",
       "source/patched-yasm/modules/parsers/gas/gas-parse-intel.c",
+      "source/patched-yasm/modules/parsers/gas/gas-parse.c",
       "source/patched-yasm/modules/parsers/gas/gas-parser.c",
       "source/patched-yasm/modules/parsers/nasm/nasm-parse.c",
       "source/patched-yasm/modules/parsers/nasm/nasm-parser.c",
@@ -248,9 +242,7 @@ if (current_toolchain == host_toolchain) {
     # directory, but the gen_x86_insn.py script does not make this easy.
     include_dirs = [ yasm_gen_include_dir ]
 
-    if (is_win) {
-      cflags = [ "/wd4267" ]  # size_t to int conversion.
-    } else {
+    if (!is_win) {
       cflags = [
         "-ansi",
         "-pedantic",

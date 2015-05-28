@@ -64,8 +64,9 @@ public:
 
     void released();
     bool loadLink(const LinkRelAttribute&, const AtomicString& crossOriginMode, const String& type, const KURL&, Document&);
+    static bool loadLinkFromHeader(const String& headerValue, Document*);
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     void linkLoadTimerFired(Timer<LinkLoader>*);

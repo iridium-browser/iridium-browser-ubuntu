@@ -48,7 +48,6 @@ public:
     virtual ~WebServiceWorkerProviderClient() { }
 
     virtual void setController(WebServiceWorker*, bool shouldNotifyControllerChange) = 0;
-    virtual void setReadyRegistration(WebServiceWorkerRegistration*) = 0;
 
     virtual void dispatchMessageEvent(const WebString& message, const WebMessagePortChannelArray&) = 0;
     virtual bool getClientInfo(WebServiceWorkerClientInfo*) = 0;

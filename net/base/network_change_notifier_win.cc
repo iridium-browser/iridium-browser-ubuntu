@@ -208,6 +208,11 @@ NetworkChangeNotifierWin::RecomputeCurrentConnectionType() const {
 
 NetworkChangeNotifier::ConnectionType
 NetworkChangeNotifierWin::GetCurrentConnectionType() const {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 NetworkChangeNotifierWin::GetCurrentConnectionType"));
+
   base::AutoLock auto_lock(last_computed_connection_type_lock_);
   return last_computed_connection_type_;
 }
@@ -219,11 +224,6 @@ void NetworkChangeNotifierWin::SetCurrentConnectionType(
 }
 
 void NetworkChangeNotifierWin::OnObjectSignaled(HANDLE object) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "NetworkChangeNotifierWin_OnObjectSignaled"));
-
   DCHECK(CalledOnValidThread());
   DCHECK(is_watching_);
   is_watching_ = false;

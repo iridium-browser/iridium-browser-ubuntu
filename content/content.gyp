@@ -31,6 +31,7 @@
     ['OS == "win"', {
       'targets': [
         {
+          # GN: //content:content_startup_helper_win
           'target_name': 'content_startup_helper_win',
           'type': 'static_library',
           'include_dirs': [
@@ -431,16 +432,21 @@
             '../device/vibration/vibration.gyp:device_vibration_java',
             '../media/media.gyp:media_java',
             '../mojo/mojo_base.gyp:mojo_system_java',
-            '../mojo/mojo_public.gyp:mojo_application_bindings',
-            '../mojo/mojo_public.gyp:mojo_bindings_java',
             '../net/net.gyp:net',
+            '../third_party/mojo/mojo_public.gyp:mojo_application_bindings',
+            '../third_party/mojo/mojo_public.gyp:mojo_bindings_java',
             '../ui/android/ui_android.gyp:ui_java',
             '../ui/touch_selection/ui_touch_selection.gyp:selection_event_type_java',
+            '../ui/touch_selection/ui_touch_selection.gyp:touch_handle_orientation_java',
+            '../third_party/WebKit/public/blink_headers.gyp:blink_headers_java',
             'common_aidl',
+            'console_message_level_java',
             'content_common',
             'content_strings_grd',
             'content_gamepad_mapping',
             'gesture_event_type_java',
+            'invalidate_types_java',
+            'navigation_controller_java',
             'popup_item_type_java',
             'result_codes_java',
             'speech_recognition_error_java',
@@ -454,6 +460,14 @@
             'R_package_relpath': 'org/chromium/content',
           },
           'includes': [ '../build/java.gypi' ],
+        },
+        {
+          'target_name': 'console_message_level_java',
+          'type': 'none',
+          'variables': {
+            'source_file': 'public/common/console_message_level.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },
         {
           'target_name': 'content_strings_grd',
@@ -480,6 +494,22 @@
           'type': 'none',
           'variables': {
             'source_file': 'browser/android/gesture_event_type.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
+        },
+        {
+          'target_name': 'invalidate_types_java',
+          'type': 'none',
+          'variables': {
+            'source_file': 'public/browser/invalidate_type.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
+        },
+        {
+          'target_name': 'navigation_controller_java',
+          'type': 'none',
+          'variables': {
+            'source_file': 'public/browser/navigation_controller.h',
           },
           'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },

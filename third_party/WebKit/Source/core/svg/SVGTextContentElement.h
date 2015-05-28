@@ -59,19 +59,18 @@ public:
     int getCharNumAtPosition(PassRefPtrWillBeRawPtr<SVGPointTearOff>, ExceptionState&);
     void selectSubString(unsigned charnum, unsigned nchars, ExceptionState&);
 
-    static SVGTextContentElement* elementFromRenderer(RenderObject*);
+    static SVGTextContentElement* elementFromRenderer(LayoutObject*);
 
     SVGAnimatedLength* textLength() { return m_textLength.get(); }
     bool textLengthIsSpecifiedByUser() { return m_textLengthIsSpecifiedByUser; }
     SVGAnimatedEnumeration<SVGLengthAdjustType>* lengthAdjust() { return m_lengthAdjust.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     SVGTextContentElement(const QualifiedName&, Document&);
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual bool isPresentationAttribute(const QualifiedName&) const override final;
     virtual void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override final;
     virtual void svgAttributeChanged(const QualifiedName&) override;
@@ -83,7 +82,7 @@ private:
 
     RefPtrWillBeMember<SVGAnimatedLength> m_textLength;
     bool m_textLengthIsSpecifiedByUser;
-    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGLengthAdjustType> > m_lengthAdjust;
+    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGLengthAdjustType>> m_lengthAdjust;
 };
 
 inline bool isSVGTextContentElement(const SVGElement& element)

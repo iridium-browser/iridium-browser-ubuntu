@@ -32,6 +32,7 @@
 frontend_domain_class = (
 """    class $domainClassName {
     public:
+        static $domainClassName* from(InspectorFrontend* frontend) { return &(frontend->m_$domainFieldName) ;}
         $domainClassName(InspectorFrontendChannel* inspectorFrontendChannel) : m_inspectorFrontendChannel(inspectorFrontendChannel) { }
 ${frontendDomainMethodDeclarations}
         void flush() { m_inspectorFrontendChannel->flush(); }
@@ -39,18 +40,16 @@ ${frontendDomainMethodDeclarations}
         InspectorFrontendChannel* m_inspectorFrontendChannel;
     };
 
-    $domainClassName* $domainFieldName() { return &m_$domainFieldName; }
-
 """)
 
 backend_method = (
-"""void InspectorBackendDispatcherImpl::${domainName}_$methodName(long callId, JSONObject*$requestMessageObject, JSONArray* protocolErrors)
+"""void InspectorBackendDispatcherImpl::${domainName}_$methodName(int callId, JSONObject*$requestMessageObject, JSONArray* protocolErrors)
 {
     if (!$agentField)
         protocolErrors->pushString("${domainName} handler is not available.");
 $methodCode
     if (protocolErrors->length()) {
-        reportProtocolError(&callId, InvalidParams, String::format(InvalidParamsFormatString, commandName($commandNameIndex)), protocolErrors);
+        reportProtocolError(callId, InvalidParams, String::format(InvalidParamsFormatString, commandName($commandNameIndex)), protocolErrors);
         return;
     }
 $agentCallParamsDeclaration
@@ -65,7 +64,7 @@ frontend_method = ("""void InspectorFrontend::$domainName::$eventName($parameter
     RefPtr<JSONObject> jsonMessage = JSONObject::create();
     jsonMessage->setString("method", "$domainName.$eventName");
 $code    if (m_inspectorFrontendChannel)
-        m_inspectorFrontendChannel->sendMessageToFrontend(jsonMessage.release());
+        m_inspectorFrontendChannel->sendProtocolNotification(jsonMessage.release());
 }
 """)
 
@@ -183,8 +182,8 @@ $virtualSetters
         LastEntry,
     };
 
-    void reportProtocolError(const long* const callId, CommonErrorCode, const String& errorMessage) const;
-    virtual void reportProtocolError(const long* const callId, CommonErrorCode, const String& errorMessage, PassRefPtr<JSONValue> data) const = 0;
+    void reportProtocolError(int callId, CommonErrorCode, const String& errorMessage) const;
+    virtual void reportProtocolError(int callId, CommonErrorCode, const String& errorMessage, PassRefPtr<JSONValue> data) const = 0;
     virtual void dispatch(const String& message) = 0;
     static bool getCommandName(const String& message, String* result);
 
@@ -198,7 +197,7 @@ $methodNamesEnumContent
 
 private:
     static const char commandNames[];
-    static const size_t commandNamesIndex[];
+    static const unsigned short commandNamesIndex[];
 };
 
 } // namespace blink
@@ -225,7 +224,7 @@ const char InspectorBackendDispatcher::commandNames[] = {
 $methodNameDeclarations
 };
 
-const size_t InspectorBackendDispatcher::commandNamesIndex[] = {
+const unsigned short InspectorBackendDispatcher::commandNamesIndex[] = {
 $methodNameDeclarationsIndex
 };
 
@@ -239,18 +238,36 @@ public:
     InspectorBackendDispatcherImpl(InspectorFrontendChannel* inspectorFrontendChannel)
         : m_inspectorFrontendChannel(inspectorFrontendChannel)
 $constructorInit
-    { }
+    {
+        // Initialize dispatch map.
+        const CallHandler handlers[] = {
+  $messageHandlers
+        };
+        for (size_t i = 0; i < kMethodNamesEnumSize; ++i)
+            m_dispatchMap.add(commandName(static_cast<MethodNames>(i)), handlers[i]);
+
+        // Initialize common errors.
+        m_commonErrors.insert(ParseError, -32700);
+        m_commonErrors.insert(InvalidRequest, -32600);
+        m_commonErrors.insert(MethodNotFound, -32601);
+        m_commonErrors.insert(InvalidParams, -32602);
+        m_commonErrors.insert(InternalError, -32603);
+        m_commonErrors.insert(ServerError, -32000);
+    }
 
     virtual void clearFrontend() { m_inspectorFrontendChannel = 0; }
     virtual void dispatch(const String& message);
-    virtual void reportProtocolError(const long* const callId, CommonErrorCode, const String& errorMessage, PassRefPtr<JSONValue> data) const;
+    virtual void reportProtocolError(int callId, CommonErrorCode, const String& errorMessage, PassRefPtr<JSONValue> data) const;
     using InspectorBackendDispatcher::reportProtocolError;
 
-    void sendResponse(long callId, const ErrorString& invocationError, PassRefPtr<JSONValue> errorData, PassRefPtr<JSONObject> result);
+    void sendResponse(int callId, const ErrorString& invocationError, PassRefPtr<JSONValue> errorData, PassRefPtr<JSONObject> result);
     bool isActive() { return m_inspectorFrontendChannel; }
 
 $setters
 private:
+    using CallHandler = void (InspectorBackendDispatcherImpl::*)(int callId, JSONObject* messageObject, JSONArray* protocolErrors);
+    using DispatchMap = HashMap<String, CallHandler>;
+
 $methodDeclarations
 
     InspectorFrontendChannel* m_inspectorFrontendChannel;
@@ -266,15 +283,18 @@ $fieldDeclarations
     static PassRefPtr<JSONObject> getObject(JSONObject* object, const char* name, bool* valueFound, JSONArray* protocolErrors);
     static PassRefPtr<JSONArray> getArray(JSONObject* object, const char* name, bool* valueFound, JSONArray* protocolErrors);
 
-    void sendResponse(long callId, ErrorString invocationError, PassRefPtr<JSONObject> result)
+    void sendResponse(int callId, ErrorString invocationError, PassRefPtr<JSONObject> result)
     {
         sendResponse(callId, invocationError, RefPtr<JSONValue>(), result);
     }
-    void sendResponse(long callId, ErrorString invocationError)
+    void sendResponse(int callId, ErrorString invocationError)
     {
         sendResponse(callId, invocationError, RefPtr<JSONValue>(), JSONObject::create());
     }
     static const char InvalidParamsFormatString[];
+
+    DispatchMap m_dispatchMap;
+    Vector<int> m_commonErrors;
 };
 
 const char InspectorBackendDispatcherImpl::InvalidParamsFormatString[] = "Some arguments of method '%s' can't be processed";
@@ -290,57 +310,24 @@ PassRefPtrWillBeRawPtr<InspectorBackendDispatcher> InspectorBackendDispatcher::c
 void InspectorBackendDispatcherImpl::dispatch(const String& message)
 {
     RefPtrWillBeRawPtr<InspectorBackendDispatcher> protect(this);
-    typedef void (InspectorBackendDispatcherImpl::*CallHandler)(long callId, JSONObject* messageObject, JSONArray* protocolErrors);
-    typedef HashMap<String, CallHandler> DispatchMap;
-    DEFINE_STATIC_LOCAL(DispatchMap, dispatchMap, );
-    long callId = 0;
-
-    if (dispatchMap.isEmpty()) {
-        static const CallHandler handlers[] = {
-$messageHandlers
-        };
-        for (size_t i = 0; i < kMethodNamesEnumSize; ++i)
-            dispatchMap.add(commandName(static_cast<MethodNames>(i)), handlers[i]);
-    }
-
+    int callId = 0;
     RefPtr<JSONValue> parsedMessage = parseJSON(message);
-    if (!parsedMessage) {
-        reportProtocolError(0, ParseError, "Message must be in JSON format");
-        return;
-    }
-
+    ASSERT(parsedMessage);
     RefPtr<JSONObject> messageObject = parsedMessage->asObject();
-    if (!messageObject) {
-        reportProtocolError(0, InvalidRequest, "Message must be a JSONified object");
-        return;
-    }
+    ASSERT(messageObject);
 
     RefPtr<JSONValue> callIdValue = messageObject->get("id");
-    if (!callIdValue) {
-        reportProtocolError(0, InvalidRequest, "'id' property was not found");
-        return;
-    }
-
-    if (!callIdValue->asNumber(&callId)) {
-        reportProtocolError(0, InvalidRequest, "The type of 'id' property must be number");
-        return;
-    }
+    bool success = callIdValue->asNumber(&callId);
+    ASSERT_UNUSED(success, success);
 
     RefPtr<JSONValue> methodValue = messageObject->get("method");
-    if (!methodValue) {
-        reportProtocolError(&callId, InvalidRequest, "'method' property wasn't found");
-        return;
-    }
-
     String method;
-    if (!methodValue->asString(&method)) {
-        reportProtocolError(&callId, InvalidRequest, "The type of 'method' property must be string");
-        return;
-    }
+    success = methodValue && methodValue->asString(&method);
+    ASSERT_UNUSED(success, success);
 
-    HashMap<String, CallHandler>::iterator it = dispatchMap.find(method);
-    if (it == dispatchMap.end()) {
-        reportProtocolError(&callId, MethodNotFound, "'" + method + "' wasn't found");
+    HashMap<String, CallHandler>::iterator it = m_dispatchMap.find(method);
+    if (it == m_dispatchMap.end()) {
+        reportProtocolError(callId, MethodNotFound, "'" + method + "' wasn't found");
         return;
     }
 
@@ -348,10 +335,10 @@ $messageHandlers
     ((*this).*it->value)(callId, messageObject.get(), protocolErrors.get());
 }
 
-void InspectorBackendDispatcherImpl::sendResponse(long callId, const ErrorString& invocationError, PassRefPtr<JSONValue> errorData, PassRefPtr<JSONObject> result)
+void InspectorBackendDispatcherImpl::sendResponse(int callId, const ErrorString& invocationError, PassRefPtr<JSONValue> errorData, PassRefPtr<JSONObject> result)
 {
     if (invocationError.length()) {
-        reportProtocolError(&callId, ServerError, invocationError, errorData);
+        reportProtocolError(callId, ServerError, invocationError, errorData);
         return;
     }
 
@@ -359,42 +346,30 @@ void InspectorBackendDispatcherImpl::sendResponse(long callId, const ErrorString
     responseMessage->setNumber("id", callId);
     responseMessage->setObject("result", result);
     if (m_inspectorFrontendChannel)
-        m_inspectorFrontendChannel->sendMessageToFrontend(responseMessage.release());
+        m_inspectorFrontendChannel->sendProtocolResponse(callId, responseMessage.release());
 }
 
-void InspectorBackendDispatcher::reportProtocolError(const long* const callId, CommonErrorCode code, const String& errorMessage) const
+void InspectorBackendDispatcher::reportProtocolError(int callId, CommonErrorCode code, const String& errorMessage) const
 {
     reportProtocolError(callId, code, errorMessage, PassRefPtr<JSONValue>());
 }
 
-void InspectorBackendDispatcherImpl::reportProtocolError(const long* const callId, CommonErrorCode code, const String& errorMessage, PassRefPtr<JSONValue> data) const
+void InspectorBackendDispatcherImpl::reportProtocolError(int callId, CommonErrorCode code, const String& errorMessage, PassRefPtr<JSONValue> data) const
 {
-    DEFINE_STATIC_LOCAL(Vector<int>,s_commonErrors,);
-    if (!s_commonErrors.size()) {
-        s_commonErrors.insert(ParseError, -32700);
-        s_commonErrors.insert(InvalidRequest, -32600);
-        s_commonErrors.insert(MethodNotFound, -32601);
-        s_commonErrors.insert(InvalidParams, -32602);
-        s_commonErrors.insert(InternalError, -32603);
-        s_commonErrors.insert(ServerError, -32000);
-    }
     ASSERT(code >=0);
-    ASSERT((unsigned)code < s_commonErrors.size());
-    ASSERT(s_commonErrors[code]);
+    ASSERT((unsigned)code < m_commonErrors.size());
+    ASSERT(m_commonErrors[code]);
     RefPtr<JSONObject> error = JSONObject::create();
-    error->setNumber("code", s_commonErrors[code]);
+    error->setNumber("code", m_commonErrors[code]);
     error->setString("message", errorMessage);
     ASSERT(error);
     if (data)
         error->setValue("data", data);
     RefPtr<JSONObject> message = JSONObject::create();
     message->setObject("error", error);
-    if (callId)
-        message->setNumber("id", *callId);
-    else
-        message->setValue("id", JSONValue::null());
+    message->setNumber("id", callId);
     if (m_inspectorFrontendChannel)
-        m_inspectorFrontendChannel->sendMessageToFrontend(message.release());
+        m_inspectorFrontendChannel->sendProtocolResponse(callId, message.release());
 }
 
 template<typename R, typename V, typename V0>

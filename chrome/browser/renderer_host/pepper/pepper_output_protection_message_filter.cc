@@ -86,12 +86,12 @@ class PepperOutputProtectionMessageFilter::Delegate
     : public aura::WindowObserver {
  public:
   Delegate(int render_process_id, int render_frame_id);
-  virtual ~Delegate();
+  ~Delegate() override;
 
   // aura::WindowObserver overrides.
-  virtual void OnWindowHierarchyChanged(
+  void OnWindowHierarchyChanged(
       const aura::WindowObserver::HierarchyChangeParams& params) override;
-  virtual void OnWindowDestroying(aura::Window* window) override;
+  void OnWindowDestroying(aura::Window* window) override;
 
   int32_t OnQueryStatus(uint32_t* link_mask, uint32_t* protection_mask);
   int32_t OnEnableProtection(uint32_t desired_method_mask);
@@ -124,11 +124,6 @@ PepperOutputProtectionMessageFilter::Delegate::Delegate(int render_process_id,
       client_id_(ui::DisplayConfigurator::kInvalidClientId),
       display_id_(0) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-#if defined(USE_ATHENA)
-  // Fail for now so that we can catch the event in the crash report.
-  // crbug.com/381398
-  CHECK(false);
-#endif
 }
 
 PepperOutputProtectionMessageFilter::Delegate::~Delegate() {

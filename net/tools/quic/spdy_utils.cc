@@ -17,18 +17,21 @@
 #include "url/gurl.h"
 
 using base::StringPiece;
+using std::make_pair;
 using std::pair;
 using std::string;
 
 namespace net {
 namespace tools {
 
-const char* const kV3Host = ":host";
-const char* const kV3Path = ":path";
-const char* const kV3Scheme = ":scheme";
-const char* const kV3Status = ":status";
-const char* const kV3Method = ":method";
-const char* const kV3Version = ":version";
+const char kV4Host[] = ":authority";
+
+const char kV3Host[] = ":host";
+const char kV3Path[] = ":path";
+const char kV3Scheme[] = ":scheme";
+const char kV3Status[] = ":status";
+const char kV3Method[] = ":method";
+const char kV3Version[] = ":version";
 
 void PopulateSpdyHeaderBlock(const BalsaHeaders& headers,
                              SpdyHeaderBlock* block,
@@ -83,6 +86,30 @@ void PopulateSpdy3RequestHeaderBlock(const BalsaHeaders& headers,
   }
 }
 
+void PopulateSpdy4RequestHeaderBlock(const BalsaHeaders& headers,
+                                     const string& scheme,
+                                     const string& host_and_port,
+                                     const string& path,
+                                     SpdyHeaderBlock* block) {
+  PopulateSpdyHeaderBlock(headers, block, true);
+  StringPiece host_header = headers.GetHeader("Host");
+  if (!host_header.empty()) {
+    DCHECK(host_and_port.empty() || host_header == host_and_port);
+    block->insert(make_pair(kV4Host, host_header.as_string()));
+    // PopulateSpdyHeaderBlock already added the "host" header,
+    // which is invalid for SPDY4.
+    block->erase("host");
+  } else {
+    block->insert(make_pair(kV4Host, host_and_port));
+  }
+  block->insert(make_pair(kV3Path, path));
+  block->insert(make_pair(kV3Scheme, scheme));
+
+  if (!headers.request_method().empty()) {
+    block->insert(make_pair(kV3Method, headers.request_method().as_string()));
+  }
+}
+
 void PopulateSpdyResponseHeaderBlock(const BalsaHeaders& headers,
                                      SpdyHeaderBlock* block) {
   string status = headers.response_code().as_string();
@@ -127,6 +154,43 @@ SpdyHeaderBlock SpdyUtils::RequestHeadersToSpdyHeaders(
   SpdyHeaderBlock block;
   PopulateSpdy3RequestHeaderBlock(
       request_headers, scheme, host_and_port, path, &block);
+  if (block.find("host") != block.end()) {
+    block.erase(block.find("host"));
+  }
+  return block;
+}
+
+// static
+SpdyHeaderBlock SpdyUtils::RequestHeadersToSpdy4Headers(
+    const BalsaHeaders& request_headers) {
+  string scheme;
+  string host_and_port;
+  string path;
+
+  string url = request_headers.request_uri().as_string();
+  if (url.empty() || url[0] == '/') {
+    path = url;
+  } else {
+    GURL request_uri(url);
+    if (request_headers.request_method() == "CONNECT") {
+      path = url;
+    } else {
+      path = request_uri.path();
+      if (!request_uri.query().empty()) {
+        path = path + "?" + request_uri.query();
+      }
+      host_and_port = request_uri.host();
+      scheme = request_uri.scheme();
+    }
+  }
+
+  DCHECK(!scheme.empty());
+  DCHECK(!host_and_port.empty());
+  DCHECK(!path.empty());
+
+  SpdyHeaderBlock block;
+  PopulateSpdy4RequestHeaderBlock(request_headers, scheme, host_and_port, path,
+                                  &block);
   if (block.find("host") != block.end()) {
     block.erase(block.find("host"));
   }
@@ -260,6 +324,13 @@ bool SpdyUtils::FillBalsaResponseHeaders(
    }
   }
   return true;
+}
+
+// static
+void SpdyUtils::SpdyHeadersToResponseHeaders(
+    const SpdyHeaderBlock& block,
+    BalsaHeaders* headers) {
+  FillBalsaResponseHeaders(block, headers);
 }
 
 }  // namespace tools

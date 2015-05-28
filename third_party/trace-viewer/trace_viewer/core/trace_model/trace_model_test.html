@@ -15,7 +15,7 @@ found in the LICENSE file.
 tv.b.unittest.testSuite(function() {
   var ThreadSlice = tv.c.trace_model.ThreadSlice;
   var TraceModel = tv.c.TraceModel;
-  var TitleFilter = tv.c.TitleFilter;
+  var TitleOrCategoryFilter = tv.c.TitleOrCategoryFilter;
 
   var createTraceModelWithOneOfEverything = function() {
     var m = new TraceModel();
@@ -58,6 +58,12 @@ tv.b.unittest.testSuite(function() {
     bSeries.addCounterSample(1, 15);
     bSeries.addCounterSample(2, 12);
     bSeries.addCounterSample(3, 16);
+
+    var gd = new tv.c.trace_model.GlobalMemoryDump(m, 2);
+    var pd = new tv.c.trace_model.ProcessMemoryDump(gd, p, 2);
+    gd.processMemoryDumps[1] = pd;
+    m.globalMemoryDumps.push(gd);
+    p.memoryDumps.push(pd);
 
     m.updateBounds();
 
@@ -114,6 +120,30 @@ tv.b.unittest.testSuite(function() {
 
     var t = m.getOrCreateProcess(1).getOrCreateThread(1);
     t.sliceGroup.pushSlice(new ThreadSlice('', 'a', 0, 1, {}, 4));
+
+    m.updateBounds();
+    assertEquals(1, m.bounds.min);
+    assertEquals(5, m.bounds.max);
+  });
+
+  test('traceModelBounds_GlobalMemoryDumps', function() {
+    var m = new TraceModel();
+    m.globalMemoryDumps.push(new tv.c.trace_model.GlobalMemoryDump(m, 1));
+    m.globalMemoryDumps.push(new tv.c.trace_model.GlobalMemoryDump(m, 3));
+    m.globalMemoryDumps.push(new tv.c.trace_model.GlobalMemoryDump(m, 5));
+
+    m.updateBounds();
+    assertEquals(1, m.bounds.min);
+    assertEquals(5, m.bounds.max);
+  });
+
+  test('traceModelBounds_ProcessMemoryDumps', function() {
+    var m = new TraceModel();
+    var p = m.getOrCreateProcess(1);
+    var gd = new tv.c.trace_model.GlobalMemoryDump(m, -1);
+    p.memoryDumps.push(new tv.c.trace_model.ProcessMemoryDump(gd, m, 1));
+    p.memoryDumps.push(new tv.c.trace_model.ProcessMemoryDump(gd, m, 3));
+    p.memoryDumps.push(new tv.c.trace_model.ProcessMemoryDump(gd, m, 5));
 
     m.updateBounds();
     assertEquals(1, m.bounds.min);
@@ -218,15 +248,15 @@ tv.b.unittest.testSuite(function() {
     });
   });
 
-  test('titleFilter', function() {
+  test('TitleOrCategoryFilter', function() {
     var s0 = tv.c.test_utils.newSlice(1, 3);
-    assertTrue(new TitleFilter('a').matchSlice(s0));
-    assertFalse(new TitleFilter('x').matchSlice(s0));
+    assertTrue(new TitleOrCategoryFilter('a').matchSlice(s0));
+    assertFalse(new TitleOrCategoryFilter('x').matchSlice(s0));
 
     var s1 = tv.c.test_utils.newSliceNamed('ba', 1, 3);
-    assertTrue(new TitleFilter('a').matchSlice(s1));
-    assertTrue(new TitleFilter('ba').matchSlice(s1));
-    assertFalse(new TitleFilter('x').matchSlice(s1));
+    assertTrue(new TitleOrCategoryFilter('a').matchSlice(s1));
+    assertTrue(new TitleOrCategoryFilter('ba').matchSlice(s1));
+    assertFalse(new TitleOrCategoryFilter('x').matchSlice(s1));
   });
 
   test('traceModel_toJSON', function() {
@@ -297,6 +327,32 @@ tv.b.unittest.testSuite(function() {
     assertEquals(0, m.samples[0].start);
     assertEquals(0.184, m.samples[1].start);
     assertEquals(0.185, m.samples[2].start);
+  });
+
+  test('traceModel_sortsGlobalMemoryDumps', function() {
+    var m = new tv.c.TraceModel();
+    m.importTraces([], true /* shiftWorldToZero */, false, function() {
+      m.globalMemoryDumps.push(new tv.c.trace_model.GlobalMemoryDump(m, 1));
+      m.globalMemoryDumps.push(new tv.c.trace_model.GlobalMemoryDump(m, 5));
+      m.globalMemoryDumps.push(new tv.c.trace_model.GlobalMemoryDump(m, 3));
+    });
+    assertEquals(0, m.globalMemoryDumps[0].start);
+    assertEquals(2, m.globalMemoryDumps[1].start);
+    assertEquals(4, m.globalMemoryDumps[2].start);
+  });
+
+  test('traceModel_sortsProcessMemoryDumps', function() {
+    var m = new tv.c.TraceModel();
+    var p = m.getOrCreateProcess(1);
+    m.importTraces([], true /* shiftWorldToZero */, false, function() {
+      var g = new tv.c.trace_model.GlobalMemoryDump(m, -1);
+      p.memoryDumps.push(new tv.c.trace_model.ProcessMemoryDump(g, p, 1));
+      p.memoryDumps.push(new tv.c.trace_model.ProcessMemoryDump(g, p, 5));
+      p.memoryDumps.push(new tv.c.trace_model.ProcessMemoryDump(g, p, 3));
+    });
+    assertEquals(0, p.memoryDumps[0].start);
+    assertEquals(2, p.memoryDumps[1].start);
+    assertEquals(4, p.memoryDumps[2].start);
   });
 });
 </script>

@@ -121,8 +121,9 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
                     if (commandLine != null) {
                         intent.putExtra(EXTRA_COMMAND_LINE, commandLine);
                     }
-                    if (mLinkerParams != null)
+                    if (mLinkerParams != null) {
                         mLinkerParams.addIntentExtras(intent);
+                    }
                     mBound = mContext.bindService(intent, this, mBindFlags);
                 } finally {
                     TraceEvent.end("ChildProcessConnectionImpl.ChildServiceConnection.bind");
@@ -177,9 +178,9 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
                 if (mServiceDisconnected) {
                     return;
                 }
-                mServiceDisconnected = true;
                 // Stash the status of the oom bindings, since stop() will release all bindings.
-                mWasOomProtected = mInitialBinding.isBound() || mStrongBinding.isBound();
+                mWasOomProtected = isCurrentlyOomProtected();
+                mServiceDisconnected = true;
                 Log.w(TAG, "onServiceDisconnected (crash or killed by oom): pid=" + mPid);
                 stop();  // We don't want to auto-restart on crash. Let the browser do that.
                 mDeathCallback.onChildProcessDied(ChildProcessConnectionImpl.this);
@@ -407,14 +408,23 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
             if (mServiceDisconnected) {
                 return mWasOomProtected;
             } else {
-                return mInitialBinding.isBound() || mStrongBinding.isBound();
+                return isCurrentlyOomProtected();
             }
+        }
+    }
+
+    private boolean isCurrentlyOomProtected() {
+        synchronized (mLock) {
+            assert !mServiceDisconnected;
+            if (mAlwaysInForeground) return ChildProcessLauncher.isApplicationInForeground();
+            return mInitialBinding.isBound() || mStrongBinding.isBound();
         }
     }
 
     @Override
     public void dropOomBindings() {
         synchronized (mLock) {
+            assert !mAlwaysInForeground;
             mInitialBinding.unbind();
 
             mStrongBindingCount = 0;

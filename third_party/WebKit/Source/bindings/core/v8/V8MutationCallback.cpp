@@ -36,7 +36,7 @@
 
 namespace blink {
 
-V8MutationCallback::V8MutationCallback(v8::Handle<v8::Function> callback, v8::Handle<v8::Object> owner, ScriptState* scriptState)
+V8MutationCallback::V8MutationCallback(v8::Local<v8::Function> callback, v8::Local<v8::Object> owner, ScriptState* scriptState)
     : ActiveDOMCallback(scriptState->executionContext())
     , m_callback(scriptState->isolate(), callback)
     , m_scriptState(scriptState)
@@ -49,7 +49,7 @@ V8MutationCallback::~V8MutationCallback()
 {
 }
 
-void V8MutationCallback::call(const WillBeHeapVector<RefPtrWillBeMember<MutationRecord> >& mutations, MutationObserver* observer)
+void V8MutationCallback::call(const WillBeHeapVector<RefPtrWillBeMember<MutationRecord>>& mutations, MutationObserver* observer)
 {
     if (!canInvokeCallback())
         return;
@@ -62,7 +62,7 @@ void V8MutationCallback::call(const WillBeHeapVector<RefPtrWillBeMember<Mutation
 
     if (m_callback.isEmpty())
         return;
-    v8::Handle<v8::Value> observerHandle = toV8(observer, m_scriptState->context()->Global(), isolate);
+    v8::Local<v8::Value> observerHandle = toV8(observer, m_scriptState->context()->Global(), isolate);
     if (observerHandle.IsEmpty()) {
         if (!isScriptControllerTerminating())
             CRASH();
@@ -72,8 +72,8 @@ void V8MutationCallback::call(const WillBeHeapVector<RefPtrWillBeMember<Mutation
     if (!observerHandle->IsObject())
         return;
 
-    v8::Handle<v8::Object> thisObject = v8::Handle<v8::Object>::Cast(observerHandle);
-    v8::Handle<v8::Value> argv[] = { toV8(mutations, m_scriptState->context()->Global(), isolate), observerHandle };
+    v8::Local<v8::Object> thisObject = v8::Local<v8::Object>::Cast(observerHandle);
+    v8::Local<v8::Value> argv[] = { toV8(mutations, m_scriptState->context()->Global(), isolate), observerHandle };
 
     v8::TryCatch exceptionCatcher;
     exceptionCatcher.SetVerbose(true);
@@ -85,7 +85,7 @@ void V8MutationCallback::setWeakCallback(const v8::WeakCallbackData<v8::Function
     data.GetParameter()->m_callback.clear();
 }
 
-void V8MutationCallback::trace(Visitor* visitor)
+DEFINE_TRACE(V8MutationCallback)
 {
     MutationCallback::trace(visitor);
     ActiveDOMCallback::trace(visitor);

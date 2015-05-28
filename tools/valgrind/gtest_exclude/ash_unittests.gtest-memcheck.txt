@@ -5,5 +5,4 @@ AutoclickTest.SynthesizedMouseMovesIgnored
 # http://crbug.com/383384
 SystemGestureEventFilterTest.TwoFingerDragDelayed
 # http://crbug.com/421888
-SystemTrayTest.*TouchFeedback*
-TrayDetailsViewTest.*TouchFeedback*
+WebNotificationTrayTest.*TouchFeedback*

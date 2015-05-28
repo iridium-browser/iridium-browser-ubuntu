@@ -23,7 +23,7 @@ class ExceptionState;
 class ResponseInit;
 class WebServiceWorkerResponse;
 
-typedef BlobOrArrayBufferOrArrayBufferViewOrUSVString BodyInit;
+typedef BlobOrArrayBufferOrArrayBufferViewOrFormDataOrUSVString BodyInit;
 
 class Response final : public Body {
     DEFINE_WRAPPERTYPEINFO();
@@ -40,17 +40,20 @@ public:
 
     static Response* createClone(const Response&);
 
+    static Response* error(ExecutionContext*);
+
     const FetchResponseData* response() const { return m_response; }
 
     // From Response.idl:
     String type() const;
     String url() const;
     unsigned short status() const;
+    bool ok() const;
     String statusText() const;
     Headers* headers() const;
 
     // From Response.idl:
-    Response* clone(ExceptionState&) const;
+    Response* clone(ExceptionState&);
 
     void populateWebServiceWorkerResponse(WebServiceWorkerResponse&);
 
@@ -58,18 +61,18 @@ public:
 
     PassRefPtr<BlobDataHandle> blobDataHandle() const override;
     BodyStreamBuffer* buffer() const override;
-    String contentTypeForBuffer() const override;
+    String mimeType() const override;
 
     PassRefPtr<BlobDataHandle> internalBlobDataHandle() const;
     BodyStreamBuffer* internalBuffer() const;
-    String internalContentTypeForBuffer() const;
+    String internalMIMEType() const;
 
-    void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
-    explicit Response(const Response&);
     explicit Response(ExecutionContext*);
     Response(ExecutionContext*, FetchResponseData*);
+    Response(ExecutionContext*, FetchResponseData*, Headers*);
 
     const Member<FetchResponseData> m_response;
     const Member<Headers> m_headers;

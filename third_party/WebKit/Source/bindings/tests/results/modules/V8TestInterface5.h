@@ -15,24 +15,26 @@
 #include "bindings/core/v8/V8TestInterfaceEmpty.h"
 #include "bindings/core/v8/WrapperTypeInfo.h"
 #include "bindings/tests/idls/modules/TestInterface5Implementation.h"
+#include "modules/ModulesExport.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
 class V8TestInterface5 {
 public:
-    static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
+    MODULES_EXPORT static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
     static v8::Local<v8::Object> findInstanceInPrototypeChain(v8::Local<v8::Value>, v8::Isolate*);
-    static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*);
+    MODULES_EXPORT static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*);
     static TestInterface5Implementation* toImpl(v8::Local<v8::Object> object)
     {
         return blink::toScriptWrappable(object)->toImpl<TestInterface5Implementation>();
     }
-    static TestInterface5Implementation* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
-    static const WrapperTypeInfo wrapperTypeInfo;
+    MODULES_EXPORT static TestInterface5Implementation* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
+    MODULES_EXPORT static const WrapperTypeInfo wrapperTypeInfo;
     static void refObject(ScriptWrappable*);
     static void derefObject(ScriptWrappable*);
-    static void trace(Visitor* visitor, ScriptWrappable* scriptWrappable)
+    template<typename VisitorDispatcher>
+    static void trace(VisitorDispatcher visitor, ScriptWrappable* scriptWrappable)
     {
     }
     static void visitDOMWrapper(v8::Isolate*, ScriptWrappable*, const v8::Persistent<v8::Object>&);
@@ -60,6 +62,11 @@ inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo, TestInterface
 {
      v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
 }
+
+template <>
+struct V8TypeOf<TestInterface5Implementation> {
+    typedef V8TestInterface5 Type;
+};
 
 } // namespace blink
 #endif // ENABLE(CONDITION)

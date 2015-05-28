@@ -363,15 +363,8 @@ void NotificationsTest::DropOriginPreference(const GURL& origin) {
       ContentSettingsPattern::FromURLNoWildcard(origin));
 }
 
-// If this flakes, use http://crbug.com/62311 and http://crbug.com/74428.
-// Flaky on Windows: http://crbug.com/437414.
-#if defined(OS_WIN)
-#define MAYBE_TestUserGestureInfobar DISABLED_TestUserGestureInfobar
-#else
-#define MAYBE_TestUserGestureInfobar TestUserGestureInfobar
-#endif
-
-IN_PROC_BROWSER_TEST_F(NotificationsTest, MAYBE_TestUserGestureInfobar) {
+// Flaky on Windows, Mac, Linux: http://crbug.com/437414.
+IN_PROC_BROWSER_TEST_F(NotificationsTest, DISABLED_TestUserGestureInfobar) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ui_test_utils::NavigateToURL(
@@ -651,16 +644,9 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestExitBrowserWithInfobar) {
   ASSERT_TRUE(RequestPermissionAndWait(browser()));
 }
 
-// Times out on Windows and Linux. http://crbug.com/168976
-#if defined(OS_WIN) || defined(OS_LINUX)
-#define MAYBE_TestCrashTabWithPermissionInfobar \
-    DISABLED_TestCrashTabWithPermissionInfobar
-#else
-#define MAYBE_TestCrashTabWithPermissionInfobar \
-    TestCrashTabWithPermissionInfobar
-#endif
+// Times out. http://crbug.com/168976
 IN_PROC_BROWSER_TEST_F(NotificationsTest,
-                       MAYBE_TestCrashTabWithPermissionInfobar) {
+                       DISABLED_TestCrashTabWithPermissionInfobar) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // Test crashing the tab with permission infobar doesn't crash Chrome.

@@ -10,10 +10,11 @@ import android.test.suitebuilder.annotation.SmallTest;
 
 import junit.framework.Assert;
 
+import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content_public.browser.LoadUrlParams;
-import org.chromium.content_shell_apk.ContentShellActivity;
 
 import java.lang.annotation.Annotation;
 import java.lang.annotation.ElementType;
@@ -35,7 +36,9 @@ import java.util.concurrent.CountDownLatch;
  * - Threading
  * - Inheritance
  */
+@SuppressFBWarnings("URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD")
 public class JavaBridgeBasicsTest extends JavaBridgeTestBase {
+    @SuppressFBWarnings("CHROMIUM_SYNCHRONIZED_METHOD")
     private class TestController extends Controller {
         private int mIntValue;
         private long mLongValue;
@@ -96,13 +99,6 @@ public class JavaBridgeBasicsTest extends JavaBridgeTestBase {
         setUpContentView(mTestController, "testController");
     }
 
-    @Override
-    protected ContentShellActivity launchContentShellWithUrl(String url) {
-        // Expose a global function "gc()" into pages.
-        return launchContentShellWithUrlAndCommandLineArgs(
-                url, new String[]{ "--js-flags=--expose-gc" });
-    }
-
     // Note that this requires that we can pass a JavaScript string to Java.
     protected String executeJavaScriptAndGetStringResult(String script) throws Throwable {
         executeJavaScript("testController.setStringValue(" + script + ");");
@@ -143,14 +139,23 @@ public class JavaBridgeBasicsTest extends JavaBridgeTestBase {
     }
 
     // Note that this requires that we can pass a JavaScript boolean to Java.
-    private void assertRaisesException(String script) throws Throwable {
+    private void executeAndSetIfException(String script) throws Throwable {
         executeJavaScript("try {"
                 + script + ";"
                 + "  testController.setBooleanValue(false);"
                 + "} catch (exception) {"
                 + "  testController.setBooleanValue(true);"
                 + "}");
+    }
+
+    private void assertRaisesException(String script) throws Throwable {
+        executeAndSetIfException(script);
         assertTrue(mTestController.waitForBooleanValue());
+    }
+
+    private void assertNoRaisedException(String script) throws Throwable {
+        executeAndSetIfException(script);
+        assertFalse(mTestController.waitForBooleanValue());
     }
 
     @SmallTest
@@ -248,6 +253,29 @@ public class JavaBridgeBasicsTest extends JavaBridgeTestBase {
             }
         }, "testObject");
         assertRaisesException("testObject.method()");
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Android-JavaBridge"})
+    public void testCallingAsConstructorRaisesException() throws Throwable {
+        assertRaisesException("new testController.setStringValue('foo')");
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Android-JavaBridge"})
+    public void testCallingOnNonInjectedObjectRaisesException() throws Throwable {
+        assertRaisesException("testController.setStringValue.call({}, 'foo')");
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Android-JavaBridge"})
+    public void testCallingOnInstanceOfOtherClassRaisesException() throws Throwable {
+        injectObjectAndReload(new Object(), "testObject");
+        assertEquals("object", executeJavaScriptAndGetStringResult("typeof testObject"));
+        assertEquals("object", executeJavaScriptAndGetStringResult("typeof testController"));
+        assertEquals("function",
+                executeJavaScriptAndGetStringResult("typeof testController.setStringValue"));
+        assertRaisesException("testController.setStringValue.call(testObject, 'foo')");
     }
 
     // Note that this requires that we can pass a JavaScript string to Java.
@@ -460,6 +488,7 @@ public class JavaBridgeBasicsTest extends JavaBridgeTestBase {
     // leak.
     @SmallTest
     @Feature({"AndroidWebView", "Android-JavaBridge"})
+    @CommandLineFlags.Add("js-flags=--expose-gc")
     public void testReturnedObjectIsGarbageCollected() throws Throwable {
         // Make sure V8 exposes "gc" property on the global object (enabled with --expose-gc flag)
         assertEquals("function", executeJavaScriptAndGetStringResult("typeof gc"));
@@ -631,7 +660,9 @@ public class JavaBridgeBasicsTest extends JavaBridgeTestBase {
         injectObjectAndReload(new Object() {
             public void method() {}
             private void privateMethod() {}
+            @SuppressFBWarnings("UUF_UNUSED")
             public int field;
+            @SuppressFBWarnings("UUF_UNUSED")
             private int mPrivateField;
         }, "testObject");
         executeJavaScript(
@@ -699,13 +730,16 @@ public class JavaBridgeBasicsTest extends JavaBridgeTestBase {
                 return getClass();
             }
 
+            @SuppressFBWarnings("UUF_UNUSED")
             private int mField;
         }, "testObject");
-        assertRaisesException("testObject.myGetClass().getField('field')");
+        String fieldName = "mField";
+        assertRaisesException("testObject.myGetClass().getField('" + fieldName + "')");
         // getDeclaredField() is able to access a private field, but getInt()
         // throws a Java exception.
+        assertNoRaisedException("testObject.myGetClass().getDeclaredField('" + fieldName + "')");
         assertRaisesException(
-                "testObject.myGetClass().getDeclaredField('field').getInt(testObject)");
+                "testObject.myGetClass().getDeclaredField('" + fieldName + "').getInt(testObject)");
     }
 
     @SmallTest
@@ -989,5 +1023,39 @@ public class JavaBridgeBasicsTest extends JavaBridgeTestBase {
         // simply replaces the old object with the new one.
         injectObjectAndReload(new Test(42), "testObject");
         assertEquals("42", executeJavaScriptAndGetStringResult("testObject.getValue()"));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Android-JavaBridge"})
+    public void testMethodCalledOnAnotherInstance() throws Throwable {
+        class TestObject {
+            private int mIndex;
+            TestObject(int index) {
+                mIndex = index;
+            }
+            public void method() {
+                mTestController.setIntValue(mIndex);
+            }
+        }
+        final TestObject testObject1 = new TestObject(1);
+        final TestObject testObject2 = new TestObject(2);
+        runTestOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                getContentViewCore().addPossiblyUnsafeJavascriptInterface(
+                        testObject1, "testObject1", null);
+                getContentViewCore().addPossiblyUnsafeJavascriptInterface(
+                        testObject2, "testObject2", null);
+                getContentViewCore().getWebContents().getNavigationController().reload(true);
+            }
+        });
+        executeJavaScript("testObject1.method()");
+        assertEquals(1, mTestController.waitForIntValue());
+        executeJavaScript("testObject2.method()");
+        assertEquals(2, mTestController.waitForIntValue());
+        executeJavaScript("testObject1.method.call(testObject2)");
+        assertEquals(2, mTestController.waitForIntValue());
+        executeJavaScript("testObject2.method.call(testObject1)");
+        assertEquals(1, mTestController.waitForIntValue());
     }
 }

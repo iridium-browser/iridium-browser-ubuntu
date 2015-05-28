@@ -17,6 +17,7 @@
 #include "ui/events/keycodes/dom3/dom_code.h"
 #include "ui/events/keycodes/dom3/dom_key.h"
 #include "ui/events/keycodes/dom4/keycode_converter.h"
+#include "ui/events/keycodes/keyboard_code_conversion.h"
 #include "ui/events/ozone/layout/layout_util.h"
 #include "ui/events/ozone/layout/xkb/xkb_keyboard_code_conversion.h"
 
@@ -24,7 +25,8 @@ namespace ui {
 
 namespace {
 
-typedef base::Callback<void(const std::string&, const char*)>
+typedef base::Callback<void(const std::string&,
+                            scoped_ptr<char, base::FreeDeleter>)>
     LoadKeymapCallback;
 
 DomKey CharacterToDomKey(base::char16 character) {
@@ -94,7 +96,7 @@ const PrintableSubEntry kU0022[] = {
 const PrintableSubEntry kU0023[] = {
     {DomCode::BACKQUOTE, 0, 0, kAny, kAny, VKEY_OEM_7},
     {DomCode::BACKSLASH, 1, 0, 0x0027, kAny, VKEY_OEM_2},   // apostrophe
-    {DomCode::BACKSLASH, 1, 1, 0x007E, kNone, VKEY_OEM_7}};  // ~, NoSymbol
+    {DomCode::BACKSLASH, 1, 0, 0x007E, kAny, VKEY_OEM_7}};  // ~, NoSymbol
 
 // U+0024 dollar sign
 const PrintableSubEntry kU0024[] = {
@@ -107,19 +109,17 @@ const PrintableSubEntry kU0027[] = {
     {DomCode::KEY_Q, 0, 0, kAny, kAny, VKEY_OEM_7},
     {DomCode::BRACKET_RIGHT, 0, 0, kAny, kAny, VKEY_OEM_1},
     {DomCode::SLASH, 0, 0, kAny, kAny, VKEY_OEM_7},
-    {DomCode::QUOTE, 1, 0, 0x0022, kAny, VKEY_OEM_7},      // quote
-    {DomCode::BACKQUOTE, 1, 0, 0x0022, kAny, VKEY_OEM_3},  // quote
-    {DomCode::BACKQUOTE, 1, 0, 0x00B7, kAny, VKEY_OEM_5},  // middle dot
-    {DomCode::BACKSLASH, 1, 0, kNone, kAny, VKEY_OEM_5},  // NoSymbol
-    {DomCode::MINUS, 1, 1, 0x003F, kNone, VKEY_OEM_4},      // ?, NoSymbol
-    {DomCode::MINUS, 1, 1, 0x003F, 0x00DD, VKEY_OEM_4},      // ?, Y acute
-    {DomCode::EQUAL, 1, 1, 0x002A, kNone, VKEY_OEM_PLUS},   // *, NoSymbol
-    {DomCode::QUOTE, 1, 1, 0x0040, kNone, VKEY_OEM_3},      // @, NoSymbol
-    {DomCode::BACKSLASH, 1, 1, 0x002A, kNone, VKEY_OEM_2},  // *, NoSymbol
+    {DomCode::QUOTE, 1, 0, 0x0022, kAny, VKEY_OEM_7},        // quote
+    {DomCode::BACKQUOTE, 1, 0, 0x0022, kAny, VKEY_OEM_3},    // quote
+    {DomCode::BACKQUOTE, 1, 0, 0x00B7, kAny, VKEY_OEM_5},    // middle dot
+    {DomCode::BACKSLASH, 1, 0, kNone, kAny, VKEY_OEM_5},     // NoSymbol
+    {DomCode::MINUS, 1, 0, 0x003F, kAny, VKEY_OEM_4},        // ?
+    {DomCode::EQUAL, 1, 0, 0x002A, kAny, VKEY_OEM_PLUS},     // *
+    {DomCode::QUOTE, 1, 0, 0x0040, kAny, VKEY_OEM_3},        // @
     {DomCode::BACKSLASH, 1, 1, 0x002A, 0x00BD, VKEY_OEM_5},  // *, one half
-    {DomCode::BACKSLASH, 1, 1, 0x002A, 0x0141, VKEY_OEM_2},  // *, L stroke
-    {DomCode::KEY_Z, 1, 1, 0x0022, kNone, VKEY_Z},          // quote, NoSymbol
-    {DomCode::KEY_Z, 1, 1, 0x0022, 0x0158, VKEY_OEM_7}};     // quote, R caron
+    {DomCode::BACKSLASH, 1, 0, 0x002A, kAny, VKEY_OEM_2},    // *, NoSymbol
+    {DomCode::KEY_Z, 1, 1, 0x0022, 0x0158, VKEY_OEM_7},      // quote, R caron
+    {DomCode::KEY_Z, 1, 0, 0x0022, kAny, VKEY_Z}};           // quote
 
 // U+0028 left parenthesis
 const PrintableSubEntry kU0028[] = {
@@ -146,9 +146,8 @@ const PrintableSubEntry kU002B[] = {
     {DomCode::BRACKET_RIGHT, 0, 0, kAny, kAny, VKEY_OEM_PLUS},
     {DomCode::SEMICOLON, 0, 0, kAny, kAny, VKEY_OEM_PLUS},
     {DomCode::BACKSLASH, 0, 0, kAny, kAny, VKEY_OEM_2},
-    {DomCode::MINUS, 1, 1, 0x003F, kNone, VKEY_OEM_PLUS},   // ?, NoSymbol
     {DomCode::MINUS, 1, 1, 0x003F, 0x005C, VKEY_OEM_MINUS},  // ?, backslash
-    {DomCode::MINUS, 1, 1, 0x003F, 0x0151, VKEY_OEM_PLUS}};  // ?, o''
+    {DomCode::MINUS, 1, 0, 0x003F, kAny, VKEY_OEM_PLUS}};    // ?
 
 // U+002C comma
 const PrintableSubEntry kU002C[] = {
@@ -169,12 +168,10 @@ const PrintableSubEntry kU002D[] = {
     {DomCode::KEY_A, 0, 0, kAny, kAny, VKEY_OEM_MINUS},
     {DomCode::QUOTE, 0, 0, kAny, kAny, VKEY_OEM_MINUS},
     {DomCode::SLASH, 1, 0, 0x003D, kAny, VKEY_OEM_MINUS},   // =
-    {DomCode::EQUAL, 1, 1, 0x005F, kNone, VKEY_OEM_MINUS},   // _, NoSymbol
-    {DomCode::EQUAL, 1, 1, 0x005F, 0x0157, VKEY_OEM_4},       // _, r cedilla
-    {DomCode::SLASH, 1, 1, 0x005F, kNone, VKEY_OEM_MINUS},   // _, NoSymbol
-    {DomCode::SLASH, 1, 1, 0x005F, 0x002A, VKEY_OEM_MINUS},   // _, *
-    {DomCode::SLASH, 1, 1, 0x005F, 0x002F, VKEY_OEM_2},       // _, /
-    {DomCode::SLASH, 1, 1, 0x005F, 0x006E, VKEY_OEM_MINUS}};  // _, n
+    {DomCode::EQUAL, 1, 1, 0x005F, 0x0157, VKEY_OEM_4},     // _, r cedilla
+    {DomCode::EQUAL, 1, 0, 0x005F, kAny, VKEY_OEM_MINUS},   // _
+    {DomCode::SLASH, 1, 1, 0x005F, 0x002F, VKEY_OEM_2},     // _, /
+    {DomCode::SLASH, 1, 0, 0x005F, kAny, VKEY_OEM_MINUS}};  // _
 
 // U+002E full stop
 const PrintableSubEntry kU002E[] = {
@@ -218,16 +215,15 @@ const PrintableSubEntry kU003B[] = {
     {DomCode::KEY_Z, 0, 0, kAny, kAny, VKEY_OEM_1},
     {DomCode::COMMA, 0, 0, kAny, kAny, VKEY_OEM_PERIOD},
     {DomCode::SLASH, 0, 0, kAny, kAny, VKEY_OEM_2}};
-
 // U+003D =
 const PrintableSubEntry kU003D[] = {
     {DomCode::DIGIT8, 0, 0, kAny, kAny, VKEY_8},
     {DomCode::EQUAL, 0, 0, kAny, kAny, VKEY_OEM_PLUS},
     {DomCode::BRACKET_RIGHT, 0, 0, kAny, kAny, VKEY_OEM_PLUS},
-    {DomCode::SLASH, 1, 0, 0x0025, kAny, VKEY_OEM_8},       // %
-    {DomCode::SLASH, 1, 0, 0x002B, kAny, VKEY_OEM_PLUS},    // +
-    {DomCode::MINUS, 1, 1, 0x0025, kNone, VKEY_OEM_PLUS},    // %, NoSymbol
-    {DomCode::MINUS, 1, 1, 0x0025, 0x002D, VKEY_OEM_MINUS}};  // %, -
+    {DomCode::SLASH, 1, 0, 0x0025, kAny, VKEY_OEM_8},        // %
+    {DomCode::SLASH, 1, 0, 0x002B, kAny, VKEY_OEM_PLUS},     // +
+    {DomCode::MINUS, 1, 1, 0x0025, 0x002D, VKEY_OEM_MINUS},  // %, -
+    {DomCode::MINUS, 1, 0, 0x0025, kAny, VKEY_OEM_PLUS}};    // %, NoSymbol
 
 // U+003F ?
 const PrintableSubEntry kU003F[] = {
@@ -274,12 +270,7 @@ const PrintableSubEntry kU005F[] = {
 const PrintableSubEntry kU0060[] = {
     {DomCode::BACKQUOTE, 1, 0, kNone, kAny, VKEY_OEM_3},   // NoSymbol
     {DomCode::BACKQUOTE, 1, 0, 0x00AC, kAny, VKEY_OEM_8},   // not
-    {DomCode::BACKQUOTE, 1, 1, 0x007E, kNone, VKEY_OEM_3},   // ~, NoSymbol
-    {DomCode::BACKQUOTE, 1, 1, 0x007E, 0x0031, VKEY_OEM_3},   // ~, 1
-    {DomCode::BACKQUOTE, 1, 1, 0x007E, 0x003B, VKEY_OEM_3},   // ~, ;
-    {DomCode::BACKQUOTE, 1, 1, 0x007E, 0x0060, VKEY_OEM_3},   // ~, `
-    {DomCode::BACKQUOTE, 1, 1, 0x007E, 0x00BF, VKEY_OEM_3},   // ~, inverted ?
-    {DomCode::BACKQUOTE, 1, 1, 0x007E, 0x0151, VKEY_OEM_3}};  // ~, o''
+    {DomCode::BACKQUOTE, 1, 0, 0x007E, kAny, VKEY_OEM_3}};  // ~
 
 // U+00A7 section
 const PrintableSubEntry kU00A7[] = {
@@ -325,9 +316,7 @@ const PrintableSubEntry kU00E2[] = {
 const PrintableSubEntry kU00E4[] = {
     {DomCode::BRACKET_RIGHT, 0, 0, kAny, kAny, VKEY_OEM_6},
     {DomCode::QUOTE, 1, 0, 0x00E0, kAny, VKEY_OEM_5},   // a grave
-    {DomCode::QUOTE, 1, 1, 0x00C4, kNone, VKEY_OEM_7},   // A dia., NoSymbol
-    {DomCode::QUOTE, 1, 1, 0x00C4, 0x015A, VKEY_OEM_7},   // A dia., S acute
-    {DomCode::QUOTE, 1, 1, 0x00C4, 0x0159, VKEY_OEM_7}};  // A dia., r caron
+    {DomCode::QUOTE, 1, 0, 0x00C4, kAny, VKEY_OEM_7}};  // A dia.
 
 // U+00E6 ae
 const PrintableSubEntry kU00E6[] = {
@@ -342,8 +331,8 @@ const PrintableSubEntry kU00E7[] = {
     {DomCode::QUOTE, 0, 0, kAny, kAny, VKEY_OEM_7},
     {DomCode::BACKSLASH, 0, 0, kAny, kAny, VKEY_OEM_2},
     {DomCode::COMMA, 0, 0, kAny, kAny, VKEY_OEM_COMMA},
-    {DomCode::SEMICOLON, 1, 1, 0x00C7, kNone, VKEY_OEM_1},   // C ced., NoSy
-    {DomCode::SEMICOLON, 1, 1, 0x00C7, 0x00DE, VKEY_OEM_3}};  // C ced., Thorn
+    {DomCode::SEMICOLON, 1, 1, 0x00C7, 0x00DE, VKEY_OEM_3},  // C ced., Thorn
+    {DomCode::SEMICOLON, 1, 0, 0x00C7, kAny, VKEY_OEM_1}};   // C ced., NoSy
 
 // U+00E8 e grave
 const PrintableSubEntry kU00E8[] = {
@@ -384,9 +373,9 @@ const PrintableSubEntry kU00F6[] = {
     {DomCode::DIGIT0, 0, 0, kAny, kAny, VKEY_OEM_3},
     {DomCode::MINUS, 0, 0, kAny, kAny, VKEY_OEM_PLUS},
     {DomCode::BRACKET_LEFT, 0, 0, kAny, kAny, VKEY_OEM_4},
-    {DomCode::SEMICOLON, 1, 0, 0x00E9, kAny, VKEY_OEM_7},   // e acute
-    {DomCode::SEMICOLON, 1, 1, 0x00D6, kNone, VKEY_OEM_3},   // O dia., NoSy
-    {DomCode::SEMICOLON, 1, 1, 0x00D6, 0x0162, VKEY_OEM_3}};  // O dia., T ced.
+    {DomCode::SEMICOLON, 1, 0, 0x00E9, kAny, VKEY_OEM_7},    // e acute
+    {DomCode::SEMICOLON, 1, 1, 0x00D6, 0x0162, VKEY_OEM_3},  // O dia., T ced.
+    {DomCode::SEMICOLON, 1, 0, 0x00D6, kAny, VKEY_OEM_3}};   // O diaresis
 
 // U+00F8 o stroke
 const PrintableSubEntry kU00F8[] = {
@@ -406,10 +395,10 @@ const PrintableSubEntry kU00FA[] = {
 // U+00FC u diaeresis
 const PrintableSubEntry kU00FC[] = {
     {DomCode::KEY_W, 0, 0, kAny, kAny, VKEY_W},
-    {DomCode::BRACKET_LEFT, 1, 0, 0x00E8, kAny, VKEY_OEM_1},   // e grave
-    {DomCode::MINUS, 1, 1, 0x00DC, kNone, VKEY_OEM_2},          // U dia., NoSy
-    {DomCode::BRACKET_LEFT, 1, 1, 0x00DC, kNone, VKEY_OEM_1},   // U dia., NoSy
-    {DomCode::BRACKET_LEFT, 1, 1, 0x00DC, 0x0141, VKEY_OEM_3}};  // U dia., L-
+    {DomCode::BRACKET_LEFT, 1, 0, 0x00E8, kAny, VKEY_OEM_1},    // e grave
+    {DomCode::MINUS, 1, 0, 0x00DC, kAny, VKEY_OEM_2},           // U diaresis
+    {DomCode::BRACKET_LEFT, 1, 1, 0x00DC, 0x0141, VKEY_OEM_3},  // U dia., L-
+    {DomCode::BRACKET_LEFT, 1, 0, 0x00DC, kAny, VKEY_OEM_1}};   // U diaresis
 
 // U+0103 a breve
 const PrintableSubEntry kU0103[] = {
@@ -443,13 +432,13 @@ const PrintableSubEntry kU0117[] = {
 // U+0119 e ogonek
 const PrintableSubEntry kU0119[] = {
     {DomCode::DIGIT3, 0, 0, kAny, kAny, VKEY_3},
-    {DomCode::SLASH, 1, 1, 0x0118, kNone, VKEY_OEM_MINUS},  // E ogonek, NoSy
-    {DomCode::SLASH, 1, 1, 0x0118, 0x006E, VKEY_OEM_2}};     // E ogonek, n
+    {DomCode::SLASH, 1, 1, 0x0118, 0x006E, VKEY_OEM_2},     // E ogonek, n
+    {DomCode::SLASH, 1, 0, 0x0118, kAny, VKEY_OEM_MINUS}};  // E ogonek
 
 // U+012F i ogonek
 const PrintableSubEntry kU012F[] = {
     {DomCode::DIGIT5, 0, 0, kAny, kAny, VKEY_5},
-    {DomCode::BRACKET_LEFT, 1, 1, 0x012E, kNone, VKEY_OEM_4}};  // Iogonek, NoSy
+    {DomCode::BRACKET_LEFT, 1, 0, 0x012E, kAny, VKEY_OEM_4}};  // Iogonek
 
 // U+0142 l stroke
 const PrintableSubEntry kU0142[] = {
@@ -479,8 +468,8 @@ const PrintableSubEntry kU016B[] = {
 // U+0173 u ogonek
 const PrintableSubEntry kU0173[] = {
     {DomCode::DIGIT7, 0, 0, kAny, kAny, VKEY_7},
-    {DomCode::SEMICOLON, 1, 1, 0x0172, kNone, VKEY_OEM_3},   // U ogo., NoSy
-    {DomCode::SEMICOLON, 1, 1, 0x0172, 0x0162, VKEY_OEM_1}};  // U ogo., T ced.
+    {DomCode::SEMICOLON, 1, 1, 0x0172, 0x0162, VKEY_OEM_1},  // U ogo., T ced.
+    {DomCode::SEMICOLON, 1, 0, 0x0172, kAny, VKEY_OEM_3}};   // U ogonek
 
 // U+017C z dot above
 const PrintableSubEntry kU017C[] = {
@@ -625,32 +614,14 @@ const PrintableSimpleEntry kSimpleMap[] = {
     {0x0259, VKEY_OEM_3},      // schwa
 };
 
-void ParseLayoutName(const std::string& layout_name,
-                     std::string* layout_id,
-                     std::string* layout_variant) {
-  size_t dash_index = layout_name.find('-');
-  size_t parentheses_index = layout_name.find('(');
-  *layout_id = layout_name;
-  *layout_variant = "";
-  if (parentheses_index != std::string::npos) {
-    *layout_id = layout_name.substr(0, parentheses_index);
-    size_t close_index = layout_name.find(')', parentheses_index);
-    if (close_index == std::string::npos)
-      close_index = layout_name.size();
-    *layout_variant = layout_name.substr(parentheses_index + 1,
-                                         close_index - parentheses_index - 1);
-  } else if (dash_index != std::string::npos) {
-    *layout_id = layout_name.substr(0, dash_index);
-    *layout_variant = layout_name.substr(dash_index + 1);
-  }
-}
-
+#if defined(OS_CHROMEOS)
 void LoadKeymap(const std::string& layout_name,
                 scoped_refptr<base::SingleThreadTaskRunner> reply_runner,
                 const LoadKeymapCallback& reply_callback) {
   std::string layout_id;
   std::string layout_variant;
-  ParseLayoutName(layout_name, &layout_id, &layout_variant);
+  XkbKeyboardLayoutEngine::ParseLayoutName(layout_name, &layout_id,
+                                           &layout_variant);
   xkb_rule_names names = {.rules = NULL,
                           .model = "pc101",
                           .layout = layout_id.c_str(),
@@ -663,14 +634,15 @@ void LoadKeymap(const std::string& layout_name,
   keymap.reset(xkb_keymap_new_from_names(context.get(), &names,
                                          XKB_KEYMAP_COMPILE_NO_FLAGS));
   if (keymap) {
-    char* keymap_str =
-        xkb_keymap_get_as_string(keymap.get(), XKB_KEYMAP_FORMAT_TEXT_V1);
+    scoped_ptr<char, base::FreeDeleter> keymap_str(
+        xkb_keymap_get_as_string(keymap.get(), XKB_KEYMAP_FORMAT_TEXT_V1));
     reply_runner->PostTask(FROM_HERE, base::Bind(reply_callback, layout_name,
-                                                 base::Owned(keymap_str)));
+                                                 base::Passed(&keymap_str)));
   } else {
-    LOG(ERROR) << "Keymap file failed to load: " << layout_name;
+    LOG(FATAL) << "Keymap file failed to load: " << layout_name;
   }
 }
+#endif
 
 }  // anonymous namespace
 
@@ -733,18 +705,19 @@ bool XkbKeyboardLayoutEngine::SetCurrentLayoutByName(
   return true;
 }
 
-void XkbKeyboardLayoutEngine::OnKeymapLoaded(const std::string& layout_name,
-                                             const char* keymap_str) {
+void XkbKeyboardLayoutEngine::OnKeymapLoaded(
+    const std::string& layout_name,
+    scoped_ptr<char, base::FreeDeleter> keymap_str) {
   if (keymap_str) {
-    xkb_keymap* keymap = xkb_map_new_from_string(xkb_context_.get(), keymap_str,
-                                                 XKB_KEYMAP_FORMAT_TEXT_V1,
-                                                 XKB_KEYMAP_COMPILE_NO_FLAGS);
+    xkb_keymap* keymap = xkb_map_new_from_string(
+        xkb_context_.get(), keymap_str.get(), XKB_KEYMAP_FORMAT_TEXT_V1,
+        XKB_KEYMAP_COMPILE_NO_FLAGS);
     XkbKeymapEntry entry = {layout_name, keymap};
     xkb_keymaps_.push_back(entry);
     if (layout_name == current_layout_name_)
       SetKeymap(keymap);
   } else {
-    LOG(ERROR) << "Keymap file failed to load: " << layout_name;
+    LOG(FATAL) << "Keymap file failed to load: " << layout_name;
   }
 }
 
@@ -764,6 +737,8 @@ bool XkbKeyboardLayoutEngine::Lookup(DomCode dom_code,
                                      base::char16* character,
                                      KeyboardCode* key_code,
                                      uint32* platform_keycode) const {
+  if (dom_code == DomCode::NONE)
+    return false;
   // Convert DOM physical key to XKB representation.
   xkb_keycode_t xkb_keycode = key_code_converter_.DomCodeToXkbKeyCode(dom_code);
   if (xkb_keycode == key_code_converter_.InvalidXkbKeyCode()) {
@@ -788,6 +763,12 @@ bool XkbKeyboardLayoutEngine::Lookup(DomCode dom_code,
                                         xkb_keysym, *dom_key, *character);
       if (*key_code == VKEY_UNKNOWN)
         *key_code = DomCodeToNonLocatedKeyboardCode(dom_code);
+    }
+
+    if ((flags & EF_CONTROL_DOWN) == EF_CONTROL_DOWN) {
+      // Use GetCharacterFromKeyCode() to set |character| to 0x0 for key codes
+      // that we do not care about.
+      *character = GetCharacterFromKeyCode(*key_code, flags);
     }
   } else if (*dom_key == DomKey::DEAD) {
     *character = DeadXkbKeySymToCombiningCharacter(xkb_keysym);
@@ -949,6 +930,26 @@ base::char16 XkbKeyboardLayoutEngine::XkbSubCharacter(
   if (!XkbLookup(xkb_keycode, flags, &keysym, &character))
     character = kNone;
   return character;
+}
+
+void XkbKeyboardLayoutEngine::ParseLayoutName(const std::string& layout_name,
+                                              std::string* layout_id,
+                                              std::string* layout_variant) {
+  size_t dash_index = layout_name.find('-');
+  size_t parentheses_index = layout_name.find('(');
+  *layout_id = layout_name;
+  *layout_variant = "";
+  if (parentheses_index != std::string::npos) {
+    *layout_id = layout_name.substr(0, parentheses_index);
+    size_t close_index = layout_name.find(')', parentheses_index);
+    if (close_index == std::string::npos)
+      close_index = layout_name.size();
+    *layout_variant = layout_name.substr(parentheses_index + 1,
+                                         close_index - parentheses_index - 1);
+  } else if (dash_index != std::string::npos) {
+    *layout_id = layout_name.substr(0, dash_index);
+    *layout_variant = layout_name.substr(dash_index + 1);
+  }
 }
 
 }  // namespace ui

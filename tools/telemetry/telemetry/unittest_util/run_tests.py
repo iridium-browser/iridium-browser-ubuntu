@@ -3,14 +3,15 @@
 # found in the LICENSE file.
 import sys
 
-from telemetry import decorators
 from telemetry.core import browser_finder
 from telemetry.core import browser_finder_exceptions
 from telemetry.core import browser_options
 from telemetry.core import command_line
+from telemetry.core import device_finder
 from telemetry.core import util
-from telemetry.unittest_util import options_for_unittests
+from telemetry import decorators
 from telemetry.unittest_util import browser_test_case
+from telemetry.unittest_util import options_for_unittests
 
 util.AddDirToPythonPath(util.GetChromiumSrcDir(), 'third_party', 'typ')
 
@@ -34,7 +35,7 @@ class RunTestsCommand(command_line.OptparseCommand):
     return parser
 
   @classmethod
-  def AddCommandLineArgs(cls, parser):
+  def AddCommandLineArgs(cls, parser, _):
     parser.add_option('--repeat-count', type='int', default=1,
                       help='Repeats each a provided number of times.')
     parser.add_option('-d', '--also-run-disabled-tests',
@@ -54,7 +55,7 @@ class RunTestsCommand(command_line.OptparseCommand):
                                         reporting=True)
 
   @classmethod
-  def ProcessCommandLineArgs(cls, parser, args):
+  def ProcessCommandLineArgs(cls, parser, args, _):
     # We retry failures by default unless we're running a list of tests
     # explicitly.
     if not args.retry_limit and not args.positional_args:
@@ -74,10 +75,10 @@ class RunTestsCommand(command_line.OptparseCommand):
   def main(cls, args=None, stream=None):  # pylint: disable=W0221
     # We override the superclass so that we can hook in the 'stream' arg.
     parser = cls.CreateParser()
-    cls.AddCommandLineArgs(parser)
+    cls.AddCommandLineArgs(parser, None)
     options, positional_args = parser.parse_args(args)
     options.positional_args = positional_args
-    cls.ProcessCommandLineArgs(parser, options)
+    cls.ProcessCommandLineArgs(parser, options, None)
 
     obj = cls()
     if stream is not None:
@@ -96,11 +97,13 @@ class RunTestsCommand(command_line.OptparseCommand):
     # are long-running, so there's a limit to how much parallelism we
     # can effectively use for now anyway.
     #
-    # It should be possible to handle multiple devices if we adjust
-    # the browser_finder code properly, but for now we only handle the one
-    # on Android and ChromeOS.
-    if possible_browser.platform.GetOSName() in ('android', 'chromeos'):
+    # It should be possible to handle multiple devices if we adjust the
+    # browser_finder code properly, but for now we only handle one on ChromeOS.
+    if possible_browser.platform.GetOSName() == 'chromeos':
       runner.args.jobs = 1
+    elif possible_browser.platform.GetOSName() == 'android':
+      runner.args.jobs = len(device_finder.GetDevicesMatchingOptions(args))
+      print 'Running tests with %d Android device(s).' % runner.args.jobs
     elif possible_browser.platform.GetOSVersionName() == 'xp':
       # For an undiagnosed reason, XP falls over with more parallelism.
       # See crbug.com/388256
@@ -138,16 +141,9 @@ class RunTestsCommand(command_line.OptparseCommand):
 def GetClassifier(args, possible_browser):
   def ClassifyTest(test_set, test):
     name = test.id()
-    if args.positional_args:
-      if _MatchesSelectedTest(name, args.positional_args,
-                              args.exact_test_filter):
-        assert hasattr(test, '_testMethodName')
-        method = getattr(test, test._testMethodName) # pylint: disable=W0212
-        if decorators.ShouldBeIsolated(method, possible_browser):
-          test_set.isolated_tests.append(typ.TestInput(name))
-        else:
-          test_set.parallel_tests.append(typ.TestInput(name))
-    else:
+    if (not args.positional_args
+        or _MatchesSelectedTest(name, args.positional_args,
+                                args.exact_test_filter)):
       assert hasattr(test, '_testMethodName')
       method = getattr(test, test._testMethodName) # pylint: disable=W0212
       should_skip, reason = decorators.ShouldSkip(method, possible_browser)
@@ -172,6 +168,9 @@ def _MatchesSelectedTest(name, selected_tests, selected_tests_are_exact):
 
 def _SetUpProcess(child, context): # pylint: disable=W0613
   args = context
+  if args.device and args.device == 'android':
+    android_devices = device_finder.GetDevicesMatchingOptions(args)
+    args.device = android_devices[child.worker_num-1].guid
   options_for_unittests.Push(args)
 
 

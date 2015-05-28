@@ -97,8 +97,8 @@ class DataReductionProxyTamperDetectionTest : public testing::Test {
 
 // Tests function ValidateChromeProxyHeader.
 TEST_F(DataReductionProxyTamperDetectionTest, ChromeProxy) {
-  // |received_fingerprint| is not the actual fingerprint from data reduction
-  // proxy, instead, the base64 encoded field is in plain text (within "[]")
+  // |received_fingerprint| is not the actual fingerprint from Data Reduction
+  // Proxy, instead, the base64 encoded field is in plain text (within "[]")
   // and needs to be encoded first.
   struct {
     std::string label;
@@ -288,7 +288,7 @@ TEST_F(DataReductionProxyTamperDetectionTest, Via) {
       false,
     },
     {
-      "Checks the case that only the data reduction proxy's Via header occurs.",
+      "Checks the case that only the Data Reduction Proxy's Via header occurs.",
       "HTTP/1.1 200 OK\n"
       "Via:  1.1 Chrome-Compression-Proxy    \n",
       "",
@@ -296,60 +296,10 @@ TEST_F(DataReductionProxyTamperDetectionTest, Via) {
       true,
     },
     {
-      "Checks the case that there are ' ', i.e., empty value after the data"
-      " reduction proxy's Via header.",
+      "Checks the case that there are ' ', i.e., empty value after the Data"
+      " Reduction Proxy's Via header.",
       "HTTP/1.1 200 OK\n"
       "Via:  1.1 Chrome-Compression-Proxy  ,  , \n",
-      "",
-      false,
-      true,
-    },
-    {
-      "Checks the case when there is no Via header",
-      "HTTP/1.1 200 OK\n",
-      "",
-      true,
-      false,
-    },
-    // Same to above test cases, but with deprecated data reduciton proxy Via
-    // header.
-    {
-      "Checks the case that Chrome Compression Proxy occurs at the last.",
-      "HTTP/1.1 200 OK\n"
-      "Via: a, b, c, 1.1 Chrome Compression Proxy\n",
-      "",
-      false,
-      true,
-    },
-    {
-      "Checks when there is intermediary.",
-      "HTTP/1.1 200 OK\n"
-      "Via: a, b,  c,   1.1 Chrome Compression Proxy,    xyz\n",
-      "",
-      true,
-      true,
-    },
-    {
-      "Checks the case of empty Via header.",
-      "HTTP/1.1 200 OK\n"
-      "Via:  \n",
-      "",
-      true,
-      false,
-    },
-    {
-      "Checks the case that only the data reduction proxy's Via header occurs.",
-      "HTTP/1.1 200 OK\n"
-      "Via:  1.1 Chrome Compression Proxy    \n",
-      "",
-      false,
-      true,
-    },
-    {
-      "Checks the case that there are ' ', i.e., empty value after the data"
-      "reduction proxy's Via header.",
-      "HTTP/1.1 200 OK\n"
-      "Via:  1.1 Chrome Compression Proxy  ,  , \n",
       "",
       false,
       true,
@@ -384,7 +334,7 @@ TEST_F(DataReductionProxyTamperDetectionTest, Via) {
 // Tests function ValidateOtherHeaders.
 TEST_F(DataReductionProxyTamperDetectionTest, OtherHeaders) {
   // For following testcases, |received_fingerprint| is not the actual
-  // fingerprint from data reduction proxy, instead, the base64 encoded field
+  // fingerprint from Data Reduction Proxy, instead, the base64 encoded field
   // is in plain text (within "[]") and needs to be encoded first. For example,
   // "[12345;]|content-length" needs to be encoded to
   // "Base64Encoded(MD5(12345;))|content-length" before calling the checking
@@ -516,12 +466,14 @@ TEST_F(DataReductionProxyTamperDetectionTest, ContentLength) {
   struct {
     std::string label;
     std::string received_fingerprint;
-    int actual_content_length;
+    int64 actual_content_length;
+    int64 expected_original_content_length;
     bool expected_tampered_with;
   } test[] = {
     {
       "Checks the case fingerprint matches actual content length.",
       "12345",
+      12345,
       12345,
       false,
     },
@@ -529,6 +481,7 @@ TEST_F(DataReductionProxyTamperDetectionTest, ContentLength) {
       "Checks case that response got modified.",
       "12345",
       12346,
+      12345,
       true,
     },
   };
@@ -541,11 +494,15 @@ TEST_F(DataReductionProxyTamperDetectionTest, ContentLength) {
 
     DataReductionProxyTamperDetection tamper_detection(headers.get(), true, 0);
 
+    int64 original_content_length;
     bool tampered = tamper_detection.ValidateContentLength(
         test[i].received_fingerprint,
-        test[i].actual_content_length);
+        test[i].actual_content_length,
+        &original_content_length);
 
     EXPECT_EQ(test[i].expected_tampered_with, tampered) << test[i].label;
+    EXPECT_EQ(test[i].expected_original_content_length,
+              original_content_length) << test[i].label;
   }
 }
 
@@ -642,7 +599,7 @@ TEST_F(DataReductionProxyTamperDetectionTest, DetectAndReport) {
   struct {
     std::string label;
     std::string raw_header;
-    int content_length;
+    int64 content_length;
     bool expected_tampered_with;
   } test[] = {
     {

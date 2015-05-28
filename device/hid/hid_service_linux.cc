@@ -5,6 +5,7 @@
 #include "device/hid/hid_service_linux.h"
 
 #include <fcntl.h>
+#include <limits>
 #include <string>
 
 #include "base/bind.h"
@@ -12,16 +13,15 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
+#include "components/device_event_log/device_event_log.h"
 #include "device/hid/device_monitor_linux.h"
 #include "device/hid/hid_connection_linux.h"
-#include "device/hid/hid_device_info.h"
-#include "device/hid/hid_report_descriptor.h"
+#include "device/hid/hid_device_info_linux.h"
 #include "device/udev_linux/scoped_udev.h"
 
 #if defined(OS_CHROMEOS)
@@ -43,7 +43,7 @@ const char kSysfsReportDescriptorKey[] = "report_descriptor";
 }  // namespace
 
 struct HidServiceLinux::ConnectParams {
-  ConnectParams(scoped_refptr<HidDeviceInfo> device_info,
+  ConnectParams(scoped_refptr<HidDeviceInfoLinux> device_info,
                 const ConnectCallback& callback,
                 scoped_refptr<base::SingleThreadTaskRunner> task_runner,
                 scoped_refptr<base::SingleThreadTaskRunner> file_task_runner)
@@ -53,29 +53,32 @@ struct HidServiceLinux::ConnectParams {
         file_task_runner(file_task_runner) {}
   ~ConnectParams() {}
 
-  scoped_refptr<HidDeviceInfo> device_info;
+  scoped_refptr<HidDeviceInfoLinux> device_info;
   ConnectCallback callback;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner;
   scoped_refptr<base::SingleThreadTaskRunner> file_task_runner;
   base::File device_file;
 };
 
-class HidServiceLinux::Helper : public DeviceMonitorLinux::Observer,
-                                public base::MessageLoop::DestructionObserver {
+class HidServiceLinux::FileThreadHelper
+    : public DeviceMonitorLinux::Observer,
+      public base::MessageLoop::DestructionObserver {
  public:
-  Helper(base::WeakPtr<HidServiceLinux> service,
-         scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+  FileThreadHelper(base::WeakPtr<HidServiceLinux> service,
+                   scoped_refptr<base::SingleThreadTaskRunner> task_runner)
       : observer_(this), service_(service), task_runner_(task_runner) {
     DeviceMonitorLinux* monitor = DeviceMonitorLinux::GetInstance();
     observer_.Add(monitor);
     monitor->Enumerate(
-        base::Bind(&Helper::OnDeviceAdded, base::Unretained(this)));
+        base::Bind(&FileThreadHelper::OnDeviceAdded, base::Unretained(this)));
     task_runner->PostTask(
         FROM_HERE,
         base::Bind(&HidServiceLinux::FirstEnumerationComplete, service_));
   }
 
-  ~Helper() override { DCHECK(thread_checker_.CalledOnValidThread()); }
+  ~FileThreadHelper() override {
+    DCHECK(thread_checker_.CalledOnValidThread());
+  }
 
  private:
   // DeviceMonitorLinux::Observer:
@@ -85,19 +88,18 @@ class HidServiceLinux::Helper : public DeviceMonitorLinux::Observer,
     if (!device_path) {
       return;
     }
+    HidDeviceId device_id = device_path;
+
     const char* subsystem = udev_device_get_subsystem(device);
     if (!subsystem || strcmp(subsystem, kHidrawSubsystem) != 0) {
       return;
     }
 
-    scoped_refptr<HidDeviceInfo> device_info(new HidDeviceInfo());
-    device_info->device_id_ = device_path;
-
     const char* str_property = udev_device_get_devnode(device);
     if (!str_property) {
       return;
     }
-    device_info->device_node_ = str_property;
+    std::string device_node = str_property;
 
     udev_device* parent = udev_device_get_parent(device);
     if (!parent) {
@@ -116,22 +118,28 @@ class HidServiceLinux::Helper : public DeviceMonitorLinux::Observer,
     }
 
     uint32_t int_property = 0;
-    if (HexStringToUInt(base::StringPiece(parts[1]), &int_property)) {
-      device_info->vendor_id_ = int_property;
+    if (!HexStringToUInt(base::StringPiece(parts[1]), &int_property) ||
+        int_property > std::numeric_limits<uint16_t>::max()) {
+      return;
     }
+    uint16_t vendor_id = int_property;
 
-    if (HexStringToUInt(base::StringPiece(parts[2]), &int_property)) {
-      device_info->product_id_ = int_property;
+    if (!HexStringToUInt(base::StringPiece(parts[2]), &int_property) ||
+        int_property > std::numeric_limits<uint16_t>::max()) {
+      return;
     }
+    uint16_t product_id = int_property;
 
+    std::string serial_number;
     str_property = udev_device_get_property_value(parent, kHIDUnique);
     if (str_property != NULL) {
-      device_info->serial_number_ = str_property;
+      serial_number = str_property;
     }
 
+    std::string product_name;
     str_property = udev_device_get_property_value(parent, kHIDName);
     if (str_property != NULL) {
-      device_info->product_name_ = str_property;
+      product_name = str_property;
     }
 
     const char* parent_sysfs_path = udev_device_get_syspath(parent);
@@ -146,14 +154,12 @@ class HidServiceLinux::Helper : public DeviceMonitorLinux::Observer,
       return;
     }
 
-    HidReportDescriptor report_descriptor(
-        reinterpret_cast<uint8_t*>(&report_descriptor_str[0]),
-        report_descriptor_str.length());
-    report_descriptor.GetDetails(&device_info->collections_,
-                                 &device_info->has_report_id_,
-                                 &device_info->max_input_report_size_,
-                                 &device_info->max_output_report_size_,
-                                 &device_info->max_feature_report_size_);
+    scoped_refptr<HidDeviceInfo> device_info(new HidDeviceInfoLinux(
+        device_id, device_node, vendor_id, product_id, product_name,
+        serial_number,
+        kHIDBusTypeUSB,  // TODO(reillyg): Detect Bluetooth. crbug.com/443335
+        std::vector<uint8>(report_descriptor_str.begin(),
+                           report_descriptor_str.end())));
 
     task_runner_->PostTask(FROM_HERE, base::Bind(&HidServiceLinux::AddDevice,
                                                  service_, device_info));
@@ -202,7 +208,7 @@ void HidServiceLinux::StartHelper(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   // Helper is a message loop destruction observer and will delete itself when
   // this thread's message loop is destroyed.
-  new Helper(weak_ptr, task_runner);
+  new FileThreadHelper(weak_ptr, task_runner);
 }
 
 void HidServiceLinux::Connect(const HidDeviceId& device_id,
@@ -214,7 +220,8 @@ void HidServiceLinux::Connect(const HidDeviceId& device_id,
     task_runner_->PostTask(FROM_HERE, base::Bind(callback, nullptr));
     return;
   }
-  scoped_refptr<HidDeviceInfo> device_info = map_entry->second;
+  scoped_refptr<HidDeviceInfoLinux> device_info =
+      static_cast<HidDeviceInfoLinux*>(map_entry->second.get());
 
   scoped_ptr<ConnectParams> params(new ConnectParams(
       device_info, callback, task_runner_, file_task_runner_));
@@ -275,29 +282,30 @@ void HidServiceLinux::OpenDevice(scoped_ptr<ConnectParams> params) {
     base::File::Error file_error = device_file.error_details();
 
     if (file_error == base::File::FILE_ERROR_ACCESS_DENIED) {
-      VLOG(1) << "Access denied opening device read-write, trying read-only.";
+      HID_LOG(EVENT)
+          << "Access denied opening device read-write, trying read-only.";
       flags = base::File::FLAG_OPEN | base::File::FLAG_READ;
       device_file.Initialize(device_path, flags);
     }
   }
   if (!device_file.IsValid()) {
-    LOG(ERROR) << "Failed to open '" << params->device_info->device_node()
-               << "': "
-               << base::File::ErrorToString(device_file.error_details());
+    HID_LOG(EVENT) << "Failed to open '" << params->device_info->device_node()
+                   << "': "
+                   << base::File::ErrorToString(device_file.error_details());
     task_runner->PostTask(FROM_HERE, base::Bind(params->callback, nullptr));
     return;
   }
 
   int result = fcntl(device_file.GetPlatformFile(), F_GETFL);
   if (result == -1) {
-    PLOG(ERROR) << "Failed to get flags from the device file descriptor";
+    HID_PLOG(ERROR) << "Failed to get flags from the device file descriptor";
     task_runner->PostTask(FROM_HERE, base::Bind(params->callback, nullptr));
     return;
   }
 
   result = fcntl(device_file.GetPlatformFile(), F_SETFL, result | O_NONBLOCK);
   if (result == -1) {
-    PLOG(ERROR) << "Failed to set the non-blocking flag on the device fd";
+    HID_PLOG(ERROR) << "Failed to set the non-blocking flag on the device fd";
     task_runner->PostTask(FROM_HERE, base::Bind(params->callback, nullptr));
     return;
   }

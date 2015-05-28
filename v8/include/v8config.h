@@ -42,8 +42,8 @@
     ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) >=   \
      ((major) * 10000 + (minor) * 100 + (patchlevel)))
 #elif defined(__GNUC__) && defined(__GNUC_MINOR__)
-# define V8_GNUC_PREREQ(major, minor, patchlevel)       \
-    ((__GNUC__ * 10000 + __GNUC_MINOR__) >=             \
+# define V8_GNUC_PREREQ(major, minor, patchlevel)      \
+    ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) >=      \
      ((major) * 10000 + (minor) * 100 + (patchlevel)))
 #else
 # define V8_GNUC_PREREQ(major, minor, patchlevel) 0
@@ -67,6 +67,7 @@
 //  V8_OS_POSIX         - POSIX compatible (mostly everything except Windows)
 //  V8_OS_QNX           - QNX Neutrino
 //  V8_OS_SOLARIS       - Sun Solaris and OpenSolaris
+//  V8_OS_AIX           - AIX
 //  V8_OS_WIN           - Microsoft Windows
 
 #if defined(__ANDROID__)
@@ -89,6 +90,9 @@
 #elif defined(__sun)
 # define V8_OS_POSIX 1
 # define V8_OS_SOLARIS 1
+#elif defined(_AIX)
+#define V8_OS_POSIX 1
+#define V8_OS_AIX 1
 #elif defined(__FreeBSD__)
 # define V8_OS_BSD 1
 # define V8_OS_FREEBSD 1
@@ -181,6 +185,7 @@
 //  V8_HAS_DECLSPEC_ALIGN               - __declspec(align(n)) supported
 //  V8_HAS_DECLSPEC_DEPRECATED          - __declspec(deprecated) supported
 //  V8_HAS_DECLSPEC_NOINLINE            - __declspec(noinline) supported
+//  V8_HAS_DECLSPEC_SELECTANY           - __declspec(selectany) supported
 //  V8_HAS___FINAL                      - __final supported in non-C++11 mode
 //  V8_HAS___FORCEINLINE                - __forceinline supported
 //
@@ -285,6 +290,7 @@
 # define V8_HAS_DECLSPEC_ALIGN 1
 # define V8_HAS_DECLSPEC_DEPRECATED 1
 # define V8_HAS_DECLSPEC_NOINLINE 1
+# define V8_HAS_DECLSPEC_SELECTANY 1
 
 # define V8_HAS___FORCEINLINE 1
 
@@ -331,6 +337,10 @@ declarator __attribute__((deprecated))
 #else
 # define V8_DEPRECATED(message, declarator) declarator
 #endif
+
+
+// a macro to make it easier to see what will be deprecated.
+#define V8_DEPRECATE_SOON(message, declarator) declarator
 
 
 // A macro to provide the compiler with branch prediction information.
@@ -413,6 +423,15 @@ declarator __attribute__((deprecated))
 // should only be used as a last resort.
 namespace v8 { template <typename T> class AlignOfHelper { char c; T t; }; }
 # define V8_ALIGNOF(type) (sizeof(::v8::AlignOfHelper<type>) - sizeof(type))
+#endif
+
+// Annotate a function indicating the caller must examine the return value.
+// Use like:
+//   int foo() WARN_UNUSED_RESULT;
+#if V8_HAS_ATTRIBUTE_WARN_UNUSED_RESULT
+#define V8_WARN_UNUSED_RESULT __attribute__((warn_unused_result))
+#else
+#define V8_WARN_UNUSED_RESULT /* NOT SUPPORTED */
 #endif
 
 #endif  // V8CONFIG_H_

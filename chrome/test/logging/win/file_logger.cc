@@ -10,12 +10,12 @@
 
 #include <ios>
 
-#include "base/debug/trace_event_win.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/logging_win.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event_win.h"
 #include "base/win/event_trace_consumer.h"
 #include "base/win/registry.h"
 
@@ -50,7 +50,7 @@ const struct {
   { &kChromeTraceProviderName, 255, 0 },
   { &kChromeFrameProvider, 255, 0 },
   { &kChromeTestsProvider, 255, 0 },
-  { &base::debug::kChromeTraceProviderName, 255, 0 }
+  { &base::trace_event::kChromeTraceProviderName, 255, 0 }
 };
 
 static_assert((1 << arraysize(kProviders)) - 1 ==

@@ -385,7 +385,7 @@ void MediaStreamDevicesController::Accept(bool update_content_setting) {
     if (update_content_setting) {
       if ((IsSchemeSecure() && !devices.empty()) ||
           request_.request_type == content::MEDIA_OPEN_DEVICE) {
-        SetPermission(true);
+        StorePermission(true);
       }
     }
 
@@ -424,8 +424,9 @@ void MediaStreamDevicesController::Deny(
   NotifyUIRequestDenied();
 
   if (update_content_setting) {
+    // Store sticky permissions if |update_content_setting|.
     CHECK_EQ(content::MEDIA_DEVICE_PERMISSION_DENIED, result);
-    SetPermission(false);
+    StorePermission(false);
   }
 
   content::MediaResponseCallback cb = callback_;
@@ -499,8 +500,12 @@ void MediaStreamDevicesController::RequestFinished() {
 
 bool MediaStreamDevicesController::IsRequestAllowedByDefault() const {
   // The request from internal objects like chrome://URLs is always allowed.
-  if (CheckAllowAllMediaStreamContentForOrigin(profile_,
-                                               request_.security_origin)) {
+  if (CheckAllowAllMediaStreamContentForOrigin(
+          profile_, request_.security_origin,
+          CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC) &&
+      CheckAllowAllMediaStreamContentForOrigin(
+          profile_, request_.security_origin,
+          CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA)) {
     return true;
   }
 
@@ -585,13 +590,12 @@ int MediaStreamDevicesController::FilterBlockedByDefaultDevices() {
 
 bool MediaStreamDevicesController::IsDefaultMediaAccessBlocked() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // TODO(markusheintz): Replace CONTENT_SETTINGS_TYPE_MEDIA_STREAM with the
-  // appropriate new CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC and
-  // CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA.
-  ContentSetting current_setting =
-      profile_->GetHostContentSettingsMap()->GetDefaultContentSetting(
-          CONTENT_SETTINGS_TYPE_MEDIASTREAM, NULL);
-  return (current_setting == CONTENT_SETTING_BLOCK);
+  return (profile_->GetHostContentSettingsMap()->GetDefaultContentSetting(
+              CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, NULL)
+          == CONTENT_SETTING_BLOCK &&
+          profile_->GetHostContentSettingsMap()->GetDefaultContentSetting(
+              CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, NULL)
+          == CONTENT_SETTING_BLOCK);
 }
 
 bool MediaStreamDevicesController::IsSchemeSecure() const {
@@ -599,7 +603,7 @@ bool MediaStreamDevicesController::IsSchemeSecure() const {
       request_.security_origin.SchemeIs(extensions::kExtensionScheme);
 }
 
-void MediaStreamDevicesController::SetPermission(bool allowed) const {
+void MediaStreamDevicesController::StorePermission(bool allowed) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   ContentSettingsPattern primary_pattern =
       ContentSettingsPattern::FromURLNoWildcard(request_.security_origin);

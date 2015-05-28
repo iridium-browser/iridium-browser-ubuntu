@@ -21,9 +21,11 @@ public:
     static ServiceWorkerClients* create();
 
     // Clients.idl
-    ScriptPromise getAll(ScriptState*, const ClientQueryOptions&);
+    ScriptPromise matchAll(ScriptState*, const ClientQueryOptions&);
+    ScriptPromise openWindow(ScriptState*, const String& url);
+    ScriptPromise claim(ScriptState*);
 
-    void trace(Visitor*) { }
+    DEFINE_INLINE_TRACE() { }
 
 private:
     ServiceWorkerClients();

@@ -26,44 +26,26 @@
 #include "config.h"
 #include "core/inspector/InspectorConsoleAgent.h"
 
-#include "bindings/core/v8/ScriptCallStackFactory.h"
-#include "bindings/core/v8/ScriptProfiler.h"
-#include "core/frame/LocalFrame.h"
-#include "core/frame/UseCounter.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/ConsoleMessageStorage.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InjectedScript.h"
-#include "core/inspector/InjectedScriptHost.h"
 #include "core/inspector/InjectedScriptManager.h"
 #include "core/inspector/InspectorState.h"
 #include "core/inspector/InstrumentingAgents.h"
 #include "core/inspector/ScriptArguments.h"
 #include "core/inspector/ScriptAsyncCallStack.h"
-#include "core/inspector/ScriptCallFrame.h"
-#include "core/inspector/ScriptCallStack.h"
-#include "core/loader/DocumentLoader.h"
-#include "core/page/Page.h"
-#include "core/xmlhttprequest/XMLHttpRequest.h"
-#include "platform/network/ResourceError.h"
-#include "platform/network/ResourceResponse.h"
-#include "wtf/CurrentTime.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
-#include "wtf/text/StringBuilder.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
 namespace ConsoleAgentState {
-static const char monitoringXHR[] = "monitoringXHR";
 static const char consoleMessagesEnabled[] = "consoleMessagesEnabled";
 }
 
 InspectorConsoleAgent::InspectorConsoleAgent(InjectedScriptManager* injectedScriptManager)
-    : InspectorBaseAgent<InspectorConsoleAgent>("Console")
+    : InspectorBaseAgent<InspectorConsoleAgent, InspectorFrontend::Console>("Console")
     , m_injectedScriptManager(injectedScriptManager)
-    , m_frontend(nullptr)
     , m_enabled(false)
 {
 }
@@ -75,7 +57,7 @@ InspectorConsoleAgent::~InspectorConsoleAgent()
 #endif
 }
 
-void InspectorConsoleAgent::trace(Visitor* visitor)
+DEFINE_TRACE(InspectorConsoleAgent)
 {
     visitor->trace(m_injectedScriptManager);
     InspectorBaseAgent::trace(visitor);
@@ -114,58 +96,24 @@ void InspectorConsoleAgent::disable(ErrorString*)
     m_state->setBoolean(ConsoleAgentState::consoleMessagesEnabled, false);
 }
 
-void InspectorConsoleAgent::clearMessages(ErrorString*)
-{
-    messageStorage()->clear();
-}
-
 void InspectorConsoleAgent::restore()
 {
     if (m_state->getBoolean(ConsoleAgentState::consoleMessagesEnabled)) {
-        m_frontend->messagesCleared();
+        frontend()->messagesCleared();
         ErrorString error;
         enable(&error);
     }
 }
 
-void InspectorConsoleAgent::setFrontend(InspectorFrontend* frontend)
-{
-    m_frontend = frontend->console();
-}
-
-void InspectorConsoleAgent::clearFrontend()
-{
-    m_frontend = nullptr;
-    String errorString;
-    disable(&errorString);
-}
-
 void InspectorConsoleAgent::addMessageToConsole(ConsoleMessage* consoleMessage)
 {
-    if (m_frontend)
-        sendConsoleMessageToFrontend(consoleMessage, true);
+    sendConsoleMessageToFrontend(consoleMessage, true);
 }
 
 void InspectorConsoleAgent::consoleMessagesCleared()
 {
     m_injectedScriptManager->releaseObjectGroup("console");
-    if (m_frontend)
-        m_frontend->messagesCleared();
-}
-
-void InspectorConsoleAgent::didFinishXHRLoading(XMLHttpRequest*, ThreadableLoaderClient*, unsigned long requestIdentifier, ScriptString, const AtomicString& method, const String& url)
-{
-    if (m_frontend && m_state->getBoolean(ConsoleAgentState::monitoringXHR)) {
-        String message = "XHR finished loading: " + method + " \"" + url + "\".";
-        RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(NetworkMessageSource, DebugMessageLevel, message);
-        consoleMessage->setRequestIdentifier(requestIdentifier);
-        messageStorage()->reportMessage(consoleMessage.release());
-    }
-}
-
-void InspectorConsoleAgent::setMonitoringXHREnabled(ErrorString*, bool enabled)
-{
-    m_state->setBoolean(ConsoleAgentState::monitoringXHR, enabled);
+    frontend()->messagesCleared();
 }
 
 static TypeBuilder::Console::ConsoleMessage::Source::Enum messageSourceValue(MessageSource source)
@@ -273,34 +221,8 @@ void InspectorConsoleAgent::sendConsoleMessageToFrontend(ConsoleMessage* console
         if (asyncCallStack)
             jsonObj->setAsyncStackTrace(asyncCallStack->buildInspectorObject());
     }
-    m_frontend->messageAdded(jsonObj);
-    m_frontend->flush();
-}
-
-class InspectableHeapObject final : public InjectedScriptHost::InspectableObject {
-public:
-    explicit InspectableHeapObject(int heapObjectId) : m_heapObjectId(heapObjectId) { }
-    virtual ScriptValue get(ScriptState*) override
-    {
-        return ScriptProfiler::objectByHeapObjectId(m_heapObjectId);
-    }
-private:
-    int m_heapObjectId;
-};
-
-void InspectorConsoleAgent::addInspectedHeapObject(ErrorString*, int inspectedHeapObjectId)
-{
-    m_injectedScriptManager->injectedScriptHost()->addInspectedObject(adoptPtr(new InspectableHeapObject(inspectedHeapObjectId)));
-}
-
-void InspectorConsoleAgent::setLastEvaluationResult(ErrorString* errorString, const String& objectId)
-{
-    InjectedScript injectedScript = m_injectedScriptManager->injectedScriptForObjectId(objectId);
-    if (injectedScript.isEmpty()) {
-        *errorString = "Inspected frame has gone";
-        return;
-    }
-    injectedScript.setLastEvaluationResult(objectId);
+    frontend()->messageAdded(jsonObj);
+    frontend()->flush();
 }
 
 } // namespace blink

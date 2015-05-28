@@ -17,18 +17,19 @@
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
-#include "chrome/browser/chromeos/login/users/fake_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/user_manager/fake_user_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/chromeos/fake_ime_keyboard.h"
 #include "ui/events/event.h"
 #include "ui/events/event_rewriter.h"
+#include "ui/events/event_utils.h"
 #include "ui/events/test/events_test_utils.h"
 #include "ui/events/test/test_event_processor.h"
 
@@ -44,7 +45,7 @@
 namespace {
 
 // The device id of the test touchpad device.
-const unsigned int kTouchPadDeviceId = 1;
+const int kTouchPadDeviceId = 1;
 const int kKeyboardDeviceId = 2;
 const int kMasterKeyboardDeviceId = 3;
 
@@ -222,12 +223,12 @@ namespace chromeos {
 class EventRewriterTest : public ash::test::AshTestBase {
  public:
   EventRewriterTest()
-      : fake_user_manager_(new chromeos::FakeUserManager),
+      : fake_user_manager_(new user_manager::FakeUserManager),
         user_manager_enabler_(fake_user_manager_),
         input_method_manager_mock_(NULL) {}
-  virtual ~EventRewriterTest() {}
+  ~EventRewriterTest() override {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     input_method_manager_mock_ =
         new chromeos::input_method::MockInputMethodManager;
     chromeos::input_method::InitializeForTesting(
@@ -236,7 +237,7 @@ class EventRewriterTest : public ash::test::AshTestBase {
     AshTestBase::SetUp();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     AshTestBase::TearDown();
     // Shutdown() deletes the IME mock object.
     chromeos::input_method::Shutdown();
@@ -255,7 +256,7 @@ class EventRewriterTest : public ash::test::AshTestBase {
                       : &event;
   }
 
-  chromeos::FakeUserManager* fake_user_manager_;  // Not owned.
+  user_manager::FakeUserManager* fake_user_manager_;  // Not owned.
   chromeos::ScopedUserManagerEnabler user_manager_enabler_;
   chromeos::input_method::MockInputMethodManager* input_method_manager_mock_;
 };
@@ -1775,7 +1776,7 @@ TEST_F(EventRewriterTest, TestRewriteNonNativeEvent) {
 class EventBuffer : public ui::test::TestEventProcessor {
  public:
   EventBuffer() {}
-  virtual ~EventBuffer() {}
+  ~EventBuffer() override {}
 
   void PopEvents(ScopedVector<ui::Event>* events) {
     events->clear();
@@ -1784,8 +1785,7 @@ class EventBuffer : public ui::test::TestEventProcessor {
 
  private:
   // ui::EventProcessor overrides:
-  virtual ui::EventDispatchDetails OnEventFromSource(
-      ui::Event* event) override {
+  ui::EventDispatchDetails OnEventFromSource(ui::Event* event) override {
     if (event->IsKeyEvent()) {
       events_.push_back(new ui::KeyEvent(*static_cast<ui::KeyEvent*>(event)));
     } else if (event->IsMouseWheelEvent()) {
@@ -1808,9 +1808,7 @@ class TestEventSource : public ui::EventSource {
  public:
   explicit TestEventSource(ui::EventProcessor* processor)
       : processor_(processor) {}
-  virtual ui::EventProcessor* GetEventProcessor() override {
-    return processor_;
-  }
+  ui::EventProcessor* GetEventProcessor() override { return processor_; }
   ui::EventDispatchDetails Send(ui::Event* event) {
     return SendEventToProcessor(event);
   }
@@ -1824,9 +1822,9 @@ class EventRewriterAshTest : public ash::test::AshTestBase {
  public:
   EventRewriterAshTest()
       : source_(&buffer_),
-        fake_user_manager_(new chromeos::FakeUserManager),
+        fake_user_manager_(new user_manager::FakeUserManager),
         user_manager_enabler_(fake_user_manager_) {}
-  virtual ~EventRewriterAshTest() {}
+  ~EventRewriterAshTest() override {}
 
   bool RewriteFunctionKeys(const ui::Event& event,
                            scoped_ptr<ui::Event>* rewritten_event) {
@@ -1855,7 +1853,7 @@ class EventRewriterAshTest : public ash::test::AshTestBase {
     buffer_.PopEvents(events);
   }
 
-  virtual void SetUp() override {
+  void SetUp() override {
     AshTestBase::SetUp();
     sticky_keys_controller_ =
         ash::Shell::GetInstance()->sticky_keys_controller();
@@ -1869,7 +1867,7 @@ class EventRewriterAshTest : public ash::test::AshTestBase {
     sticky_keys_controller_->Enable(true);
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     rewriter_.reset();
     AshTestBase::TearDown();
   }
@@ -1883,7 +1881,7 @@ class EventRewriterAshTest : public ash::test::AshTestBase {
   EventBuffer buffer_;
   TestEventSource source_;
 
-  chromeos::FakeUserManager* fake_user_manager_;  // Not owned.
+  user_manager::FakeUserManager* fake_user_manager_;  // Not owned.
   chromeos::ScopedUserManagerEnabler user_manager_enabler_;
   TestingPrefServiceSyncable prefs_;
 
@@ -1937,7 +1935,7 @@ TEST_F(EventRewriterAshTest, TopRowKeysAreFunctionKeys) {
 }
 
 TEST_F(EventRewriterTest, TestRewrittenModifierClick) {
-  std::vector<unsigned int> device_list;
+  std::vector<int> device_list;
   device_list.push_back(10);
   ui::TouchFactory::GetInstance()->SetPointerDeviceForTest(device_list);
 
@@ -1976,7 +1974,7 @@ TEST_F(EventRewriterTest, TestRewrittenModifierClick) {
 TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
   // TODO(kpschoedel): pending changes for crbug.com/360377
   // to |chromeos::EventRewriter::RewriteLocatedEvent()
-  std::vector<unsigned int> device_list;
+  std::vector<int> device_list;
   device_list.push_back(10);
   device_list.push_back(11);
   ui::TouchFactory::GetInstance()->SetPointerDeviceForTest(device_list);
@@ -1987,10 +1985,8 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
 
   // Test Alt + Left click.
   {
-    ui::MouseEvent press(ui::ET_MOUSE_PRESSED,
-                         gfx::Point(),
-                         gfx::Point(),
-                         kLeftAndAltFlag,
+    ui::MouseEvent press(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
+                         ui::EventTimeForNow(), kLeftAndAltFlag,
                          ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_press(&press);
     test_press.set_source_device_id(10);
@@ -2005,10 +2001,8 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     EXPECT_EQ(ui::EF_RIGHT_MOUSE_BUTTON, result->changed_button_flags());
   }
   {
-    ui::MouseEvent release(ui::ET_MOUSE_RELEASED,
-                           gfx::Point(),
-                           gfx::Point(),
-                           kLeftAndAltFlag,
+    ui::MouseEvent release(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(),
+                           ui::EventTimeForNow(), kLeftAndAltFlag,
                            ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_release(&release);
     test_release.set_source_device_id(10);
@@ -2052,10 +2046,8 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
 
   // No ALT in frst click.
   {
-    ui::MouseEvent press(ui::ET_MOUSE_PRESSED,
-                         gfx::Point(),
-                         gfx::Point(),
-                         ui::EF_LEFT_MOUSE_BUTTON,
+    ui::MouseEvent press(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
+                         ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                          ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_press(&press);
     test_press.set_source_device_id(10);
@@ -2066,10 +2058,8 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     EXPECT_EQ(ui::EF_LEFT_MOUSE_BUTTON, result->changed_button_flags());
   }
   {
-    ui::MouseEvent release(ui::ET_MOUSE_RELEASED,
-                           gfx::Point(),
-                           gfx::Point(),
-                           kLeftAndAltFlag,
+    ui::MouseEvent release(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(),
+                           ui::EventTimeForNow(), kLeftAndAltFlag,
                            ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_release(&release);
     test_release.set_source_device_id(10);
@@ -2107,10 +2097,8 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
 
   // ALT on different device.
   {
-    ui::MouseEvent press(ui::ET_MOUSE_PRESSED,
-                         gfx::Point(),
-                         gfx::Point(),
-                         kLeftAndAltFlag,
+    ui::MouseEvent press(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
+                         ui::EventTimeForNow(), kLeftAndAltFlag,
                          ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_press(&press);
     test_press.set_source_device_id(11);
@@ -2122,10 +2110,8 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     EXPECT_EQ(ui::EF_RIGHT_MOUSE_BUTTON, result->changed_button_flags());
   }
   {
-    ui::MouseEvent release(ui::ET_MOUSE_RELEASED,
-                           gfx::Point(),
-                           gfx::Point(),
-                           kLeftAndAltFlag,
+    ui::MouseEvent release(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(),
+                           ui::EventTimeForNow(), kLeftAndAltFlag,
                            ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_release(&release);
     test_release.set_source_device_id(10);
@@ -2136,10 +2122,8 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     EXPECT_EQ(ui::EF_LEFT_MOUSE_BUTTON, result->changed_button_flags());
   }
   {
-    ui::MouseEvent release(ui::ET_MOUSE_RELEASED,
-                           gfx::Point(),
-                           gfx::Point(),
-                           kLeftAndAltFlag,
+    ui::MouseEvent release(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(),
+                           ui::EventTimeForNow(), kLeftAndAltFlag,
                            ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_release(&release);
     test_release.set_source_device_id(11);
@@ -2233,10 +2217,8 @@ TEST_F(EventRewriterAshTest, MouseEventDispatchImpl) {
 
   // Test mouse press event is correctly modified.
   gfx::Point location(0, 0);
-  ui::MouseEvent press(ui::ET_MOUSE_PRESSED,
-                       location,
-                       location,
-                       ui::EF_LEFT_MOUSE_BUTTON,
+  ui::MouseEvent press(ui::ET_MOUSE_PRESSED, location, location,
+                       ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                        ui::EF_LEFT_MOUSE_BUTTON);
   ui::EventDispatchDetails details = Send(&press);
   ASSERT_FALSE(details.dispatcher_destroyed);
@@ -2247,10 +2229,8 @@ TEST_F(EventRewriterAshTest, MouseEventDispatchImpl) {
 
   // Test mouse release event is correctly modified and modifier release
   // event is sent. The mouse event should have the correct DIP location.
-  ui::MouseEvent release(ui::ET_MOUSE_RELEASED,
-                         location,
-                         location,
-                         ui::EF_LEFT_MOUSE_BUTTON,
+  ui::MouseEvent release(ui::ET_MOUSE_RELEASED, location, location,
+                         ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                          ui::EF_LEFT_MOUSE_BUTTON);
   details = Send(&release);
   ASSERT_FALSE(details.dispatcher_destroyed);
@@ -2271,10 +2251,8 @@ TEST_F(EventRewriterAshTest, MouseWheelEventDispatchImpl) {
   SendActivateStickyKeyPattern(ui::VKEY_CONTROL);
   PopEvents(&events);
   gfx::Point location(0, 0);
-  ui::MouseEvent mev(ui::ET_MOUSEWHEEL,
-                     location,
-                     location,
-                     ui::EF_LEFT_MOUSE_BUTTON,
+  ui::MouseEvent mev(ui::ET_MOUSEWHEEL, location, location,
+                     ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                      ui::EF_LEFT_MOUSE_BUTTON);
   ui::MouseWheelEvent positive(mev, 0, ui::MouseWheelEvent::kWheelDelta);
   ui::EventDispatchDetails details = Send(&positive);
@@ -2307,9 +2285,9 @@ class StickyKeysOverlayTest : public EventRewriterAshTest {
  public:
   StickyKeysOverlayTest() : overlay_(NULL) {}
 
-  virtual ~StickyKeysOverlayTest() {}
+  ~StickyKeysOverlayTest() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     EventRewriterAshTest::SetUp();
     overlay_ = sticky_keys_controller_->GetOverlayForTest();
     ASSERT_TRUE(overlay_);

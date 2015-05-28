@@ -142,6 +142,7 @@ CollectVariables::CollectVariables(std::vector<sh::Attribute> *attribs,
       mPointCoordAdded(false),
       mFrontFacingAdded(false),
       mFragCoordAdded(false),
+      mInstanceIDAdded(false),
       mPositionAdded(false),
       mPointSizeAdded(false),
       mLastFragDataAdded(false),
@@ -250,6 +251,22 @@ void CollectVariables::visitSymbol(TIntermSymbol *symbol)
                 mPointCoordAdded = true;
             }
             return;
+          case EvqInstanceID:
+            if (!mInstanceIDAdded)
+            {
+                Attribute info;
+                const char kName[] = "gl_InstanceID";
+                info.name = kName;
+                info.mappedName = kName;
+                info.type = GL_INT;
+                info.arraySize = 0;
+                info.precision = GL_HIGH_INT;  // Defined by spec.
+                info.staticUse = true;
+                info.location = -1;
+                mAttribs->push_back(info);
+                mInstanceIDAdded = true;
+            }
+            return;
           case EvqPosition:
             if (!mPositionAdded)
             {
@@ -318,8 +335,6 @@ class NameHashingTraverser : public GetVariableTraverser
     {}
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(NameHashingTraverser);
-
     virtual void visitVariable(ShaderVariable *variable)
     {
         TString stringName = TString(variable->name.c_str());

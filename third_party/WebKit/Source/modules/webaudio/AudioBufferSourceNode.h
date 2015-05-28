@@ -25,11 +25,11 @@
 #ifndef AudioBufferSourceNode_h
 #define AudioBufferSourceNode_h
 
-#include "platform/audio/AudioBus.h"
 #include "modules/webaudio/AudioBuffer.h"
 #include "modules/webaudio/AudioParam.h"
 #include "modules/webaudio/AudioScheduledSourceNode.h"
 #include "modules/webaudio/PannerNode.h"
+#include "platform/audio/AudioBus.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
@@ -42,14 +42,12 @@ class AudioContext;
 // AudioBufferSourceNode is an AudioNode representing an audio source from an in-memory audio asset represented by an AudioBuffer.
 // It generally will be used for short sounds which require a high degree of scheduling flexibility (can playback in rhythmically perfect ways).
 
-class AudioBufferSourceNode final : public AudioScheduledSourceNode {
-    DEFINE_WRAPPERTYPEINFO();
+class AudioBufferSourceHandler final : public AudioScheduledSourceHandler {
 public:
-    static AudioBufferSourceNode* create(AudioContext*, float sampleRate);
+    AudioBufferSourceHandler(AudioNode&, float sampleRate);
+    virtual ~AudioBufferSourceHandler();
 
-    virtual ~AudioBufferSourceNode();
-
-    // AudioNode
+    // AudioHandler
     virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
 
@@ -91,16 +89,21 @@ public:
     // AudioScheduledSourceNode
     virtual void finish() override;
 
-    virtual void trace(Visitor*) override;
+    void handleStoppableSourceNode();
+
+    DECLARE_VIRTUAL_TRACE();
 
 private:
-    AudioBufferSourceNode(AudioContext*, float sampleRate);
+    void startSource(double when, double grainOffset, double grainDuration, bool isDurationGiven, ExceptionState&);
 
     // Returns true on success.
     bool renderFromBuffer(AudioBus*, unsigned destinationFrameOffset, size_t numberOfFrames);
 
     // Render silence starting from "index" frame in AudioBus.
     inline bool renderSilenceAndFinishIfNotLooping(AudioBus*, unsigned index, size_t framesToProcess);
+
+    // Clamps grain parameters to the duration of the given AudioBuffer.
+    void clampGrainParameters(const AudioBuffer*);
 
     // m_buffer holds the sample data which this node outputs.
     Member<AudioBuffer> m_buffer;
@@ -127,7 +130,8 @@ private:
     bool m_isGrain;
     double m_grainOffset; // in seconds
     double m_grainDuration; // in seconds
-
+    // True if grainDuration is given explicitly (via 3 arg start method).
+    bool m_isDurationGiven;
     // totalPitchRate() returns the instantaneous pitch rate (non-time preserving).
     // It incorporates the base pitch rate, any sample-rate conversion factor from the buffer, and any doppler shift from an associated panner node.
     double totalPitchRate();
@@ -144,6 +148,31 @@ private:
 
     // This synchronizes process() with setBuffer() which can cause dynamic channel count changes.
     mutable Mutex m_processLock;
+};
+
+class AudioBufferSourceNode final : public AudioScheduledSourceNode {
+    DEFINE_WRAPPERTYPEINFO();
+public:
+    static AudioBufferSourceNode* create(AudioContext*, float sampleRate);
+    AudioBufferSourceHandler& audioBufferSourceHandler() const;
+
+    AudioBuffer* buffer() const;
+    void setBuffer(AudioBuffer*, ExceptionState&);
+    AudioParam* playbackRate() const;
+    bool loop() const;
+    void setLoop(bool);
+    double loopStart() const;
+    void setLoopStart(double);
+    double loopEnd() const;
+    void setLoopEnd(double);
+
+    void start(ExceptionState&);
+    void start(double when, ExceptionState&);
+    void start(double when, double grainOffset, ExceptionState&);
+    void start(double when, double grainOffset, double grainDuration, ExceptionState&);
+
+private:
+    AudioBufferSourceNode(AudioContext&, float sampleRate);
 };
 
 } // namespace blink

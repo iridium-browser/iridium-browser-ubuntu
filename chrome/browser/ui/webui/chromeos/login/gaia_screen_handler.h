@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
 #include "chrome/browser/extensions/signin/scoped_gaia_auth_extension.h"
+#include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "net/base/net_errors.h"
 
@@ -22,6 +23,7 @@ class ConsumerManagementService;
 namespace chromeos {
 
 class SigninScreenHandler;
+class SigninScreenHandlerDelegate;
 
 // A class that's used to specify the way how Gaia should be loaded.
 struct GaiaContext {
@@ -36,7 +38,7 @@ struct GaiaContext {
   // True if password was changed for the current user.
   bool password_changed;
 
-  // True if user pods can be displyed.
+  // True if user pods can be displayed.
   bool show_users;
 
   // Whether Gaia should be loaded in offline mode.
@@ -45,14 +47,14 @@ struct GaiaContext {
   // True if user list is non-empty.
   bool has_users;
 
-  // Email of current user.
+  // Email of the current user.
   std::string email;
+
+  // GAIA ID of the current user.
+  std::string gaia_id;
 
   // Whether consumer management enrollment is in progress.
   bool is_enrolling_consumer_management;
-
-  // True if embedded_signin is enabled.
-  bool embedded_signin_enabled;
 };
 
 // A class that handles WebUI hooks in Gaia screen.
@@ -69,7 +71,7 @@ class GaiaScreenHandler : public BaseScreenHandler {
       CoreOobeActor* core_oobe_actor,
       const scoped_refptr<NetworkStateInformer>& network_state_informer,
       policy::ConsumerManagementService* consumer_management);
-  virtual ~GaiaScreenHandler();
+  ~GaiaScreenHandler() override;
 
   void LoadGaia(const GaiaContext& context);
   void UpdateGaia(const GaiaContext& context);
@@ -79,12 +81,6 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // not loading right now.
   void ReloadGaia(bool force_reload);
 
-  // Reload gaia with embedded signin frame.
-  void SwitchToEmbeddedSignin();
-
-  // Cancel embedded signin for the next load.
-  void CancelEmbeddedSignin();
-
   // Decides whether an auth extension should be pre-loaded. If it should,
   // pre-loads it.
   void MaybePreloadAuthExtension();
@@ -93,22 +89,27 @@ class GaiaScreenHandler : public BaseScreenHandler {
   net::Error frame_error() const { return frame_error_; }
 
  private:
-  // TODO (ygorshenin@): remove this dependency.
+  // TODO (antrim@): remove this dependency.
   friend class SigninScreenHandler;
 
   // BaseScreenHandler implementation:
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) override;
-  virtual void Initialize() override;
+  void DeclareLocalizedValues(
+      ::login::LocalizedValuesBuilder* builder) override;
+  void GetAdditionalParameters(base::DictionaryValue* dict) override;
+  void Initialize() override;
 
   // WebUIMessageHandler implementation:
-  virtual void RegisterMessages() override;
+  void RegisterMessages() override;
 
   // WebUI message handlers.
   void HandleFrameLoadingCompleted(int status);
+  void HandleWebviewLoadAborted(const std::string& error_reason_str);
   void HandleCompleteAuthentication(const std::string& gaia_id,
                                     const std::string& email,
                                     const std::string& password,
-                                    const std::string& auth_code);
+                                    const std::string& auth_code,
+                                    bool using_saml);
+  void HandleCompleteAuthenticationAuthCodeOnly(const std::string& auth_code);
   void HandleCompleteLogin(const std::string& gaia_id,
                            const std::string& typed_email,
                            const std::string& password,
@@ -120,7 +121,9 @@ class GaiaScreenHandler : public BaseScreenHandler {
 
   void HandleGaiaUIReady();
 
-  void HandleSwitchToFullTab();
+  void HandleToggleEasyBootstrap();
+
+  void HandleToggleWebviewSignin();
 
   // This is called when ConsumerManagementService::SetOwner() returns.
   void OnSetOwnerDone(const std::string& gaia_id,
@@ -180,11 +183,11 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // extension should be used.
   void LoadAuthExtension(bool force, bool silent_load, bool offline);
 
-  // TODO (ygorshenin@): GaiaScreenHandler should implement
+  // TODO (antrim@): GaiaScreenHandler should implement
   // NetworkStateInformer::Observer.
-  void UpdateState(ErrorScreenActor::ErrorReason reason);
+  void UpdateState(NetworkError::ErrorReason reason);
 
-  // TODO (ygorshenin@): remove this dependency.
+  // TODO (antrim@): remove this dependency.
   void SetSigninScreenHandler(SigninScreenHandler* handler);
 
   SigninScreenHandlerDelegate* Delegate();
@@ -243,12 +246,12 @@ class GaiaScreenHandler : public BaseScreenHandler {
   std::string test_pass_;
   bool test_expects_complete_login_;
 
-  // True if user pressed shortcut to enable embedded signin.
-  bool embedded_signin_enabled_by_shortcut_;
+  // True if Easy bootstrap is enabled.
+  bool use_easy_bootstrap_;
 
   // Non-owning ptr to SigninScreenHandler instance. Should not be used
   // in dtor.
-  // TODO (ygorshenin@): GaiaScreenHandler shouldn't communicate with
+  // TODO (antrim@): GaiaScreenHandler shouldn't communicate with
   // signin_screen_handler directly.
   SigninScreenHandler* signin_screen_handler_;
 

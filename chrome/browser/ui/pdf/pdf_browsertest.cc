@@ -26,9 +26,8 @@ namespace {
 
 // Tests basic PDF rendering.  This can be broken depending on bad merges with
 // the vendor, so it's important that we have basic sanity checking.
-// TODO(eustas): This is failing on CROS offical build. crbug.com/446347.
-#if defined(GOOGLE_CHROME_BUILD) && defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#define MAYBE_Basic Basic
+#if defined(GOOGLE_CHROME_BUILD) && defined(OS_LINUX)
+#define MAYBE_Basic DISABLED_Basic
 #else
 #define MAYBE_Basic DISABLED_Basic
 #endif
@@ -48,10 +47,14 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_Basic) {
 #endif
 }
 
-#if defined(GOOGLE_CHROME_BUILD) && (defined(OS_WIN) || defined(OS_LINUX))
-#define MAYBE_Scroll Scroll
+#if defined(GOOGLE_CHROME_BUILD) && \
+    (defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS)))
+#define MAYBE_Scroll DISABLED_Scroll
 #else
-// TODO(thestig): http://crbug.com/79837, http://crbug.com/332778
+// TODO(thestig): http://crbug.com/79837, http://crbug.com/332778,
+// http://crbug.com/446221 Possibly a race between mouse event processing and
+// JavaScript execution in the renderer. The failure goes away if you Sleep()
+// after SwapBuffers.
 #define MAYBE_Scroll DISABLED_Scroll
 #endif
 // Tests that scrolling works.
@@ -85,7 +88,7 @@ const int kLoadingNumberOfParts = 10;
 // regressions.
 // If it flakes, reopen http://crbug.com/74548.
 #if defined(GOOGLE_CHROME_BUILD)
-#define MAYBE_Loading Loading
+#define MAYBE_Loading DISABLED_Loading
 #else
 #define MAYBE_Loading DISABLED_Loading
 #endif
@@ -157,7 +160,7 @@ INSTANTIATE_TEST_CASE_P(PDFTestFiles,
                         testing::Range(0, kLoadingNumberOfParts));
 
 #if defined(GOOGLE_CHROME_BUILD) && (defined(OS_WIN) || defined(OS_LINUX))
-#define MAYBE_Action Action
+#define MAYBE_Action DISABLED_Action
 #else
 // http://crbug.com/315160
 #define MAYBE_Action DISABLED_Action
@@ -189,7 +192,7 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_Action) {
 }
 
 #if defined(GOOGLE_CHROME_BUILD) && defined(OS_LINUX)
-#define MAYBE_OnLoadAndReload OnLoadAndReload
+#define MAYBE_OnLoadAndReload DISABLED_OnLoadAndReload
 #else
 // Flaky as per http://crbug.com/74549.
 #define MAYBE_OnLoadAndReload DISABLED_OnLoadAndReload

@@ -15,8 +15,8 @@
         "ui"
     ],
     "scripts": [
-        "CookiesTable.js",
-        "NativeBreakpointsSidebarPane.js",
+        "BreakpointsSidebarPaneBase.js",
+        "DebuggerPresentationUtils.js",
         "DOMBreakpointsSidebarPane.js",
         "DOMPresentationUtils.js",
         "DockController.js",
@@ -27,11 +27,12 @@
         "InspectorView.js",
         "ObjectPopoverHelper.js",
         "ObjectPropertiesSection.js",
-        "ShortcutsScreen.js",
-        "TargetsComboBoxController.js",
-        "CustomPreviewSection.js"
+        "RemoteObjectPreviewFormatter.js",
+        "ShortcutsScreen.js"
     ],
     "stylesheets": [
-        "breakpointsList.css"
+        "breakpointsList.css",
+        "nodeLink.css",
+        "objectValue.css"
     ]
 }

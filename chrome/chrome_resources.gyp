@@ -100,6 +100,14 @@
               },
               'includes': [ '../build/grit_action.gypi' ],
             },
+            {
+              # GN version: //chrome/browser/resources:settings_resources
+              'action_name': 'generate_settings_resources',
+              'variables': {
+                'grit_grd_file': 'browser/resources/settings/settings_resources.grd',
+              },
+              'includes': [ '../build/grit_action.gypi' ],
+            },
           ],
           'copies': [
             {
@@ -466,12 +474,6 @@
             '<(DEPTH)/remoting/remoting.gyp:remoting_resources',
             '<(DEPTH)/ui/chromeos/ui_chromeos.gyp:ui_chromeos_resources',
             '<(DEPTH)/ui/chromeos/ui_chromeos.gyp:ui_chromeos_strings',
-          ],
-        }],
-        ['use_athena==1', {
-          'dependencies': [
-            '<(DEPTH)/athena/resources/athena_resources.gyp:athena_resources',
-            '<(DEPTH)/athena/strings/athena_strings.gyp:athena_strings',
           ],
         }],
         ['enable_autofill_dialog==1 and OS!="android"', {

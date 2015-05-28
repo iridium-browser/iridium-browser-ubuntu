@@ -377,7 +377,7 @@ struct NetErrorHelperCore::ErrorPageInfo {
         needs_dns_updates(false),
         needs_load_navigation_corrections(false),
         reload_button_in_page(false),
-        load_stale_button_in_page(false),
+        show_saved_copy_button_in_page(false),
         is_finished_loading(false),
         auto_reload_triggered(false) {
   }
@@ -410,7 +410,7 @@ struct NetErrorHelperCore::ErrorPageInfo {
 
   // Track if specific buttons are included in an error page, for statistics.
   bool reload_button_in_page;
-  bool load_stale_button_in_page;
+  bool show_saved_copy_button_in_page;
 
   // True if a page has completed loading, at which point it can receive
   // updates.
@@ -429,6 +429,7 @@ NetErrorHelperCore::NavigationCorrectionParams::~NavigationCorrectionParams() {
 
 bool NetErrorHelperCore::IsReloadableError(
     const NetErrorHelperCore::ErrorPageInfo& info) {
+  GURL url = info.error.unreachableURL;
   return info.error.domain.utf8() == net::kErrorDomain &&
          info.error.reason != net::ERR_ABORTED &&
          // For now, net::ERR_UNKNOWN_URL_SCHEME is only being displayed on
@@ -441,7 +442,10 @@ bool NetErrorHelperCore::IsReloadableError(
          // handshake_failure alert.
          // https://crbug.com/431387
          info.error.reason != net::ERR_SSL_PROTOCOL_ERROR &&
-         !info.was_failed_post;
+         !info.was_failed_post &&
+         // Don't auto-reload non-http/https schemas.
+         // https://crbug.com/471713
+         url.SchemeIsHTTPOrHTTPS();
 }
 
 NetErrorHelperCore::NetErrorHelperCore(Delegate* delegate,
@@ -547,11 +551,11 @@ void NetErrorHelperCore::OnCommitLoad(FrameType frame_type, const GURL& url) {
       committed_error_page_info_->error.unreachableURL ==
           pending_error_page_info_->error.unreachableURL) {
     DCHECK(navigation_from_button_ == RELOAD_BUTTON ||
-           navigation_from_button_ == LOAD_STALE_BUTTON);
+           navigation_from_button_ == SHOW_SAVED_COPY_BUTTON);
     chrome_common_net::RecordEvent(
         navigation_from_button_ == RELOAD_BUTTON ?
             chrome_common_net::NETWORK_ERROR_PAGE_RELOAD_BUTTON_ERROR :
-            chrome_common_net::NETWORK_ERROR_PAGE_LOAD_STALE_BUTTON_ERROR);
+            chrome_common_net::NETWORK_ERROR_PAGE_SHOW_SAVED_COPY_BUTTON_ERROR);
   }
   navigation_from_button_ = NO_BUTTON;
 
@@ -584,9 +588,14 @@ void NetErrorHelperCore::OnFinishLoad(FrameType frame_type) {
     chrome_common_net::RecordEvent(
         chrome_common_net::NETWORK_ERROR_PAGE_RELOAD_BUTTON_SHOWN);
   }
-  if (committed_error_page_info_->load_stale_button_in_page) {
+  if (committed_error_page_info_->show_saved_copy_button_in_page) {
     chrome_common_net::RecordEvent(
-        chrome_common_net::NETWORK_ERROR_PAGE_LOAD_STALE_BUTTON_SHOWN);
+        chrome_common_net::NETWORK_ERROR_PAGE_SHOW_SAVED_COPY_BUTTON_SHOWN);
+  }
+  if (committed_error_page_info_->reload_button_in_page &&
+      committed_error_page_info_->show_saved_copy_button_in_page) {
+    chrome_common_net::RecordEvent(
+        chrome_common_net::NETWORK_ERROR_PAGE_BOTH_BUTTONS_SHOWN);
   }
 
   delegate_->EnablePageHelperFunctions();
@@ -632,11 +641,11 @@ void NetErrorHelperCore::GetErrorHTML(
   } else {
     // These values do not matter, as error pages in iframes hide the buttons.
     bool reload_button_in_page;
-    bool load_stale_button_in_page;
+    bool show_saved_copy_button_in_page;
 
     delegate_->GenerateLocalizedErrorPage(
         error, is_failed_post, scoped_ptr<ErrorPageParams>(),
-        &reload_button_in_page, &load_stale_button_in_page,
+        &reload_button_in_page, &show_saved_copy_button_in_page,
         error_html);
   }
 }
@@ -697,7 +706,7 @@ void NetErrorHelperCore::GetErrorHtmlForMainFrame(
       error, pending_error_page_info->was_failed_post,
       scoped_ptr<ErrorPageParams>(),
       &pending_error_page_info->reload_button_in_page,
-      &pending_error_page_info->load_stale_button_in_page,
+      &pending_error_page_info->show_saved_copy_button_in_page,
       error_html);
 }
 
@@ -716,7 +725,7 @@ void NetErrorHelperCore::UpdateErrorPage() {
     committed_error_page_info_->needs_dns_updates = false;
 
   // There is no need to worry about the button display statistics here because
-  // the presentation of the reload and load stale buttons can't be changed
+  // the presentation of the reload and show saved copy buttons can't be changed
   // by a DNS error update.
   delegate_->UpdateErrorPage(
       GetUpdatedError(committed_error_page_info_->error),
@@ -758,7 +767,7 @@ void NetErrorHelperCore::OnNavigationCorrectionsFetched(
         pending_error_page_info_->was_failed_post,
         params.Pass(),
         &pending_error_page_info_->reload_button_in_page,
-        &pending_error_page_info_->load_stale_button_in_page,
+        &pending_error_page_info_->show_saved_copy_button_in_page,
         &error_html);
   } else {
     // Since |navigation_correction_params| in |pending_error_page_info_| is
@@ -894,13 +903,21 @@ void NetErrorHelperCore::ExecuteButtonPress(Button button) {
     case RELOAD_BUTTON:
       chrome_common_net::RecordEvent(
           chrome_common_net::NETWORK_ERROR_PAGE_RELOAD_BUTTON_CLICKED);
+      if (committed_error_page_info_->show_saved_copy_button_in_page) {
+        chrome_common_net::RecordEvent(
+            chrome_common_net::NETWORK_ERROR_PAGE_BOTH_BUTTONS_RELOAD_CLICKED);
+      }
       navigation_from_button_ = RELOAD_BUTTON;
       Reload();
       return;
-    case LOAD_STALE_BUTTON:
+    case SHOW_SAVED_COPY_BUTTON:
       chrome_common_net::RecordEvent(
-          chrome_common_net::NETWORK_ERROR_PAGE_LOAD_STALE_BUTTON_CLICKED);
-      navigation_from_button_ = LOAD_STALE_BUTTON;
+          chrome_common_net::NETWORK_ERROR_PAGE_SHOW_SAVED_COPY_BUTTON_CLICKED);
+      navigation_from_button_ = SHOW_SAVED_COPY_BUTTON;
+      if (committed_error_page_info_->reload_button_in_page) {
+        chrome_common_net::RecordEvent(chrome_common_net::
+            NETWORK_ERROR_PAGE_BOTH_BUTTONS_SHOWN_SAVED_COPY_CLICKED);
+      }
       delegate_->LoadPageFromCache(
           committed_error_page_info_->error.unreachableURL);
       return;
@@ -908,6 +925,10 @@ void NetErrorHelperCore::ExecuteButtonPress(Button button) {
       // Visual effects on page are handled in Javascript code.
       chrome_common_net::RecordEvent(
           chrome_common_net::NETWORK_ERROR_PAGE_MORE_BUTTON_CLICKED);
+      return;
+    case EASTER_EGG:
+      chrome_common_net::RecordEvent(
+          chrome_common_net::NETWORK_ERROR_EASTER_EGG_ACTIVATED);
       return;
     case NO_BUTTON:
       NOTREACHED();

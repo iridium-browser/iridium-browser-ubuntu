@@ -1,24 +1,17 @@
-#!/usr/bin/python
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Unit tests for autotest_quickmerge."""
 
-# pylint: disable=bad-continuation
-
 from __future__ import print_function
 
-import os
-import sys
+import mock
 import types
 
-sys.path.insert(0, os.path.abspath('%s/../..' % os.path.dirname(__file__)))
 from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.scripts import autotest_quickmerge
-
-import mock
 
 
 RSYNC_TEST_OUTPUT = """.d..t...... ./
@@ -69,9 +62,10 @@ TEST_PACKAGE_C = 'a_cute'
 TEST_PACKAGE_PV = 'little_puppy-3.14159'
 TEST_PORTAGE_ROOT = '/bib/bob/'
 TEST_PACKAGE_OLDCONTENTS = {
-  u'/by/the/prickling/of/my/thumbs'   : (u'obj', '1234', '4321'),
-  u'/something/wicked/this/way/comes' : (u'dir',)
+    u'/by/the/prickling/of/my/thumbs': (u'obj', '1234', '4321'),
+    u'/something/wicked/this/way/comes': (u'dir',)
 }
+
 
 class ItemizeChangesFromRsyncOutput(cros_test_lib.TestCase):
   """Test autotest_quickmerge.ItemizeChangesFromRsyncOutput."""
@@ -173,25 +167,25 @@ class PortageManipulationsTest(cros_test_lib.MockTestCase):
     RESULT_DICIONARY.update(EXPECTED_NEW_ENTRIES)
 
     mock_vartree.dbapi.writeContentsToContentsFile(mock_package,
-      RESULT_DICIONARY)
+                                                   RESULT_DICIONARY)
 
     change_report = autotest_quickmerge.ItemizeChangesFromRsyncOutput(
-      RSYNC_TEST_OUTPUT, RSYNC_TEST_DESTINATION_PATH)
+        RSYNC_TEST_OUTPUT, RSYNC_TEST_DESTINATION_PATH)
     autotest_quickmerge.UpdatePackageContents(change_report, TEST_PACKAGE_CP,
-        TEST_PORTAGE_ROOT)
+                                              TEST_PORTAGE_ROOT)
 
 
 class PortageAPITest(cros_test_lib.TestCase):
   """Ensures that required portage API exists."""
+
   def runTest(self):
     try:
-      # pylint: disable=F0401
       import portage
     except ImportError:
       self.skipTest('Portage not available in test environment. Re-run test '
                     'in chroot.')
     try:
-      # pylint: disable=E1101
+      # pylint: disable=no-member
       f = portage.vardbapi.writeContentsToContentsFile
     except AttributeError:
       self.fail('Required writeContentsToContentsFile function does '
@@ -200,6 +194,3 @@ class PortageAPITest(cros_test_lib.TestCase):
     self.assertIsInstance(f, types.UnboundMethodType,
                           'Required writeContentsToContentsFile is not '
                           'a function.')
-
-if __name__ == '__main__':
-  cros_test_lib.main()

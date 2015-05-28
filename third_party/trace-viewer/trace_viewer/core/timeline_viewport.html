@@ -11,6 +11,7 @@ found in the LICENSE file.
 <link rel="import" href="/base/events.html">
 <link rel="import" href="/base/ui/animation.html">
 <link rel="import" href="/base/ui/animation_controller.html">
+<link rel="import" href="/base/ui/dom_helpers.html">
 
 <script>
 'use strict';
@@ -21,6 +22,32 @@ found in the LICENSE file.
 tv.exportTo('tv.c', function() {
   var TimelineDisplayTransform = tv.c.TimelineDisplayTransform;
   var TimelineInterestRange = tv.c.TimelineInterestRange;
+
+  /**
+   * ContainerToTrackObj is a class to handle building and accessing a map
+   * between an EventContainer's stableId and its handling track.
+   *
+   * @constructor
+   */
+  function ContainerToTrackObj() {
+    this.stableIdToTrackMap_ = {};
+  }
+
+  ContainerToTrackObj.prototype = {
+    addContainer: function(container, track) {
+      if (!track)
+        throw new Error('Must provide a track.');
+      this.stableIdToTrackMap_[container.stableId] = track;
+    },
+
+    clearMap: function() {
+      this.stableIdToTrackMap_ = {};
+    },
+
+    getTrackByStableId: function(stableId) {
+      return this.stableIdToTrackMap_[stableId];
+    }
+  };
 
   /**
    * The TimelineViewport manages the transform used for navigating
@@ -72,6 +99,7 @@ tv.exportTo('tv.c', function() {
     this.interestRange_ = new TimelineInterestRange(this);
 
     this.eventToTrackMap_ = {};
+    this.containerToTrackObj = new ContainerToTrackObj();
   }
 
   TimelineViewport.prototype = {
@@ -377,12 +405,19 @@ tv.exportTo('tv.c', function() {
       this.eventToTrackMap_ = eventToTrackMap;
     },
 
+    rebuildContainerToTrackMap: function() {
+      this.containerToTrackObj.clearMap();
+      this.modelTrackContainer_.addContainersToTrackMap(
+          this.containerToTrackObj);
+    },
+
     trackForEvent: function(event) {
       return this.eventToTrackMap_[event.guid];
     }
   };
 
   return {
+    ContainerToTrackObj: ContainerToTrackObj,
     TimelineViewport: TimelineViewport
   };
 });

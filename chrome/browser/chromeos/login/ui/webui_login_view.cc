@@ -8,9 +8,9 @@
 #include "ash/system/tray/system_tray.h"
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
@@ -68,8 +68,9 @@ const char kAccelNameDeviceRequisitionRemora[] = "device_requisition_remora";
 const char kAccelNameDeviceRequisitionShark[] = "device_requisition_shark";
 const char kAccelNameAppLaunchBailout[] = "app_launch_bailout";
 const char kAccelNameAppLaunchNetworkConfig[] = "app_launch_network_config";
-const char kAccelNameEmbeddedSignin[] = "embedded_signin";
 const char kAccelNameNewOobe[] = "new_oobe";
+const char kAccelNameToggleWebviewSignin[] = "toggle_webview_signin";
+const char kAccelNameToggleEasyBootstrap[] = "toggle_easy_bootstrap";
 
 // A class to change arrow key traversal behavior when it's alive.
 class ScopedArrowKeyTraversal {
@@ -118,9 +119,6 @@ WebUILoginView::WebUILoginView()
   accel_map_[ui::Accelerator(ui::VKEY_E,
                              ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
       kAccelNameEnrollment;
-  accel_map_[ui::Accelerator(
-      ui::VKEY_G, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
-      kAccelNameEmbeddedSignin;
   accel_map_[ui::Accelerator(ui::VKEY_K,
                              ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
       kAccelNameKioskEnable;
@@ -132,6 +130,12 @@ WebUILoginView::WebUILoginView()
   accel_map_[ui::Accelerator(ui::VKEY_X,
       ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
       kAccelNameEnableDebugging;
+  accel_map_[ui::Accelerator(ui::VKEY_W,
+      ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
+      kAccelNameToggleWebviewSignin;
+  accel_map_[ui::Accelerator(
+      ui::VKEY_B, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
+      kAccelNameToggleEasyBootstrap;
 
   accel_map_[ui::Accelerator(ui::VKEY_LEFT, ui::EF_NONE)] =
       kAccelFocusPrev;
@@ -178,12 +182,10 @@ WebUILoginView::~WebUILoginView() {
                     observer_list_,
                     OnHostDestroying());
 
-#if !defined(USE_ATHENA)
   if (ash::Shell::GetInstance()->HasPrimaryStatusArea()) {
     ash::Shell::GetInstance()->GetPrimarySystemTray()->
         SetNextFocusableView(NULL);
   }
-#endif
 }
 
 void WebUILoginView::Init() {
@@ -320,7 +322,6 @@ void WebUILoginView::OnPostponedShow() {
 }
 
 void WebUILoginView::SetStatusAreaVisible(bool visible) {
-#if !defined(USE_ATHENA)
   if (ash::Shell::GetInstance()->HasPrimaryStatusArea()) {
     ash::SystemTray* tray = ash::Shell::GetInstance()->GetPrimarySystemTray();
     if (visible) {
@@ -331,14 +332,11 @@ void WebUILoginView::SetStatusAreaVisible(bool visible) {
       tray->GetWidget()->Hide();
     }
   }
-#endif
 }
 
 void WebUILoginView::SetUIEnabled(bool enabled) {
   forward_keyboard_event_ = enabled;
-#if !defined(USE_ATHENA)
   ash::Shell::GetInstance()->GetPrimarySystemTray()->SetEnabled(enabled);
-#endif
 }
 
 void WebUILoginView::AddFrameObserver(FrameObserver* frame_observer) {
@@ -437,14 +435,12 @@ bool WebUILoginView::TakeFocus(content::WebContents* source, bool reverse) {
   if (!forward_keyboard_event_)
     return false;
 
-#if !defined(USE_ATHENA)
   ash::SystemTray* tray = ash::Shell::GetInstance()->GetPrimarySystemTray();
   if (tray && tray->GetWidget()->IsVisible()) {
     tray->SetNextFocusableView(this);
     ash::Shell::GetInstance()->RotateFocus(reverse ? ash::Shell::BACKWARD :
                                                     ash::Shell::FORWARD);
   }
-#endif
 
   return true;
 }

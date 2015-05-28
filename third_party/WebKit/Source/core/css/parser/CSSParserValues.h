@@ -148,6 +148,11 @@ struct CSSParserValue {
         Function  = 0x100001,
         ValueList = 0x100002,
         Q_EMS     = 0x100003,
+        HexColor = 0x100004,
+        // Represents a dimension as an unparsed string, only used by the Bison parser
+        Dimension = 0x100005,
+        // Represents a dimension by a list of two values, a CSS_NUMBER and an CSS_IDENT
+        DimensionList = 0x100006,
     };
     int unit;
 
@@ -158,13 +163,13 @@ struct CSSParserValue {
 };
 
 class CSSParserValueList {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(CSSParserValueList);
 public:
     CSSParserValueList()
         : m_current(0)
     {
     }
-    CSSParserValueList(CSSParserTokenRange);
+    CSSParserValueList(CSSParserTokenRange, bool& usesRemUnits);
     ~CSSParserValueList();
 
     void addValue(const CSSParserValue&);
@@ -200,14 +205,14 @@ private:
 };
 
 struct CSSParserFunction {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(CSSParserFunction);
 public:
     CSSValueID id;
     OwnPtr<CSSParserValueList> args;
 };
 
 class CSSParserSelector {
-    WTF_MAKE_NONCOPYABLE(CSSParserSelector); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(CSSParserSelector); WTF_MAKE_FAST_ALLOCATED(CSSParserSelector);
 public:
     CSSParserSelector();
     explicit CSSParserSelector(const QualifiedName&);
@@ -229,7 +234,7 @@ public:
     void setRelationIsAffectedByPseudoContent() { m_selector->setRelationIsAffectedByPseudoContent(); }
     bool relationIsAffectedByPseudoContent() const { return m_selector->relationIsAffectedByPseudoContent(); }
 
-    void adoptSelectorVector(Vector<OwnPtr<CSSParserSelector> >& selectorVector);
+    void adoptSelectorVector(Vector<OwnPtr<CSSParserSelector>>& selectorVector);
     void setSelectorList(PassOwnPtr<CSSSelectorList>);
 
     bool hasHostPseudoSelector() const;

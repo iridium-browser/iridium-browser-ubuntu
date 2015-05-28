@@ -12,8 +12,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/browser_features.h"
@@ -24,6 +22,8 @@
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/history/core/browser/history_backend.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/referrer.h"
@@ -102,9 +102,9 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
     ASSERT_EQ(0, num_pending_);
   }
 
-  HistoryService* history_service() {
-    return HistoryServiceFactory::GetForProfile(profile(),
-                                                Profile::EXPLICIT_ACCESS);
+  history::HistoryService* history_service() {
+    return HistoryServiceFactory::GetForProfile(
+        profile(), ServiceAccessType::EXPLICIT_ACCESS);
   }
 
   void SetRedirectChain(const std::vector<GURL>& redirect_chain,

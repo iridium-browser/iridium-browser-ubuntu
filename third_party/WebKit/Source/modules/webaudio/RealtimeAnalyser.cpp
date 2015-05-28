@@ -23,9 +23,7 @@
  */
 
 #include "config.h"
-
 #if ENABLE(WEB_AUDIO)
-
 #include "modules/webaudio/RealtimeAnalyser.h"
 
 #include "platform/audio/AudioBus.h"
@@ -46,7 +44,7 @@ const double RealtimeAnalyser::DefaultMaxDecibels = -30;
 const unsigned RealtimeAnalyser::DefaultFFTSize = 2048;
 // All FFT implementations are expected to handle power-of-two sizes MinFFTSize <= size <= MaxFFTSize.
 const unsigned RealtimeAnalyser::MinFFTSize = 32;
-const unsigned RealtimeAnalyser::MaxFFTSize = 2048;
+const unsigned RealtimeAnalyser::MaxFFTSize = 32768;
 const unsigned RealtimeAnalyser::InputBufferSize = RealtimeAnalyser::MaxFFTSize * 2;
 
 RealtimeAnalyser::RealtimeAnalyser()
@@ -105,7 +103,7 @@ void RealtimeAnalyser::writeInput(AudioBus* bus, size_t framesToProcess)
     // Sum all channels in one if numberOfChannels > 1.
     unsigned numberOfChannels = bus->numberOfChannels();
     if (numberOfChannels > 1) {
-        for (unsigned i = 1; i < numberOfChannels; i++) {
+        for (unsigned i = 1; i < numberOfChannels; ++i) {
             source = bus->channel(i)->data();
             VectorMath::vadd(dest, 1, source, 1, dest, 1, framesToProcess);
         }
@@ -155,9 +153,9 @@ void RealtimeAnalyser::doFFTAnalysis()
     if (writeIndex < fftSize) {
         memcpy(tempP, inputBuffer + writeIndex - fftSize + InputBufferSize, sizeof(*tempP) * (fftSize - writeIndex));
         memcpy(tempP + fftSize - writeIndex, inputBuffer, sizeof(*tempP) * writeIndex);
-    } else
+    } else {
         memcpy(tempP, inputBuffer + writeIndex - fftSize, sizeof(*tempP) * fftSize);
-
+    }
 
     // Window the input samples.
     applyWindow(tempP, fftSize);

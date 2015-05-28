@@ -124,6 +124,11 @@
 - (void)enterAppKitFullscreen;
 - (void)exitAppKitFullscreen;
 
+// Returns where the fullscreen button should be positioned in the window.
+// Returns NSZeroRect if there is no fullscreen button (if currently in
+// fullscreen, or if running 10.6 or 10.10+).
+- (NSRect)fullscreenButtonFrame;
+
 // Updates |layout| with the full set of parameters required to statelessly
 // determine the layout of the views managed by this controller.
 - (void)updateLayoutParameters:(BrowserWindowLayout*)layout;
@@ -148,11 +153,16 @@
 // There is a bug in Mavericks for applications linked against OSX 10.8 and
 // earlier. The bug requires Screens Have Separate Spaces to be enabled, and
 // for the window to be on a secondary screen. When AppKit Fullscreen is
-// invoked on the window, its final frame is 22pt too short. This method
-// detects when the relevant conditions have been met so that a hack can be
+// invoked on the window, its final frame is 22pt too short. These methods
+// detect when the relevant conditions have been met so that a hack can be
 // applied to fix the size of the window.
 // http://crbug.com/396980
++ (BOOL)systemSettingsRequireMavericksAppKitFullscreenHack;
 - (BOOL)shouldUseMavericksAppKitFullscreenHack;
+
+// Whether the instance should use a custom transition when animating into and
+// out of AppKit Fullscreen.
+- (BOOL)shouldUseCustomAppKitFullscreenTransition;
 
 @end  // @interface BrowserWindowController(Private)
 

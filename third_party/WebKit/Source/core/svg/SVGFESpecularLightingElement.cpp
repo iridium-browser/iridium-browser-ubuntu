@@ -22,8 +22,8 @@
 #include "config.h"
 #include "core/svg/SVGFESpecularLightingElement.h"
 
-#include "core/rendering/RenderObject.h"
-#include "core/rendering/style/RenderStyle.h"
+#include "core/layout/LayoutObject.h"
+#include "core/style/ComputedStyle.h"
 #include "core/svg/SVGParserUtilities.h"
 #include "core/svg/graphics/filters/SVGFilterBuilder.h"
 #include "platform/graphics/filters/FilterEffect.h"
@@ -35,7 +35,7 @@ inline SVGFESpecularLightingElement::SVGFESpecularLightingElement(Document& docu
     , m_specularConstant(SVGAnimatedNumber::create(this, SVGNames::specularConstantAttr, SVGNumber::create(1)))
     , m_specularExponent(SVGAnimatedNumber::create(this, SVGNames::specularExponentAttr, SVGNumber::create(1)))
     , m_surfaceScale(SVGAnimatedNumber::create(this, SVGNames::surfaceScaleAttr, SVGNumber::create(1)))
-    , m_kernelUnitLength(SVGAnimatedNumberOptionalNumber::create(this, SVGNames::surfaceScaleAttr))
+    , m_kernelUnitLength(SVGAnimatedNumberOptionalNumber::create(this, SVGNames::kernelUnitLengthAttr))
     , m_in1(SVGAnimatedString::create(this, SVGNames::inAttr, SVGString::create()))
 {
     addToPropertyMap(m_specularConstant);
@@ -45,7 +45,7 @@ inline SVGFESpecularLightingElement::SVGFESpecularLightingElement(Document& docu
     addToPropertyMap(m_in1);
 }
 
-void SVGFESpecularLightingElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFESpecularLightingElement)
 {
     visitor->trace(m_specularConstant);
     visitor->trace(m_specularExponent);
@@ -70,37 +70,12 @@ bool SVGFESpecularLightingElement::isSupportedAttribute(const QualifiedName& att
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGFESpecularLightingElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    if (!isSupportedAttribute(name)) {
-        SVGFilterPrimitiveStandardAttributes::parseAttribute(name, value);
-        return;
-    }
-
-    SVGParsingError parseError = NoError;
-
-    if (name == SVGNames::inAttr)
-        m_in1->setBaseValueAsString(value, parseError);
-    else if (name == SVGNames::surfaceScaleAttr)
-        m_surfaceScale->setBaseValueAsString(value, parseError);
-    else if (name == SVGNames::specularConstantAttr)
-        m_specularConstant->setBaseValueAsString(value, parseError);
-    else if (name == SVGNames::specularExponentAttr)
-        m_specularExponent->setBaseValueAsString(value, parseError);
-    else if (name == SVGNames::kernelUnitLengthAttr)
-        m_kernelUnitLength->setBaseValueAsString(value, parseError);
-    else
-        ASSERT_NOT_REACHED();
-
-    reportAttributeParsingError(parseError, name, value);
-}
-
 bool SVGFESpecularLightingElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)
 {
     FESpecularLighting* specularLighting = static_cast<FESpecularLighting*>(effect);
 
     if (attrName == SVGNames::lighting_colorAttr) {
-        RenderObject* renderer = this->renderer();
+        LayoutObject* renderer = this->layoutObject();
         ASSERT(renderer);
         ASSERT(renderer->style());
         return specularLighting->setLightingColor(renderer->style()->svgStyle().lightingColor());
@@ -111,6 +86,11 @@ bool SVGFESpecularLightingElement::setFilterEffectAttribute(FilterEffect* effect
         return specularLighting->setSpecularConstant(m_specularConstant->currentValue()->value());
     if (attrName == SVGNames::specularExponentAttr)
         return specularLighting->setSpecularExponent(m_specularExponent->currentValue()->value());
+    if (attrName == SVGNames::kernelUnitLengthAttr) {
+        bool changedX = specularLighting->setKernelUnitLengthX(m_kernelUnitLength->firstNumber()->currentValue()->value());
+        bool changedY = specularLighting->setKernelUnitLengthY(m_kernelUnitLength->secondNumber()->currentValue()->value());
+        return changedX || changedY;
+    }
 
     LightSource* lightSource = const_cast<LightSource*>(specularLighting->lightSource());
     SVGFELightElement* lightElement = SVGFELightElement::findLightElement(*this);
@@ -180,7 +160,7 @@ PassRefPtrWillBeRawPtr<FilterEffect> SVGFESpecularLightingElement::build(SVGFilt
     if (!lightNode)
         return nullptr;
 
-    RenderObject* renderer = this->renderer();
+    LayoutObject* renderer = this->layoutObject();
     if (!renderer)
         return nullptr;
 

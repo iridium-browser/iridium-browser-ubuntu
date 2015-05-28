@@ -7,8 +7,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "components/password_manager/content/browser/content_credential_manager_dispatcher.h"
 #include "components/password_manager/content/browser/content_password_manager_driver_factory.h"
+#include "components/password_manager/content/browser/credential_manager_dispatcher.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -43,20 +43,22 @@ class ChromePasswordManagerClient
   // PasswordManagerClient implementation.
   bool IsAutomaticPasswordSavingEnabled() const override;
   bool IsPasswordManagerEnabledForCurrentPage() const override;
-  bool ShouldAskUserToSubmitURL(const GURL& url) override;
   bool ShouldFilterAutofillResult(const autofill::PasswordForm& form) override;
   std::string GetSyncUsername() const override;
   bool IsSyncAccountCredential(const std::string& username,
                                const std::string& origin) const override;
-  void AskUserAndMaybeReportURL(const GURL& url) const override;
   void AutofillResultsComputed() override;
   bool PromptUserToSavePassword(
-      scoped_ptr<password_manager::PasswordFormManager> form_to_save) override;
+      scoped_ptr<password_manager::PasswordFormManager> form_to_save,
+      password_manager::CredentialSourceType type) override;
   bool PromptUserToChooseCredentials(
-      const std::vector<autofill::PasswordForm*>& local_forms,
-      const std::vector<autofill::PasswordForm*>& federated_forms,
-      base::Callback<void(const password_manager::CredentialInfo&)>
-          callback) override;
+      ScopedVector<autofill::PasswordForm> local_forms,
+      ScopedVector<autofill::PasswordForm> federated_forms,
+      const GURL& origin,
+      base::Callback<void(const password_manager::CredentialInfo&)> callback)
+      override;
+  void NotifyUserAutoSignin(
+      ScopedVector<autofill::PasswordForm> local_forms) override;
   void AutomaticPasswordSave(scoped_ptr<password_manager::PasswordFormManager>
                                  saved_form_manager) override;
   void PasswordWasAutofilled(
@@ -64,20 +66,18 @@ class ChromePasswordManagerClient
   void PasswordAutofillWasBlocked(
       const autofill::PasswordFormMap& best_matches) const override;
   PrefService* GetPrefs() override;
-  password_manager::PasswordStore* GetPasswordStore() override;
-  base::FieldTrial::Probability GetProbabilityForExperiment(
-      const std::string& experiment_name) override;
+  password_manager::PasswordStore* GetPasswordStore() const override;
   bool IsPasswordSyncEnabled(
-      password_manager::CustomPassphraseState state) override;
+      password_manager::CustomPassphraseState state) const override;
   void OnLogRouterAvailabilityChanged(bool router_can_be_used) override;
   void LogSavePasswordProgress(const std::string& text) const override;
   bool IsLoggingActive() const override;
   bool WasLastNavigationHTTPError() const override;
-  bool DidLastPageLoadEncounterSSLErrors() override;
-  bool IsOffTheRecord() override;
+  bool DidLastPageLoadEncounterSSLErrors() const override;
+  bool IsOffTheRecord() const override;
   password_manager::PasswordManager* GetPasswordManager() override;
   autofill::AutofillManager* GetAutofillManagerForMainFrame() override;
-  const GURL& GetMainFrameURL() override;
+  const GURL& GetMainFrameURL() const override;
 
   // Hides any visible generation UI.
   void HidePasswordGenerationPopup();
@@ -152,7 +152,7 @@ class ChromePasswordManagerClient
 
   password_manager::ContentPasswordManagerDriverFactory* driver_factory_;
 
-  password_manager::ContentCredentialManagerDispatcher
+  password_manager::CredentialManagerDispatcher
       credential_manager_dispatcher_;
 
   // Observer for password generation popup.

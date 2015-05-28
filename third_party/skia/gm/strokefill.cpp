@@ -19,15 +19,12 @@ public:
     }
 
 protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("stroke-fill");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(640, 480);
     }
 
@@ -39,7 +36,7 @@ protected:
         canvas->drawText(text, len, x, y + SkIntToScalar(120), p);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         SkScalar x = SkIntToScalar(100);
         SkScalar y = SkIntToScalar(88);
 

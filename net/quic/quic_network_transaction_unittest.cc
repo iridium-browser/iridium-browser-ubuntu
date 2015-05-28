@@ -8,8 +8,6 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
-#include "net/base/capturing_net_log.h"
-#include "net/base/net_log_unittest.h"
 #include "net/base/test_completion_callback.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/dns/mock_host_resolver.h"
@@ -21,6 +19,8 @@
 #include "net/http/http_stream_factory.h"
 #include "net/http/http_transaction_test_util.h"
 #include "net/http/transport_security_state.h"
+#include "net/log/capturing_net_log.h"
+#include "net/log/net_log_unittest.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_service.h"
@@ -53,6 +53,8 @@ static const char kQuicAlternateProtocolHttpHeader[] =
     "Alternate-Protocol: 80:quic\r\n\r\n";
 static const char kQuicAlternateProtocol50pctHttpHeader[] =
     "Alternate-Protocol: 80:quic,p=.5\r\n\r\n";
+static const char kQuicAlternateProtocolDifferentPortHttpHeader[] =
+    "Alternate-Protocol: 137:quic\r\n\r\n";
 static const char kQuicAlternateProtocolHttpsHeader[] =
     "Alternate-Protocol: 443:quic\r\n\r\n";
 
@@ -100,6 +102,21 @@ class MockQuicData {
   std::vector<MockRead> reads_;
   size_t sequence_number_;
   scoped_ptr<SocketDataProvider> socket_data_;
+};
+
+class ProxyHeadersHandler {
+ public:
+  ProxyHeadersHandler() : was_called_(false) {}
+
+  bool was_called() { return was_called_; }
+
+  void OnBeforeProxyHeadersSent(const ProxyInfo& proxy_info,
+                                HttpRequestHeaders* request_headers) {
+    was_called_ = true;
+  }
+
+ private:
+  bool was_called_;
 };
 
 class QuicNetworkTransactionTest
@@ -173,8 +190,11 @@ class QuicNetworkTransactionTest
       bool should_include_version,
       bool fin,
       const SpdyHeaderBlock& headers) {
-    return maker_.MakeRequestHeadersPacket(
-        sequence_number, stream_id, should_include_version, fin, headers);
+    QuicPriority priority =
+        ConvertRequestPriorityToQuicPriority(DEFAULT_PRIORITY);
+    return maker_.MakeRequestHeadersPacket(sequence_number, stream_id,
+                                           should_include_version, fin,
+                                           priority, headers);
   }
 
   scoped_ptr<QuicEncryptedPacket> ConstructResponseHeadersPacket(
@@ -232,6 +252,13 @@ class QuicNetworkTransactionTest
               response->connection_info);
   }
 
+  void CheckResponsePort(const scoped_ptr<HttpNetworkTransaction>& trans,
+                         uint16 port) {
+    const HttpResponseInfo* response = trans->GetResponseInfo();
+    ASSERT_TRUE(response != nullptr);
+    EXPECT_EQ(port, response->socket_address.port());
+  }
+
   void CheckWasHttpResponse(const scoped_ptr<HttpNetworkTransaction>& trans) {
     const HttpResponseInfo* response = trans->GetResponseInfo();
     ASSERT_TRUE(response != nullptr);
@@ -266,36 +293,43 @@ class QuicNetworkTransactionTest
   }
 
   void SendRequestAndExpectQuicResponse(const std::string& expected) {
-    scoped_ptr<HttpNetworkTransaction> trans(
-        new HttpNetworkTransaction(DEFAULT_PRIORITY, session_.get()));
-    RunTransaction(trans.get());
-    CheckWasQuicResponse(trans);
-    CheckResponseData(trans.get(), expected);
+    SendRequestAndExpectQuicResponseMaybeFromProxy(expected, false, 80);
+  }
+
+  void SendRequestAndExpectQuicResponseOnPort(const std::string& expected,
+                                              uint16 port) {
+    SendRequestAndExpectQuicResponseMaybeFromProxy(expected, false, port);
+  }
+
+  void SendRequestAndExpectQuicResponseFromProxyOnPort(
+      const std::string& expected,
+      uint16 port) {
+    SendRequestAndExpectQuicResponseMaybeFromProxy(expected, true, port);
   }
 
   void AddQuicAlternateProtocolMapping(
       MockCryptoClientStream::HandshakeMode handshake_mode) {
     crypto_client_stream_factory_.set_handshake_mode(handshake_mode);
-    session_->http_server_properties()->SetAlternateProtocol(
-        HostPortPair::FromURL(request_.url), 80, QUIC, 1);
+    HostPortPair host_port_pair = HostPortPair::FromURL(request_.url);
+    AlternativeService alternative_service(QUIC, host_port_pair.host(), 80);
+    session_->http_server_properties()->SetAlternativeService(
+        host_port_pair, alternative_service, 1.0);
   }
 
   void ExpectBrokenAlternateProtocolMapping() {
-    ASSERT_TRUE(session_->http_server_properties()->HasAlternateProtocol(
-        HostPortPair::FromURL(request_.url)));
-    const AlternateProtocolInfo alternate =
-        session_->http_server_properties()->GetAlternateProtocol(
-            HostPortPair::FromURL(request_.url));
-    EXPECT_TRUE(alternate.is_broken);
+    const HostPortPair origin = HostPortPair::FromURL(request_.url);
+    const AlternativeService alternative_service =
+        session_->http_server_properties()->GetAlternativeService(origin);
+    EXPECT_NE(UNINITIALIZED_ALTERNATE_PROTOCOL, alternative_service.protocol);
+    EXPECT_TRUE(session_->http_server_properties()->IsAlternativeServiceBroken(
+        alternative_service));
   }
 
   void ExpectQuicAlternateProtocolMapping() {
-    ASSERT_TRUE(session_->http_server_properties()->HasAlternateProtocol(
-        HostPortPair::FromURL(request_.url)));
-    const AlternateProtocolInfo alternate =
-        session_->http_server_properties()->GetAlternateProtocol(
+    const AlternativeService alternative_service =
+        session_->http_server_properties()->GetAlternativeService(
             HostPortPair::FromURL(request_.url));
-    EXPECT_EQ(QUIC, alternate.protocol);
+    EXPECT_EQ(QUIC, alternative_service.protocol);
   }
 
   void AddHangingNonAlternateProtocolSocketData() {
@@ -321,6 +355,24 @@ class QuicNetworkTransactionTest
   HttpRequestInfo request_;
   CapturingBoundNetLog net_log_;
   StaticSocketDataProvider hanging_data_;
+
+ private:
+  void SendRequestAndExpectQuicResponseMaybeFromProxy(
+      const std::string& expected,
+      bool used_proxy,
+      uint16 port) {
+    scoped_ptr<HttpNetworkTransaction> trans(
+        new HttpNetworkTransaction(DEFAULT_PRIORITY, session_.get()));
+    ProxyHeadersHandler proxy_headers_handler;
+    trans->SetBeforeProxyHeadersSentCallback(
+        base::Bind(&ProxyHeadersHandler::OnBeforeProxyHeadersSent,
+                   base::Unretained(&proxy_headers_handler)));
+    RunTransaction(trans.get());
+    CheckWasQuicResponse(trans);
+    CheckResponsePort(trans, port);
+    CheckResponseData(trans.get(), expected);
+    EXPECT_EQ(used_proxy, proxy_headers_handler.was_called());
+  }
 };
 
 INSTANTIATE_TEST_CASE_P(Version, QuicNetworkTransactionTest,
@@ -389,6 +441,7 @@ TEST_P(QuicNetworkTransactionTest, ForceQuic) {
 }
 
 TEST_P(QuicNetworkTransactionTest, QuicProxy) {
+  params_.enable_quic_for_proxies = true;
   proxy_service_.reset(
       ProxyService::CreateFixedFromPacResult("QUIC myproxy:70"));
 
@@ -411,7 +464,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxy) {
 
   CreateSession();
 
-  SendRequestAndExpectQuicResponse("hello!");
+  SendRequestAndExpectQuicResponseFromProxyOnPort("hello!", 70);
 }
 
 TEST_P(QuicNetworkTransactionTest, ForceQuicWithErrorConnecting) {
@@ -490,6 +543,88 @@ TEST_P(QuicNetworkTransactionTest, UseAlternateProtocolForQuic) {
 
   SendRequestAndExpectHttpResponse("hello world");
   SendRequestAndExpectQuicResponse("hello!");
+}
+
+TEST_P(QuicNetworkTransactionTest, AlternateProtocolDifferentPort) {
+  MockRead http_reads[] = {
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(kQuicAlternateProtocolDifferentPortHttpHeader),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, ERR_TEST_PEER_CLOSE_AFTER_NEXT_MOCK_READ),
+      MockRead(ASYNC, OK)};
+
+  StaticSocketDataProvider http_data(http_reads, arraysize(http_reads), nullptr,
+                                     0);
+  socket_factory_.AddSocketDataProvider(&http_data);
+
+  MockQuicData mock_quic_data;
+  mock_quic_data.AddWrite(
+      ConstructRequestHeadersPacket(1, kClientDataStreamId1, true, true,
+                                    GetRequestHeaders("GET", "http", "/")));
+  mock_quic_data.AddRead(ConstructResponseHeadersPacket(
+      1, kClientDataStreamId1, false, false, GetResponseHeaders("200 OK")));
+  mock_quic_data.AddRead(
+      ConstructDataPacket(2, kClientDataStreamId1, false, true, 0, "hello!"));
+  mock_quic_data.AddWrite(ConstructAckPacket(2, 1));
+  mock_quic_data.AddRead(SYNCHRONOUS, 0);  // EOF
+
+  mock_quic_data.AddDelayedSocketDataToFactory(&socket_factory_, 1);
+
+  // The non-alternate protocol job needs to hang in order to guarantee that
+  // the alternate-protocol job will "win".
+  AddHangingNonAlternateProtocolSocketData();
+
+  CreateSessionWithNextProtos();
+
+  SendRequestAndExpectHttpResponse("hello world");
+  SendRequestAndExpectQuicResponseOnPort("hello!", 137);
+}
+
+TEST_P(QuicNetworkTransactionTest, ConfirmAlternativeService) {
+  MockRead http_reads[] = {
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(kQuicAlternateProtocolHttpHeader),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, ERR_TEST_PEER_CLOSE_AFTER_NEXT_MOCK_READ),
+      MockRead(ASYNC, OK)};
+
+  StaticSocketDataProvider http_data(http_reads, arraysize(http_reads), nullptr,
+                                     0);
+  socket_factory_.AddSocketDataProvider(&http_data);
+
+  MockQuicData mock_quic_data;
+  mock_quic_data.AddWrite(
+      ConstructRequestHeadersPacket(1, kClientDataStreamId1, true, true,
+                                    GetRequestHeaders("GET", "http", "/")));
+  mock_quic_data.AddRead(ConstructResponseHeadersPacket(
+      1, kClientDataStreamId1, false, false, GetResponseHeaders("200 OK")));
+  mock_quic_data.AddRead(
+      ConstructDataPacket(2, kClientDataStreamId1, false, true, 0, "hello!"));
+  mock_quic_data.AddWrite(ConstructAckPacket(2, 1));
+  mock_quic_data.AddRead(SYNCHRONOUS, 0);  // EOF
+
+  mock_quic_data.AddDelayedSocketDataToFactory(&socket_factory_, 1);
+
+  // The non-alternate protocol job needs to hang in order to guarantee that
+  // the alternate-protocol job will "win".
+  AddHangingNonAlternateProtocolSocketData();
+
+  CreateSessionWithNextProtos();
+
+  AlternativeService alternative_service(QUIC,
+                                         HostPortPair::FromURL(request_.url));
+  session_->http_server_properties()->MarkAlternativeServiceRecentlyBroken(
+      alternative_service);
+  EXPECT_TRUE(
+      session_->http_server_properties()->WasAlternativeServiceRecentlyBroken(
+          alternative_service));
+
+  SendRequestAndExpectHttpResponse("hello world");
+  SendRequestAndExpectQuicResponse("hello!");
+
+  EXPECT_FALSE(
+      session_->http_server_properties()->WasAlternativeServiceRecentlyBroken(
+          alternative_service));
 }
 
 TEST_P(QuicNetworkTransactionTest, UseAlternateProtocolProbabilityForQuic) {

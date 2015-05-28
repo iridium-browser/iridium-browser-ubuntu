@@ -210,6 +210,19 @@
       <message name="IDS_EXTENSION_MANIFEST_INVALID" desc="">
         Manifest file is invalid.
       </message>
+      <message name="IDS_EXTENSION_PACKAGE_DIRECTORY_ERROR" desc="Message for when an error occurs while trying to create the temporary directory needed to unzip a packaged extension or app.">
+        Could not create directory for unzipping: '<ph name="DIRECTORY_PATH">$1<ex>profile/Extensions/CRX_INSTALL</ex></ph>'
+      </message>
+      <message name="IDS_EXTENSION_PACKAGE_IMAGE_PATH_ERROR" desc="Error message for when a packaged extension or app contains a reference to an image that could be outside the package.">
+        Illegal path (absolute or relative with '..'): '<ph name="IMAGE_PATH">$1<ex>../image.png</ex></ph>'
+      </message>
+      <message name="IDS_EXTENSION_PACKAGE_IMAGE_ERROR" desc="Message for when an error occurs while trying to decode an image found within a packaged extension or app.">
+        Could not decode image: '<ph name="IMAGE_NAME">$1<ex>image.png</ex></ph>'
+      </message>
+      <message name="IDS_EXTENSION_PACKAGE_UNZIP_ERROR" desc="Message for when an error occurs while unzipping a packaged extension or app.">
+        Could not unzip extension
+      </message>
+
       <message name="IDS_EXTENSION_PROMPT_WARNING_CLIPBOARD" desc="Permission string for access to clipboard.">
         Read data you copy and paste
       </message>
@@ -346,6 +359,12 @@
       <message name="IDS_DEVICE_UNKNOWN_VENDOR" desc="String used when no human-readable vendor name is available for a device.">
         Vendor <ph name="VENDOR_ID">$1<ex>0x1234</ex></ph>
       </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_NETWORKING_CONFIG" desc="Permission string for Networking Config API.">
+        Configure network connections
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_NETWORKING_PRIVATE" desc="Permission string for Networking Private API.">
+        Manage network connections
+      </message>
       <message name="IDS_EXTENSION_PROMPT_WARNING_SERIAL" desc="Permission string for access to serial devices.">
         Access your serial devices
       </message>
@@ -381,6 +400,9 @@
       </message>
       <message name="IDS_EXTENSION_TASK_MANAGER_EXTENSIONOPTIONS_TAG_PREFIX" desc="The prefix for a guest page loaded in an extensionoptions tag in the Task Manager">
         Options: <ph name="EXTENSIONOPTIONS_TAG_NAME">$1<ex>Google Hangouts</ex></ph>
+      </message>
+      <message name="IDS_EXTENSION_TASK_MANAGER_EXTENSIONVIEW_TAG_PREFIX" desc="The prefix for a guest page loaded in an extensionview tag in the Task Manager">
+        ExtensionView: <ph name="EXTENSIONVIEW_TAG_NAME">$1<ex>Google Hangouts</ex></ph>
       </message>
       <message name="IDS_EXTENSION_TASK_MANAGER_MIMEHANDLERVIEW_TAG_PREFIX" desc="The prefix for a guest page loaded in a mime handler view page in the task manager">
         Mimehandler: <ph name="MIMEHANDLERVIEW_TAG_NAME">$1<ex>My mime handler view</ex></ph>
@@ -427,6 +449,29 @@
         Communicate with cooperating websites
       </message>
 
+      <!-- Install related messages. Please keep alphabetized. -->
+      <message name="IDS_EXTENSION_INSTALL_PROCESS_CRASHED" desc="Error message in case package fails to install because a utility process crashed.">
+        Could not install package because a utility process crashed. Try restarting Chrome and trying again.
+      </message>
+      <message name="IDS_EXTENSION_PACKAGE_ERROR_CODE" desc="Error message in cases where we fail to install the extension because the crx file is invalid. For example, because the crx header or signature is invalid.">
+        Package is invalid: '<ph name="ERROR_CODE">$1<ex>error</ex></ph>'.
+      </message>
+      <message name="IDS_EXTENSION_PACKAGE_ERROR_MESSAGE" desc="The cases where we get an error message string back from some other component. The message might be in English, but these are typically developer errors, and the extension SDK is English.">
+        Package is invalid. Details: '<ph name="ERROR_MESSAGE">$1<ex>error</ex></ph>'.
+      </message>
+      <message name="IDS_EXTENSION_PACKAGE_INSTALL_ERROR" desc="Error message in case package fails to install because of some problem with the filesystem.">
+        Could not install package: '<ph name="ERROR_CODE">$1<ex>error</ex></ph>'
+      </message>
+      <if expr="is_win">
+        <message name="IDS_EXTENSION_UNPACK_FAILED" desc="On windows, it is possible to mount a disk without the root of that disk having a drive letter.  The sandbox does not support this. See crbug/49530 .">
+          Can not unpack extension.  To safely unpack an extension, there must be a path to your profile directory that starts with a drive letter and does not contain a junction, mount point, or symlink.  No such path exists for your profile.
+        </message>
+      </if>
+      <if expr="not is_win">
+        <message name="IDS_EXTENSION_UNPACK_FAILED" desc="">
+          Can not unpack extension.  To safely unpack an extension, there must be a path to your profile directory that does not contain a symlink.  No such path exists for your profile.
+        </message>
+      </if>
     </messages>
   </release>
 </grit>

@@ -16,6 +16,7 @@
 #include "extensions/common/draggable_region.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extensions_client.h"
+#include "extensions/common/host_id.h"
 #include "extensions/common/permissions/media_galleries_permission_data.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/socket_permission_data.h"
@@ -37,6 +38,8 @@ IPC_ENUM_TRAITS_MAX_VALUE(content::SocketPermissionRequest::OperationType,
 
 IPC_ENUM_TRAITS_MAX_VALUE(extensions::UserScript::InjectionType,
                           extensions::UserScript::INJECTION_TYPE_LAST)
+
+IPC_ENUM_TRAITS_MAX_VALUE(HostID::HostType, HostID::HOST_TYPE_LAST)
 
 // Parameters structure for ExtensionHostMsg_AddAPIActionToActivityLog and
 // ExtensionHostMsg_AddEventToActivityLog.
@@ -106,9 +109,8 @@ IPC_STRUCT_BEGIN(ExtensionMsg_ExecuteCode_Params)
   // The extension API request id, for responding.
   IPC_STRUCT_MEMBER(int, request_id)
 
-  // The ID of the requesting extension. To know which isolated world to
-  // execute the code inside of.
-  IPC_STRUCT_MEMBER(std::string, extension_id)
+  // The ID of the requesting injection host.
+  IPC_STRUCT_MEMBER(HostID, host_id)
 
   // Whether the code is JavaScript or CSS.
   IPC_STRUCT_MEMBER(bool, is_javascript)
@@ -258,7 +260,8 @@ struct ExtensionMsg_PermissionSetStruct {
 struct ExtensionMsg_Loaded_Params {
   ExtensionMsg_Loaded_Params();
   ~ExtensionMsg_Loaded_Params();
-  explicit ExtensionMsg_Loaded_Params(const extensions::Extension* extension);
+  ExtensionMsg_Loaded_Params(const extensions::Extension* extension,
+                             bool include_tab_permissions);
 
   // Creates a new extension from the data in this object.
   scoped_refptr<extensions::Extension> ConvertToExtension(
@@ -277,6 +280,7 @@ struct ExtensionMsg_Loaded_Params {
   // The extension's active and withheld permissions.
   ExtensionMsg_PermissionSetStruct active_permissions;
   ExtensionMsg_PermissionSetStruct withheld_permissions;
+  std::map<int, ExtensionMsg_PermissionSetStruct> tab_specific_permissions;
 
   // We keep this separate so that it can be used in logging.
   std::string id;
@@ -330,6 +334,14 @@ struct ParamTraits<extensions::APIPermissionSet> {
 template <>
 struct ParamTraits<extensions::ManifestPermissionSet> {
   typedef extensions::ManifestPermissionSet param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<HostID> {
+  typedef HostID param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
@@ -438,16 +450,17 @@ IPC_MESSAGE_ROUTED1(ExtensionMsg_ExecuteCode,
 // handle is valid in the context of the renderer.
 // If |owner| is not empty, then the shared memory handle refers to |owner|'s
 // programmatically-defined scripts. Otherwise, the handle refers to all
-// extensions' statically defined scripts.
-// If |changed_extensions| is not empty, only the extensions in that set will
-// be updated. Otherwise, all extensions that have scripts in the shared memory
-// region will be updated. Note that the empty set => all extensions case is not
+// hosts' statically defined scripts. So far, only extension-hosts support
+// statically defined scripts; WebUI-hosts don't.
+// If |changed_hosts| is not empty, only the host in that set will
+// be updated. Otherwise, all hosts that have scripts in the shared memory
+// region will be updated. Note that the empty set => all hosts case is not
 // supported for per-extension programmatically-defined script regions; in such
-// regions, the owner is expected to list itself as the only changed extension.
+// regions, the owner is expected to list itself as the only changed host.
 IPC_MESSAGE_CONTROL3(ExtensionMsg_UpdateUserScripts,
                      base::SharedMemoryHandle,
-                     extensions::ExtensionId /* owner */,
-                     std::set<std::string> /* changed extensions */)
+                     HostID /* owner */,
+                     std::set<HostID> /* changed hosts */)
 
 // Trigger to execute declarative content script under browser control.
 IPC_MESSAGE_ROUTED4(ExtensionMsg_ExecuteDeclarativeScript,
@@ -469,14 +482,18 @@ IPC_MESSAGE_CONTROL1(ExtensionMsg_UpdatePermissions,
                      ExtensionMsg_UpdatePermissions_Params)
 
 // Tell the render view about new tab-specific permissions for an extension.
-IPC_MESSAGE_ROUTED3(ExtensionMsg_UpdateTabSpecificPermissions,
-                    GURL /* url */,
-                    std::string /* extension_id */,
-                    extensions::URLPatternSet /* hosts */)
+IPC_MESSAGE_CONTROL5(ExtensionMsg_UpdateTabSpecificPermissions,
+                     GURL /* url */,
+                     std::string /* extension_id */,
+                     extensions::URLPatternSet /* hosts */,
+                     bool /* update origin whitelist */,
+                     int /* tab_id */)
 
 // Tell the render view to clear tab-specific permissions for some extensions.
-IPC_MESSAGE_ROUTED1(ExtensionMsg_ClearTabSpecificPermissions,
-                    std::vector<std::string> /* extension_ids */)
+IPC_MESSAGE_CONTROL3(ExtensionMsg_ClearTabSpecificPermissions,
+                     std::vector<std::string> /* extension_ids */,
+                     bool /* update origin whitelist */,
+                     int /* tab_id */)
 
 // Tell the renderer which type this view is.
 IPC_MESSAGE_ROUTED1(ExtensionMsg_NotifyRenderViewType,
@@ -553,28 +570,6 @@ IPC_MESSAGE_CONTROL1(ExtensionMsg_WatchPages,
 IPC_MESSAGE_CONTROL1(ExtensionMsg_TransferBlobs,
                      std::vector<std::string> /* blob_uuids */)
 
-// The ACK for ExtensionHostMsg_CreateMimeHandlerViewGuest.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_CreateMimeHandlerViewGuestACK,
-                     int /* element_instance_id */)
-
-// Once a MimeHandlerView guest's JavaScript onload function has been called,
-// this IPC is sent to the container to notify it.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_MimeHandlerViewGuestOnLoadCompleted,
-                     int /* element_instance_id */)
-
-// Once a RenderView proxy has been created for the guest in the embedder render
-// process, this IPC informs the embedder of the proxy's routing ID.
-IPC_MESSAGE_CONTROL2(ExtensionMsg_GuestAttached,
-                     int /* element_instance_id */,
-                     int /* source_routing_id */)
-
-// This IPC tells the browser process to detach the provided
-// |element_instance_id| from a GuestViewBase if it is attached to one.
-// In other words, routing of input and graphics will no longer flow through
-// the container associated with the provided ID.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_GuestDetached,
-                     int /* element_instance_id*/)
-
 // Messages sent from the renderer to the browser.
 
 // A renderer sends this message when an extension process starts an API
@@ -630,7 +625,7 @@ IPC_MESSAGE_CONTROL4(ExtensionHostMsg_RemoveFilteredListener,
                      bool /* lazy */)
 
 // Notify the browser that an event has finished being dispatched.
-IPC_MESSAGE_ROUTED0(ExtensionHostMsg_EventAck)
+IPC_MESSAGE_ROUTED1(ExtensionHostMsg_EventAck, int /* message_id */)
 
 // Open a channel to all listening contexts owned by the extension with
 // the given ID.  This always returns a valid port ID which can be used for
@@ -776,11 +771,6 @@ IPC_MESSAGE_ROUTED1(ExtensionHostMsg_OnWatchedPageChange,
 IPC_MESSAGE_CONTROL1(ExtensionHostMsg_TransferBlobsAck,
                      std::vector<std::string> /* blob_uuids */)
 
-// Informs of updated frame names.
-IPC_MESSAGE_ROUTED2(ExtensionHostMsg_FrameNameChanged,
-                    bool /* is_top_level */,
-                    std::string /* name */)
-
 // Tells listeners that a detailed message was reported to the console by
 // WebKit.
 IPC_MESSAGE_ROUTED4(ExtensionHostMsg_DetailedConsoleMessageAdded,
@@ -788,22 +778,6 @@ IPC_MESSAGE_ROUTED4(ExtensionHostMsg_DetailedConsoleMessageAdded,
                     base::string16 /* source */,
                     extensions::StackTrace /* stack trace */,
                     int32 /* severity level */)
-
-// Sent by the renderer to set initialization parameters of a Browser Plugin
-// that is identified by |element_instance_id|.
-IPC_MESSAGE_CONTROL4(ExtensionHostMsg_AttachGuest,
-                     int /* routing_id */,
-                     int /* element_instance_id */,
-                     int /* guest_instance_id */,
-                     base::DictionaryValue /* attach_params */)
-
-// Tells the browser to create a mime handler guest view for a plugin.
-IPC_MESSAGE_CONTROL5(ExtensionHostMsg_CreateMimeHandlerViewGuest,
-                     int /* render_frame_id */,
-                     std::string /* embedder_url */,
-                     std::string /* content_url */,
-                     std::string /* mime_type */,
-                     int /* element_instance_id */)
 
 // Sent when a query selector request is made from the automation API.
 // acc_obj_id is the accessibility tree ID of the starting element.

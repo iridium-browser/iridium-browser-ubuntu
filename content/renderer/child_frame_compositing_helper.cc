@@ -34,7 +34,7 @@ ChildFrameCompositingHelper*
 ChildFrameCompositingHelper::CreateForBrowserPlugin(
     const base::WeakPtr<BrowserPlugin>& browser_plugin) {
   return new ChildFrameCompositingHelper(
-      browser_plugin, NULL, NULL, browser_plugin->render_view_routing_id());
+      browser_plugin, NULL, NULL, browser_plugin->render_frame_routing_id());
 }
 
 ChildFrameCompositingHelper*
@@ -61,7 +61,10 @@ ChildFrameCompositingHelper::ChildFrameCompositingHelper(
       render_frame_proxy_(render_frame_proxy),
       frame_(frame) {}
 
-ChildFrameCompositingHelper::~ChildFrameCompositingHelper() {}
+ChildFrameCompositingHelper::~ChildFrameCompositingHelper() {
+  if (resource_collection_.get())
+    resource_collection_->SetClient(NULL);
+}
 
 BrowserPluginManager* ChildFrameCompositingHelper::GetBrowserPluginManager() {
   if (!browser_plugin_)
@@ -91,7 +94,7 @@ void ChildFrameCompositingHelper::SendCompositorFrameSwappedACKToBrowser(
   if (GetBrowserPluginManager()) {
     GetBrowserPluginManager()->Send(
         new BrowserPluginHostMsg_CompositorFrameSwappedACK(
-            host_routing_id_, GetInstanceID(), params));
+            GetInstanceID(), params));
   } else if (render_frame_proxy_) {
     render_frame_proxy_->Send(
         new FrameHostMsg_CompositorFrameSwappedACK(host_routing_id_, params));
@@ -105,7 +108,7 @@ void ChildFrameCompositingHelper::SendReclaimCompositorResourcesToBrowser(
   if (GetBrowserPluginManager()) {
     GetBrowserPluginManager()->Send(
         new BrowserPluginHostMsg_ReclaimCompositorResources(
-            host_routing_id_, GetInstanceID(), params));
+            GetInstanceID(), params));
   } else if (render_frame_proxy_) {
     render_frame_proxy_->Send(
         new FrameHostMsg_ReclaimCompositorResources(host_routing_id_, params));

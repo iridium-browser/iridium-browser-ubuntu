@@ -47,16 +47,14 @@
 #include "SkCanvas.h"
 #include "SkDeferredCanvas.h"
 #include "SkDevice.h"
+#include "SkDocument.h"
 #include "SkMatrix.h"
 #include "SkNWayCanvas.h"
-#include "SkPDFDevice.h"
-#include "SkPDFDocument.h"
 #include "SkPaint.h"
 #include "SkPath.h"
 #include "SkPicture.h"
 #include "SkPictureRecord.h"
 #include "SkPictureRecorder.h"
-#include "SkProxyCanvas.h"
 #include "SkRect.h"
 #include "SkRegion.h"
 #include "SkShader.h"
@@ -192,13 +190,13 @@ class Canvas2CanvasClipVisitor : public SkCanvas::ClipVisitor {
 public:
     Canvas2CanvasClipVisitor(SkCanvas* target) : fTarget(target) {}
 
-    virtual void clipRect(const SkRect& r, SkRegion::Op op, bool aa) SK_OVERRIDE {
+    void clipRect(const SkRect& r, SkRegion::Op op, bool aa) override {
         fTarget->clipRect(r, op, aa);
     }
-    virtual void clipRRect(const SkRRect& r, SkRegion::Op op, bool aa) SK_OVERRIDE {
+    void clipRRect(const SkRRect& r, SkRegion::Op op, bool aa) override {
         fTarget->clipRRect(r, op, aa);
     }
-    virtual void clipPath(const SkPath& p, SkRegion::Op op, bool aa) SK_OVERRIDE {
+    void clipPath(const SkPath& p, SkRegion::Op op, bool aa) override {
         fTarget->clipPath(p, op, aa);
     }
 
@@ -229,8 +227,6 @@ static const char* const kCanvasDrawAssertMessageFormat =
     "Drawing test step %s with SkCanvas";
 static const char* const kDeferredDrawAssertMessageFormat =
     "Drawing test step %s with SkDeferredCanvas";
-static const char* const kProxyDrawAssertMessageFormat =
-    "Drawing test step %s with SkProxyCanvas";
 static const char* const kNWayDrawAssertMessageFormat =
     "Drawing test step %s with SkNWayCanvas";
 static const char* const kDeferredPreFlushAssertMessageFormat =
@@ -239,10 +235,6 @@ static const char* const kDeferredPostFlushPlaybackAssertMessageFormat =
     "test step %s, SkDeferredCanvas playback canvas state consistency after flush";
 static const char* const kDeferredPostSilentFlushPlaybackAssertMessageFormat =
     "test step %s, SkDeferredCanvas playback canvas state consistency after silent flush";
-static const char* const kProxyStateAssertMessageFormat =
-    "test step %s, SkProxyCanvas state consistency";
-static const char* const kProxyIndirectStateAssertMessageFormat =
-    "test step %s, SkProxyCanvas indirect canvas state consistency";
 static const char* const kNWayStateAssertMessageFormat =
     "test step %s, SkNWayCanvas state consistency";
 static const char* const kNWayIndirect1StateAssertMessageFormat =
@@ -564,15 +556,15 @@ static void AssertCanvasStatesEqual(skiatest::Reporter* reporter, const TestData
 static void TestPdfDevice(skiatest::Reporter* reporter,
                           const TestData& d,
                           CanvasTestStep* testStep) {
-    SkISize pageSize = SkISize::Make(d.fWidth, d.fHeight);
-    SkPDFDevice device(pageSize, pageSize, SkMatrix::I());
-    SkCanvas canvas(&device);
+    SkDynamicMemoryWStream outStream;
+    SkAutoTUnref<SkDocument> doc(SkDocument::CreatePDF(&outStream));
+    SkCanvas* canvas = doc->beginPage(SkIntToScalar(d.fWidth),
+                                      SkIntToScalar(d.fHeight));
+    REPORTER_ASSERT(reporter, canvas);
     testStep->setAssertMessageFormat(kPdfAssertMessageFormat);
-    testStep->draw(&canvas, d, reporter);
-    SkPDFDocument doc;
-    doc.appendPage(&device);
-    SkDynamicMemoryWStream stream;
-    doc.emitPDF(&stream);
+    testStep->draw(canvas, d, reporter);
+
+    REPORTER_ASSERT(reporter, doc->close());
 }
 
 // The following class groups static functions that need to access
@@ -619,27 +611,6 @@ public:
 };
 
 // unused
-static void TestProxyCanvasStateConsistency(
-    skiatest::Reporter* reporter,
-    const TestData& d,
-    CanvasTestStep* testStep,
-    const SkCanvas& referenceCanvas) {
-
-    SkBitmap indirectStore;
-    createBitmap(&indirectStore, 0xFFFFFFFF);
-    SkCanvas indirectCanvas(indirectStore);
-    SkProxyCanvas proxyCanvas(&indirectCanvas);
-    testStep->setAssertMessageFormat(kProxyDrawAssertMessageFormat);
-    testStep->draw(&proxyCanvas, d, reporter);
-    // Verify that the SkProxyCanvas reports consitent state
-    testStep->setAssertMessageFormat(kProxyStateAssertMessageFormat);
-    AssertCanvasStatesEqual(reporter, d, &proxyCanvas, &referenceCanvas, testStep);
-    // Verify that the indirect canvas reports consitent state
-    testStep->setAssertMessageFormat(kProxyIndirectStateAssertMessageFormat);
-    AssertCanvasStatesEqual(reporter, d, &indirectCanvas, &referenceCanvas, testStep);
-}
-
-// unused
 static void TestNWayCanvasStateConsistency(
     skiatest::Reporter* reporter,
     const TestData& d,
@@ -661,7 +632,7 @@ static void TestNWayCanvasStateConsistency(
 
     testStep->setAssertMessageFormat(kNWayDrawAssertMessageFormat);
     testStep->draw(&nWayCanvas, d, reporter);
-    // Verify that the SkProxyCanvas reports consitent state
+    // Verify that the SkNWayCanvas reports consitent state
     testStep->setAssertMessageFormat(kNWayStateAssertMessageFormat);
     AssertCanvasStatesEqual(reporter, d, &nWayCanvas, &referenceCanvas, testStep);
     // Verify that the indirect canvases report consitent state
@@ -688,15 +659,6 @@ static void TestOverrideStateConsistency(skiatest::Reporter* reporter, const Tes
     SkDeferredCanvasTester::TestDeferredCanvasStateConsistency(reporter, d, testStep, referenceCanvas, false);
 
     SkDeferredCanvasTester::TestDeferredCanvasStateConsistency(reporter, d, testStep, referenceCanvas, true);
-
-    // The following test code is disabled because SkProxyCanvas is
-    // missing a lot of virtual overrides on get* methods, which are used
-    // to verify canvas state.
-    // Issue: http://code.google.com/p/skia/issues/detail?id=500
-
-    if (false) { // avoid bit rot, suppress warning
-        TestProxyCanvasStateConsistency(reporter, d, testStep, referenceCanvas);
-    }
 
     // The following test code is disabled because SkNWayCanvas does not
     // report correct clipping and device bounds information
@@ -784,4 +746,20 @@ DEF_TEST(Canvas_SaveState, reporter) {
     REPORTER_ASSERT(reporter, 2 == canvas.getSaveCount());
     canvas.restore();
     REPORTER_ASSERT(reporter, 1 == canvas.getSaveCount());
+}
+
+DEF_TEST(Canvas_ClipEmptyPath, reporter) {
+    SkCanvas canvas(10, 10);
+    canvas.save();
+    SkPath path;
+    canvas.clipPath(path);
+    canvas.restore();
+    canvas.save();
+    path.moveTo(5, 5);
+    canvas.clipPath(path);
+    canvas.restore();
+    canvas.save();
+    path.moveTo(7, 7);
+    canvas.clipPath(path);  // should not assert here
+    canvas.restore();
 }

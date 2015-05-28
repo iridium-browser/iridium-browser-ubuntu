@@ -23,12 +23,11 @@ class QuicFlowControllerTest : public ::testing::Test {
         send_window_(kInitialSessionFlowControlWindowForTest),
         receive_window_(kInitialSessionFlowControlWindowForTest),
         max_receive_window_(kInitialSessionFlowControlWindowForTest),
-        connection_(false) {
-  }
+        connection_(Perspective::IS_CLIENT) {}
 
   void Initialize() {
     flow_controller_.reset(new QuicFlowController(
-        &connection_, stream_id_, false, send_window_,
+        &connection_, stream_id_, Perspective::IS_CLIENT, send_window_,
         receive_window_, max_receive_window_));
   }
 
@@ -44,7 +43,6 @@ class QuicFlowControllerTest : public ::testing::Test {
 TEST_F(QuicFlowControllerTest, SendingBytes) {
   Initialize();
 
-  EXPECT_TRUE(flow_controller_->IsEnabled());
   EXPECT_FALSE(flow_controller_->IsBlocked());
   EXPECT_FALSE(flow_controller_->FlowControlViolation());
   EXPECT_EQ(send_window_, flow_controller_->SendWindowSize());
@@ -86,7 +84,6 @@ TEST_F(QuicFlowControllerTest, SendingBytes) {
 TEST_F(QuicFlowControllerTest, ReceivingBytes) {
   Initialize();
 
-  EXPECT_TRUE(flow_controller_->IsEnabled());
   EXPECT_FALSE(flow_controller_->IsBlocked());
   EXPECT_FALSE(flow_controller_->FlowControlViolation());
   EXPECT_EQ(kInitialSessionFlowControlWindowForTest,
@@ -116,7 +113,6 @@ TEST_F(QuicFlowControllerTest, OnlySendBlockedFrameOncePerOffset) {
 
   // Test that we don't send duplicate BLOCKED frames. We should only send one
   // BLOCKED frame at a given send window offset.
-  EXPECT_TRUE(flow_controller_->IsEnabled());
   EXPECT_FALSE(flow_controller_->IsBlocked());
   EXPECT_FALSE(flow_controller_->FlowControlViolation());
   EXPECT_EQ(send_window_, flow_controller_->SendWindowSize());

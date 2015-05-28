@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/ui.gni")
+import("//testing/test.gni")
 import("//third_party/WebKit/Source/build/scripts/scripts.gni")
 import("//third_party/WebKit/Source/config.gni")
 import("//third_party/WebKit/Source/platform/platform.gni")
@@ -78,7 +79,6 @@ if (is_mac) {
       "WebScrollbarPartAnimation=ChromiumWebCoreObjCWebScrollbarPartAnimation",
       "WebCoreFlippedView=ChromiumWebCoreObjCWebCoreFlippedView",
       "WebCoreTextFieldCell=ChromiumWebCoreObjCWebCoreTextFieldCell",
-      "WebCoreRenderThemeNotificationObserver=ChromiumWebCoreObjCWebCoreRenderThemeNotificationObserver",
     ]
   }
 }
@@ -176,6 +176,8 @@ component("platform") {
     get_target_outputs(":color_data")
 
   configs += [
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    "//build/config/compiler:no_size_t_to_int_warning",
     "//third_party/WebKit/Source:config",
     "//third_party/WebKit/Source:non_test_config",
   ]
@@ -216,7 +218,6 @@ component("platform") {
       "fonts/opentype/OpenTypeVerticalData.cpp",
       "fonts/opentype/OpenTypeVerticalData.h",
       # The Mac currently uses FontCustomPlatformDataMac.cpp instead.
-      "fonts/skia/FontCustomPlatformDataSkia.cpp",
       "fonts/skia/FontCacheSkia.cpp",
       # Uses LocaleMac instead.
       "text/LocaleICU.cpp",
@@ -263,7 +264,6 @@ component("platform") {
       "text/LocaleICU.h",
     ]
     cflags = [
-      "/wd4267",  # Conversion from 'size_t' to 'type', possible loss of data.
       "/wd4334",  # Result of 32-bit shift implicitly converted to 64 bits.
       "/wd4724",  # Modulo by 0.
     ]
@@ -299,7 +299,7 @@ component("platform") {
     ]
   }
 
-  if (cpu_arch == "arm") {
+  if (current_cpu == "arm") {
     deps += [ ":blink_arm_neon" ]
   }
 
@@ -326,6 +326,10 @@ if (!is_mac) {
     configs += [
       "//third_party/WebKit/Source/wtf:wtf_config",
       "//third_party/WebKit/Source:config",
+    ]
+
+    defines = [
+      "INSIDE_BLINK",
     ]
 
     deps = [
@@ -380,7 +384,7 @@ if (!is_mac) {
 }
 
 
-if (cpu_arch == "arm") {
+if (current_cpu == "arm") {
   source_set("blink_arm_neon") {
     sources = blink_platform_neon_files
 

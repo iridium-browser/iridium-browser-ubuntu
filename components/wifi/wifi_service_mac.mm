@@ -17,6 +17,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "components/onc/onc_constants.h"
 #include "components/wifi/network_properties.h"
+#include "crypto/apple_keychain.h"
 
 namespace wifi {
 
@@ -75,6 +76,8 @@ class WiFiServiceMac : public WiFiService {
       const NetworkGuidListCallback& network_list_changed_observer) override;
 
   void RequestConnectedNetworkUpdate() override;
+
+  void GetConnectedNetworkSSID(std::string* ssid, std::string* error) override;
 
  private:
   // Checks |ns_error| and if is not |nil|, then stores |error_name|
@@ -359,14 +362,15 @@ void WiFiServiceMac::GetKeyFromSystem(const std::string& network_guid,
 
   UInt32 password_length = 0;
   void *password_data = NULL;
-  OSStatus status = SecKeychainFindGenericPassword(NULL,
-                                                   strlen(kAirPortServiceName),
-                                                   kAirPortServiceName,
-                                                   network_guid.length(),
-                                                   network_guid.c_str(),
-                                                   &password_length,
-                                                   &password_data,
-                                                   NULL);
+  crypto::AppleKeychain keychain;
+  OSStatus status = keychain.FindGenericPassword(NULL,
+                                                 strlen(kAirPortServiceName),
+                                                 kAirPortServiceName,
+                                                 network_guid.length(),
+                                                 network_guid.c_str(),
+                                                 &password_length,
+                                                 &password_data,
+                                                 NULL);
   if (status != errSecSuccess) {
     *error = kErrorNotFound;
     return;
@@ -375,7 +379,7 @@ void WiFiServiceMac::GetKeyFromSystem(const std::string& network_guid,
   if (password_data) {
     *key_data = std::string(reinterpret_cast<char*>(password_data),
                             password_length);
-    SecKeychainItemFreeContent(NULL, password_data);
+    keychain.ItemFreeContent(NULL, password_data);
   }
 }
 
@@ -414,6 +418,12 @@ void WiFiServiceMac::SetEventObservers(
 
 void WiFiServiceMac::RequestConnectedNetworkUpdate() {
   OnWlanObserverNotification();
+}
+
+void WiFiServiceMac::GetConnectedNetworkSSID(std::string* ssid,
+                                             std::string* error) {
+  *ssid = base::SysNSStringToUTF8([interface_ ssid]);
+  *error = "";
 }
 
 std::string WiFiServiceMac::GetNetworkConnectionState(

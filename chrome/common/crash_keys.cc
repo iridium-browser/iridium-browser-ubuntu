@@ -55,7 +55,13 @@ static_assert(kMediumSize <= kSingleChunkLength,
               "mac has medium size crash key chunks");
 #endif
 
+#if defined(OS_MACOSX)
+// Crashpad owns the "guid" key. Chrome's metrics client ID is a separate ID
+// carried in a distinct "metrics_client_id" field.
+const char kMetricsClientId[] = "metrics_client_id";
+#else
 const char kClientId[] = "guid";
+#endif
 
 const char kChannel[] = "channel";
 
@@ -71,8 +77,6 @@ const char kVariations[] = "variations";
 
 const char kExtensionID[] = "extension-%" PRIuS;
 const char kNumExtensionsCount[] = "num-extensions";
-
-const char kNumberOfViews[] = "num-views";
 
 const char kShutdownType[] = "shutdown-type";
 
@@ -116,18 +120,26 @@ const char kZombieTrace[] = "zombie_dealloc_bt";
 }  // namespace mac
 #endif
 
+#if defined(KASKO)
+const char kKaskoGuid[] = "kasko-guid";
+const char kKaskoEquivalentGuid[] = "kasko-equivalent-guid";
+#endif
+
 size_t RegisterChromeCrashKeys() {
   // The following keys may be chunked by the underlying crash logging system,
   // but ultimately constitute a single key-value pair.
   base::debug::CrashKey fixed_keys[] = {
+#if defined(OS_MACOSX)
+    { kMetricsClientId, kSmallSize },
+#else
     { kClientId, kSmallSize },
+#endif
     { kChannel, kSmallSize },
     { kActiveURL, kLargeSize },
     { kNumSwitches, kSmallSize },
     { kNumVariations, kSmallSize },
     { kVariations, kLargeSize },
     { kNumExtensionsCount, kSmallSize },
-    { kNumberOfViews, kSmallSize },
     { kShutdownType, kSmallSize },
 #if !defined(OS_ANDROID)
     { kGPUVendorID, kSmallSize },
@@ -143,13 +155,13 @@ size_t RegisterChromeCrashKeys() {
     { kGPURenderer, kSmallSize },
 #endif
 
-    // base/:
-    { "dm-usage", kSmallSize },
-    { "total-dm-usage", kSmallSize },
     // content/:
+    { "discardable-memory-allocated", kSmallSize },
+    { "discardable-memory-free", kSmallSize },
     { kFontKeyName, kSmallSize},
     { "ppapi_path", kMediumSize },
     { "subresource_url", kLargeSize },
+    { "total-discardable-memory-allocated", kSmallSize },
 #if defined(OS_CHROMEOS)
     { kNumberOfUsers, kSmallSize },
 #endif
@@ -169,6 +181,10 @@ size_t RegisterChromeCrashKeys() {
     { "rwhvm_window", kMediumSize },
     // media/:
     { "VideoCaptureDeviceQTKit", kSmallSize },
+#endif
+#if defined(KASKO)
+    { kKaskoGuid, kSmallSize },
+    { kKaskoEquivalentGuid, kSmallSize },
 #endif
   };
 
@@ -228,14 +244,40 @@ size_t RegisterChromeCrashKeys() {
                                     kSingleChunkLength);
 }
 
-void SetCrashClientIdFromGUID(const std::string& client_guid) {
-  std::string stripped_guid(client_guid);
+void SetMetricsClientIdFromGUID(const std::string& metrics_client_guid) {
+  std::string stripped_guid(metrics_client_guid);
   // Remove all instance of '-' char from the GUID. So BCD-WXY becomes BCDWXY.
   ReplaceSubstringsAfterOffset(&stripped_guid, 0, "-", "");
   if (stripped_guid.empty())
     return;
 
+#if defined(OS_MACOSX)
+  // The crash client ID is maintained by Crashpad and is distinct from the
+  // metrics client ID, which is carried in its own key.
+  base::debug::SetCrashKeyValue(kMetricsClientId, stripped_guid);
+#else
+  // The crash client ID is set by the application when Breakpad is in use.
+  // The same ID as the metrics client ID is used.
   base::debug::SetCrashKeyValue(kClientId, stripped_guid);
+#endif
+}
+
+void ClearMetricsClientId() {
+#if defined(OS_MACOSX)
+  // Crashpad always monitors for crashes, but doesn't upload them when
+  // crash reporting is disabled. The preference to upload crash reports is
+  // linked to the preference for metrics reporting. When metrics reporting is
+  // disabled, don't put the metrics client ID into crash dumps. This way, crash
+  // reports that are saved but not uploaded will not have a metrics client ID
+  // from the time that metrics reporting was disabled even if they are uploaded
+  // by user action at a later date.
+  //
+  // Breakpad cannot be enabled or disabled without an application restart, and
+  // it needs to use the metrics client ID as its stable crash client ID, so
+  // leave its client ID intact even when metrics reporting is disabled while
+  // the application is running.
+  base::debug::ClearCrashKey(kMetricsClientId);
+#endif
 }
 
 static bool IsBoringSwitch(const std::string& flag) {
@@ -265,6 +307,11 @@ static bool IsBoringSwitch(const std::string& flag) {
          // (If you need to know can always look at the PEB).
          flag == "--flag-switches-begin" ||
          flag == "--flag-switches-end";
+#elif defined(OS_MACOSX)
+  // These are carried in their own fields.
+  return StartsWithASCII(flag, "--channel=", true) ||
+         StartsWithASCII(flag, "--type=", true) ||
+         StartsWithASCII(flag, "--metrics-client-id=", true);
 #elif defined(OS_CHROMEOS)
   static const char* const kIgnoreSwitches[] = {
     ::switches::kEnableLogging,
@@ -280,6 +327,8 @@ static bool IsBoringSwitch(const std::string& flag) {
     ::switches::kV,
     ::switches::kVModule,
     // Cros/CC flgas are specified as raw strings to avoid dependency.
+    "child-wallpaper-large",
+    "child-wallpaper-small",
     "default-wallpaper-large",
     "default-wallpaper-small",
     "guest-wallpaper-large",

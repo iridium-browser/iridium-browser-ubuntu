@@ -17,11 +17,39 @@ var scanner;
 /** @type {!importer.TestImportHistory} */
 var importHistory;
 
+/** @type {!importer.TestDirectoryWatcher} */
+var watcher;
+
+/**
+ * @type {function(!FileEntry, !importer.Destination):
+ *     !Promise<!importer.Disposition>}
+ */
+var dispositionChecker;
+
 // Set up the test components.
 function setUp() {
 
+
   importHistory = new importer.TestImportHistory();
-  scanner = new importer.DefaultMediaScanner(importHistory);
+  // This is the default disposition checker.
+  // Tests can replace this at runtime if they
+  // want specialized behaviors.
+  dispositionChecker = function() {
+    return Promise.resolve(importer.Disposition.ORIGINAL);
+  };
+
+  scanner = new importer.DefaultMediaScanner(
+      /** @param {!FileEntry} entry */
+      function(entry) {
+        return Promise.resolve(entry.name);
+      },
+      function(entry, destination) {
+        return dispositionChecker(entry, destination);
+      },
+      function(callback) {
+        watcher = new TestDirectoryWatcher(callback);
+        return watcher;
+      });
 }
 
 /**
@@ -30,7 +58,7 @@ function setUp() {
 function testEmptySourceList() {
   assertThrows(
     function() {
-      scanner.scan([]);
+      scanner.scanFiles([]);
     });
 }
 
@@ -48,7 +76,7 @@ function testIsScanning(callback) {
                * @param {!DirectoryEntry} root
                */
               function(root) {
-                var results = scanner.scan([root]);
+                var results = scanner.scanDirectory(root);
                 assertFalse(results.isFinal());
               }),
       callback);
@@ -71,7 +99,7 @@ function testObserverNotifiedOnScanFinish(callback) {
             // We kick this off first so we can capture the result for
             // use in an assert. Promises ensure the scan won't finish
             // until after our funciton is fully processed.
-            var result = scanner.scan([root]);
+            var result = scanner.scanDirectory(root);
             scanner.addObserver(
                 function(eventType, scanResult) {
                   assertEquals(importer.ScanEvent.FINALIZED, eventType);
@@ -83,6 +111,34 @@ function testObserverNotifiedOnScanFinish(callback) {
           function() {
             callback(true);
           });
+}
+
+/**
+ * Verifies that scanFiles slurps up all specified files.
+ */
+function testScanFiles(callback) {
+  var filenames = [
+    'foo',
+    'foo.jpg',
+    'bar.gif',
+    'baz.avi'
+  ];
+  var expectedFiles = [
+    '/testScanFiles/foo.jpg',
+    '/testScanFiles/bar.gif',
+    '/testScanFiles/baz.avi'
+  ];
+  reportPromise(
+      makeTestFileSystemRoot('testScanFiles')
+          .then(populateDir.bind(null, filenames))
+          .then(fileOperationUtil.gatherEntriesRecursively)
+          .then(
+              /** @param {!Array<!FileEntry>} files */
+              function(files) {
+                return scanner.scanFiles(files).whenFinal();
+              })
+          .then(assertFilesFound.bind(null, expectedFiles)),
+      callback);
 }
 
 /**
@@ -102,9 +158,9 @@ function testEmptyScanResults(callback) {
                * @param {!DirectoryEntry} root
                */
               function(root) {
-                return scanner.scan([root]).whenFinal();
+                return scanner.scanDirectory(root).whenFinal();
               })
-          .then(assertResults.bind(null, [])),
+          .then(assertFilesFound.bind(null, [])),
       callback);
 }
 
@@ -134,9 +190,9 @@ function testSingleLevel(callback) {
                * @param {!DirectoryEntry} root
                */
               function(root) {
-                return scanner.scan([root]).whenFinal();
+                return scanner.scanDirectory(root).whenFinal();
               })
-          .then(assertResults.bind(null, expectedFiles)),
+          .then(assertFilesFound.bind(null, expectedFiles)),
       callback);
 }
 
@@ -148,29 +204,92 @@ function testIgnoresPreviousImports(callback) {
       '/testIgnoresPreviousImports/oldimage1234.jpg'] =
           [importer.Destination.GOOGLE_DRIVE];
   var filenames = [
-    'oldimage1234.jpg',
+    'oldimage1234.jpg',    // a history duplicate
+    'driveimage1234.jpg',  // a content duplicate
     'foo.jpg',
     'bar.gif',
     'baz.avi'
   ];
+
+  // Replace the default dispositionChecker with a function
+  // that treats our dupes accordingly.
+  dispositionChecker = function(entry, destination) {
+    if (entry.name === filenames[0]) {
+      return Promise.resolve(importer.Disposition.HISTORY_DUPLICATE);
+    }
+    if (entry.name === filenames[1]) {
+      return Promise.resolve(importer.Disposition.CONTENT_DUPLICATE);
+    }
+    return Promise.resolve(importer.Disposition.ORIGINAL);
+  };
+
   var expectedFiles = [
     '/testIgnoresPreviousImports/foo.jpg',
     '/testIgnoresPreviousImports/bar.gif',
     '/testIgnoresPreviousImports/baz.avi'
   ];
-  reportPromise(
-      makeTestFileSystemRoot('testIgnoresPreviousImports')
-          .then(populateDir.bind(null, filenames))
-          .then(
-              /**
-               * Scans the directory.
-               * @param {!DirectoryEntry} root
-               */
-              function(root) {
-                return scanner.scan([root]).whenFinal();
-              })
-          .then(assertResults.bind(null, expectedFiles)),
-      callback);
+
+  var promise = makeTestFileSystemRoot('testIgnoresPreviousImports')
+      .then(populateDir.bind(null, filenames))
+      .then(
+          /**
+           * Scans the directory.
+           * @param {!DirectoryEntry} root
+           */
+          function(root) {
+            return scanner.scanDirectory(root).whenFinal();
+          })
+      .then(assertFilesFound.bind(null, expectedFiles))
+
+  reportPromise(promise, callback);
+}
+
+function testTracksDuplicates(callback) {
+  importHistory.importedPaths[
+      '/testTracksDuplicates/oldimage1234.jpg'] =
+          [importer.Destination.GOOGLE_DRIVE];
+  var filenames = [
+    'oldimage1234.jpg',    // a history duplicate
+    'driveimage1234.jpg',  // a content duplicate
+    'driveimage9999.jpg',  // a content duplicate
+    'bar.gif',
+    'baz.avi'
+  ];
+
+  // Replace the default dispositionChecker with a function
+  // that treats our dupes accordingly.
+  dispositionChecker = function(entry, destination) {
+    if (entry.name === filenames[0]) {
+      return Promise.resolve(importer.Disposition.HISTORY_DUPLICATE);
+    }
+    if (entry.name === filenames[1]) {
+      return Promise.resolve(importer.Disposition.CONTENT_DUPLICATE);
+    }
+    if (entry.name === filenames[2]) {
+      return Promise.resolve(importer.Disposition.CONTENT_DUPLICATE);
+    }
+    return Promise.resolve(importer.Disposition.ORIGINAL);
+  };
+
+  var expectedDuplicates = [
+    '/testTracksDuplicates/driveimage1234.jpg',
+    '/testTracksDuplicates/driveimage9999.jpg'
+  ];
+
+
+  var promise = makeTestFileSystemRoot('testTracksDuplicates')
+      .then(populateDir.bind(null, filenames))
+      .then(
+          /**
+           * Scans the directory.
+           * @param {!DirectoryEntry} root
+           */
+          function(root) {
+            return scanner.scanDirectory(root).whenFinal();
+          })
+      .then(assertDuplicatesFound.bind(null, expectedDuplicates));
+
+  reportPromise(promise, callback);
 }
 
 function testMultiLevel(callback) {
@@ -178,23 +297,23 @@ function testMultiLevel(callback) {
     'foo.jpg',
     'bar',
     [
-      'foo.0',
+      'dir1',
       'bar.0.jpg'
     ],
     [
-      'foo.1',
+      'dir2',
       'bar.1.gif',
       [
-        'foo.1.0',
+        'dir3',
         'bar.1.0.avi'
       ]
     ]
   ];
   var expectedFiles = [
     '/testMultiLevel/foo.jpg',
-    '/testMultiLevel/foo.0/bar.0.jpg',
-    '/testMultiLevel/foo.1/bar.1.gif',
-    '/testMultiLevel/foo.1/foo.1.0/bar.1.0.avi'
+    '/testMultiLevel/dir1/bar.0.jpg',
+    '/testMultiLevel/dir2/bar.1.gif',
+    '/testMultiLevel/dir2/dir3/bar.1.0.avi'
   ];
 
   reportPromise(
@@ -206,65 +325,89 @@ function testMultiLevel(callback) {
                * @param {!DirectoryEntry} root
                */
               function(root) {
-                return scanner.scan([root]).whenFinal();
+                return scanner.scanDirectory(root).whenFinal();
               })
-          .then(assertResults.bind(null, expectedFiles)),
+          .then(assertFilesFound.bind(null, expectedFiles)),
       callback);
 }
 
-function testMultipleDirectories(callback) {
+function testDedupesFilesInScanResult(callback) {
   var filenames = [
-    'foo',
-    'bar',
+    'foo.jpg',
+    'bar.jpg',
     [
-      'foo.0',
-      'bar.0.jpg'
+      'dir1',
+      'foo.jpg',
+      'bar.jpg'
     ],
     [
-      'foo.1',
-      'bar.1.jpg',
+      'dir2',
+      'foo.jpg',
+      'bar.jpg',
+      [
+        'dir3',
+        'foo.jpg',
+        'bar.jpg'
+      ]
     ]
   ];
-  // Expected file paths from the scan.  We're scanning the two subdirectories
-  // only.
   var expectedFiles = [
-    '/testMultipleDirectories/foo.0/bar.0.jpg',
-    '/testMultipleDirectories/foo.1/bar.1.jpg'
+    '/testDedupesFilesInScanResult/foo.jpg',
+    '/testDedupesFilesInScanResult/bar.jpg'
   ];
 
-  var getDirectory = function(root, dirname) {
-    return new Promise(function(resolve, reject) {
-      root.getDirectory(
-          dirname, {create: false}, resolve, reject);
-    });
-  };
-
   reportPromise(
-      makeTestFileSystemRoot('testMultipleDirectories')
+      makeTestFileSystemRoot('testDedupesFilesInScanResult')
           .then(populateDir.bind(null, filenames))
+          .then(
+              /**
+               * Scans the directory.
+               * @param {!DirectoryEntry} root
+               */
+              function(root) {
+                return scanner.scanDirectory(root).whenFinal();
+              })
+          .then(assertFilesFound.bind(null, expectedFiles)),
+      callback);
+}
+
+function testInvalidation(callback) {
+  var invalidatePromise = new Promise(function(fulfill) {
+    scanner.addObserver(fulfill);
+  });
+  reportPromise(
+      makeTestFileSystemRoot('testInvalidation')
+          .then(populateDir.bind(null, ['DCIM']))
           .then(
               /**
                * Scans the directories.
                * @param {!DirectoryEntry} root
                */
               function(root) {
-                return Promise.all(['foo.0', 'foo.1'].map(
-                    getDirectory.bind(null, root))).then(
-                        function(directories) {
-                          return scanner.scan(directories).whenFinal();
-                        });
-              })
-          .then(assertResults.bind(null, expectedFiles)),
-      callback);
+                scan = scanner.scanDirectory(root);
+                watcher.callback();
+                return invalidatePromise;
+              }),
+              callback);
 }
 
 /**
  * Verifies the results of the media scan are as expected.
  * @param {!Array.<string>} expected
- * @param {!impoter.ScanResults} results
+ * @param {!importer.ScanResults} results
  */
-function assertResults(expected, results) {
+function assertFilesFound(expected, results) {
   assertFileEntryPathsEqual(expected, results.getFileEntries());
+  // TODO(smckay): Add coverage for getScanDurationMs && getTotalBytes.
+}
+
+/**
+ * Verifies the results of the media scan are as expected.
+ * @param {!Array.<string>} expected
+ * @param {!importer.ScanResults} results
+ */
+function assertDuplicatesFound(expected, results) {
+  assertFileEntryPathsEqual(expected, results.getDuplicateFileEntries());
   // TODO(smckay): Add coverage for getScanDurationMs && getTotalBytes.
 }
 

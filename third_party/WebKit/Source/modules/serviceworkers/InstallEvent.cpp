@@ -33,7 +33,6 @@
 
 #include "modules/serviceworkers/WaitUntilObserver.h"
 #include "wtf/RefPtr.h"
-#include <v8.h>
 
 namespace blink {
 
@@ -71,7 +70,7 @@ InstallEvent::InstallEvent(const AtomicString& type, const InstallEventInit& ini
 {
 }
 
-void InstallEvent::trace(Visitor* visitor)
+DEFINE_TRACE(InstallEvent)
 {
     ExtendableEvent::trace(visitor);
 }

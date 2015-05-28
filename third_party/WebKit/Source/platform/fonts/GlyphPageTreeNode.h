@@ -70,7 +70,7 @@ class GlyphPageTreeNode;
 class SystemFallbackGlyphPageTreeNode;
 
 class PLATFORM_EXPORT GlyphPageTreeNodeBase {
-    WTF_MAKE_FAST_ALLOCATED; WTF_MAKE_NONCOPYABLE(GlyphPageTreeNodeBase);
+    WTF_MAKE_FAST_ALLOCATED(GlyphPageTreeNodeBase); WTF_MAKE_NONCOPYABLE(GlyphPageTreeNodeBase);
 public:
     GlyphPageTreeNode* parent() const { return m_parent; }
 
@@ -134,7 +134,7 @@ private:
     static GlyphPageTreeNode* pageZeroRoot;
 
     RefPtr<GlyphPage> m_page;
-    typedef HashMap<const FontData*, OwnPtr<GlyphPageTreeNode> > GlyphPageTreeNodeMap;
+    typedef HashMap<const FontData*, OwnPtr<GlyphPageTreeNode>> GlyphPageTreeNodeMap;
     GlyphPageTreeNodeMap m_children;
     OwnPtr<SystemFallbackGlyphPageTreeNode> m_systemFallbackChild;
 };
@@ -152,7 +152,6 @@ private:
     PassRefPtr<GlyphPage> initializePage();
 
     struct UScriptCodeHashTraits : WTF::GenericHashTraits<UScriptCode> {
-        static const bool needsDestruction = false;
         static UScriptCode emptyValue() { return USCRIPT_CODE_LIMIT; }
         static void constructDeletedValue(UScriptCode& slot, bool) { slot = USCRIPT_INVALID_CODE; }
         static bool isDeletedValue(UScriptCode value) { return value == USCRIPT_INVALID_CODE; }

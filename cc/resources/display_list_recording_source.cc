@@ -26,12 +26,16 @@ const int kOpCountThatIsOkToAnalyze = 10;
 
 namespace cc {
 
-DisplayListRecordingSource::DisplayListRecordingSource()
+DisplayListRecordingSource::DisplayListRecordingSource(
+    const gfx::Size& grid_cell_size)
     : slow_down_raster_scale_factor_for_debug_(0),
-      can_use_lcd_text_(true),
+      gather_pixel_refs_(false),
+      requires_clear_(false),
       is_solid_color_(false),
       solid_color_(SK_ColorTRANSPARENT),
+      background_color_(SK_ColorTRANSPARENT),
       pixel_record_distance_(kPixelDistanceToRecord),
+      grid_cell_size_(grid_cell_size),
       is_suitable_for_gpu_rasterization_(true) {
 }
 
@@ -41,21 +45,14 @@ DisplayListRecordingSource::~DisplayListRecordingSource() {
 bool DisplayListRecordingSource::UpdateAndExpandInvalidation(
     ContentLayerClient* painter,
     Region* invalidation,
-    bool can_use_lcd_text,
     const gfx::Size& layer_size,
     const gfx::Rect& visible_layer_rect,
     int frame_number,
-    Picture::RecordingMode recording_mode) {
+    RecordingMode recording_mode) {
   bool updated = false;
 
   if (size_ != layer_size) {
     size_ = layer_size;
-    updated = true;
-  }
-
-  if (can_use_lcd_text_ != can_use_lcd_text) {
-    can_use_lcd_text_ = can_use_lcd_text;
-    invalidation->Union(gfx::Rect(GetSize()));
     updated = true;
   }
 
@@ -80,12 +77,37 @@ bool DisplayListRecordingSource::UpdateAndExpandInvalidation(
   if (!updated && !invalidation->Intersects(recorded_viewport_))
     return false;
 
-  // TODO(ajuma): Does repeating this way really makes sense with display lists?
-  // With Blink caching recordings, repeated calls will not cause re-recording.
-  int repeat_count = std::max(1, slow_down_raster_scale_factor_for_debug_);
+  ContentLayerClient::PaintingControlSetting painting_control =
+      ContentLayerClient::PAINTING_BEHAVIOR_NORMAL;
+
+  switch (recording_mode) {
+    case RECORD_NORMALLY:
+      // Already setup for normal recording.
+      break;
+    case RECORD_WITH_SK_NULL_CANVAS:
+    // TODO(schenney): Remove this when DisplayList recording is the only
+    // option. For now, fall through and disable construction.
+    case RECORD_WITH_PAINTING_DISABLED:
+      painting_control = ContentLayerClient::DISPLAY_LIST_CONSTRUCTION_DISABLED;
+      break;
+    case RECORD_WITH_CACHING_DISABLED:
+      painting_control = ContentLayerClient::DISPLAY_LIST_CACHING_DISABLED;
+      break;
+    default:
+      NOTREACHED();
+  }
+
+  int repeat_count = 1;
+  if (slow_down_raster_scale_factor_for_debug_ > 1) {
+    repeat_count = slow_down_raster_scale_factor_for_debug_;
+    if (painting_control !=
+        ContentLayerClient::DISPLAY_LIST_CONSTRUCTION_DISABLED) {
+      painting_control = ContentLayerClient::DISPLAY_LIST_CACHING_DISABLED;
+    }
+  }
   for (int i = 0; i < repeat_count; ++i) {
-    display_list_ = painter->PaintContentsToDisplayList(
-        recorded_viewport_, ContentLayerClient::GRAPHICS_CONTEXT_ENABLED);
+    display_list_ = painter->PaintContentsToDisplayList(recorded_viewport_,
+                                                        painting_control);
   }
   display_list_->set_layer_rect(recorded_viewport_);
   is_suitable_for_gpu_rasterization_ =
@@ -93,7 +115,16 @@ bool DisplayListRecordingSource::UpdateAndExpandInvalidation(
 
   DetermineIfSolidColor();
   display_list_->EmitTraceSnapshot();
+
+  display_list_->CreateAndCacheSkPicture();
+  if (gather_pixel_refs_)
+    display_list_->GatherPixelRefs(grid_cell_size_);
+
   return true;
+}
+
+void DisplayListRecordingSource::DidMoveToNewCompositor() {
+  // No invalidation history to worry about here.
 }
 
 gfx::Size DisplayListRecordingSource::GetSize() const {
@@ -105,15 +136,20 @@ void DisplayListRecordingSource::SetEmptyBounds() {
   Clear();
 }
 
-void DisplayListRecordingSource::SetMinContentsScale(float min_contents_scale) {
-}
-
-void DisplayListRecordingSource::SetTileGridSize(
-    const gfx::Size& tile_grid_size) {
-}
-
 void DisplayListRecordingSource::SetSlowdownRasterScaleFactor(int factor) {
   slow_down_raster_scale_factor_for_debug_ = factor;
+}
+
+void DisplayListRecordingSource::SetGatherPixelRefs(bool gather_pixel_refs) {
+  gather_pixel_refs_ = gather_pixel_refs;
+}
+
+void DisplayListRecordingSource::SetBackgroundColor(SkColor background_color) {
+  background_color_ = background_color;
+}
+
+void DisplayListRecordingSource::SetRequiresClear(bool requires_clear) {
+  requires_clear_ = requires_clear;
 }
 
 void DisplayListRecordingSource::SetUnsuitableForGpuRasterizationForTesting() {
@@ -124,15 +160,15 @@ bool DisplayListRecordingSource::IsSuitableForGpuRasterization() const {
   return is_suitable_for_gpu_rasterization_;
 }
 
-scoped_refptr<RasterSource> DisplayListRecordingSource::CreateRasterSource()
-    const {
+scoped_refptr<RasterSource> DisplayListRecordingSource::CreateRasterSource(
+    bool can_use_lcd_text) const {
   return scoped_refptr<RasterSource>(
-      DisplayListRasterSource::CreateFromDisplayListRecordingSource(this));
+      DisplayListRasterSource::CreateFromDisplayListRecordingSource(
+          this, can_use_lcd_text));
 }
 
-SkTileGridFactory::TileGridInfo
-DisplayListRecordingSource::GetTileGridInfoForTesting() const {
-  return SkTileGridFactory::TileGridInfo();
+gfx::Size DisplayListRecordingSource::GetTileGridSizeForTesting() const {
+  return gfx::Size();
 }
 
 void DisplayListRecordingSource::DetermineIfSolidColor() {

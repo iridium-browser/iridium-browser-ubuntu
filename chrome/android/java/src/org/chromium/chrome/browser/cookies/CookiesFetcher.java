@@ -10,6 +10,7 @@ import android.util.Log;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.ImportantFileWriterAndroid;
+import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.content.browser.crypto.CipherFactory;
 import org.chromium.content.common.CleanupReference;
@@ -46,13 +47,12 @@ public class CookiesFetcher {
      */
     private static final String MAGIC_STRING = "c0Ok135";
 
-    /** Full path of the file that we are fetching/loading cookies from. */
-    private final String mFileName;
-
     /** Native-side pointer. */
     private final long mNativeCookiesFetcher;
 
     private final CleanupReference mCleanupReference;
+
+    private final Context mContext;
 
     /**
      * Creates a new fetcher that can use to fetch cookies from cookie jar
@@ -67,8 +67,18 @@ public class CookiesFetcher {
      */
     private CookiesFetcher(Context context) {
         mNativeCookiesFetcher = nativeInit();
-        mFileName = context.getFileStreamPath(DEFAULT_COOKIE_FILE_NAME).getAbsolutePath();
+        mContext = context.getApplicationContext();
         mCleanupReference = new CleanupReference(this, new DestroyRunnable(mNativeCookiesFetcher));
+    }
+
+    /**
+     * Fetches the cookie file's path on demand to prevent IO on the main thread.
+     *
+     * @return Path to the cookie file.
+     */
+    private String fetchFileName() {
+        assert !ThreadUtils.runningOnUiThread();
+        return mContext.getFileStreamPath(DEFAULT_COOKIE_FILE_NAME).getAbsolutePath();
     }
 
     /**
@@ -118,7 +128,7 @@ public class CookiesFetcher {
                         // Something is wrong. Can't encrypt, don't restore cookies.
                         return cookies;
                     }
-                    File fileIn = new File(mFileName);
+                    File fileIn = new File(fetchFileName());
                     if (!fileIn.exists()) return cookies; // Nothing to read
 
                     FileInputStream streamIn = new FileInputStream(fileIn);
@@ -162,19 +172,11 @@ public class CookiesFetcher {
             protected void onPostExecute(List<CanonicalCookie> cookies) {
                 // We can only access cookies and profiles on the UI thread.
                 for (CanonicalCookie cookie : cookies) {
-                    nativeRestoreCookies(mNativeCookiesFetcher,
-                            cookie.getUrl(),
-                            cookie.getName(),
-                            cookie.getValue(),
-                            cookie.getDomain(),
-                            cookie.getPath(),
-                            cookie.getCreationDate(),
-                            cookie.getExpirationDate(),
-                            cookie.getLastAccessDate(),
-                            cookie.isSecure(),
-                            cookie.isHttpOnly(),
-                            cookie.getPriority()
-                    );
+                    nativeRestoreCookies(mNativeCookiesFetcher, cookie.getUrl(), cookie.getName(),
+                            cookie.getValue(), cookie.getDomain(), cookie.getPath(),
+                            cookie.getCreationDate(), cookie.getExpirationDate(),
+                            cookie.getLastAccessDate(), cookie.isSecure(), cookie.isHttpOnly(),
+                            cookie.isFirstPartyOnly(), cookie.getPriority());
                 }
             }
         }.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
@@ -201,9 +203,9 @@ public class CookiesFetcher {
     @CalledByNative
     private CanonicalCookie createCookie(String url, String name, String value, String domain,
             String path, long creation, long expiration, long lastAccess, boolean secure,
-            boolean httpOnly, int priority) {
+            boolean httpOnly, boolean firstPartyOnly, int priority) {
         return new CanonicalCookie(url, name, value, domain, path, creation, expiration, lastAccess,
-                secure, httpOnly, priority);
+                secure, httpOnly, firstPartyOnly, priority);
     }
 
     @CalledByNative
@@ -240,7 +242,7 @@ public class CookiesFetcher {
             }
             out.close();
             ImportantFileWriterAndroid.writeFileAtomically(
-                    mFileName, byteOut.toByteArray());
+                    fetchFileName(), byteOut.toByteArray());
             out = null;
         } catch (IOException e) {
             Log.w(TAG, "IOException during Cookie Fetch");
@@ -262,9 +264,11 @@ public class CookiesFetcher {
         new AsyncTask<Void, Void, Void>() {
             @Override
             protected Void doInBackground(Void... voids) {
-                File cookiesFile = new File(mFileName);
+                File cookiesFile = new File(fetchFileName());
                 if (cookiesFile.exists()) {
-                    if (!cookiesFile.delete()) Log.e(TAG, "Failed to delete " + mFileName);
+                    if (!cookiesFile.delete()) {
+                        Log.e(TAG, "Failed to delete " + cookiesFile.getName());
+                    }
                 }
                 return null;
             }
@@ -292,8 +296,8 @@ public class CookiesFetcher {
     private native long nativeInit();
     private static native void nativeDestroy(long nativeCookiesFetcher);
     private native void nativePersistCookies(long nativeCookiesFetcher);
-    private native void nativeRestoreCookies(long nativeCookiesFetcher,
-            String url, String name, String value, String domain, String path,
-            long creation, long expiration, long lastAccess, boolean secure,
-            boolean httpOnly, int priority);
+    private native void nativeRestoreCookies(long nativeCookiesFetcher, String url, String name,
+            String value, String domain, String path, long creation, long expiration,
+            long lastAccess, boolean secure, boolean httpOnly, boolean firstPartyOnly,
+            int priority);
 }

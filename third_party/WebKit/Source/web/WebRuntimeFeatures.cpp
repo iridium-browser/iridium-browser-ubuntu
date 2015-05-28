@@ -41,6 +41,11 @@ void WebRuntimeFeatures::enableExperimentalFeatures(bool enable)
     RuntimeEnabledFeatures::setExperimentalFeaturesEnabled(enable);
 }
 
+void WebRuntimeFeatures::enableFeatureFromString(const WebString& name, bool enable)
+{
+    RuntimeEnabledFeatures::setFeatureEnabledFromString(name, enable);
+}
+
 void WebRuntimeFeatures::enableBleedingEdgeFastPaths(bool enable)
 {
     ASSERT(enable);
@@ -51,6 +56,11 @@ void WebRuntimeFeatures::enableBleedingEdgeFastPaths(bool enable)
 void WebRuntimeFeatures::enableBlinkScheduler(bool enable)
 {
     RuntimeEnabledFeatures::setBlinkSchedulerEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableCompositorAnimationTimelines(bool enable)
+{
+    RuntimeEnabledFeatures::setCompositorAnimationTimelinesEnabled(enable);
 }
 
 void WebRuntimeFeatures::enableTestOnlyFeatures(bool enable)
@@ -153,6 +163,11 @@ void WebRuntimeFeatures::enableMediaSource(bool enable)
     RuntimeEnabledFeatures::setMediaSourceEnabled(enable);
 }
 
+void WebRuntimeFeatures::enableNotificationConstructor(bool enable)
+{
+    RuntimeEnabledFeatures::setNotificationConstructorEnabled(enable);
+}
+
 void WebRuntimeFeatures::enableNotifications(bool enable)
 {
     RuntimeEnabledFeatures::setNotificationsEnabled(enable);
@@ -198,19 +213,9 @@ void WebRuntimeFeatures::enableScreenOrientation(bool enable)
     RuntimeEnabledFeatures::setScreenOrientationEnabled(enable);
 }
 
-void WebRuntimeFeatures::enableScriptedSpeech(bool enable)
-{
-    RuntimeEnabledFeatures::setScriptedSpeechEnabled(enable);
-}
-
 void WebRuntimeFeatures::enableServiceWorker(bool enable)
 {
     RuntimeEnabledFeatures::setServiceWorkerEnabled(enable);
-}
-
-void WebRuntimeFeatures::enableSessionStorage(bool enable)
-{
-    RuntimeEnabledFeatures::setSessionStorageEnabled(enable);
 }
 
 void WebRuntimeFeatures::enableSlimmingPaint(bool enable)
@@ -273,11 +278,6 @@ void WebRuntimeFeatures::enablePreciseMemoryInfo(bool enable)
     RuntimeEnabledFeatures::setPreciseMemoryInfoEnabled(enable);
 }
 
-void WebRuntimeFeatures::enableShowModalDialog(bool enable)
-{
-    RuntimeEnabledFeatures::setShowModalDialogEnabled(enable);
-}
-
 void WebRuntimeFeatures::enableCredentialManagerAPI(bool enable)
 {
     RuntimeEnabledFeatures::setCredentialManagerEnabled(enable);
@@ -306,6 +306,36 @@ void WebRuntimeFeatures::enableSVG1DOM(bool enable)
 void WebRuntimeFeatures::enableReducedReferrerGranularity(bool enable)
 {
     RuntimeEnabledFeatures::setReducedReferrerGranularityEnabled(enable);
+}
+
+void WebRuntimeFeatures::enablePushMessaging(bool enable)
+{
+    RuntimeEnabledFeatures::setPushMessagingEnabled(enable);
+}
+
+void WebRuntimeFeatures::enablePushMessagingData(bool enable)
+{
+    RuntimeEnabledFeatures::setPushMessagingDataEnabled(enable);
+}
+
+void WebRuntimeFeatures::enablePushMessagingHasPermission(bool enable)
+{
+    RuntimeEnabledFeatures::setPushMessagingHasPermissionEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableStaleWhileRevalidateCacheControl(bool enable)
+{
+    RuntimeEnabledFeatures::setStaleWhileRevalidateCacheControlEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableUnsafeES3APIs(bool enable)
+{
+    RuntimeEnabledFeatures::setUnsafeES3APIsEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableVRDevice(bool enable)
+{
+    RuntimeEnabledFeatures::setVRDeviceEnabled(enable);
 }
 
 } // namespace blink

@@ -6,8 +6,8 @@
 
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
-#include "extensions/common/extension_messages.h"
 #include "extensions/common/guest_view/guest_view_constants.h"
+#include "extensions/common/guest_view/guest_view_messages.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebScopedMicrotaskSuppression.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -25,9 +25,7 @@ ExtensionsGuestViewContainer::Request::Request(
     GuestViewContainer* container,
     v8::Handle<v8::Function> callback,
     v8::Isolate* isolate)
-    : container_(container),
-      callback_(callback),
-      isolate_(isolate) {
+    : container_(container), callback_(isolate, callback), isolate_(isolate) {
 }
 
 ExtensionsGuestViewContainer::Request::~Request() {
@@ -39,7 +37,26 @@ bool ExtensionsGuestViewContainer::Request::HasCallback() const {
 
 v8::Handle<v8::Function>
 ExtensionsGuestViewContainer::Request::GetCallback() const {
-  return callback_.NewHandle(isolate_);
+  return v8::Local<v8::Function>::New(isolate_, callback_);
+}
+
+void ExtensionsGuestViewContainer::Request::ExecuteCallbackIfAvailable(
+    int argc, scoped_ptr<v8::Handle<v8::Value>[]> argv) {
+  if (!HasCallback())
+    return;
+
+  v8::HandleScope handle_scope(isolate());
+  v8::Handle<v8::Function> callback = GetCallback();
+  v8::Handle<v8::Context> context = callback->CreationContext();
+  if (context.IsEmpty())
+    return;
+
+  v8::Context::Scope context_scope(context);
+  blink::WebScopedMicrotaskSuppression suppression;
+
+  // Call the AttachGuest API's callback with the guest proxy as the first
+  // parameter.
+  callback->Call(context->Global(), argc, argv.get());
 }
 
 ExtensionsGuestViewContainer::AttachRequest::AttachRequest(
@@ -62,8 +79,7 @@ void ExtensionsGuestViewContainer::AttachRequest::PerformRequest() {
 
   // Step 1, send the attach params to extensions/.
   container()->render_frame()->Send(
-      new ExtensionHostMsg_AttachGuest(container()->render_view_routing_id(),
-                                       container()->element_instance_id(),
+      new GuestViewHostMsg_AttachGuest(container()->element_instance_id(),
                                        guest_instance_id_,
                                        *params_));
 
@@ -73,12 +89,8 @@ void ExtensionsGuestViewContainer::AttachRequest::PerformRequest() {
 
 void ExtensionsGuestViewContainer::AttachRequest::HandleResponse(
     const IPC::Message& message) {
-  ExtensionMsg_GuestAttached::Param param;
-  if (!ExtensionMsg_GuestAttached::Read(&message, &param))
-    return;
-
-  // If we don't have a callback then there's nothing more to do.
-  if (!HasCallback())
+  GuestViewMsg_GuestAttached::Param param;
+  if (!GuestViewMsg_GuestAttached::Read(&message, &param))
     return;
 
   content::RenderView* guest_proxy_render_view =
@@ -88,23 +100,14 @@ void ExtensionsGuestViewContainer::AttachRequest::HandleResponse(
     return;
 
   v8::HandleScope handle_scope(isolate());
-  v8::Handle<v8::Function> callback = GetCallback();
-  v8::Handle<v8::Context> context = callback->CreationContext();
-  if (context.IsEmpty())
-    return;
-
   blink::WebFrame* frame = guest_proxy_render_view->GetWebView()->mainFrame();
   v8::Local<v8::Value> window = frame->mainWorldScriptContext()->Global();
 
   const int argc = 1;
-  v8::Handle<v8::Value> argv[argc] = { window };
+  scoped_ptr<v8::Handle<v8::Value>[]> argv(new v8::Handle<v8::Value>[argc]);
+  argv[0] = window;
 
-  v8::Context::Scope context_scope(context);
-  blink::WebScopedMicrotaskSuppression suppression;
-
-  // Call the AttachGuest API's callback with the guest proxy as the first
-  // parameter.
-  callback->Call(context->Global(), argc, argv);
+  ExecuteCallbackIfAvailable(argc, argv.Pass());
 }
 
 ExtensionsGuestViewContainer::DetachRequest::DetachRequest(
@@ -126,58 +129,55 @@ void ExtensionsGuestViewContainer::DetachRequest::PerformRequest() {
 
 void ExtensionsGuestViewContainer::DetachRequest::HandleResponse(
     const IPC::Message& message) {
-  // If we don't have a callback then there's nothing more to do.
-  if (!HasCallback())
-    return;
-
-  v8::HandleScope handle_scope(isolate());
-  v8::Handle<v8::Function> callback = GetCallback();
-  v8::Handle<v8::Context> context = callback->CreationContext();
-  if (context.IsEmpty())
-    return;
-
-  v8::Context::Scope context_scope(context);
-  blink::WebScopedMicrotaskSuppression suppression;
-
-  // Call the DetachGuest's callback.
-  callback->Call(context->Global(), 0 /* argc */, NULL);
+  ExecuteCallbackIfAvailable(0 /* argc */, nullptr);
 }
 
 ExtensionsGuestViewContainer::ExtensionsGuestViewContainer(
     content::RenderFrame* render_frame)
     : GuestViewContainer(render_frame),
       ready_(false),
-      destruction_isolate_(nullptr) {
+      destruction_isolate_(nullptr),
+      element_resize_isolate_(nullptr),
+      weak_ptr_factory_(this) {
 }
 
 ExtensionsGuestViewContainer::~ExtensionsGuestViewContainer() {
-  if (element_instance_id() != guestview::kInstanceIDNone) {
+  if (element_instance_id() != guestview::kInstanceIDNone)
     g_guest_view_container_map.Get().erase(element_instance_id());
+
+  if (pending_response_.get())
+    pending_response_->ExecuteCallbackIfAvailable(0 /* argc */, nullptr);
+
+  while (pending_requests_.size() > 0) {
+    linked_ptr<Request> pending_request = pending_requests_.front();
+    pending_requests_.pop_front();
+    // Call the JavaScript callbacks with no arguments which implies an error.
+    pending_request->ExecuteCallbackIfAvailable(0 /* argc */, nullptr);
   }
 
   // Call the destruction callback, if one is registered.
-  if (destruction_callback_.IsEmpty())
-    return;
-  v8::HandleScope handle_scope(destruction_isolate_);
-  v8::Handle<v8::Function> callback =
-      destruction_callback_.NewHandle(destruction_isolate_);
-  v8::Handle<v8::Context> context = callback->CreationContext();
-  if (context.IsEmpty())
-    return;
+  if (!destruction_callback_.IsEmpty()) {
+    v8::HandleScope handle_scope(destruction_isolate_);
+    v8::Handle<v8::Function> callback =
+        v8::Local<v8::Function>::New(destruction_isolate_,
+                                     destruction_callback_);
+    v8::Handle<v8::Context> context = callback->CreationContext();
+    if (context.IsEmpty())
+      return;
 
-  v8::Context::Scope context_scope(context);
-  blink::WebScopedMicrotaskSuppression suppression;
+    v8::Context::Scope context_scope(context);
+    blink::WebScopedMicrotaskSuppression suppression;
 
-  callback->Call(context->Global(), 0, nullptr);
+    callback->Call(context->Global(), 0 /* argc */, nullptr);
+  }
 }
 
 ExtensionsGuestViewContainer* ExtensionsGuestViewContainer::FromID(
     int element_instance_id) {
   ExtensionsGuestViewContainerMap* guest_view_containers =
       g_guest_view_container_map.Pointer();
-  ExtensionsGuestViewContainerMap::iterator it =
-      guest_view_containers->find(element_instance_id);
-  return it == guest_view_containers->end() ? NULL : it->second;
+  auto it = guest_view_containers->find(element_instance_id);
+  return it == guest_view_containers->end() ? nullptr : it->second;
 }
 
 void ExtensionsGuestViewContainer::IssueRequest(linked_ptr<Request> request) {
@@ -188,8 +188,27 @@ void ExtensionsGuestViewContainer::IssueRequest(linked_ptr<Request> request) {
 void ExtensionsGuestViewContainer::RegisterDestructionCallback(
     v8::Handle<v8::Function> callback,
     v8::Isolate* isolate) {
-  destruction_callback_.reset(callback);
+  destruction_callback_.Reset(isolate, callback);
   destruction_isolate_ = isolate;
+}
+
+void ExtensionsGuestViewContainer::RegisterElementResizeCallback(
+    v8::Handle<v8::Function> callback,
+    v8::Isolate* isolate) {
+  element_resize_callback_.Reset(isolate, callback);
+  element_resize_isolate_ = isolate;
+}
+
+void ExtensionsGuestViewContainer::DidResizeElement(const gfx::Size& old_size,
+                                                    const gfx::Size& new_size) {
+  // Call the element resize callback, if one is registered.
+  if (element_resize_callback_.IsEmpty())
+    return;
+
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&ExtensionsGuestViewContainer::CallElementResizeCallback,
+                 weak_ptr_factory_.GetWeakPtr(), old_size, new_size));
 }
 
 bool ExtensionsGuestViewContainer::OnMessageReceived(
@@ -220,6 +239,29 @@ void ExtensionsGuestViewContainer::OnHandleCallback(
   HandlePendingResponseCallback(message);
   // Perform the subsequent attach request if one exists.
   PerformPendingRequest();
+}
+
+void ExtensionsGuestViewContainer::CallElementResizeCallback(
+    const gfx::Size& old_size,
+    const gfx::Size& new_size) {
+  v8::HandleScope handle_scope(element_resize_isolate_);
+  v8::Handle<v8::Function> callback = v8::Local<v8::Function>::New(
+      element_resize_isolate_, element_resize_callback_);
+  v8::Handle<v8::Context> context = callback->CreationContext();
+  if (context.IsEmpty())
+    return;
+
+  const int argc = 4;
+  v8::Handle<v8::Value> argv[argc] = {
+    v8::Integer::New(element_resize_isolate_, old_size.width()),
+    v8::Integer::New(element_resize_isolate_, old_size.height()),
+    v8::Integer::New(element_resize_isolate_, new_size.width()),
+    v8::Integer::New(element_resize_isolate_, new_size.height())};
+
+  v8::Context::Scope context_scope(context);
+  blink::WebScopedMicrotaskSuppression suppression;
+
+  callback->Call(context->Global(), argc, argv);
 }
 
 void ExtensionsGuestViewContainer::EnqueueRequest(linked_ptr<Request> request) {

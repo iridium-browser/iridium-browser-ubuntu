@@ -36,7 +36,7 @@ class MutableStylePropertySet;
 
 class CSSStyleDeclaration : public NoBaseWillBeGarbageCollectedFinalized<CSSStyleDeclaration>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
-    WTF_MAKE_NONCOPYABLE(CSSStyleDeclaration); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_NONCOPYABLE(CSSStyleDeclaration); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(CSSStyleDeclaration);
 public:
     virtual ~CSSStyleDeclaration() { }
 
@@ -69,7 +69,7 @@ public:
     virtual bool cssPropertyMatches(CSSPropertyID, const CSSValue*) const = 0;
     virtual CSSStyleSheet* parentStyleSheet() const { return 0; }
 
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 
 protected:
     CSSStyleDeclaration() { }

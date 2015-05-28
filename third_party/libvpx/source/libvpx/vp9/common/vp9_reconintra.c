@@ -12,6 +12,7 @@
 #include "./vp9_rtcd.h"
 
 #include "vpx_mem/vpx_mem.h"
+#include "vpx_ports/vpx_once.h"
 
 #include "vp9/common/vp9_reconintra.h"
 #include "vp9/common/vp9_onyxc_int.h"
@@ -579,7 +580,7 @@ static intra_high_pred_fn pred_high[INTRA_MODES][4];
 static intra_high_pred_fn dc_pred_high[2][2][4];
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 
-void vp9_init_intra_predictors() {
+static void vp9_init_intra_predictors_internal(void) {
 #define INIT_ALL_SIZES(p, type) \
   p[TX_4X4] = vp9_##type##_predictor_4x4; \
   p[TX_8X8] = vp9_##type##_predictor_8x8; \
@@ -715,15 +716,9 @@ static void build_intra_predictors_high(const MACROBLOCKD *xd,
         }
       } else if (x0 <= frame_width) {
         const int r = frame_width - x0;
-        if (right_available && bs == 4) {
-          vpx_memcpy(above_row, above_ref, r * sizeof(uint16_t));
-          vpx_memset16(above_row + r, above_row[r - 1],
+        vpx_memcpy(above_row, above_ref, r * sizeof(uint16_t));
+        vpx_memset16(above_row + r, above_row[r - 1],
                        x0 + 2 * bs - frame_width);
-        } else {
-          vpx_memcpy(above_row, above_ref, r * sizeof(uint16_t));
-          vpx_memset16(above_row + r, above_row[r - 1],
-                       x0 + 2 * bs - frame_width);
-        }
       }
       // TODO(Peter) this value should probably change for high bitdepth
       above_row[-1] = left_available ? above_ref[-1] : (base+1);
@@ -843,15 +838,9 @@ static void build_intra_predictors(const MACROBLOCKD *xd, const uint8_t *ref,
         }
       } else if (x0 <= frame_width) {
         const int r = frame_width - x0;
-        if (right_available && bs == 4) {
-          vpx_memcpy(above_row, above_ref, r);
-          vpx_memset(above_row + r, above_row[r - 1],
+        vpx_memcpy(above_row, above_ref, r);
+        vpx_memset(above_row + r, above_row[r - 1],
                      x0 + 2 * bs - frame_width);
-        } else {
-          vpx_memcpy(above_row, above_ref, r);
-          vpx_memset(above_row + r, above_row[r - 1],
-                     x0 + 2 * bs - frame_width);
-        }
       }
       above_row[-1] = left_available ? above_ref[-1] : 129;
     } else {
@@ -905,4 +894,8 @@ void vp9_predict_intra_block(const MACROBLOCKD *xd, int block_idx, int bwl_in,
 #endif
   build_intra_predictors(xd, ref, ref_stride, dst, dst_stride, mode, tx_size,
                          have_top, have_left, have_right, x, y, plane);
+}
+
+void vp9_init_intra_predictors() {
+  once(vp9_init_intra_predictors_internal);
 }

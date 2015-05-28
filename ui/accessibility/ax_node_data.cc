@@ -188,6 +188,22 @@ std::string AXNodeData::ToString() const {
       case AX_ATTR_TABLE_ROW_INDEX:
         result += " row_index=" + value;
         break;
+      case AX_ATTR_SORT_DIRECTION:
+        switch (int_attributes[i].second) {
+          case AX_SORT_DIRECTION_UNSORTED:
+            result += " sort_direction=none";
+            break;
+          case AX_SORT_DIRECTION_ASCENDING:
+            result += " sort_direction=ascending";
+            break;
+          case AX_SORT_DIRECTION_DESCENDING:
+            result += " sort_direction=descending";
+            break;
+          case AX_SORT_DIRECTION_OTHER:
+            result += " sort_direction=other";
+            break;
+        }
+        break;
       case AX_ATTR_TITLE_UI_ELEMENT:
         result += " title_elem=" + value;
         break;
@@ -226,6 +242,25 @@ std::string AXNodeData::ToString() const {
             break;
         }
         break;
+      case AX_ATTR_INVALID_STATE:
+        switch (int_attributes[i].second) {
+          case AX_INVALID_STATE_FALSE:
+            result += " invalid_state=false";
+            break;
+          case AX_INVALID_STATE_TRUE:
+            result += " invalid_state=true";
+            break;
+          case AX_INVALID_STATE_SPELLING:
+            result += " invalid_state=spelling";
+            break;
+          case AX_INVALID_STATE_GRAMMAR:
+            result += " invalid_state=grammar";
+            break;
+          case AX_INVALID_STATE_OTHER:
+            result += " invalid_state=other";
+            break;
+        }
+        break;
       case AX_INT_ATTRIBUTE_NONE:
         break;
     }
@@ -261,11 +296,17 @@ std::string AXNodeData::ToString() const {
       case AX_ATTR_DISPLAY:
         result += " display=" + value;
         break;
+      case AX_ATTR_DROPEFFECT:
+        result += " dropeffect=" + value;
+        break;
       case AX_ATTR_HELP:
         result += " help=" + value;
         break;
       case AX_ATTR_HTML_TAG:
         result += " html_tag=" + value;
+        break;
+      case AX_ATTR_ARIA_INVALID_VALUE:
+        result += " aria_invalid_value=" + value;
         break;
       case AX_ATTR_LIVE_RELEVANT:
         result += " relevant=" + value;
@@ -360,6 +401,9 @@ std::string AXNodeData::ToString() const {
         break;
       case AX_ATTR_IS_AX_TREE_HOST:
         result += " is_ax_tree_host=" + value;
+        break;
+      case AX_ATTR_GRABBED:
+        result += " grabbed=" + value;
         break;
       case AX_BOOL_ATTRIBUTE_NONE:
         break;

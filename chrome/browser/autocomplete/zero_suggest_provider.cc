@@ -19,11 +19,12 @@
 #include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/autocomplete_input.h"
 #include "components/omnibox/autocomplete_match.h"
@@ -98,7 +99,7 @@ void ZeroSuggestProvider::Start(const AutocompleteInput& input,
       input.type() == metrics::OmniboxInputType::INVALID)
     return;
 
-  Stop(true);
+  Stop(true, false);
   field_trial_triggered_ = false;
   field_trial_triggered_in_session_ = false;
   results_from_cache_ = false;
@@ -145,7 +146,8 @@ void ZeroSuggestProvider::Start(const AutocompleteInput& input,
   Run(suggest_url);
 }
 
-void ZeroSuggestProvider::Stop(bool clear_cached_results) {
+void ZeroSuggestProvider::Stop(bool clear_cached_results,
+                               bool due_to_user_inactivity) {
   if (fetcher_)
     LogOmniboxZeroSuggestRequest(ZERO_SUGGEST_REQUEST_INVALIDATED);
   fetcher_.reset();
@@ -160,6 +162,7 @@ void ZeroSuggestProvider::Stop(bool clear_cached_results) {
     results_.suggest_results.clear();
     results_.navigation_results.clear();
     current_query_.clear();
+    most_visited_urls_.clear();
   }
 }
 
@@ -175,7 +178,9 @@ void ZeroSuggestProvider::DeleteMatch(const AutocompleteMatch& match) {
 
 void ZeroSuggestProvider::AddProviderInfo(ProvidersInfo* provider_info) const {
   BaseSearchProvider::AddProviderInfo(provider_info);
-  if (!results_.suggest_results.empty() || !results_.navigation_results.empty())
+  if (!results_.suggest_results.empty() ||
+      !results_.navigation_results.empty() ||
+      !most_visited_urls_.empty())
     provider_info->back().set_times_returned_results_in_session(1);
 }
 
@@ -318,7 +323,8 @@ AutocompleteMatch ZeroSuggestProvider::NavigationToMatch(
 void ZeroSuggestProvider::Run(const GURL& suggest_url) {
   if (OmniboxFieldTrial::InZeroSuggestMostVisitedFieldTrial()) {
     most_visited_urls_.clear();
-    history::TopSites* ts = profile_->GetTopSites();
+    scoped_refptr<history::TopSites> ts =
+        TopSitesFactory::GetForProfile(profile_);
     if (ts) {
       waiting_for_most_visited_urls_request_ = true;
       ts->GetMostVisitedURLs(

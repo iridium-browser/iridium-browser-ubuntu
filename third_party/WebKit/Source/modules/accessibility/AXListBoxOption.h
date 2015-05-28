@@ -30,7 +30,7 @@
 #define AXListBoxOption_h
 
 #include "core/html/HTMLElement.h"
-#include "modules/accessibility/AXRenderObject.h"
+#include "modules/accessibility/AXLayoutObject.h"
 #include "wtf/Forward.h"
 
 namespace blink {
@@ -38,35 +38,36 @@ namespace blink {
 class AXObjectCacheImpl;
 class HTMLSelectElement;
 
-class AXListBoxOption final : public AXRenderObject {
+class AXListBoxOption final : public AXLayoutObject {
 
 private:
-    AXListBoxOption(RenderObject*, AXObjectCacheImpl*);
+    AXListBoxOption(LayoutObject*, AXObjectCacheImpl*);
 
 public:
-    static PassRefPtr<AXListBoxOption> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXListBoxOption> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AXListBoxOption();
 
-    virtual AccessibilityRole roleValue() const override { return ListBoxOptionRole; }
+    virtual bool isAXListBoxOption() const override { return true; }
+    virtual AccessibilityRole roleValue() const override;
     virtual bool isSelected() const override;
     virtual bool isEnabled() const override;
     virtual bool isSelectedOptionActive() const override;
     virtual void setSelected(bool) override;
     virtual bool canSetSelectedAttribute() const override;
     virtual String stringValue() const override;
-    virtual String title() const override { return String(); }
+    virtual String title(TextUnderElementMode) const override { return String(); }
 
 private:
-    virtual bool isListBoxOption() const override { return true; }
     virtual bool canHaveChildren() const override { return false; }
     virtual bool computeAccessibilityIsIgnored() const override;
 
     HTMLSelectElement* listBoxOptionParentNode() const;
     int listBoxOptionIndex() const;
     AXObject* listBoxOptionAXObject(HTMLElement*) const;
+    bool isParentPresentationalRole() const;
 };
 
-DEFINE_AX_OBJECT_TYPE_CASTS(AXListBoxOption, isListBoxOption());
+DEFINE_AX_OBJECT_TYPE_CASTS(AXListBoxOption, isAXListBoxOption());
 
 } // namespace blink
 

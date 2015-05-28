@@ -168,6 +168,10 @@ tv.exportTo('tv.c.trace_model', function() {
       this.snapshots.forEach(function(snapshot) {
         snapshot.ts += amount;
       });
+    },
+
+    get userFriendlyName() {
+      return this.typeName + ' object ' + this.id;
     }
   };
 
@@ -180,7 +184,8 @@ tv.exportTo('tv.c.trace_model', function() {
       multiViewElementName: 'tv-c-multi-object-sub-view'
     });
 
-  var options = new tv.b.ExtensionRegistryOptions(tv.b.TYPE_BASED_REGISTRY_MODE);
+  var options = new tv.b.ExtensionRegistryOptions(
+      tv.b.TYPE_BASED_REGISTRY_MODE);
   options.mandatoryBaseClass = ObjectInstance;
   options.defaultConstructor = ObjectInstance;
   tv.b.decorateExtensionRegistry(ObjectInstance, options);

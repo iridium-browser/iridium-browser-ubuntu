@@ -14,9 +14,11 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/policy/core/common/remote_commands/remote_command_job.h"
 #include "components/policy/policy_export.h"
 #include "policy/proto/device_management_backend.pb.h"
 
@@ -41,12 +43,17 @@ class POLICY_EXPORT CloudPolicyClient {
  public:
   // Maps a (policy type, settings entity ID) pair to its corresponding
   // PolicyFetchResponse.
-  typedef std::map<std::pair<std::string, std::string>,
-                   enterprise_management::PolicyFetchResponse*> ResponseMap;
+  using ResponseMap = std::map<std::pair<std::string, std::string>,
+                               enterprise_management::PolicyFetchResponse*>;
 
   // A callback which receives boolean status of an operation.  If the operation
   // succeeded, |status| is true.
-  typedef base::Callback<void(bool status)> StatusCallback;
+  using StatusCallback = base::Callback<void(bool status)>;
+
+  // A callback which receives fetched remote commands.
+  using RemoteCommandCallback = base::Callback<void(
+      DeviceManagementStatus,
+      const std::vector<enterprise_management::RemoteCommand>&)>;
 
   // Observer interface for state and policy changes.
   class POLICY_EXPORT Observer {
@@ -68,24 +75,6 @@ class POLICY_EXPORT CloudPolicyClient {
 
     // Indicates there's been an error in a previously-issued request.
     virtual void OnClientError(CloudPolicyClient* client) = 0;
-  };
-
-  // Delegate interface for supplying status information to upload to the server
-  // as part of the policy fetch request.
-  class POLICY_EXPORT StatusProvider {
-   public:
-    virtual ~StatusProvider();
-
-    // Retrieves status information to send with the next policy fetch.
-    // Implementations must return true if status information was filled in.
-    virtual bool GetDeviceStatus(
-        enterprise_management::DeviceStatusReportRequest* status) = 0;
-    virtual bool GetSessionStatus(
-        enterprise_management::SessionStatusReportRequest* status) = 0;
-
-    // Called after the status information has successfully been submitted to
-    // the server.
-    virtual void OnSubmittedSuccessfully() = 0;
   };
 
   // |provider| and |service| are weak pointers and it's the caller's
@@ -146,18 +135,49 @@ class POLICY_EXPORT CloudPolicyClient {
   virtual void UploadCertificate(const std::string& certificate_data,
                                  const StatusCallback& callback);
 
+  // Uploads device/session status to the server. As above, the client must be
+  // in a registered state. If non-null, |device_status| and |session_status|
+  // will be included in the upload status request. The |callback| will be
+  // called when the operation completes.
+  virtual void UploadDeviceStatus(
+      const enterprise_management::DeviceStatusReportRequest* device_status,
+      const enterprise_management::SessionStatusReportRequest* session_status,
+      const StatusCallback& callback);
+
+  // Attempts to fetch remote commands, with |last_command_id| being the ID of
+  // the last command that finished execution and |command_results| being
+  // results for previous commands which have not been reported yet. The
+  // |callback| will be called when the operation completes.
+  // Note that sending |last_command_id| will acknowledge this command and any
+  // previous commands. A nullptr indicates that no commands have finished
+  // execution.
+  virtual void FetchRemoteCommands(
+      scoped_ptr<RemoteCommandJob::UniqueIDType> last_command_id,
+      const std::vector<enterprise_management::RemoteCommandResult>&
+          command_results,
+      const RemoteCommandCallback& callback);
+
+  // Sends a device attribute update permission request to the server, uses
+  // OAuth2 token |auth_token| to identify user who requests a permission to
+  // name a device, calls a |callback| from the enrollment screen to indicate
+  // whether the device naming prompt should be shown.
+  void GetDeviceAttributeUpdatePermission(const std::string& auth_token,
+                                          const StatusCallback& callback);
+
+  // Sends a device naming information (Asset Id and Location) to the
+  // device management server, uses OAuth2 token |auth_token| to identify user
+  // who names a device, the |callback| will be called when the operation
+  // completes.
+  void UpdateDeviceAttributes(const std::string& auth_token,
+                              const std::string& asset_id,
+                              const std::string& location,
+                              const StatusCallback& callback);
+
   // Adds an observer to be called back upon policy and state changes.
   void AddObserver(Observer* observer);
 
   // Removes the specified observer.
   void RemoveObserver(Observer* observer);
-
-  // Sets the status provider for this client, or NULL if no provider.
-  // ClouldPolicyClient takes ownership of the passed |provider|.
-  void SetStatusProvider(scoped_ptr<StatusProvider> provider);
-
-  // Returns true if this object has a StatusProvider configured.
-  bool HasStatusProviderForTest();
 
   void set_submit_machine_id(bool submit_machine_id) {
     submit_machine_id_ = submit_machine_id;
@@ -232,6 +252,9 @@ class POLICY_EXPORT CloudPolicyClient {
 
   scoped_refptr<net::URLRequestContextGetter> GetRequestContext();
 
+  // Returns the number of active requests.
+  int GetActiveRequestCountForTest() const;
+
  protected:
   // A set of (policy type, settings entity ID) pairs to fetch.
   typedef std::set<std::pair<std::string, std::string>> PolicyTypeSet;
@@ -265,10 +288,46 @@ class POLICY_EXPORT CloudPolicyClient {
 
   // Callback for certificate upload requests.
   void OnCertificateUploadCompleted(
+      const DeviceManagementRequestJob* job,
       const StatusCallback& callback,
       DeviceManagementStatus status,
       int net_error,
       const enterprise_management::DeviceManagementResponse& response);
+
+  // Callback for status upload requests.
+  void OnStatusUploadCompleted(
+      const DeviceManagementRequestJob* job,
+      const StatusCallback& callback,
+      DeviceManagementStatus status,
+      int net_error,
+      const enterprise_management::DeviceManagementResponse& response);
+
+  // Callback for remote command fetch requests.
+  void OnRemoteCommandsFetched(
+      const DeviceManagementRequestJob* job,
+      const RemoteCommandCallback& callback,
+      DeviceManagementStatus status,
+      int net_error,
+      const enterprise_management::DeviceManagementResponse& response);
+
+  // Callback for device attribute update permission requests.
+  void OnDeviceAttributeUpdatePermissionCompleted(
+      const DeviceManagementRequestJob* job,
+      const StatusCallback& callback,
+      DeviceManagementStatus status,
+      int net_error,
+      const enterprise_management::DeviceManagementResponse& response);
+
+  // Callback for device attribute update requests.
+  void OnDeviceAttributeUpdated(
+      const DeviceManagementRequestJob* job,
+      const StatusCallback& callback,
+      DeviceManagementStatus status,
+      int net_error,
+      const enterprise_management::DeviceManagementResponse& response);
+
+  // Helper to remove a job from request_jobs_.
+  void RemoveJob(const DeviceManagementRequestJob* job);
 
   // Observer notification helpers.
   void NotifyPolicyFetched();
@@ -302,10 +361,14 @@ class POLICY_EXPORT CloudPolicyClient {
 
   // Used for issuing requests to the cloud.
   DeviceManagementService* service_;
-  scoped_ptr<DeviceManagementRequestJob> request_job_;
 
-  // Status upload data is produced by |status_provider_|.
-  scoped_ptr<StatusProvider> status_provider_;
+  // Only one outstanding policy fetch is allowed, so this is tracked in
+  // its own member variable.
+  scoped_ptr<DeviceManagementRequestJob> policy_fetch_request_job_;
+
+  // All of the outstanding non-policy-fetch request jobs. These jobs are
+  // silently cancelled if Unregister() is called.
+  ScopedVector<DeviceManagementRequestJob> request_jobs_;
 
   // The policy responses returned by the last policy fetch operation.
   ResponseMap responses_;

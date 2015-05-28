@@ -35,7 +35,7 @@
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/fetch/FetchRequest.h"
 #include "core/fetch/ResourceFetcher.h"
-#include "core/rendering/svg/RenderSVGTransformableContainer.h"
+#include "core/layout/svg/LayoutSVGTransformableContainer.h"
 #include "core/svg/SVGGElement.h"
 #include "core/svg/SVGLengthContext.h"
 #include "core/svg/SVGSVGElement.h"
@@ -46,10 +46,10 @@ namespace blink {
 inline SVGUseElement::SVGUseElement(Document& document)
     : SVGGraphicsElement(SVGNames::useTag, document)
     , SVGURIReference(this)
-    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(LengthModeWidth), AllowNegativeLengths))
-    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(LengthModeHeight), AllowNegativeLengths))
-    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(LengthModeWidth), ForbidNegativeLengths))
-    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(LengthModeHeight), ForbidNegativeLengths))
+    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(SVGLengthMode::Width), AllowNegativeLengths))
+    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(SVGLengthMode::Height), AllowNegativeLengths))
+    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(SVGLengthMode::Width), ForbidNegativeLengths))
+    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(SVGLengthMode::Height), ForbidNegativeLengths))
     , m_haveFiredLoadEvent(false)
     , m_needsShadowTreeRecreation(false)
     , m_svgLoadEventTimer(this, &SVGElement::svgLoadEventTimerFired)
@@ -66,7 +66,7 @@ PassRefPtrWillBeRawPtr<SVGUseElement> SVGUseElement::create(Document& document)
 {
     // Always build a user agent #shadow-root for SVGUseElement.
     RefPtrWillBeRawPtr<SVGUseElement> use = adoptRefWillBeNoop(new SVGUseElement(document));
-    use->ensureUserAgentShadowRoot();
+    use->ensureClosedShadowRoot();
     return use.release();
 }
 
@@ -78,7 +78,7 @@ SVGUseElement::~SVGUseElement()
 #endif
 }
 
-void SVGUseElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGUseElement)
 {
     visitor->trace(m_x);
     visitor->trace(m_y);
@@ -100,11 +100,6 @@ bool SVGUseElement::isSupportedAttribute(const QualifiedName& attrName)
         supportedAttributes.add(SVGNames::heightAttr);
     }
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGUseElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
 }
 
 #if ENABLE(ASSERT)
@@ -181,6 +176,31 @@ void transferUseWidthAndHeightIfNeeded(const SVGUseElement& use, SVGElement* sha
     }
 }
 
+bool SVGUseElement::isPresentationAttribute(const QualifiedName& attrName) const
+{
+    if (attrName == SVGNames::xAttr || attrName == SVGNames::yAttr)
+        return true;
+    return SVGGraphicsElement::isPresentationAttribute(attrName);
+}
+
+bool SVGUseElement::isPresentationAttributeWithSVGDOM(const QualifiedName& attrName) const
+{
+    if (attrName == SVGNames::xAttr || attrName == SVGNames::yAttr)
+        return true;
+    return SVGGraphicsElement::isPresentationAttributeWithSVGDOM(attrName);
+}
+
+void SVGUseElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStylePropertySet* style)
+{
+    RefPtrWillBeRawPtr<SVGAnimatedPropertyBase> property = propertyFromAttribute(name);
+    if (property == m_x)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyX, *m_x->currentValue());
+    else if (property == m_y)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyY, *m_y->currentValue());
+    else
+        SVGGraphicsElement::collectStyleForPresentationAttribute(name, value, style);
+}
+
 void SVGUseElement::svgAttributeChanged(const QualifiedName& attrName)
 {
     if (!isSupportedAttribute(attrName)) {
@@ -190,7 +210,14 @@ void SVGUseElement::svgAttributeChanged(const QualifiedName& attrName)
 
     SVGElement::InvalidationGuard invalidationGuard(this);
 
-    RenderObject* renderer = this->renderer();
+    if (attrName == SVGNames::xAttr
+        || attrName == SVGNames::yAttr) {
+        invalidateSVGPresentationAttributeStyle();
+        setNeedsStyleRecalc(LocalStyleChange,
+            StyleChangeReasonForTracing::fromAttribute(attrName));
+    }
+
+    LayoutObject* renderer = this->layoutObject();
     if (attrName == SVGNames::xAttr
         || attrName == SVGNames::yAttr
         || attrName == SVGNames::widthAttr
@@ -296,7 +323,7 @@ void SVGUseElement::clearResourceReferences()
         m_targetElementInstance = nullptr;
 
     // FIXME: We should try to optimize this, to at least allow partial reclones.
-    if (ShadowRoot* shadowTreeRootElement = userAgentShadowRoot())
+    if (ShadowRoot* shadowTreeRootElement = closedShadowRoot())
         shadowTreeRootElement->removeChildren(OmitSubtreeModifiedEvent);
 
     m_needsShadowTreeRecreation = false;
@@ -365,13 +392,13 @@ void SVGUseElement::buildShadowAndInstanceTree(SVGElement* target)
 
     // Do not allow self-referencing.
     // 'target' may be null, if it's a non SVG namespaced element.
-    if (!target || target == this)
+    if (!target || target == this || isDisallowedElement(target))
         return;
 
     // Set up root SVG element in shadow tree.
     RefPtrWillBeRawPtr<Element> newChild = target->cloneElementWithoutChildren();
     m_targetElementInstance = toSVGElement(newChild.get());
-    ShadowRoot* shadowTreeRootElement = userAgentShadowRoot();
+    ShadowRoot* shadowTreeRootElement = closedShadowRoot();
     shadowTreeRootElement->appendChild(newChild.release());
 
     // Clone the target subtree into the shadow tree, not handling <use> and <symbol> yet.
@@ -411,9 +438,9 @@ void SVGUseElement::buildShadowAndInstanceTree(SVGElement* target)
     updateRelativeLengthsInformation();
 }
 
-RenderObject* SVGUseElement::createRenderer(RenderStyle*)
+LayoutObject* SVGUseElement::createLayoutObject(const ComputedStyle&)
 {
-    return new RenderSVGTransformableContainer(this);
+    return new LayoutSVGTransformableContainer(this);
 }
 
 static bool isDirectReference(const SVGElement& element)
@@ -431,7 +458,7 @@ void SVGUseElement::toClipPath(Path& path)
 {
     ASSERT(path.isEmpty());
 
-    Node* n = userAgentShadowRoot()->firstChild();
+    Node* n = closedShadowRoot()->firstChild();
     if (!n || !n->isSVGElement())
         return;
     SVGElement& element = toSVGElement(*n);
@@ -450,11 +477,11 @@ void SVGUseElement::toClipPath(Path& path)
     }
 }
 
-RenderObject* SVGUseElement::rendererClipChild() const
+LayoutObject* SVGUseElement::layoutObjectClipChild() const
 {
-    if (Node* n = userAgentShadowRoot()->firstChild()) {
+    if (Node* n = closedShadowRoot()->firstChild()) {
         if (n->isSVGElement() && isDirectReference(toSVGElement(*n)))
-            return n->renderer();
+            return n->layoutObject();
     }
 
     return 0;
@@ -671,7 +698,7 @@ void SVGUseElement::invalidateShadowTree()
 void SVGUseElement::invalidateDependentShadowTrees()
 {
     // Recursively invalidate dependent <use> shadow trees
-    const WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement> >& instances = instancesForElement();
+    const WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement>>& instances = instancesForElement();
     for (SVGElement* instance : instances) {
         if (SVGUseElement* element = instance->correspondingUseElement()) {
             ASSERT(element->inDocument());

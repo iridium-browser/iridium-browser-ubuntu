@@ -17,11 +17,6 @@
 
 #include "angle_gl.h"
 
-namespace rx
-{
-class DefaultAttachmentImpl;
-}
-
 namespace gl
 {
 class Renderbuffer;
@@ -32,7 +27,7 @@ class Renderbuffer;
 // Note: Our old naming scheme used the term "Renderbuffer" for both GL renderbuffers and for
 // framebuffer attachments, which confused their usage.
 
-class FramebufferAttachment
+class FramebufferAttachment : angle::NonCopyable
 {
   public:
     explicit FramebufferAttachment(GLenum binding);
@@ -70,8 +65,6 @@ class FramebufferAttachment
     virtual Renderbuffer *getRenderbuffer() const = 0;
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(FramebufferAttachment);
-
     GLenum mBinding;
 };
 
@@ -98,8 +91,6 @@ class TextureAttachment : public FramebufferAttachment
     virtual Renderbuffer *getRenderbuffer() const;
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(TextureAttachment);
-
     BindingPointer<Texture> mTexture;
     ImageIndex mIndex;
 };
@@ -127,15 +118,13 @@ class RenderbufferAttachment : public FramebufferAttachment
     virtual Renderbuffer *getRenderbuffer() const;
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(RenderbufferAttachment);
-
     BindingPointer<Renderbuffer> mRenderbuffer;
 };
 
 class DefaultAttachment : public FramebufferAttachment
 {
   public:
-    DefaultAttachment(GLenum binding, rx::DefaultAttachmentImpl *impl);
+    DefaultAttachment(GLenum binding, egl::Surface *surface);
 
     virtual ~DefaultAttachment();
 
@@ -154,12 +143,10 @@ class DefaultAttachment : public FramebufferAttachment
     virtual const ImageIndex *getTextureImageIndex() const;
     virtual Renderbuffer *getRenderbuffer() const;
 
-    rx::DefaultAttachmentImpl *getImplementation() const;
+    const egl::Surface *getSurface() const { return mSurface.get(); }
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(DefaultAttachment);
-
-    rx::DefaultAttachmentImpl *mImpl;
+    BindingPointer<egl::Surface> mSurface;
 };
 
 }

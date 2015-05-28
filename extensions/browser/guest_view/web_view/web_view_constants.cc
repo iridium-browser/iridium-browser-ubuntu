@@ -8,6 +8,7 @@ namespace webview {
 
 // Attributes.
 const char kAttributeAllowTransparency[] = "allowtransparency";
+const char kAttributeAllowScaling[] = "allowscaling";
 const char kAttributeName[] = "name";
 const char kAttributeSrc[] = "src";
 
@@ -23,9 +24,11 @@ const char kAPILoadDataInvalidVirtualURL[] = "Invalid virtual URL \"%s\".";
 const char kEventClose[] = "webViewInternal.onClose";
 const char kEventConsoleMessage[] = "webViewInternal.onConsoleMessage";
 const char kEventContentLoad[] = "webViewInternal.onContentLoad";
-const char kEventContextMenu[] = "chromeWebViewInternal.contextmenu";
+const char kEventContextMenuShow[] = "chromeWebViewInternal.onContextMenuShow";
 const char kEventDialog[] = "webViewInternal.onDialog";
+const char kEventDropLink[] = "webViewInternal.onDropLink";
 const char kEventExit[] = "webViewInternal.onExit";
+const char kEventExitFullscreen[] = "webViewInternal.onExitFullscreen";
 const char kEventFindReply[] = "webViewInternal.onFindReply";
 const char kEventFrameNameChanged[] = "webViewInternal.onFrameNameChanged";
 const char kEventLoadAbort[] = "webViewInternal.onLoadAbort";
@@ -64,10 +67,12 @@ const char kNewURL[] = "newUrl";
 const char kNewWidth[] = "newWidth";
 const char kOldHeight[] = "oldHeight";
 const char kOldURL[] = "oldUrl";
+const char kOrigin[] = "origin";
 const char kPermission[] = "permission";
 const char kPermissionTypeDialog[] = "dialog";
 const char kPermissionTypeDownload[] = "download";
 const char kPermissionTypeFileSystem[] = "filesystem";
+const char kPermissionTypeFullscreen[] = "fullscreen";
 const char kPermissionTypeGeolocation[] = "geolocation";
 const char kPermissionTypeLoadPlugin[] = "loadplugin";
 const char kPermissionTypeMedia[] = "media";
@@ -108,8 +113,17 @@ const char kParameterUserAgentOverride[] = "userAgentOverride";
 const char kMenuItemCommandId[] = "commandId";
 const char kMenuItemLabel[] = "label";
 const char kPersistPrefix[] = "persist:";
-const char kStoragePartitionId[] = "storagePartitionId";
+const char kStoragePartitionId[] = "partition";
 const unsigned int kMaxOutstandingPermissionRequests = 1024;
 const int kInvalidPermissionRequestID = 0;
+
+// ClearData API constants.
+const uint32 WEB_VIEW_REMOVE_DATA_MASK_APPCACHE = 1 << 0;
+const uint32 WEB_VIEW_REMOVE_DATA_MASK_CACHE = 1 << 1;
+const uint32 WEB_VIEW_REMOVE_DATA_MASK_COOKIES = 1 << 2;
+const uint32 WEB_VIEW_REMOVE_DATA_MASK_FILE_SYSTEMS = 1 << 3;
+const uint32 WEB_VIEW_REMOVE_DATA_MASK_INDEXEDDB = 1 << 4;
+const uint32 WEB_VIEW_REMOVE_DATA_MASK_LOCAL_STORAGE = 1 << 5;
+const uint32 WEB_VIEW_REMOVE_DATA_MASK_WEBSQL = 1 << 6;
 
 }  // namespace webview

@@ -4,10 +4,10 @@
 
 import logging
 
-from telemetry import decorators
+from telemetry.core.backends.chrome import cros_test_case
 from telemetry.core import exceptions
 from telemetry.core import util
-from telemetry.core.backends.chrome import cros_test_case
+from telemetry import decorators
 
 
 class CrOSCryptohomeTest(cros_test_case.CrOSTestCase):
@@ -59,8 +59,7 @@ class CrOSLoginTest(cros_test_case.CrOSTestCase):
       extension = self._GetAutotestExtension(b)
       try:
         extension.ExecuteJavaScript('chrome.autotestPrivate.logout();')
-      except (exceptions.BrowserConnectionGoneException,
-              exceptions.BrowserGoneException):
+      except exceptions.Error:
         pass
       util.WaitFor(lambda: not self._IsCryptohomeMounted(), 20)
 

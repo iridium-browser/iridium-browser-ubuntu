@@ -60,7 +60,10 @@ class GLES2DecoderGeometryInstancingTest : public GLES2DecoderWithShaderTest {
   void SetUp() override {
     InitState init;
     init.extensions = "GL_ANGLE_instanced_arrays";
-    init.gl_version = "opengl es 2.0";
+    // Most of the tests in this file assume they're running on
+    // desktop OpenGL, and large portions of the tests will become
+    // no-ops if they aren't.
+    init.gl_version = "opengl 2.1";
     init.has_alpha = true;
     init.has_depth = true;
     init.request_alpha = true;
@@ -391,7 +394,6 @@ TEST_P(GLES2DecoderRGBBackbufferTest, RGBBackbufferColorMaskFBO) {
 
 TEST_P(GLES2DecoderManualInitTest, DepthEnableWithDepth) {
   InitState init;
-  init.gl_version = "3.0";
   init.has_depth = true;
   init.request_depth = true;
   init.bind_generates_resource = true;
@@ -444,7 +446,6 @@ TEST_P(GLES2DecoderManualInitTest, DepthEnableWithDepth) {
 
 TEST_P(GLES2DecoderManualInitTest, DepthEnableWithoutRequestedDepth) {
   InitState init;
-  init.gl_version = "3.0";
   init.has_depth = true;
   init.bind_generates_resource = true;
   InitDecoder(init);
@@ -496,7 +497,6 @@ TEST_P(GLES2DecoderManualInitTest, DepthEnableWithoutRequestedDepth) {
 
 TEST_P(GLES2DecoderManualInitTest, StencilEnableWithStencil) {
   InitState init;
-  init.gl_version = "3.0";
   init.has_stencil = true;
   init.request_stencil = true;
   init.bind_generates_resource = true;
@@ -550,7 +550,6 @@ TEST_P(GLES2DecoderManualInitTest, StencilEnableWithStencil) {
 
 TEST_P(GLES2DecoderManualInitTest, StencilEnableWithoutRequestedStencil) {
   InitState init;
-  init.gl_version = "3.0";
   init.has_stencil = true;
   init.bind_generates_resource = true;
   InitDecoder(init);
@@ -602,7 +601,6 @@ TEST_P(GLES2DecoderManualInitTest, StencilEnableWithoutRequestedStencil) {
 
 TEST_P(GLES2DecoderManualInitTest, CachedColorMask) {
   InitState init;
-  init.gl_version = "3.0";
   init.has_alpha = true;
   init.has_depth = true;
   init.has_stencil = true;
@@ -630,7 +628,6 @@ TEST_P(GLES2DecoderManualInitTest, CachedColorMask) {
 
 TEST_P(GLES2DecoderManualInitTest, CachedDepthMask) {
   InitState init;
-  init.gl_version = "3.0";
   init.has_alpha = true;
   init.has_depth = true;
   init.has_stencil = true;
@@ -657,7 +654,6 @@ TEST_P(GLES2DecoderManualInitTest, CachedDepthMask) {
 
 TEST_P(GLES2DecoderManualInitTest, CachedStencilMask) {
   InitState init;
-  init.gl_version = "3.0";
   init.has_alpha = true;
   init.has_depth = true;
   init.has_stencil = true;
@@ -746,7 +742,6 @@ TEST_P(GLES2DecoderWithShaderTest, DrawArraysSimulatedAttrib0OOMFails) {
 // Test that we lose context.
 TEST_P(GLES2DecoderManualInitTest, LoseContextWhenOOM) {
   InitState init;
-  init.gl_version = "3.0";
   init.has_alpha = true;
   init.has_depth = true;
   init.request_alpha = true;
@@ -863,7 +858,6 @@ TEST_P(GLES2DecoderManualInitTest, InitVertexAttributes) {
       switches::kGpuDriverBugWorkarounds,
       base::IntToString(gpu::INIT_VERTEX_ATTRIBUTES));
   InitState init;
-  init.gl_version = "3.0";
   init.has_alpha = true;
   init.has_depth = true;
   init.request_alpha = true;

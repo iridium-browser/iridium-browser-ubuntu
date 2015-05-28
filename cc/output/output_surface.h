@@ -46,6 +46,11 @@ class CC_EXPORT OutputSurface {
     DEFAULT_MAX_FRAMES_PENDING = 2
   };
 
+  OutputSurface(const scoped_refptr<ContextProvider>& context_provider,
+                const scoped_refptr<ContextProvider>& worker_context_provider,
+                scoped_ptr<SoftwareOutputDevice> software_device);
+  OutputSurface(const scoped_refptr<ContextProvider>& context_provider,
+                const scoped_refptr<ContextProvider>& worker_context_provider);
   explicit OutputSurface(
       const scoped_refptr<ContextProvider>& context_provider);
 
@@ -94,6 +99,9 @@ class CC_EXPORT OutputSurface {
   // In the event of a lost context, the entire output surface should be
   // recreated.
   ContextProvider* context_provider() const { return context_provider_.get(); }
+  ContextProvider* worker_context_provider() const {
+    return worker_context_provider_.get();
+  }
   SoftwareOutputDevice* software_device() const {
     return software_device_.get();
   }
@@ -143,19 +151,27 @@ class CC_EXPORT OutputSurface {
   void DidLoseOutputSurface();
   void SetMemoryPolicy(const ManagedMemoryPolicy& policy);
 
+  // Support for a pull-model where draws are requested by the output surface.
+  //
+  // OutputSurface::Invalidate is called by the compositor to notify that
+  // there's new content.
+  virtual void Invalidate() {}
+
  protected:
   OutputSurfaceClient* client_;
 
   // Synchronously initialize context3d and enter hardware mode.
   // This can only supported in threaded compositing mode.
   bool InitializeAndSetContext3d(
-      scoped_refptr<ContextProvider> context_provider);
+      scoped_refptr<ContextProvider> context_provider,
+      scoped_refptr<ContextProvider> worker_context_provider);
   void ReleaseGL();
 
   void PostSwapBuffersComplete();
 
   struct OutputSurface::Capabilities capabilities_;
   scoped_refptr<ContextProvider> context_provider_;
+  scoped_refptr<ContextProvider> worker_context_provider_;
   scoped_ptr<SoftwareOutputDevice> software_device_;
   scoped_ptr<OverlayCandidateValidator> overlay_candidate_validator_;
   gfx::Size surface_size_;

@@ -54,6 +54,7 @@ public:
 
     String type() const;
     bool extractable() const;
+    ScriptValue algorithm(ScriptState*);
     Vector<String> usages() const;
 
     const WebCryptoKey& key() const { return m_key; }
@@ -66,7 +67,7 @@ public:
     static bool parseFormat(const String&, WebCryptoKeyFormat&, CryptoResult*);
     static bool parseUsageMask(const Vector<String>&, WebCryptoKeyUsageMask&, CryptoResult*);
 
-    void trace(Visitor*) { }
+    DEFINE_INLINE_TRACE() { }
 
 protected:
     explicit CryptoKey(const WebCryptoKey&);

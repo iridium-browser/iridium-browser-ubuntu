@@ -16,8 +16,8 @@
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
 #include "net/base/net_export.h"
-#include "net/base/net_log.h"
 #include "net/base/network_change_notifier.h"
+#include "net/log/net_log.h"
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_server.h"
@@ -35,6 +35,7 @@ class DhcpProxyScriptFetcher;
 class HostResolver;
 class NetworkDelegate;
 class ProxyResolver;
+class ProxyResolverFactory;
 class ProxyResolverScriptData;
 class ProxyScriptDecider;
 class ProxyScriptFetcher;
@@ -90,11 +91,11 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
                               base::TimeDelta* next_delay) const = 0;
   };
 
-  // The instance takes ownership of |config_service| and |resolver|.
+  // The instance takes ownership of |config_service| and |resolver_factory|.
   // |net_log| is a possibly NULL destination to send log events to. It must
   // remain alive for the lifetime of this ProxyService.
   ProxyService(ProxyConfigService* config_service,
-               ProxyResolver* resolver,
+               scoped_ptr<ProxyResolverFactory> resolver_factory,
                NetLog* net_log);
 
   ~ProxyService() override;
@@ -387,6 +388,7 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
       ProxyConfigService::ConfigAvailability availability) override;
 
   scoped_ptr<ProxyConfigService> config_service_;
+  scoped_ptr<ProxyResolverFactory> resolver_factory_;
   scoped_ptr<ProxyResolver> resolver_;
 
   // We store the proxy configuration that was last fetched from the

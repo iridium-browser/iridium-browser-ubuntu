@@ -33,7 +33,7 @@ class TestAutofillDriver : public AutofillDriver {
                               RendererFormDataAction action,
                               const FormData& data) override;
   void PingRenderer() override;
-  void DetectAccountCreationForms(
+  void PropagateAutofillPredictions(
       const std::vector<autofill::FormStructure*>& forms) override;
   void SendAutofillTypePredictionsToRenderer(
       const std::vector<FormStructure*>& forms) override;
@@ -44,6 +44,7 @@ class TestAutofillDriver : public AutofillDriver {
   void RendererShouldFillFieldWithValue(const base::string16& value) override;
   void RendererShouldPreviewFieldWithValue(
       const base::string16& value) override;
+  void PopupHidden() override;
 
   // Methods that tests can use to specialize functionality.
 

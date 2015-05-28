@@ -3,11 +3,13 @@
 <translation id="6895424601869865703"><ph name="GIVEN_NAME"/> सीठी खाते जोडा</translation>
 <translation id="1270290102613614947">ऑन-स्क्रीन कीबोर्ड अक्षम</translation>
 <translation id="1057289296854808272">फिरवणे चालू (बदलण्यासाठी येथे टॅप करा)</translation>
+<translation id="5548285847212963613">या नेटवर्कवर कनेक्ट करण्यात &quot;<ph name="EXTENSION_NAME"/>&quot; विस्तार मदत करू शकतो.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> आणि <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">ओव्हरफ्लो बटण</translation>
 <translation id="7904094684485781019">या खात्याच्या प्रशासकाने एकाधिक साइन इन ची अनुमती रद्द केली आहे.</translation>
 <translation id="8673028979667498656">270°</translation>
 <translation id="5571066253365925590">Bluetooth सक्षम</translation>
+<translation id="5895138241574237353">रीस्टार्ट करा</translation>
 <translation id="6310121235600822547"><ph name="DISPLAY_NAME"/> <ph name="ROTATION"/> वर फिरविले होते</translation>
 <translation id="9074739597929991885">Bluetooth</translation>
 <translation id="2268130516524549846">Bluetooth अक्षम</translation>
@@ -58,7 +60,9 @@
 <translation id="8676770494376880701">निम्न-उर्जेचे चार्जर कनेक्ट केले</translation>
 <translation id="5238774010593222950">दुसर्‍या खात्यावर साइन इन करू शकत नाही.</translation>
 <translation id="1723752762323179280">सत्रातून निर्गमन करत आहे</translation>
+<translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">होय</translation>
+<translation id="4804818685124855865">‍डिस्कनेक्ट</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">साइन आउट करा</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -77,7 +81,6 @@
 <translation id="5825747213122829519">आपली इनपुट पद्धत <ph name="INPUT_METHOD_ID"/> मध्ये बदलली आहे.
 स्विच करण्यासाठी Shift + Alt दाबा.</translation>
 <translation id="2562916301614567480">खाजगी नेटवर्क</translation>
-<translation id="2982222131142145681"><ph name="DEVICE_NAME"/> (HDMI)</translation>
 <translation id="4250680216510889253">नाही</translation>
 <translation id="4379753398862151997">प्रिय मॉनिटर, हे आपल्या दरम्यान कार्य करत नाही. (तो मॉनिटर समर्थित नाही)</translation>
 <translation id="6426039856985689743">मोबाइल डेटा अक्षम करा</translation>
@@ -159,6 +162,7 @@
 <translation id="9201131092683066720">बॅटरी <ph name="PERCENTAGE"/>% भरली आहे.</translation>
 <translation id="2983818520079887040">सेटिंग्ज...</translation>
 <translation id="6452181791372256707">नाकारा</translation>
+<translation id="1330145147221172764">ऑन-स्क्रीन कीबोर्ड सक्षम करा</translation>
 <translation id="1195412055398077112">ओव्हरस्कॅन</translation>
 <translation id="607652042414456612">आपला संगणक जवळपासच्या Bluetooth डिव्हाइसेसवर शोधण्यायोग्य आहे आणि <ph name="ADDRESS"/> पत्त्यासह &quot;<ph name="NAME"/>&quot; म्हणून दिसेल</translation>
 <translation id="112308213915226829">शेल्फ स्वयं लपवा</translation>
@@ -189,15 +193,18 @@
 <translation id="8103386449138765447">SMS संदेश: <ph name="MESSAGE_COUNT"/></translation>
 <translation id="7097613348211027502">ChromeVox (बोललेला अभिप्राय) सक्षम केलेला आहे. अक्षम करण्यासाठी Ctrl+Alt+Z दाबा.</translation>
 <translation id="5045002648206642691">Google ड्राइव्ह सेटिंग्ज...</translation>
+<translation id="1510238584712386396">लाँचर</translation>
 <translation id="7209101170223508707">CAPS LOCK चालू आहे.
 रद्द करण्यासाठी Alt+Search किंवा Shift दाबा.</translation>
 <translation id="8940956008527784070">बॅटरी कमी झाली (<ph name="PERCENTAGE"/>%)</translation>
 <translation id="4918086044614829423">स्वीकारा</translation>
 <translation id="5102001756192215136"><ph name="HOUR"/>:<ph name="MINUTE"/> शिल्‍लक</translation>
 <translation id="3009178788565917040">आउटपुट</translation>
+<translation id="3147142846278915599">लाँचर (संकालन अॅप्स...)</translation>
 <translation id="6911468394164995108">दुसरीकडे सामील व्हा...</translation>
 <translation id="3678715477168044796"><ph name="DISPLAY_NAME"/>: <ph name="ANNOTATION"/></translation>
 <translation id="412065659894267608">पूर्ण होईपर्यंत  <ph name="HOUR"/>ता <ph name="MINUTE"/>मि</translation>
 <translation id="3077734595579995578">shift</translation>
 <translation id="6359806961507272919"><ph name="PHONE_NUMBER"/> कडून SMS</translation>
+<translation id="4053612967614057854">ऑन-स्क्रीन कीबोर्ड अक्षम करा</translation>
 </translationbundle>

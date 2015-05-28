@@ -27,8 +27,8 @@
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/transform_util.h"
 #include "ui/strings/grit/ui_strings.h"
+#include "ui/views/border.h"
 #include "ui/views/controls/button/image_button.h"
-#include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/window_util.h"
@@ -45,13 +45,10 @@ static const int kWindowMargin = 30;
 // Foreground label color.
 static const SkColor kLabelColor = SK_ColorWHITE;
 
-// Background label color.
-static const SkColor kLabelBackground = SK_ColorTRANSPARENT;
-
 // Label shadow color.
 static const SkColor kLabelShadow = 0xB0000000;
 
-// Vertical padding for the label, both over and beneath it.
+// Vertical padding for the label, on top of it.
 static const int kVerticalLabelPadding = 20;
 
 // Solid shadow length from the label
@@ -113,19 +110,35 @@ OverviewCloseButton::~OverviewCloseButton() {
 
 }  // namespace
 
-WindowSelectorItem::WindowSelectorItem(aura::Window* root_window)
+WindowSelectorItem::OverviewLabelButton::OverviewLabelButton(
+    views::ButtonListener* listener,
+    const base::string16& text)
+    : LabelButton(listener, text),
+      top_padding_(0) {
+}
+
+WindowSelectorItem::OverviewLabelButton::~OverviewLabelButton() {
+}
+
+gfx::Rect WindowSelectorItem::OverviewLabelButton::GetChildAreaBounds() {
+  gfx::Rect bounds = GetLocalBounds();
+  bounds.Inset(0, top_padding_, 0, 0);
+  return bounds;
+}
+
+WindowSelectorItem::WindowSelectorItem(aura::Window* window)
     : dimmed_(false),
-      root_window_(root_window),
+      root_window_(window->GetRootWindow()),
+      transform_window_(window),
       in_bounds_update_(false),
-      window_label_view_(nullptr),
-      close_button_(new OverviewCloseButton(this)),
-      selector_item_activate_window_button_(
-          new TransparentActivateWindowButton(root_window, this)) {
+      window_label_button_view_(nullptr),
+      close_button_(new OverviewCloseButton(this)) {
+  CreateWindowLabel(window->title());
   views::Widget::InitParams params;
   params.type = views::Widget::InitParams::TYPE_POPUP;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
-  params.parent = Shell::GetContainer(root_window,
+  params.parent = Shell::GetContainer(root_window_,
                                       kShellWindowId_OverlayContainer);
   close_button_widget_.set_focus_on_creation(false);
   close_button_widget_.Init(params);
@@ -141,136 +154,63 @@ WindowSelectorItem::WindowSelectorItem(aura::Window* root_window)
   close_button_rect.set_x(-close_button_rect.width() / 2);
   close_button_rect.set_y(-close_button_rect.height() / 2);
   close_button_widget_.GetNativeWindow()->SetBounds(close_button_rect);
+
+  GetWindow()->AddObserver(this);
 }
 
 WindowSelectorItem::~WindowSelectorItem() {
-  for (auto* transform_window : transform_windows_) {
-    transform_window->window()->RemoveObserver(this);
-  }
+  GetWindow()->RemoveObserver(this);
 }
 
-void WindowSelectorItem::AddWindow(aura::Window* window) {
-  DCHECK(window->GetRootWindow() == root_window_);
-  window->AddObserver(this);
-  ScopedTransformOverviewWindow* transform_window =
-      new ScopedTransformOverviewWindow(window);
-  transform_windows_.push_back(transform_window);
-  // The transparent overlays are added at the front of the z-order when
-  // created so make sure the selector item's transparent overlay is behind the
-  // overlay for the window that was just added.
-  transform_window->activate_button()->StackAbove(
-      selector_item_activate_window_button_.get());
-
-  UpdateSelectorButtons();
-  UpdateCloseButtonAccessibilityName();
+aura::Window* WindowSelectorItem::GetWindow() {
+  return transform_window_.window();
 }
 
-bool WindowSelectorItem::HasSelectableWindow(const aura::Window* window) const {
-  for (auto* transform_window : transform_windows_) {
-    if (transform_window->window() == window)
-      return true;
-  }
-  return false;
+void WindowSelectorItem::RestoreWindow() {
+  transform_window_.RestoreWindow();
 }
 
-bool WindowSelectorItem::Contains(const aura::Window* target) const {
-  for (auto* transform_window : transform_windows_) {
-    if (transform_window->Contains(target))
-      return true;
-  }
-  return false;
-}
-
-void WindowSelectorItem::RestoreWindowOnExit(aura::Window* window) {
-  for (auto* transform_window : transform_windows_) {
-    if (transform_window->Contains(window)) {
-      transform_window->RestoreWindowOnExit();
-      break;
-    }
-  }
-}
-
-aura::Window* WindowSelectorItem::SelectionWindow() const {
-  return SelectionTransformWindow()->window();
-}
-
-void WindowSelectorItem::RemoveWindow(const aura::Window* window) {
-  bool window_found = false;
-
-  for (TransformWindows::iterator iter = transform_windows_.begin();
-       iter != transform_windows_.end();
-       ++iter) {
-    ScopedTransformOverviewWindow* transform_window = *iter;
-
-    if (transform_window->window() == window) {
-      transform_window->window()->RemoveObserver(this);
-      transform_window->OnWindowDestroyed();
-      transform_windows_.erase(iter);
-      window_found = true;
-      break;
-    }
-  }
-  CHECK(window_found);
-
-
-  // If empty WindowSelectorItem will be destroyed immediately after this by
-  // its owner.
-  if (empty())
-    return;
-
-  UpdateCloseButtonAccessibilityName();
-  window_label_.reset();
-  UpdateWindowLabels(target_bounds_,
-                     OverviewAnimationType::OVERVIEW_ANIMATION_NONE);
-  UpdateCloseButtonLayout(OverviewAnimationType::OVERVIEW_ANIMATION_NONE);
-  UpdateSelectorButtons();
-}
-
-bool WindowSelectorItem::empty() const {
-  return transform_windows_.empty();
+void WindowSelectorItem::ShowWindowOnExit() {
+  transform_window_.ShowWindowOnExit();
 }
 
 void WindowSelectorItem::PrepareForOverview() {
-  for (auto* transform_window : transform_windows_)
-    transform_window->PrepareForOverview();
+  transform_window_.PrepareForOverview();
 }
 
-void WindowSelectorItem::SetBounds(aura::Window* root_window,
-                                   const gfx::Rect& target_bounds,
+bool WindowSelectorItem::Contains(const aura::Window* target) const {
+  return transform_window_.Contains(target);
+}
+
+void WindowSelectorItem::SetBounds(const gfx::Rect& target_bounds,
                                    OverviewAnimationType animation_type) {
   if (in_bounds_update_)
     return;
   base::AutoReset<bool> auto_reset_in_bounds_update(&in_bounds_update_, true);
   target_bounds_ = target_bounds;
 
-  UpdateWindowLabels(target_bounds, animation_type);
-
   gfx::Rect inset_bounds(target_bounds);
   inset_bounds.Inset(kWindowMargin, kWindowMargin);
-  SetItemBounds(root_window, inset_bounds, animation_type);
+  SetItemBounds(inset_bounds, animation_type);
 
   // SetItemBounds is called before UpdateCloseButtonLayout so the close button
   // can properly use the updated windows bounds.
   UpdateCloseButtonLayout(animation_type);
-  UpdateSelectorButtons();
+  UpdateWindowLabel(target_bounds, animation_type);
 }
 
 void WindowSelectorItem::RecomputeWindowTransforms() {
   if (in_bounds_update_ || target_bounds_.IsEmpty())
     return;
-  DCHECK(root_window_);
   base::AutoReset<bool> auto_reset_in_bounds_update(&in_bounds_update_, true);
   gfx::Rect inset_bounds(target_bounds_);
   inset_bounds.Inset(kWindowMargin, kWindowMargin);
-  SetItemBounds(root_window_, inset_bounds,
-      OverviewAnimationType::OVERVIEW_ANIMATION_NONE);
-
+  SetItemBounds(inset_bounds, OverviewAnimationType::OVERVIEW_ANIMATION_NONE);
   UpdateCloseButtonLayout(OverviewAnimationType::OVERVIEW_ANIMATION_NONE);
-  UpdateSelectorButtons();
 }
 
 void WindowSelectorItem::SendFocusAlert() const {
-  selector_item_activate_window_button_->SendFocusAlert();
+  window_label_button_view_->NotifyAccessibilityEvent(ui::AX_EVENT_FOCUS, true);
 }
 
 void WindowSelectorItem::SetDimmed(bool dimmed) {
@@ -280,66 +220,50 @@ void WindowSelectorItem::SetDimmed(bool dimmed) {
 
 void WindowSelectorItem::ButtonPressed(views::Button* sender,
                                        const ui::Event& event) {
-  CHECK(!transform_windows_.empty());
-  SelectionTransformWindow()->Close();
+  if (sender == close_button_) {
+    transform_window_.Close();
+    return;
+  }
+  CHECK(sender == window_label_button_view_);
+  wm::GetWindowState(transform_window_.window())->Activate();
+}
+
+void WindowSelectorItem::OnWindowDestroying(aura::Window* window) {
+  window->RemoveObserver(this);
+  transform_window_.OnWindowDestroyed();
 }
 
 void WindowSelectorItem::OnWindowTitleChanged(aura::Window* window) {
   // TODO(flackr): Maybe add the new title to a vector of titles so that we can
   // filter any of the titles the window had while in the overview session.
-  if (window == SelectionWindow()) {
-    window_label_view_->SetText(window->title());
-    UpdateCloseButtonAccessibilityName();
-  }
-  UpdateCloseButtonLayout(OverviewAnimationType::OVERVIEW_ANIMATION_NONE);
-  UpdateSelectorButtons();
+  window_label_button_view_->SetText(window->title());
+  UpdateCloseButtonAccessibilityName();
 }
 
-void WindowSelectorItem::Select() {
-  aura::Window* selection_window = SelectionWindow();
-  if (selection_window)
-    wm::GetWindowState(selection_window)->Activate();
-}
-
-void WindowSelectorItem::SetItemBounds(aura::Window* root_window,
-                                       const gfx::Rect& target_bounds,
+void WindowSelectorItem::SetItemBounds(const gfx::Rect& target_bounds,
                                        OverviewAnimationType animation_type) {
-  gfx::Rect bounding_rect;
-  for (auto* transform_window : transform_windows_) {
-    bounding_rect.Union(
-        transform_window->GetTargetBoundsInScreen());
-  }
-  gfx::Rect bounds =
+  DCHECK(root_window_ == GetWindow()->GetRootWindow());
+  gfx::Rect screen_bounds = transform_window_.GetTargetBoundsInScreen();
+  gfx::Rect selector_item_bounds =
       ScopedTransformOverviewWindow::ShrinkRectToFitPreservingAspectRatio(
-          bounding_rect, target_bounds);
-  gfx::Transform bounding_transform =
-      ScopedTransformOverviewWindow::GetTransformForRect(bounding_rect, bounds);
-  for (auto* transform_window : transform_windows_) {
-    gfx::Rect target_bounds = transform_window->GetTargetBoundsInScreen();
-    gfx::Transform transform = TransformAboutPivot(
-        gfx::Point(bounding_rect.x() - target_bounds.x(),
-                   bounding_rect.y() - target_bounds.y()),
-        bounding_transform);
-
-    ScopedTransformOverviewWindow::ScopedAnimationSettings animation_settings;
-    transform_window->BeginScopedAnimation(animation_type, &animation_settings);
-    transform_window->SetTransform(root_window, transform);
-    transform_window->set_overview_transform(transform);
-  }
+          screen_bounds, target_bounds);
+  gfx::Transform transform =
+      ScopedTransformOverviewWindow::GetTransformForRect(screen_bounds,
+          selector_item_bounds);
+  ScopedTransformOverviewWindow::ScopedAnimationSettings animation_settings;
+  transform_window_.BeginScopedAnimation(animation_type, &animation_settings);
+  transform_window_.SetTransform(root_window_, transform);
+  transform_window_.set_overview_transform(transform);
 }
 
 void WindowSelectorItem::SetOpacity(float opacity) {
   window_label_->GetNativeWindow()->layer()->SetOpacity(opacity);
   close_button_widget_.GetNativeWindow()->layer()->SetOpacity(opacity);
 
-  // TODO(flackr): find a way to make panels that are hidden behind other panels
-  // look nice.
-  for (auto* transform_window : transform_windows_) {
-    transform_window->SetOpacity(opacity);
-  }
+  transform_window_.SetOpacity(opacity);
 }
 
-void WindowSelectorItem::UpdateWindowLabels(
+void WindowSelectorItem::UpdateWindowLabel(
     const gfx::Rect& window_bounds,
     OverviewAnimationType animation_type) {
   // If the root window has changed, force the window label to be recreated
@@ -347,24 +271,19 @@ void WindowSelectorItem::UpdateWindowLabels(
   DCHECK(!window_label_ ||
          window_label_->GetNativeWindow()->GetRootWindow() == root_window_);
 
-  if (!window_label_) {
-    CreateWindowLabel(SelectionWindow()->title());
+  if (!window_label_->IsVisible()) {
+    window_label_->Show();
     SetupFadeInAfterLayout(window_label_->GetNativeWindow());
   }
 
-  gfx::Rect converted_bounds = ScreenUtil::ConvertRectFromScreen(root_window_,
-                                                                 window_bounds);
-  gfx::Rect label_bounds(converted_bounds.x(),
-                         converted_bounds.bottom(),
-                         converted_bounds.width(),
-                         0);
-  label_bounds.set_height(window_label_->GetContentsView()->
-                              GetPreferredSize().height());
-  label_bounds.set_y(label_bounds.y() - window_label_->
-                         GetContentsView()->GetPreferredSize().height());
-
-  ScopedOverviewAnimationSettings animation_settings(animation_type,
-      window_label_->GetNativeWindow());
+  gfx::Rect converted_bounds =
+      ScreenUtil::ConvertRectFromScreen(root_window_, window_bounds);
+  gfx::Rect label_bounds(converted_bounds.x(), converted_bounds.y(),
+                         converted_bounds.width(), converted_bounds.height());
+  window_label_button_view_->set_top_padding(label_bounds.height() -
+                                             kVerticalLabelPadding);
+  ScopedOverviewAnimationSettings animation_settings(
+      animation_type, window_label_->GetNativeWindow());
 
   window_label_->GetNativeWindow()->SetBounds(label_bounds);
 }
@@ -375,51 +294,28 @@ void WindowSelectorItem::CreateWindowLabel(const base::string16& title) {
   params.type = views::Widget::InitParams::TYPE_POPUP;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
-  params.parent = Shell::GetContainer(root_window_,
-                                      kShellWindowId_OverlayContainer);
-  params.accept_events = false;
+  params.parent =
+      Shell::GetContainer(root_window_, kShellWindowId_OverlayContainer);
   params.visible_on_all_workspaces = true;
   window_label_->set_focus_on_creation(false);
   window_label_->Init(params);
-  window_label_view_ = new views::Label;
-  window_label_view_->SetEnabledColor(kLabelColor);
-  window_label_view_->SetBackgroundColor(kLabelBackground);
-  window_label_view_->SetShadows(gfx::ShadowValues(
-      1,
-      gfx::ShadowValue(
-          gfx::Point(0, kVerticalShadowOffset), kShadowBlur, kLabelShadow)));
+  window_label_button_view_ = new OverviewLabelButton(this, title);
+  window_label_button_view_->SetBorder(views::Border::NullBorder());
+  window_label_button_view_->SetTextColor(views::LabelButton::STATE_NORMAL,
+                                          kLabelColor);
+  window_label_button_view_->SetTextColor(views::LabelButton::STATE_HOVERED,
+                                          kLabelColor);
+  window_label_button_view_->SetTextColor(views::LabelButton::STATE_PRESSED,
+                                          kLabelColor);
+  window_label_button_view_->set_animate_on_state_change(false);
+  window_label_button_view_->SetHorizontalAlignment(gfx::ALIGN_CENTER);
+  window_label_button_view_->SetTextShadows(gfx::ShadowValues(
+      1, gfx::ShadowValue(gfx::Vector2d(0, kVerticalShadowOffset), kShadowBlur,
+                          kLabelShadow)));
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-  window_label_view_->SetFontList(
+  window_label_button_view_->SetFontList(
       bundle.GetFontList(ui::ResourceBundle::BoldFont));
-  window_label_view_->SetText(title);
-  views::BoxLayout* layout = new views::BoxLayout(views::BoxLayout::kVertical,
-                                                  0,
-                                                  kVerticalLabelPadding,
-                                                  0);
-  window_label_view_->SetLayoutManager(layout);
-  window_label_->SetContentsView(window_label_view_);
-  window_label_->Show();
-}
-
-void WindowSelectorItem::UpdateSelectorButtons() {
-  CHECK(!transform_windows_.empty());
-
-  selector_item_activate_window_button_->SetBounds(target_bounds());
-  selector_item_activate_window_button_->SetAccessibleName(
-      transform_windows_.front()->window()->title());
-
-  for (auto* transform_window : transform_windows_) {
-    TransparentActivateWindowButton* activate_button =
-        transform_window->activate_button();
-
-    // If there is only one window in this, then expand the transparent overlay
-    // so that touch exploration in ChromVox only provides spoken feedback once
-    // within |this| selector item's bounds.
-    gfx::Rect bounds = transform_windows_.size() == 1
-        ? target_bounds() : GetTransformedBounds(transform_window->window());
-    activate_button->SetBounds(bounds);
-    activate_button->SetAccessibleName(transform_window->window()->title());
-  }
+  window_label_->SetContentsView(window_label_button_view_);
 }
 
 void WindowSelectorItem::UpdateCloseButtonLayout(
@@ -433,7 +329,7 @@ void WindowSelectorItem::UpdateCloseButtonLayout(
 
   gfx::Rect transformed_window_bounds = ScreenUtil::ConvertRectFromScreen(
       close_button_widget_.GetNativeWindow()->GetRootWindow(),
-      GetTransformedBounds(SelectionWindow()));
+      GetTransformedBounds(GetWindow()));
 
   gfx::Transform close_button_transform;
   close_button_transform.Translate(transformed_window_bounds.right(),
@@ -445,13 +341,7 @@ void WindowSelectorItem::UpdateCloseButtonLayout(
 void WindowSelectorItem::UpdateCloseButtonAccessibilityName() {
   close_button_->SetAccessibleName(l10n_util::GetStringFUTF16(
       IDS_ASH_OVERVIEW_CLOSE_ITEM_BUTTON_ACCESSIBLE_NAME,
-      SelectionWindow()->title()));
-}
-
-ScopedTransformOverviewWindow*
-    WindowSelectorItem::SelectionTransformWindow() const {
-  CHECK(!transform_windows_.empty());
-  return transform_windows_.front();
+      GetWindow()->title()));
 }
 
 }  // namespace ash

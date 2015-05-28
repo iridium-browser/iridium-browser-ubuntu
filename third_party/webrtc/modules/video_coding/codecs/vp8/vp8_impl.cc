@@ -17,7 +17,9 @@
 
 // NOTE(ajm): Path provided by gyp.
 #include "libyuv/scale.h"  // NOLINT
+#include "libyuv/convert.h"  // NOLINT
 
+#include "webrtc/base/checks.h"
 #include "webrtc/common.h"
 #include "webrtc/common_types.h"
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
@@ -107,6 +109,7 @@ VP8EncoderImpl::VP8EncoderImpl()
       timestamp_(0),
       feedback_mode_(false),
       qp_max_(56),  // Setting for max quantizer.
+      cpu_speed_default_(-6),
       rc_max_intra_target_(0),
       token_partitions_(VP8_ONE_TOKENPARTITION),
       down_scale_requested_(false),
@@ -527,25 +530,14 @@ int VP8EncoderImpl::InitEncode(const VideoCodec* inst,
       cpu_speed_[0] = -6;
       break;
   }
-  // Setting complexity for non-base streams based on resolution.
-  // Base stream (layer 0) is of highest resolution.
+  cpu_speed_default_ = cpu_speed_[0];
+  // Set encoding complexity (cpu_speed) based on resolution and/or platform.
+  cpu_speed_[0] = SetCpuSpeed(inst->width, inst->height);
   for (int i = 1; i < number_of_streams; ++i) {
-    int pixels_per_frame =
-        inst->simulcastStream[number_of_streams - 1 - i].width *
-        inst->simulcastStream[number_of_streams - 1 - i].height;
-      cpu_speed_[i] =  cpu_speed_[0];
-      // Increase complexity if below a CIF (default -6)
-      if (pixels_per_frame < 352 * 288) {
-        cpu_speed_[i] = -4;
-      }
+    cpu_speed_[i] =
+        SetCpuSpeed(inst->simulcastStream[number_of_streams - 1 - i].width,
+                    inst->simulcastStream[number_of_streams - 1 - i].height);
   }
-#if defined(WEBRTC_ARCH_ARM)
-  // On mobile platform, always set to -12 to leverage between cpu usage
-  // and video quality
-  for (int i = 0; i < number_of_streams; ++i) {
-    cpu_speed_[i] = -12;
-  }
-#endif
   configurations_[0].g_w = inst->width;
   configurations_[0].g_h = inst->height;
 
@@ -615,6 +607,22 @@ int VP8EncoderImpl::InitEncode(const VideoCodec* inst,
   quality_scaler_.ReportFramerate(codec_.maxFramerate);
 
   return InitAndSetControlSettings();
+}
+
+int VP8EncoderImpl::SetCpuSpeed(int width, int height) {
+#if defined(WEBRTC_ARCH_ARM)
+  // On mobile platform, always set to -12 to leverage between cpu usage
+  // and video quality.
+  return -12;
+#else
+  // For non-ARM, increase encoding complexity (i.e., use lower speed setting)
+  // if resolution is below CIF. Otherwise, keep the default/user setting
+  // (|cpu_speed_default_|) set on InitEncode via codecSpecific.VP8.complexity.
+  if (width * height < 352 * 288)
+    return (cpu_speed_default_ < -4) ? -4 : cpu_speed_default_;
+  else
+    return cpu_speed_default_;
+#endif
 }
 
 int VP8EncoderImpl::NumberOfThreads(int width, int height, int cpus) {
@@ -735,6 +743,13 @@ int VP8EncoderImpl::Encode(
     if (ret < 0)
       return ret;
   }
+
+  // Since we are extracting raw pointers from |input_image| to
+  // |raw_images_[0]|, the resolution of these frames must match. Note that
+  // |input_image| might be scaled from |frame|. In that case, the resolution of
+  // |raw_images_[0]| should have been updated in UpdateCodecFrameSize.
+  DCHECK_EQ(input_image.width(), static_cast<int>(raw_images_[0].d_w));
+  DCHECK_EQ(input_image.height(), static_cast<int>(raw_images_[0].d_h));
 
   // Image in vpx_image_t format.
   // Input image is const. VP8's raw image is not defined as const.
@@ -891,6 +906,10 @@ int VP8EncoderImpl::UpdateCodecFrameSize(
     const I420VideoFrame& input_image) {
   codec_.width = input_image.width();
   codec_.height = input_image.height();
+  // Update the cpu_speed setting for resolution change.
+  vpx_codec_control(&(encoders_[0]),
+                    VP8E_SET_CPUUSED,
+                    SetCpuSpeed(codec_.width, codec_.height));
   raw_images_[0].w = codec_.width;
   raw_images_[0].h = codec_.height;
   raw_images_[0].d_w = codec_.width;
@@ -1024,7 +1043,7 @@ int VP8EncoderImpl::GetEncodedPartitions(
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
-int VP8EncoderImpl::SetChannelParameters(uint32_t packetLoss, int rtt) {
+int VP8EncoderImpl::SetChannelParameters(uint32_t packetLoss, int64_t rtt) {
   rps_.SetRtt(rtt);
   return WEBRTC_VIDEO_CODEC_OK;
 }
@@ -1323,20 +1342,18 @@ int VP8DecoderImpl::ReturnFrame(const vpx_image_t* img,
   last_frame_width_ = img->d_w;
   last_frame_height_ = img->d_h;
   // Allocate memory for decoded image.
-  int size_y = img->stride[VPX_PLANE_Y] * img->d_h;
-  int size_u = img->stride[VPX_PLANE_U] * (img->d_h + 1) / 2;
-  int size_v = img->stride[VPX_PLANE_V] * (img->d_h + 1) / 2;
-  // TODO(mikhal): This does  a copy - need to SwapBuffers.
-  decoded_image_.CreateFrame(size_y, img->planes[VPX_PLANE_Y],
-                             size_u, img->planes[VPX_PLANE_U],
-                             size_v, img->planes[VPX_PLANE_V],
-                             img->d_w, img->d_h,
-                             img->stride[VPX_PLANE_Y],
-                             img->stride[VPX_PLANE_U],
-                             img->stride[VPX_PLANE_V]);
-  decoded_image_.set_timestamp(timestamp);
-  decoded_image_.set_ntp_time_ms(ntp_time_ms);
-  int ret = decode_complete_callback_->Decoded(decoded_image_);
+  I420VideoFrame decoded_image(buffer_pool_.CreateBuffer(img->d_w, img->d_h),
+                               timestamp, 0, kVideoRotation_0);
+  libyuv::I420Copy(
+      img->planes[VPX_PLANE_Y], img->stride[VPX_PLANE_Y],
+      img->planes[VPX_PLANE_U], img->stride[VPX_PLANE_U],
+      img->planes[VPX_PLANE_V], img->stride[VPX_PLANE_V],
+      decoded_image.buffer(kYPlane), decoded_image.stride(kYPlane),
+      decoded_image.buffer(kUPlane), decoded_image.stride(kUPlane),
+      decoded_image.buffer(kVPlane), decoded_image.stride(kVPlane),
+      img->d_w, img->d_h);
+  decoded_image.set_ntp_time_ms(ntp_time_ms);
+  int ret = decode_complete_callback_->Decoded(decoded_image);
   if (ret != 0)
     return ret;
 
@@ -1368,6 +1385,7 @@ int VP8DecoderImpl::Release() {
     delete ref_frame_;
     ref_frame_ = NULL;
   }
+  buffer_pool_.Release();
   inited_ = false;
   return WEBRTC_VIDEO_CODEC_OK;
 }
@@ -1379,7 +1397,7 @@ VideoDecoder* VP8DecoderImpl::Copy() {
     assert(false);
     return NULL;
   }
-  if (decoded_image_.IsZeroSize()) {
+  if (last_frame_width_ == 0 || last_frame_height_ == 0) {
     // Nothing has been decoded before; cannot clone.
     return NULL;
   }
@@ -1402,13 +1420,13 @@ VideoDecoder* VP8DecoderImpl::Copy() {
     return NULL;
   }
   // Allocate memory for reference image copy
-  assert(decoded_image_.width() > 0);
-  assert(decoded_image_.height() > 0);
+  assert(last_frame_width_ > 0);
+  assert(last_frame_height_ > 0);
   assert(image_format_ > VPX_IMG_FMT_NONE);
   // Check if frame format has changed.
   if (ref_frame_ &&
-      (decoded_image_.width() != static_cast<int>(ref_frame_->img.d_w) ||
-          decoded_image_.height() != static_cast<int>(ref_frame_->img.d_h) ||
+      (last_frame_width_ != static_cast<int>(ref_frame_->img.d_w) ||
+          last_frame_height_ != static_cast<int>(ref_frame_->img.d_h) ||
           image_format_ != ref_frame_->img.fmt)) {
     vpx_img_free(&ref_frame_->img);
     delete ref_frame_;
@@ -1423,7 +1441,7 @@ VideoDecoder* VP8DecoderImpl::Copy() {
     // for the y plane, but only half of it to the u and v planes.
     if (!vpx_img_alloc(&ref_frame_->img,
                        static_cast<vpx_img_fmt_t>(image_format_),
-                       decoded_image_.width(), decoded_image_.height(),
+                       last_frame_width_, last_frame_height_,
                        kVp832ByteAlign)) {
       assert(false);
       delete copy;

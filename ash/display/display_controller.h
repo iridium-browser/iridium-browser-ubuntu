@@ -138,7 +138,7 @@ class ASH_EXPORT DisplayController : public gfx::DisplayObserver,
 
   // Checks if the mouse pointer is on one of displays, and moves to
   // the center of the nearest display if it's outside of all displays.
-  void EnsurePointerInDisplays();
+  void UpdateMouseLocationAfterDisplayChange();
 
   // Sets the work area's |insets| to the display assigned to |window|.
   bool UpdateWorkAreaOfDisplayNearestWindow(const aura::Window* window,
@@ -211,10 +211,16 @@ class ASH_EXPORT DisplayController : public gfx::DisplayObserver,
   scoped_ptr<CursorWindowController> cursor_window_controller_;
   scoped_ptr<MirrorWindowController> mirror_window_controller_;
 
-  // Stores the curent cursor location (in native coordinates) used to
-  // restore the cursor location when display configuration
-  // changed.
+  // Stores the current cursor location (in native coordinates and screen
+  // coordinates respectively). The locations are used to restore the cursor
+  // location when the display configuration changes and to determine whether
+  // the mouse should be moved after a display configuration change.
   gfx::Point cursor_location_in_native_coords_for_restore_;
+  gfx::Point cursor_location_in_screen_coords_for_restore_;
+
+  // Stores the cursor's display. The id is used to determine whether the mouse
+  // should be moved after a display configuration change.
+  int64 cursor_display_id_for_restore_;
 
   base::WeakPtrFactory<DisplayController> weak_ptr_factory_;
 

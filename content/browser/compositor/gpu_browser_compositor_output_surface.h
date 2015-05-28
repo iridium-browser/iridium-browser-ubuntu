@@ -27,8 +27,6 @@ class GpuBrowserCompositorOutputSurface
  public:
   GpuBrowserCompositorOutputSurface(
       const scoped_refptr<ContextProviderCommandBuffer>& context,
-      int surface_id,
-      IDMap<BrowserCompositorOutputSurface>* output_surface_map,
       const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
       scoped_ptr<cc::OverlayCandidateValidator> overlay_candidate_validator);
 
@@ -51,6 +49,9 @@ class GpuBrowserCompositorOutputSurface
 
   base::CancelableCallback<void(const std::vector<ui::LatencyInfo>&)>
       swap_buffers_completion_callback_;
+  base::CancelableCallback<void(base::TimeTicks timebase,
+                                base::TimeDelta interval)>
+      update_vsync_parameters_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuBrowserCompositorOutputSurface);
 };

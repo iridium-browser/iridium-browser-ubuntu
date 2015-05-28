@@ -27,13 +27,14 @@
 #include "core/events/EventDispatcher.h"
 
 #include "core/dom/ContainerNode.h"
+#include "core/dom/Document.h"
+#include "core/dom/Element.h"
 #include "core/events/EventDispatchMediator.h"
 #include "core/events/MouseEvent.h"
 #include "core/events/ScopedEventQueue.h"
 #include "core/events/WindowEventContext.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalDOMWindow.h"
-#include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/TraceEvent.h"
@@ -43,7 +44,7 @@ namespace blink {
 
 bool EventDispatcher::dispatchEvent(Node& node, PassRefPtrWillBeRawPtr<EventDispatchMediator> mediator)
 {
-    TRACE_EVENT0("blink", "EventDispatcher::dispatchEvent");
+    TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("blink.debug"), "EventDispatcher::dispatchEvent");
     ASSERT(!EventDispatchForbiddenScope::isEventDispatchForbidden());
     EventDispatcher dispatcher(node, &mediator->event());
     return mediator->dispatchEvent(dispatcher);
@@ -57,7 +58,6 @@ EventDispatcher::EventDispatcher(Node& node, PassRefPtrWillBeRawPtr<Event> event
 #endif
 {
     ASSERT(m_event.get());
-    ASSERT(!m_event->type().isNull()); // JavaScript code can create an event with an empty name, but not null.
     m_view = node.document().view();
     m_event->initEventPath(*m_node);
 }
@@ -104,7 +104,7 @@ void EventDispatcher::dispatchSimulatedClick(Node& node, Event* underlyingEvent,
 
 bool EventDispatcher::dispatch()
 {
-    TRACE_EVENT0("blink", "EventDispatcher::dispatch");
+    TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("blink.debug"), "EventDispatcher::dispatch");
 
 #if ENABLE(ASSERT)
     ASSERT(!m_eventDispatched);
@@ -120,9 +120,6 @@ bool EventDispatcher::dispatch()
     ASSERT(!EventDispatchForbiddenScope::isEventDispatchForbidden());
     ASSERT(m_event->target());
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "EventDispatch", "data", InspectorEventDispatchEvent::data(*m_event));
-    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
-    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willDispatchEvent(&m_node->document(), *m_event, m_event->eventPath().windowEventContext().window(), m_node.get(), m_event->eventPath());
-
     void* preDispatchEventHandlerResult;
     if (dispatchEventPreProcess(preDispatchEventHandlerResult) == ContinueDispatching) {
         if (dispatchEventAtCapturing() == ContinueDispatching) {
@@ -136,7 +133,6 @@ bool EventDispatcher::dispatch()
     // outermost shadow DOM boundary.
     m_event->setTarget(m_event->eventPath().windowEventContext().target());
     m_event->setCurrentTarget(0);
-    InspectorInstrumentation::didDispatchEvent(cookie);
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", "data", InspectorUpdateCountersEvent::data());
 
     return !m_event->defaultPrevented();

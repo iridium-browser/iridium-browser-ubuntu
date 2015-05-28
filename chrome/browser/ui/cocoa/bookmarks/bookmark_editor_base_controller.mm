@@ -25,6 +25,8 @@
 #include "ui/base/l10n/l10n_util_mac.h"
 
 using bookmarks::BookmarkExpandedStateTracker;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 
 @interface BookmarkEditorBaseController ()
 

@@ -19,7 +19,7 @@
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/native_messaging/native_messaging_pipe.h"
 #include "remoting/host/native_messaging/pipe_messaging_channel.h"
-#include "remoting/host/policy_hack/policy_watcher.h"
+#include "remoting/host/policy_watcher.h"
 #include "remoting/host/setup/test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -69,7 +69,7 @@ void VerifyCommonProperties(scoped_ptr<base::DictionaryValue> response,
 class MockIt2MeHost : public It2MeHost {
  public:
   MockIt2MeHost(scoped_ptr<ChromotingHostContext> context,
-                scoped_ptr<policy_hack::PolicyWatcher> policy_watcher,
+                scoped_ptr<PolicyWatcher> policy_watcher,
                 base::WeakPtr<It2MeHost::Observer> observer,
                 const XmppSignalStrategy::XmppServerConfig& xmpp_server_config,
                 const std::string& directory_bot_jid)
@@ -190,7 +190,6 @@ class It2MeNativeMessagingHostTest : public testing::Test {
 
  private:
   void StartHost();
-  void StopHost();
   void ExitTest();
 
   // Each test creates two unidirectional pipes: "input" and "output".
@@ -239,6 +238,10 @@ void It2MeNativeMessagingHostTest::SetUp() {
 }
 
 void It2MeNativeMessagingHostTest::TearDown() {
+  // Release reference to AutoThreadTaskRunner, so the host thread can be shut
+  // down.
+  host_task_runner_ = nullptr;
+
   // Closing the write-end of the input will send an EOF to the native
   // messaging reader. This will trigger a host shutdown.
   input_write_file_.Close();
@@ -443,26 +446,11 @@ void It2MeNativeMessagingHostTest::StartHost() {
           make_scoped_ptr(new MockIt2MeHostFactory())));
   it2me_host->Start(pipe_.get());
 
-  pipe_->Start(it2me_host.Pass(),
-               channel.Pass(),
-               base::Bind(&It2MeNativeMessagingHostTest::StopHost,
-                          base::Unretained(this)));
+  pipe_->Start(it2me_host.Pass(), channel.Pass());
 
   // Notify the test that the host has finished starting up.
   test_message_loop_->message_loop_proxy()->PostTask(
       FROM_HERE, test_run_loop_->QuitClosure());
-}
-
-void It2MeNativeMessagingHostTest::StopHost() {
-  DCHECK(host_task_runner_->RunsTasksOnCurrentThread());
-
-  pipe_.reset();
-
-  // Wait till all shutdown tasks have completed.
-  base::RunLoop().RunUntilIdle();
-
-  // Trigger a test shutdown via ExitTest().
-  host_task_runner_ = nullptr;
 }
 
 void It2MeNativeMessagingHostTest::ExitTest() {

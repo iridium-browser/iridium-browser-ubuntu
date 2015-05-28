@@ -23,10 +23,13 @@
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
+#include "chrome/browser/permissions/permission_manager.h"
+#include "chrome/browser/permissions/permission_manager_factory.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate.h"
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate_factory.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -79,6 +82,12 @@
 #include "extensions/common/extension.h"
 #endif
 
+#if defined(ENABLE_SUPERVISED_USERS)
+#include "chrome/browser/content_settings/content_settings_supervised_provider.h"
+#include "chrome/browser/supervised_user/supervised_user_settings_service.h"
+#include "chrome/browser/supervised_user/supervised_user_settings_service_factory.h"
+#endif
+
 using content::BrowserThread;
 using content::DownloadManagerDelegate;
 using content::HostZoomMap;
@@ -126,6 +135,9 @@ void OffTheRecordProfileImpl::Init() {
 
   BrowserContextDependencyManager::GetInstance()->CreateBrowserContextServices(
       this);
+
+  set_is_guest_profile(
+      profile_->GetPath() == ProfileManager::GetGuestProfilePath());
 
   // Guest profiles may always be OTR. Check IncognitoModePrefs otherwise.
   DCHECK(profile_->IsGuestSession() ||
@@ -221,8 +233,8 @@ void OffTheRecordProfileImpl::TrackZoomLevelsFromParent() {
                      base::Unretained(this)));
 }
 
-std::string OffTheRecordProfileImpl::GetProfileName() {
-  // Incognito profile should not return the profile name.
+std::string OffTheRecordProfileImpl::GetProfileUserName() const {
+  // Incognito profile should not return the username.
   return std::string();
 }
 
@@ -291,6 +303,10 @@ bool OffTheRecordProfileImpl::IsLegacySupervised() {
 }
 
 PrefService* OffTheRecordProfileImpl::GetPrefs() {
+  return prefs_;
+}
+
+const PrefService* OffTheRecordProfileImpl::GetPrefs() const {
   return prefs_;
 }
 
@@ -384,6 +400,15 @@ HostContentSettingsMap* OffTheRecordProfileImpl::GetHostContentSettingsMap() {
           host_content_settings_map_.get());
     }
 #endif
+#if defined(ENABLE_SUPERVISED_USERS)
+    SupervisedUserSettingsService* supervised_service =
+        SupervisedUserSettingsServiceFactory::GetForProfile(this);
+    scoped_ptr<content_settings::SupervisedProvider> supervised_provider(
+        new content_settings::SupervisedProvider(supervised_service));
+    host_content_settings_map_->RegisterProvider(
+        HostContentSettingsMap::SUPERVISED_PROVIDER,
+        supervised_provider.Pass());
+#endif
   }
   return host_content_settings_map_.get();
 }
@@ -416,20 +441,18 @@ OffTheRecordProfileImpl::GetSSLHostStateDelegate() {
   return ChromeSSLHostStateDelegateFactory::GetForProfile(this);
 }
 
+// TODO(mlamouri): we should all these BrowserContext implementation to Profile
+// instead of repeating them inside all Profile implementations.
+content::PermissionManager* OffTheRecordProfileImpl::GetPermissionManager() {
+  return PermissionManagerFactory::GetForProfile(this);
+}
+
 bool OffTheRecordProfileImpl::IsSameProfile(Profile* profile) {
   return (profile == this) || (profile == profile_);
 }
 
 Time OffTheRecordProfileImpl::GetStartTime() const {
   return start_time_;
-}
-
-history::TopSites* OffTheRecordProfileImpl::GetTopSitesWithoutCreating() {
-  return NULL;
-}
-
-history::TopSites* OffTheRecordProfileImpl::GetTopSites() {
-  return NULL;
 }
 
 void OffTheRecordProfileImpl::SetExitType(ExitType exit_type) {
@@ -511,13 +534,12 @@ class GuestSessionProfile : public OffTheRecordProfileImpl {
  public:
   explicit GuestSessionProfile(Profile* real_profile)
       : OffTheRecordProfileImpl(real_profile) {
+    set_is_guest_profile(true);
   }
 
-  virtual ProfileType GetProfileType() const override {
-    return GUEST_PROFILE;
-  }
+  ProfileType GetProfileType() const override { return GUEST_PROFILE; }
 
-  virtual void InitChromeOSPreferences() override {
+  void InitChromeOSPreferences() override {
     chromeos_preferences_.reset(new chromeos::Preferences());
     chromeos_preferences_->Init(
         this, user_manager::UserManager::Get()->GetActiveUser());
@@ -546,15 +568,17 @@ void OffTheRecordProfileImpl::OnParentZoomLevelChanged(
   HostZoomMap* host_zoom_map = HostZoomMap::GetDefaultForBrowserContext(this);
   switch (change.mode) {
     case HostZoomMap::ZOOM_CHANGED_TEMPORARY_ZOOM:
-       return;
+      return;
     case HostZoomMap::ZOOM_CHANGED_FOR_HOST:
-       host_zoom_map->SetZoomLevelForHost(change.host, change.zoom_level);
-       return;
+      host_zoom_map->SetZoomLevelForHost(change.host, change.zoom_level);
+      return;
     case HostZoomMap::ZOOM_CHANGED_FOR_SCHEME_AND_HOST:
-       host_zoom_map->SetZoomLevelForHostAndScheme(change.scheme,
-           change.host,
-           change.zoom_level);
-       return;
+      host_zoom_map->SetZoomLevelForHostAndScheme(change.scheme,
+          change.host,
+          change.zoom_level);
+      return;
+    case HostZoomMap::PAGE_SCALE_IS_ONE_CHANGED:
+      return;
   }
 }
 

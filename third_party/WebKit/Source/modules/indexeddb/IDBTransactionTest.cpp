@@ -31,6 +31,7 @@
 #include "config.h"
 #include "modules/indexeddb/IDBTransaction.h"
 
+#include "bindings/core/v8/V8BindingForTesting.h"
 #include "core/dom/DOMError.h"
 #include "core/dom/Document.h"
 #include "modules/indexeddb/IDBDatabase.h"
@@ -59,7 +60,7 @@ public:
     virtual void TearDown() override
     {
         m_executionContext->notifyContextDestroyed();
-        m_scope.scriptState()->setExecutionContext(0);
+        m_scope.scriptState()->setExecutionContext(nullptr);
     }
 
     v8::Isolate* isolate() const { return m_scope.isolate(); }
@@ -107,7 +108,7 @@ TEST_F(IDBTransactionTest, EnsureLifetime)
     const int64_t transactionId = 1234;
     const Vector<String> transactionScope;
     Persistent<IDBTransaction> transaction = IDBTransaction::create(scriptState(), transactionId, transactionScope, WebIDBTransactionModeReadOnly, db.get());
-    PersistentHeapHashSet<WeakMember<IDBTransaction> > set;
+    PersistentHeapHashSet<WeakMember<IDBTransaction>> set;
     set.add(transaction);
 
     Heap::collectAllGarbage();
@@ -137,7 +138,7 @@ TEST_F(IDBTransactionTest, TransactionFinish)
     const int64_t transactionId = 1234;
     const Vector<String> transactionScope;
     Persistent<IDBTransaction> transaction = IDBTransaction::create(scriptState(), transactionId, transactionScope, WebIDBTransactionModeReadOnly, db.get());
-    PersistentHeapHashSet<WeakMember<IDBTransaction> > set;
+    PersistentHeapHashSet<WeakMember<IDBTransaction>> set;
     set.add(transaction);
 
     Heap::collectAllGarbage();

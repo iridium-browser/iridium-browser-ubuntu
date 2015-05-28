@@ -32,6 +32,7 @@
 #include "platform/PlatformScreen.h"
 #include "platform/SharedBuffer.h"
 #include "platform/graphics/ImageSource.h"
+#include "platform/image-decoders/ImageAnimation.h"
 #include "platform/image-decoders/ImageFrame.h"
 #include "public/platform/Platform.h"
 #include "wtf/Assertions.h"
@@ -65,7 +66,7 @@ private:
 // (e.g. JPEGImageDecoder). This base manages the ImageFrame cache.
 //
 class PLATFORM_EXPORT ImageDecoder {
-    WTF_MAKE_NONCOPYABLE(ImageDecoder); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(ImageDecoder); WTF_MAKE_FAST_ALLOCATED(ImageDecoder);
 public:
     enum SizeType { ActualSize, SizeForMemoryAllocation };
 
@@ -232,9 +233,9 @@ public:
 
     static qcms_profile* qcmsOutputDeviceProfile()
     {
-        AtomicallyInitializedStatic(OutputDeviceProfile*, outputDeviceProfile = new OutputDeviceProfile());
+        AtomicallyInitializedStaticReference(OutputDeviceProfile, outputDeviceProfile, new OutputDeviceProfile);
 
-        return outputDeviceProfile->profile();
+        return outputDeviceProfile.profile();
     }
 #endif
 

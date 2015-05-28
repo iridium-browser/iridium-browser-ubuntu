@@ -1,5 +1,5 @@
 <!doctype html>
-<html i18n-values="dir:textdirection">
+<html i18n-values="dir:textdirection;lang:language">
 <head>
   <meta charset="utf-8">
   <link rel="stylesheet" href="chrome://resources/css/text_defaults.css">
@@ -11,11 +11,13 @@
   <script src="chrome://resources/js/util.js"></script>
   <script src="chrome://app-list/strings.js"></script>
   <script src="chrome://app-list/start_page.js"></script>
+  <base id="base">
 </head>
 
 <body>
-  <div id="logo"></div>
-  <div id="start-page"></div>
+  <div id="logo_container">
+    <div id="default_logo"></div>
+  </div>
   <script src="chrome://resources/js/i18n_template2.js"></script>
 </body>
 </html>

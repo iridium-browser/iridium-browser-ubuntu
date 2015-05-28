@@ -22,11 +22,11 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_file_system_context.h"
 #include "extensions/browser/extension_registry.h"
+#include "storage/browser/blob/shareable_file_reference.h"
 #include "storage/browser/fileapi/async_file_util.h"
 #include "storage/browser/fileapi/external_mount_points.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_url.h"
-#include "storage/common/blob/shareable_file_reference.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -117,9 +117,9 @@ KeyedService* CreateService(content::BrowserContext* context) {
 class FileSystemProviderProviderAsyncFileUtilTest : public testing::Test {
  protected:
   FileSystemProviderProviderAsyncFileUtilTest() {}
-  virtual ~FileSystemProviderProviderAsyncFileUtilTest() {}
+  ~FileSystemProviderProviderAsyncFileUtilTest() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     profile_manager_.reset(
         new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
@@ -155,7 +155,7 @@ class FileSystemProviderProviderAsyncFileUtilTest : public testing::Test {
     ASSERT_TRUE(root_url_.is_valid());
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     // Setting the testing factory to NULL will destroy the created service
     // associated with the testing profile.
     ServiceFactory::GetInstance()->SetTestingFactory(profile_, NULL);

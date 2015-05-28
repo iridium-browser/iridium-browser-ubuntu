@@ -7,13 +7,14 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
+#include "cc/base/util.h"
 #include "cc/output/gl_renderer.h"
 #include "cc/resources/resource_provider.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "media/base/video_frame.h"
-#include "media/filters/skcanvas_video_renderer.h"
+#include "media/blink/skcanvas_video_renderer.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -95,9 +96,9 @@ VideoResourceUpdater::AllocateResource(const gfx::Size& plane_size,
   // TODO(danakj): Abstract out hw/sw resource create/delete from
   // ResourceProvider and stop using ResourceProvider in this class.
   const ResourceProvider::ResourceId resource_id =
-      resource_provider_->CreateResource(plane_size, GL_CLAMP_TO_EDGE,
-                                         ResourceProvider::TextureHintImmutable,
-                                         format);
+      resource_provider_->CreateResource(
+          plane_size, GL_CLAMP_TO_EDGE,
+          ResourceProvider::TEXTURE_HINT_IMMUTABLE, format);
   if (resource_id == 0)
     return all_resources_.end();
 
@@ -144,6 +145,7 @@ bool VideoResourceUpdater::VerifyFrame(
     case media::VideoFrame::YV12A:
     case media::VideoFrame::YV16:
     case media::VideoFrame::YV12J:
+    case media::VideoFrame::YV12HD:
     case media::VideoFrame::YV24:
     case media::VideoFrame::NATIVE_TEXTURE:
 #if defined(VIDEO_HOLE)
@@ -191,6 +193,7 @@ VideoFrameExternalResources VideoResourceUpdater::CreateForSoftwarePlanes(
       input_frame_format != media::VideoFrame::I420 &&
       input_frame_format != media::VideoFrame::YV12A &&
       input_frame_format != media::VideoFrame::YV12J &&
+      input_frame_format != media::VideoFrame::YV12HD &&
       input_frame_format != media::VideoFrame::YV16 &&
       input_frame_format != media::VideoFrame::YV24) {
     NOTREACHED() << input_frame_format;
@@ -294,7 +297,9 @@ VideoFrameExternalResources VideoResourceUpdater::CreateForSoftwarePlanes(
       ResourceProvider::ScopedWriteLockSoftware lock(
           resource_provider_, plane_resource.resource_id);
       SkCanvas canvas(lock.sk_bitmap());
-      video_renderer_->Copy(video_frame, &canvas);
+      // This is software path, so canvas and video_frame are always backed
+      // by software.
+      video_renderer_->Copy(video_frame, &canvas, media::Context3D());
       SetPlaneResourceUniqueId(video_frame.get(), 0, &plane_resource);
     }
 
@@ -313,14 +318,41 @@ VideoFrameExternalResources VideoResourceUpdater::CreateForSoftwarePlanes(
 
     if (!PlaneResourceMatchesUniqueID(plane_resource, video_frame.get(), i)) {
       // We need to transfer data from |video_frame| to the plane resource.
-      const uint8_t* input_plane_pixels = video_frame->data(i);
+      // TODO(reveman): Can use GpuMemoryBuffers here to improve performance.
 
-      gfx::Rect image_rect(0, 0, video_frame->stride(i),
-                           plane_resource.resource_size.height());
-      gfx::Rect source_rect(plane_resource.resource_size);
-      resource_provider_->SetPixels(plane_resource.resource_id,
-                                    input_plane_pixels, image_rect, source_rect,
-                                    gfx::Vector2d());
+      // The |resource_size_pixels| is the size of the resource we want to
+      // upload to.
+      gfx::Size resource_size_pixels = plane_resource.resource_size;
+      // The |video_stride_pixels| is the width of the video frame we are
+      // uploading (including non-frame data to fill in the stride).
+      size_t video_stride_pixels = video_frame->stride(i);
+
+      size_t bytes_per_pixel = BitsPerPixel(plane_resource.resource_format) / 8;
+      // Use 4-byte row alignment (OpenGL default) for upload performance.
+      // Assuming that GL_UNPACK_ALIGNMENT has not changed from default.
+      size_t upload_image_stride =
+          RoundUp<size_t>(bytes_per_pixel * resource_size_pixels.width(), 4u);
+
+      const uint8_t* pixels;
+      if (upload_image_stride == video_stride_pixels * bytes_per_pixel) {
+        pixels = video_frame->data(i);
+      } else {
+        // Avoid malloc for each frame/plane if possible.
+        size_t needed_size =
+            upload_image_stride * resource_size_pixels.height();
+        if (upload_pixels_.size() < needed_size)
+          upload_pixels_.resize(needed_size);
+        for (int row = 0; row < resource_size_pixels.height(); ++row) {
+          uint8_t* dst = &upload_pixels_[upload_image_stride * row];
+          const uint8_t* src = video_frame->data(i) +
+                               bytes_per_pixel * video_stride_pixels * row;
+          memcpy(dst, src, resource_size_pixels.width() * bytes_per_pixel);
+        }
+        pixels = &upload_pixels_[0];
+      }
+
+      resource_provider_->CopyToResource(plane_resource.resource_id, pixels,
+                                         resource_size_pixels);
       SetPlaneResourceUniqueId(video_frame.get(), i, &plane_resource);
     }
 
@@ -386,6 +418,8 @@ VideoFrameExternalResources VideoResourceUpdater::CreateForHardwarePlanes(
       TextureMailbox(mailbox_holder->mailbox,
                      mailbox_holder->texture_target,
                      mailbox_holder->sync_point));
+  external_resources.mailboxes.back().set_allow_overlay(
+      video_frame->allow_overlay());
   external_resources.release_callbacks.push_back(
       base::Bind(&ReturnTexture, AsWeakPtr(), video_frame));
   return external_resources;

@@ -23,8 +23,6 @@
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/signin/core/common/signin_switches.h"
-#include "content/public/browser/render_process_host.h"
-#include "content/public/common/child_process_host.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "url/gurl.h"
 
@@ -40,9 +38,6 @@
 #include "chrome/browser/first_run/first_run.h"
 #endif
 
-using content::ChildProcessHost;
-using content::RenderProcessHost;
-
 namespace {
 
 const char kGoogleAccountsUrl[] = "https://accounts.google.com";
@@ -52,18 +47,12 @@ const char kGoogleAccountsUrl[] = "https://accounts.google.com";
 ChromeSigninClient::ChromeSigninClient(
     Profile* profile, SigninErrorController* signin_error_controller)
     : profile_(profile),
-      signin_error_controller_(signin_error_controller),
-      signin_host_id_(ChildProcessHost::kInvalidUniqueID) {
+      signin_error_controller_(signin_error_controller) {
   signin_error_controller_->AddObserver(this);
 }
 
 ChromeSigninClient::~ChromeSigninClient() {
   signin_error_controller_->RemoveObserver(this);
-  std::set<RenderProcessHost*>::iterator i;
-  for (i = signin_hosts_observed_.begin(); i != signin_hosts_observed_.end();
-       ++i) {
-    (*i)->RemoveObserver(this);
-  }
 }
 
 // static
@@ -81,46 +70,11 @@ bool ChromeSigninClient::SettingsAllowSigninCookies(
                                                  GURL(kGoogleAccountsUrl));
 }
 
-void ChromeSigninClient::SetSigninProcess(int process_id) {
-  if (process_id == signin_host_id_)
-    return;
-  DLOG_IF(WARNING, signin_host_id_ != ChildProcessHost::kInvalidUniqueID)
-      << "Replacing in-use signin process.";
-  signin_host_id_ = process_id;
-  RenderProcessHost* host = RenderProcessHost::FromID(process_id);
-  DCHECK(host);
-  host->AddObserver(this);
-  signin_hosts_observed_.insert(host);
-}
-
-void ChromeSigninClient::ClearSigninProcess() {
-  signin_host_id_ = ChildProcessHost::kInvalidUniqueID;
-}
-
-bool ChromeSigninClient::IsSigninProcess(int process_id) const {
-  return process_id != ChildProcessHost::kInvalidUniqueID &&
-         process_id == signin_host_id_;
-}
-
-bool ChromeSigninClient::HasSigninProcess() const {
-  return signin_host_id_ != ChildProcessHost::kInvalidUniqueID;
-}
-
-void ChromeSigninClient::RenderProcessHostDestroyed(RenderProcessHost* host) {
-  // It's possible we're listening to a "stale" renderer because it was replaced
-  // with a new process by process-per-site. In either case, stop observing it,
-  // but only reset signin_host_id_ tracking if this was from the current signin
-  // process.
-  signin_hosts_observed_.erase(host);
-  if (signin_host_id_ == host->GetID())
-    signin_host_id_ = ChildProcessHost::kInvalidUniqueID;
-}
-
 PrefService* ChromeSigninClient::GetPrefs() { return profile_->GetPrefs(); }
 
 scoped_refptr<TokenWebData> ChromeSigninClient::GetDatabase() {
   return WebDataServiceFactory::GetTokenWebDataForProfile(
-      profile_, Profile::EXPLICIT_ACCESS);
+      profile_, ServiceAccessType::EXPLICIT_ACCESS);
 }
 
 bool ChromeSigninClient::CanRevokeCredentials() {
@@ -169,6 +123,12 @@ void ChromeSigninClient::OnSignedOut() {
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
   size_t index = cache.GetIndexOfProfileWithPath(profile_->GetPath());
+
+  // If sign out occurs because Sync setup was in progress and the Profile got
+  // deleted, then the profile's no longer in the ProfileInfoCache.
+  if (index == std::string::npos)
+    return;
+
   cache.SetLocalAuthCredentialsOfProfileAtIndex(index, std::string());
   cache.SetUserNameOfProfileAtIndex(index, base::string16());
   cache.SetProfileSigninRequiredAtIndex(index, false);
@@ -179,10 +139,7 @@ net::URLRequestContextGetter* ChromeSigninClient::GetURLRequestContext() {
 }
 
 bool ChromeSigninClient::ShouldMergeSigninCredentialsIntoCookieJar() {
-  // If inline sign in is enabled, but account consistency is not, the user's
-  // credentials should be merge into the cookie jar.
-  return !switches::IsEnableWebBasedSignin() &&
-         !switches::IsEnableAccountConsistency();
+  return !switches::IsEnableAccountConsistency();
 }
 
 std::string ChromeSigninClient::GetProductVersion() {
@@ -201,6 +158,20 @@ bool ChromeSigninClient::IsFirstRun() const {
 base::Time ChromeSigninClient::GetInstallDate() {
   return base::Time::FromTimeT(
       g_browser_process->metrics_service()->GetInstallDate());
+}
+
+bool ChromeSigninClient::AreSigninCookiesAllowed() {
+  return ProfileAllowsSigninCookies(profile_);
+}
+
+void ChromeSigninClient::AddContentSettingsObserver(
+    content_settings::Observer* observer) {
+  profile_->GetHostContentSettingsMap()->AddObserver(observer);
+}
+
+void ChromeSigninClient::RemoveContentSettingsObserver(
+    content_settings::Observer* observer) {
+  profile_->GetHostContentSettingsMap()->RemoveObserver(observer);
 }
 
 scoped_ptr<SigninClient::CookieChangedSubscription>

@@ -21,15 +21,13 @@
 #ifndef SVGLength_h
 #define SVGLength_h
 
-#include "bindings/core/v8/ExceptionMessages.h"
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "core/css/CSSPrimitiveValue.h"
 #include "core/svg/SVGLengthContext.h"
 #include "core/svg/properties/SVGProperty.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class CSSPrimitiveValue;
 class ExceptionState;
 class QualifiedName;
 
@@ -44,7 +42,7 @@ class SVGLength final : public SVGPropertyBase {
 public:
     typedef SVGLengthTearOff TearOffType;
 
-    static PassRefPtrWillBeRawPtr<SVGLength> create(SVGLengthMode mode = LengthModeOther)
+    static PassRefPtrWillBeRawPtr<SVGLength> create(SVGLengthMode mode = SVGLengthMode::Other)
     {
         return adoptRefWillBeNoop(new SVGLength(mode));
     }
@@ -53,37 +51,47 @@ public:
     virtual PassRefPtrWillBeRawPtr<SVGPropertyBase> cloneForAnimation(const String&) const override;
 
     SVGLengthType unitType() const { return static_cast<SVGLengthType>(m_unitType); }
+    CSSPrimitiveValue::UnitType cssUnitTypeQuirk() const
+    {
+        if (m_unitType == LengthTypeNumber)
+            return CSSPrimitiveValue::UnitType::CSS_PX;
+        return static_cast<CSSPrimitiveValue::UnitType>(m_unitType);
+    }
     void setUnitType(SVGLengthType);
     SVGLengthMode unitMode() const { return static_cast<SVGLengthMode>(m_unitMode); }
 
     bool operator==(const SVGLength&) const;
     bool operator!=(const SVGLength& other) const { return !operator==(other); }
 
-    float value(const SVGLengthContext& context) const
-    {
-        return value(context, IGNORE_EXCEPTION);
-    }
-    float value(const SVGLengthContext&, ExceptionState&) const;
-    void setValue(float, const SVGLengthContext&, ExceptionState&);
+    float value(const SVGLengthContext&) const;
+    void setValue(float, const SVGLengthContext&);
 
     float valueInSpecifiedUnits() const { return m_valueInSpecifiedUnits; }
     void setValueInSpecifiedUnits(float value) { m_valueInSpecifiedUnits = value; }
 
+    // Resolves LengthTypePercentage into a normalized floating point number (full value is 1.0).
     float valueAsPercentage() const;
+
+    // Returns a number to be used as percentage (so full value is 100)
+    float valueAsPercentage100() const;
+
+    // Scale the input value by this SVGLength. Higher precision than input * valueAsPercentage().
+    float scaleByPercentage(float) const;
 
     virtual String valueAsString() const override;
     void setValueAsString(const String&, ExceptionState&);
 
     void newValueSpecifiedUnits(SVGLengthType, float valueInSpecifiedUnits);
-    void convertToSpecifiedUnits(SVGLengthType, const SVGLengthContext&, ExceptionState&);
+    void convertToSpecifiedUnits(SVGLengthType, const SVGLengthContext&);
 
     // Helper functions
-    inline bool isRelative() const
+    static inline bool isRelativeUnit(SVGLengthType unitType)
     {
-        return m_unitType == LengthTypePercentage
-            || m_unitType == LengthTypeEMS
-            || m_unitType == LengthTypeEXS;
+        return unitType == LengthTypePercentage
+            || unitType == LengthTypeEMS
+            || unitType == LengthTypeEXS;
     }
+    inline bool isRelative() const { return isRelativeUnit(unitType()); }
 
     bool isZero() const
     {

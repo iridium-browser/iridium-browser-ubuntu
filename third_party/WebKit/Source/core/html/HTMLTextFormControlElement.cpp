@@ -30,24 +30,25 @@
 #include "core/HTMLNames.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/Document.h"
+#include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeList.h"
-#include "core/dom/NodeTraversal.h"
 #include "core/dom/Text.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/editing/Editor.h"
 #include "core/editing/FrameSelection.h"
-#include "core/editing/TextIterator.h"
 #include "core/editing/htmlediting.h"
+#include "core/editing/iterators/CharacterIterator.h"
+#include "core/editing/iterators/TextIterator.h"
 #include "core/events/Event.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLBRElement.h"
 #include "core/html/shadow/ShadowElementNames.h"
+#include "core/layout/LayoutBlock.h"
+#include "core/layout/LayoutBlockFlow.h"
+#include "core/layout/LayoutTheme.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
-#include "core/rendering/RenderBlock.h"
-#include "core/rendering/RenderBlockFlow.h"
-#include "core/rendering/RenderTheme.h"
 #include "platform/heap/Handle.h"
 #include "platform/text/TextBoundaries.h"
 #include "wtf/text/StringBuilder.h"
@@ -79,7 +80,7 @@ Node::InsertionNotificationRequest HTMLTextFormControlElement::insertedInto(Cont
     return InsertionDone;
 }
 
-void HTMLTextFormControlElement::dispatchFocusEvent(Element* oldFocusedElement, FocusType type)
+void HTMLTextFormControlElement::dispatchFocusEvent(Element* oldFocusedElement, WebFocusType type)
 {
     if (supportsPlaceholder())
         updatePlaceholderVisibility(false);
@@ -87,17 +88,17 @@ void HTMLTextFormControlElement::dispatchFocusEvent(Element* oldFocusedElement, 
     HTMLFormControlElementWithState::dispatchFocusEvent(oldFocusedElement, type);
 }
 
-void HTMLTextFormControlElement::dispatchBlurEvent(Element* newFocusedElement)
+void HTMLTextFormControlElement::dispatchBlurEvent(Element* newFocusedElement, WebFocusType type)
 {
     if (supportsPlaceholder())
         updatePlaceholderVisibility(false);
     handleBlurEvent();
-    HTMLFormControlElementWithState::dispatchBlurEvent(newFocusedElement);
+    HTMLFormControlElementWithState::dispatchBlurEvent(newFocusedElement, type);
 }
 
 void HTMLTextFormControlElement::defaultEventHandler(Event* event)
 {
-    if (event->type() == EventTypeNames::webkitEditableContentChanged && renderer() && renderer()->isTextControl()) {
+    if (event->type() == EventTypeNames::webkitEditableContentChanged && layoutObject() && layoutObject()->isTextControl()) {
         m_lastChangeWasUserEdit = true;
         subtreeHasChanged();
         return;
@@ -147,13 +148,13 @@ bool HTMLTextFormControlElement::placeholderShouldBeVisible() const
         && isEmptyValue()
         && isEmptySuggestedValue()
         && !isPlaceholderEmpty()
-        && (document().focusedElement() != this || (RenderTheme::theme().shouldShowPlaceholderWhenFocused()))
-        && (!renderer() || renderer()->style()->visibility() == VISIBLE);
+        && (document().focusedElement() != this || (LayoutTheme::theme().shouldShowPlaceholderWhenFocused()))
+        && (!layoutObject() || layoutObject()->style()->visibility() == VISIBLE);
 }
 
 HTMLElement* HTMLTextFormControlElement::placeholderElement() const
 {
-    return toHTMLElement(userAgentShadowRoot()->getElementById(ShadowElementNames::placeholder()));
+    return toHTMLElement(closedShadowRoot()->getElementById(ShadowElementNames::placeholder()));
 }
 
 void HTMLTextFormControlElement::updatePlaceholderVisibility(bool placeholderValueChanged)
@@ -215,7 +216,7 @@ void HTMLTextFormControlElement::setRangeText(const String& replacement, unsigne
         exceptionState.throwDOMException(IndexSizeError, "The provided start value (" + String::number(start) + ") is larger than the provided end value (" + String::number(end) + ").");
         return;
     }
-    if (hasAuthorShadowRoot())
+    if (hasOpenShadowRoot())
         return;
 
     String text = innerEditorValue();
@@ -235,7 +236,7 @@ void HTMLTextFormControlElement::setRangeText(const String& replacement, unsigne
     setInnerEditorValue(text);
 
     // FIXME: What should happen to the value (as in value()) if there's no renderer?
-    if (!renderer())
+    if (!layoutObject())
         return;
 
     subtreeHasChanged();
@@ -347,7 +348,7 @@ static int indexForPosition(HTMLElement* innerEditor, const Position& passedPosi
 
 void HTMLTextFormControlElement::setSelectionRange(int start, int end, TextFieldSelectionDirection direction, NeedToDispatchSelectEvent eventBehaviour, SelectionOption selectionOption)
 {
-    if (hasAuthorShadowRoot() || !isTextFormControl())
+    if (hasOpenShadowRoot() || !isTextFormControl() || !inDocument())
         return;
 
     const int editorValueLength = static_cast<int>(innerEditorValue().length());
@@ -413,7 +414,7 @@ int HTMLTextFormControlElement::indexForVisiblePosition(const VisiblePosition& p
     RefPtrWillBeRawPtr<Range> range = Range::create(*indexPosition.document());
     range->setStart(innerEditorElement(), 0, ASSERT_NO_EXCEPTION);
     range->setEnd(indexPosition.containerNode(), indexPosition.offsetInContainerNode(), ASSERT_NO_EXCEPTION);
-    return TextIterator::rangeLength(range.get());
+    return TextIterator::rangeLength(range->startPosition(), range->endPosition());
 }
 
 int HTMLTextFormControlElement::selectionStart() const
@@ -508,7 +509,7 @@ static inline void setContainerAndOffsetForRange(Node* node, int offset, Node*& 
 
 PassRefPtrWillBeRawPtr<Range> HTMLTextFormControlElement::selection() const
 {
-    if (!renderer() || !isTextFormControl())
+    if (!layoutObject() || !isTextFormControl())
         return nullptr;
 
     int start = m_cachedSelectionStart;
@@ -547,6 +548,33 @@ PassRefPtrWillBeRawPtr<Range> HTMLTextFormControlElement::selection() const
     return Range::create(document(), startNode, start, endNode, end);
 }
 
+const AtomicString& HTMLTextFormControlElement::autocapitalize() const
+{
+    DEFINE_STATIC_LOCAL(const AtomicString, off, ("off", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(const AtomicString, none, ("none", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(const AtomicString, characters, ("characters", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(const AtomicString, words, ("words", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(const AtomicString, sentences, ("sentences", AtomicString::ConstructFromLiteral));
+
+    const AtomicString& value = fastGetAttribute(autocapitalizeAttr);
+    if (equalIgnoringCase(value, none) || equalIgnoringCase(value, off))
+        return none;
+    if (equalIgnoringCase(value, characters))
+        return characters;
+    if (equalIgnoringCase(value, words))
+        return words;
+    if (equalIgnoringCase(value, sentences))
+        return sentences;
+
+    // Invalid or missing value.
+    return defaultAutocapitalize();
+}
+
+void HTMLTextFormControlElement::setAutocapitalize(const AtomicString& autocapitalize)
+{
+    setAttribute(autocapitalizeAttr, autocapitalize);
+}
+
 void HTMLTextFormControlElement::restoreCachedSelection()
 {
     setSelectionRange(m_cachedSelectionStart, m_cachedSelectionEnd, m_cachedSelectionDirection, NotDispatchSelectEvent);
@@ -554,7 +582,7 @@ void HTMLTextFormControlElement::restoreCachedSelection()
 
 void HTMLTextFormControlElement::selectionChanged(bool userTriggered)
 {
-    if (!renderer() || !isTextFormControl())
+    if (!layoutObject() || !isTextFormControl())
         return;
 
     // selectionStart() or selectionEnd() will return cached selection when this node doesn't have focus
@@ -591,13 +619,13 @@ bool HTMLTextFormControlElement::lastChangeWasUserEdit() const
 
 void HTMLTextFormControlElement::setInnerEditorValue(const String& value)
 {
-    ASSERT(!hasAuthorShadowRoot());
-    if (!isTextFormControl() || hasAuthorShadowRoot())
+    ASSERT(!hasOpenShadowRoot());
+    if (!isTextFormControl() || hasOpenShadowRoot())
         return;
 
     bool textIsChanged = value != innerEditorValue();
     if (textIsChanged || !innerEditorElement()->hasChildren()) {
-        if (textIsChanged && renderer()) {
+        if (textIsChanged && layoutObject()) {
             if (AXObjectCache* cache = document().existingAXObjectCache())
                 cache->handleTextFormControlChanged(this);
         }
@@ -619,7 +647,7 @@ static String finishText(StringBuilder& result)
 
 String HTMLTextFormControlElement::innerEditorValue() const
 {
-    ASSERT(!hasAuthorShadowRoot());
+    ASSERT(!hasOpenShadowRoot());
     HTMLElement* innerEditor = innerEditorElement();
     if (!innerEditor || !isTextFormControl())
         return emptyString();
@@ -659,7 +687,7 @@ String HTMLTextFormControlElement::valueWithHardLineBreaks() const
     if (!innerText || !isTextFormControl())
         return value();
 
-    RenderBlockFlow* renderer = toRenderBlockFlow(innerText->renderer());
+    LayoutBlockFlow* renderer = toLayoutBlockFlow(innerText->layoutObject());
     if (!renderer)
         return value();
 
@@ -708,7 +736,7 @@ HTMLTextFormControlElement* enclosingTextFormControl(Node* container)
     if (!container)
         return nullptr;
     Element* ancestor = container->shadowHost();
-    return ancestor && isHTMLTextFormControlElement(*ancestor) && container->containingShadowRoot()->type() == ShadowRoot::UserAgentShadowRoot ? toHTMLTextFormControlElement(ancestor) : 0;
+    return ancestor && isHTMLTextFormControlElement(*ancestor) && container->containingShadowRoot()->type() == ShadowRoot::ClosedShadowRoot ? toHTMLTextFormControlElement(ancestor) : 0;
 }
 
 String HTMLTextFormControlElement::directionForFormData() const
@@ -733,7 +761,7 @@ String HTMLTextFormControlElement::directionForFormData() const
 
 HTMLElement* HTMLTextFormControlElement::innerEditorElement() const
 {
-    return toHTMLElement(userAgentShadowRoot()->getElementById(ShadowElementNames::innerEditor()));
+    return toHTMLElement(closedShadowRoot()->getElementById(ShadowElementNames::innerEditor()));
 }
 
 static Position innerNodePosition(const Position& innerPosition)

@@ -2,13 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from measurements import smoothness_controller
 from telemetry.page import page_test
+
+from measurements import smoothness_controller
 
 
 class Repaint(page_test.PageTest):
   def __init__(self, mode='viewport', width=None, height=None):
-    super(Repaint, self).__init__('RunPageInteractions', False)
+    super(Repaint, self).__init__()
     self._smoothness_controller = None
     self._micro_benchmark_id = None
     self._mode = mode

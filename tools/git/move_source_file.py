@@ -31,6 +31,7 @@ if __name__ == '__main__':
   # classpath.
   sys.path.append(os.path.abspath(os.path.join(sys.path[0], '..')))
 sort_headers = __import__('sort-headers')
+import sort_sources
 
 
 HANDLED_EXTENSIONS = ['.cc', '.mm', '.h', '.hh', '.cpp']
@@ -106,18 +107,54 @@ def UpdatePostMove(from_path, to_path):
       r'\1%s' % to_path,
       ['*.cc', '*.h', '*.m', '*.mm', '*.cpp'])
 
-  # Update references in .gyp(i) files.
-  def PathMinusFirstComponent(path):
-    """foo/bar/baz -> bar/baz"""
+  # Update references in GYP and BUILD.gn files.
+  #
+  # GYP files are mostly located under the first level directory (ex.
+  # chrome/chrome_browser.gypi), but sometimes they are located in
+  # directories at a deeper level (ex. extensions/shell/app_shell.gypi). On
+  # the other hand, BUILD.gn files can be placed in any directories.
+  #
+  # Paths in a GYP or BUILD.gn file are relative to the directory where the
+  # file is placed.
+  #
+  # For instance, "chrome/browser/chromeos/device_uma.h" is listed as
+  # "browser/chromeos/device_uma.h" in "chrome/chrome_browser_chromeos.gypi",
+  # but it's listed as "device_uma.h" in "chrome/browser/chromeos/BUILD.gn".
+  #
+  # To handle this, the code here will visit directories from the top level
+  # src directory to the directory of |from_path| and try to update GYP and
+  # BUILD.gn files in each directory.
+  #
+  # The code only handles files moved/renamed within the same build file. If
+  # files are moved beyond the same build file, the affected build files
+  # should be fixed manually.
+  def SplitByFirstComponent(path):
+    """'foo/bar/baz' -> ('foo', 'bar/baz')
+       'bar' -> ('bar', '')
+       '' -> ('', '')
+    """
     parts = re.split(r"[/\\]", path, 1)
     if len(parts) == 2:
-      return parts[1]
+      return (parts[0], parts[1])
     else:
-      return parts[0]
-  mffr.MultiFileFindReplace(
-      r'([\'"])%s([\'"])' % re.escape(PathMinusFirstComponent(from_path)),
-      r'\1%s\2' % PathMinusFirstComponent(to_path),
-      ['*.gyp*'])
+      return (parts[0], '')
+
+  visiting_directory = ''
+  from_rest = from_path
+  to_rest = to_path
+  while True:
+    files_with_changed_sources = mffr.MultiFileFindReplace(
+        r'([\'"])%s([\'"])' % from_rest,
+        r'\1%s\2' % to_rest,
+        [os.path.join(visiting_directory, 'BUILD.gn'),
+         os.path.join(visiting_directory, '*.gyp*')])
+    for changed_file in files_with_changed_sources:
+      sort_sources.ProcessFile(changed_file, should_confirm=False)
+    from_first, from_rest = SplitByFirstComponent(from_rest)
+    to_first, to_rest = SplitByFirstComponent(to_rest)
+    visiting_directory = os.path.join(visiting_directory, from_first)
+    if not from_rest or not to_rest:
+        break
 
 
 def MakeIncludeGuardName(path_from_root):

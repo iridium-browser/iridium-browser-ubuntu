@@ -8,8 +8,7 @@
 #include "components/nacl/loader/nacl_validation_db.h"
 #include "crypto/nss_util.h"
 #include "native_client/src/include/portability.h"
-#include "native_client/src/public/nacl_file_info.h"
-#include "native_client/src/trusted/validator/validation_cache.h"
+#include "native_client/src/public/validation_cache.h"
 
 NaClValidationQueryContext::NaClValidationQueryContext(
     NaClValidationDB* db,
@@ -29,15 +28,6 @@ NaClValidationQuery* NaClValidationQueryContext::CreateQuery() {
   // Changing the version effectively invalidates existing hashes.
   query->AddData(nacl_version_);
   return query;
-}
-
-bool NaClValidationQueryContext::ResolveFileToken(
-    struct NaClFileToken* file_token,
-    int32* fd,
-    std::string* path) {
-  // This should no longer be used.
-  CHECK(false);
-  return false;
 }
 
 NaClValidationQuery::NaClValidationQuery(NaClValidationDB* db,
@@ -138,24 +128,6 @@ static void DestroyQuery(void* query) {
   delete static_cast<NaClValidationQuery*>(query);
 }
 
-static int ResolveFileToken(void* handle, struct NaClFileToken* file_token,
-                            int32* fd, char** file_path,
-                            uint32* file_path_length) {
-  std::string path;
-  *file_path = NULL;
-  *file_path_length = 0;
-  bool ok = static_cast<NaClValidationQueryContext*>(handle)->
-      ResolveFileToken(file_token, fd, &path);
-  if (ok) {
-    *file_path = static_cast<char*>(malloc(path.length() + 1));
-    CHECK(*file_path);
-    memcpy(*file_path, path.data(), path.length());
-    (*file_path)[path.length()] = 0;
-    *file_path_length = static_cast<uint32>(path.length());
-  }
-  return ok;
-}
-
 struct NaClValidationCache* CreateValidationCache(
     NaClValidationDB* db, const std::string& profile_key,
     const std::string& nacl_version) {
@@ -169,6 +141,5 @@ struct NaClValidationCache* CreateValidationCache(
   cache->QueryKnownToValidate = QueryKnownToValidate;
   cache->SetKnownToValidate = SetKnownToValidate;
   cache->DestroyQuery = DestroyQuery;
-  cache->ResolveFileToken = ResolveFileToken;
   return cache;
 }

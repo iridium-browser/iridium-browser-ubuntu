@@ -19,6 +19,7 @@
 #include "base/files/file_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_member.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/strings/string_number_conversions.h"
@@ -44,7 +45,9 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "components/onc/onc_constants.h"
 #include "components/url_fixer/url_fixer.h"
@@ -57,8 +60,6 @@
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/net_internals_resources.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log_logger.h"
-#include "net/base/net_log_util.h"
 #include "net/base/net_util.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/dns/host_cache.h"
@@ -69,6 +70,8 @@
 #include "net/http/http_server_properties.h"
 #include "net/http/http_stream_factory.h"
 #include "net/http/transport_security_state.h"
+#include "net/log/net_log_logger.h"
+#include "net/log/net_log_util.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -109,6 +112,35 @@ namespace {
 // page.  All events that occur during this period are grouped together and
 // sent to the page at once, which reduces context switching and CPU usage.
 const int kNetLogEventDelayMilliseconds = 100;
+
+// TODO(eroman): Temporary while investigating http://crbug.com/472313
+//
+// The objective is to measure the usage of the connection tester relative to
+// the usage of chrome://net-internals. (It is expected that both will have low
+// overall usage).
+//
+// Rather than count total usages (which would be skewed towards the most active
+// users), only record 1 "usage" of these feature per launch of Chrome.
+
+enum Feature {
+  FEATURE_NET_INTERNALS_USED,
+  FEATURE_CONNECTION_TESTER,
+  FEATURE_COUNT,
+};
+
+void HistogramUsage(Feature feature) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  // Static is safe because this code only runs on the IO thread.
+  static unsigned int usages_bit_field = 0;
+
+  unsigned int bit_flag = 1 << feature;
+  if ((usages_bit_field & bit_flag) == 0) {
+    usages_bit_field |= bit_flag;
+    UMA_HISTOGRAM_ENUMERATION("Net.NetInternalsUi.Feature", feature,
+                              FEATURE_COUNT);
+  }
+}
 
 // Returns the HostCache for |context|'s primary HostResolver, or NULL if
 // there is none.
@@ -426,7 +458,9 @@ void NetInternalsMessageHandler::RegisterMessages() {
   proxy_ = new IOThreadImpl(this->AsWeakPtr(), g_browser_process->io_thread(),
                             profile->GetRequestContext());
   proxy_->AddRequestContextGetter(profile->GetMediaRequestContext());
+#if defined(ENABLE_EXTENSIONS)
   proxy_->AddRequestContextGetter(profile->GetRequestContextForExtensions());
+#endif
 
   prerender::PrerenderManager* prerender_manager =
       prerender::PrerenderManagerFactory::GetForProfile(profile);
@@ -583,10 +617,18 @@ void NetInternalsMessageHandler::OnGetPrerenderInfo(
 void NetInternalsMessageHandler::OnGetHistoricNetworkStats(
     const base::ListValue* list) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  base::Value* historic_network_info = NULL;
   Profile* profile = Profile::FromWebUI(web_ui());
-  base::Value* historic_network_info =
-      data_reduction_proxy::DataReductionProxyNetworkDelegate::
-          HistoricNetworkStatsInfoToValue(profile->GetPrefs());
+  DataReductionProxyChromeSettings* data_reduction_proxy_settings =
+        DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile);
+  if (data_reduction_proxy_settings) {
+    data_reduction_proxy::DataReductionProxyCompressionStats*
+        compression_stats =
+            data_reduction_proxy_settings->data_reduction_proxy_service()
+                ->compression_stats();
+    historic_network_info =
+        compression_stats->HistoricNetworkStatsInfoToValue();
+  }
   SendJavascriptCommand("receivedHistoricNetworkStats", historic_network_info);
 }
 
@@ -680,7 +722,7 @@ void NetInternalsMessageHandler::IOThreadImpl::Detach() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   // Unregister with network stack to observe events.
   if (net_log())
-    net_log()->RemoveThreadSafeObserver(this);
+    net_log()->DeprecatedRemoveObserver(this);
 
   // Cancel any in-progress connection tests.
   connection_tester_.reset();
@@ -695,11 +737,13 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
     const base::ListValue* list) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
+  HistogramUsage(FEATURE_NET_INTERNALS_USED);
+
   // If currently watching the NetLog, temporarily stop watching it and flush
   // pending events, so they won't appear before the status events created for
   // currently active network objects below.
   if (net_log()) {
-    net_log()->RemoveThreadSafeObserver(this);
+    net_log()->DeprecatedRemoveObserver(this);
     PostPendingEntries();
   }
 
@@ -708,7 +752,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
   PrePopulateEventList();
 
   // Register with network stack to observe events.
-  io_thread_->net_log()->AddThreadSafeObserver(this,
+  io_thread_->net_log()->DeprecatedAddObserver(this,
       net::NetLog::LOG_ALL_BUT_BYTES);
 }
 
@@ -764,6 +808,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnEnableIPv6(
 
 void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTests(
     const base::ListValue* list) {
+  HistogramUsage(FEATURE_CONNECTION_TESTER);
+
   // |value| should be: [<URL to test>].
   base::string16 url_str;
   CHECK(list->GetString(0, &url_str));
@@ -818,6 +864,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSQuery(
                           static_state.pkp.expiry.ToDoubleT());
         result->SetString("static_spki_hashes",
                           HashesToBase64String(static_state.pkp.spki_hashes));
+        result->SetString("static_sts_domain", static_state.sts.domain);
+        result->SetString("static_pkp_domain", static_state.pkp.domain);
       }
 
       net::TransportSecurityState::DomainState dynamic_state;
@@ -841,16 +889,11 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSQuery(
                           dynamic_state.pkp.expiry.ToDoubleT());
         result->SetString("dynamic_spki_hashes",
                           HashesToBase64String(dynamic_state.pkp.spki_hashes));
+        result->SetString("dynamic_sts_domain", dynamic_state.sts.domain);
+        result->SetString("dynamic_pkp_domain", dynamic_state.pkp.domain);
       }
 
       result->SetBoolean("result", found_static || found_dynamic);
-      if (found_static) {
-        result->SetString("domain", static_state.domain);
-      } else if (found_dynamic) {
-        result->SetString("domain", dynamic_state.domain);
-      } else {
-        result->SetString("domain", domain);
-      }
     }
   }
 
@@ -994,8 +1037,9 @@ void NetInternalsMessageHandler::ImportONCFileToNSSDB(
     const std::string& onc_blob,
     const std::string& passcode,
     net::NSSCertDatabase* nssdb) {
-  user_manager::User* user = chromeos::ProfileHelper::Get()->GetUserByProfile(
-      Profile::FromWebUI(web_ui()));
+  const user_manager::User* user =
+      chromeos::ProfileHelper::Get()->GetUserByProfile(
+          Profile::FromWebUI(web_ui()));
 
   if (!user) {
     std::string error = "User not found.";

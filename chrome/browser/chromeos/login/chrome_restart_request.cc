@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "ash/ash_switches.h"
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -45,10 +46,6 @@
 #include "ui/wm/core/wm_core_switches.h"
 #include "url/gurl.h"
 
-#if !defined(USE_ATHENA)
-#include "ash/ash_switches.h"
-#endif
-
 using content::BrowserThread;
 
 namespace chromeos {
@@ -75,6 +72,7 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kDisableAccelerated2dCanvas,
     ::switches::kDisableAcceleratedJpegDecoding,
     ::switches::kDisableAcceleratedVideoDecode,
+    ::switches::kDisableBlinkFeatures,
     ::switches::kDisableCastStreamingHWEncoding,
     ::switches::kDisableDelegatedRenderer,
     ::switches::kDisableDistanceFieldText,
@@ -92,17 +90,19 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kDisablePanelFitting,
     ::switches::kDisableSeccompFilterSandbox,
     ::switches::kDisableSetuidSandbox,
+    ::switches::kDisableSurfaces,
     ::switches::kDisableTextBlobs,
     ::switches::kDisableThreadedScrolling,
     ::switches::kDisableTouchDragDrop,
     ::switches::kDisableTouchEditing,
     ::switches::kEnableBeginFrameScheduling,
-    ::switches::kEnablePreferCompositingToLCDText,
+    ::switches::kEnableBlinkFeatures,
+    ::switches::kEnableCompositorAnimationTimelines,
     ::switches::kEnableDelegatedRenderer,
     ::switches::kDisableDisplayList2dCanvas,
     ::switches::kEnableDisplayList2dCanvas,
     ::switches::kForceDisplayList2dCanvas,
-    ::switches::kEnableEncryptedMedia,
+    ::switches::kDisableEncryptedMedia,
     ::switches::kDisableGpuSandbox,
     ::switches::kEnableDistanceFieldText,
     ::switches::kEnableGpuRasterization,
@@ -111,6 +111,7 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kEnableLowResTiling,
     ::switches::kEnableOneCopy,
     ::switches::kEnablePinch,
+    ::switches::kEnablePreferCompositingToLCDText,
     ::switches::kEnablePluginPlaceholderShadowDom,
     ::switches::kEnableSlimmingPaint,
     ::switches::kEnableTouchDragDrop,
@@ -121,6 +122,7 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kMainFrameResizesAreOrientationChanges,
     ::switches::kForceDeviceScaleFactor,
     ::switches::kForceGpuRasterization,
+    ::switches::kGpuRasterizationMSAASampleCount,
     ::switches::kGpuStartupDialog,
     ::switches::kGpuSandboxAllowSysVShm,
     ::switches::kGpuSandboxFailuresFatal,
@@ -143,11 +145,11 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kTouchDevices,
     ::switches::kTouchEvents,
     ::switches::kUIDisableThreadedCompositing,
+    ::switches::kUIEnableCompositorAnimationTimelines,
     ::switches::kUIPrioritizeInGpuProcess,
 #if defined(USE_CRAS)
     ::switches::kUseCras,
 #endif
-    ::switches::kUseDiscardableMemory,
     ::switches::kUseGL,
     ::switches::kUseNormalPriorityForTileTaskWorkerThreads,
     ::switches::kUserDataDir,
@@ -169,7 +171,6 @@ std::string DeriveCommandLine(const GURL& start_url,
 #endif
     app_list::switches::kDisableSyncAppList,
     app_list::switches::kEnableSyncAppList,
-#if !defined(USE_ATHENA)
     ash::switches::kAshHostWindowBounds,
     ash::switches::kAshTouchHud,
     ash::switches::kAuraLegacyPowerButton,
@@ -177,7 +178,6 @@ std::string DeriveCommandLine(const GURL& start_url,
     chromeos::switches::kDefaultWallpaperSmall,
     chromeos::switches::kGuestWallpaperLarge,
     chromeos::switches::kGuestWallpaperSmall,
-#endif
     // Please keep these in alphabetical order. Non-UI Compositor switches
     // here should also be added to
     // content/browser/renderer_host/render_process_host_impl.cc.
@@ -188,15 +188,13 @@ std::string DeriveCommandLine(const GURL& start_url,
     cc::switches::kDisableThreadedAnimation,
     cc::switches::kEnableGpuBenchmarking,
     cc::switches::kEnablePinchVirtualViewport,
+    cc::switches::kEnablePropertyTreeVerification,
     cc::switches::kEnableMainFrameBeforeActivation,
-    cc::switches::kEnableTopControlsPositionCalculation,
     cc::switches::kMaxTilesForInterestArea,
     cc::switches::kMaxUnusedResourceMemoryUsagePercentage,
     cc::switches::kShowCompositedLayerBorders,
     cc::switches::kShowFPSCounter,
     cc::switches::kShowLayerAnimationBounds,
-    cc::switches::kShowNonOccludingRects,
-    cc::switches::kShowOccludingRects,
     cc::switches::kShowPropertyChangedRects,
     cc::switches::kShowReplicaScreenSpaceRects,
     cc::switches::kShowScreenSpaceRects,
@@ -215,7 +213,6 @@ std::string DeriveCommandLine(const GURL& start_url,
     chromeos::switches::kNaturalScrollDefault,
     chromeos::switches::kSystemInDevMode,
     policy::switches::kDeviceManagementUrl,
-    ::switches::kEnableWebkitTextSubpixelPositioning,
     wm::switches::kWindowAnimationsDisabled,
   };
   command_line->CopySwitchesFrom(base_command_line,
@@ -328,7 +325,7 @@ void ChromeRestartRequest::Start() {
 }
 
 void ChromeRestartRequest::RestartJob() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   DBusThreadManager::Get()->GetSessionManagerClient()->RestartJob(
       pid_, command_line_);
@@ -366,7 +363,7 @@ std::string GetOffTheRecordCommandLine(
 }
 
 void RestartChrome(const std::string& command_line) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BootTimesRecorder::Get()->set_restart_requested();
 
   static bool restart_requested = false;

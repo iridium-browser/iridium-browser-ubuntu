@@ -31,21 +31,31 @@
 #ifndef AnimationPlayer_h
 #define AnimationPlayer_h
 
+#include "bindings/core/v8/ScriptPromise.h"
+#include "bindings/core/v8/ScriptPromiseProperty.h"
+#include "core/CSSPropertyNames.h"
 #include "core/animation/AnimationNode.h"
 #include "core/dom/ActiveDOMObject.h"
+#include "core/dom/DOMException.h"
 #include "core/events/EventTarget.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebCompositorAnimationDelegate.h"
+#include "public/platform/WebCompositorAnimationPlayerClient.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
 
 class AnimationTimeline;
+class Element;
 class ExceptionState;
+class WebCompositorAnimationPlayer;
 
 class AnimationPlayer final
     : public EventTargetWithInlineData
     , public RefCountedWillBeNoBase<AnimationPlayer>
-    , public ActiveDOMObject {
+    , public ActiveDOMObject
+    , public WebCompositorAnimationDelegate
+    , public WebCompositorAnimationPlayerClient {
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(AnimationPlayer);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(AnimationPlayer);
@@ -59,7 +69,7 @@ public:
     };
 
     ~AnimationPlayer();
-    static PassRefPtrWillBeRawPtr<AnimationPlayer> create(ExecutionContext*, AnimationTimeline&, AnimationNode*);
+    static PassRefPtrWillBeRawPtr<AnimationPlayer> create(AnimationNode*, AnimationTimeline*);
 
     // Returns whether the player is finished.
     bool update(TimingUpdateReason);
@@ -77,21 +87,24 @@ public:
     void setCurrentTime(double newCurrentTime);
 
     double currentTimeInternal() const;
+    double unlimitedCurrentTimeInternal() const;
 
     void setCurrentTimeInternal(double newCurrentTime, TimingUpdateReason = TimingUpdateOnDemand);
     bool paused() const { return m_paused && !m_isPausedForTesting; }
     static const char* playStateString(AnimationPlayState);
-    String playState() { return playStateString(playStateInternal()); }
+    String playState() const { return playStateString(playStateInternal()); }
     AnimationPlayState playStateInternal() const;
 
     void pause();
     void play();
     void reverse();
     void finish(ExceptionState&);
-    bool finished() const { return m_playState != Idle && limited(currentTimeInternal()); }
-    bool playing() const { return !(playStateInternal() == Idle || finished() || m_paused || m_isPausedForTesting); }
-    // FIXME: Resolve whether finished() should just return the flag, and
-    // remove this method.
+
+    ScriptPromise finished(ScriptState*);
+    ScriptPromise ready(ScriptState*);
+
+    bool playing() const { return !(playStateInternal() == Idle || limited() || m_paused || m_isPausedForTesting); }
+    bool limited() const { return limited(currentTimeInternal()); }
     bool finishedInternal() const { return m_finished; }
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(finish);
@@ -132,14 +145,20 @@ public:
     void setOutdated();
     bool outdated() { return m_outdated; }
 
-    bool canStartAnimationOnCompositor();
+    bool canStartAnimationOnCompositor() const;
+    bool isCandidateForAnimationOnCompositor() const;
     bool maybeStartAnimationOnCompositor();
     void cancelAnimationOnCompositor();
+    void restartAnimationOnCompositor();
+    void cancelIncompatibleAnimationsOnCompositor();
     bool hasActiveAnimationsOnCompositor();
     void setCompositorPending(bool sourceChanged = false);
     void notifyCompositorStartTime(double timelineTime);
     void notifyStartTime(double timelineTime);
+    // WebCompositorAnimationPlayerClient implementation.
+    WebCompositorAnimationPlayer* compositorPlayer() const override { return m_compositorPlayer.get(); }
 
+    bool affects(const Element&, CSSPropertyID) const;
 
     void preCommit(int compositorGroup, bool startOnCompositor);
     void postCommit(double timelineTime);
@@ -147,20 +166,14 @@ public:
     unsigned sequenceNumber() const { return m_sequenceNumber; }
     int compositorGroup() const { return m_compositorGroup; }
 
-    static bool hasLowerPriority(AnimationPlayer* player1, AnimationPlayer* player2)
+    static bool hasLowerPriority(const AnimationPlayer* player1, const AnimationPlayer* player2)
     {
         return player1->sequenceNumber() < player2->sequenceNumber();
     }
 
-#if !ENABLE(OILPAN)
-    // Checks if the AnimationStack is the last reference holder to the Player.
-    // This won't be needed when AnimationPlayer is moved to Oilpan.
-    bool canFree() const;
-#endif
-
     virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     AnimationPlayer(ExecutionContext*, AnimationTimeline&, AnimationNode*);
@@ -178,12 +191,26 @@ private:
     void beginUpdatingState();
     void endUpdatingState();
 
+    void createCompositorPlayer();
+    void destroyCompositorPlayer();
+    void attachCompositorTimeline();
+    void detachCompositorTimeline();
+    void attachCompositedLayers();
+    void detachCompositedLayers();
+    // WebCompositorAnimationDelegate implementation.
+    void notifyAnimationStarted(double monotonicTime, int group) override;
+    void notifyAnimationFinished(double monotonicTime, int group) override { }
+
     AnimationPlayState m_playState;
     double m_playbackRate;
     double m_startTime;
     double m_holdTime;
 
     unsigned m_sequenceNumber;
+
+    typedef ScriptPromiseProperty<RawPtrWillBeMember<AnimationPlayer>, RawPtrWillBeMember<AnimationPlayer>, RefPtrWillBeMember<DOMException>> AnimationPlayerPromise;
+    PersistentWillBeMember<AnimationPlayerPromise> m_finishedPromise;
+    PersistentWillBeMember<AnimationPlayerPromise> m_readyPromise;
 
     RefPtrWillBeMember<AnimationNode> m_content;
     RawPtrWillBeMember<AnimationTimeline> m_timeline;
@@ -238,7 +265,7 @@ private:
         ~PlayStateUpdateScope();
     private:
         RawPtrWillBeMember<AnimationPlayer> m_player;
-        AnimationPlayState m_initial;
+        AnimationPlayState m_initialPlayState;
         CompositorPendingChange m_compositorPendingChange;
     };
 
@@ -248,6 +275,8 @@ private:
     OwnPtr<CompositorState> m_compositorState;
     bool m_compositorPending;
     int m_compositorGroup;
+
+    OwnPtr<WebCompositorAnimationPlayer> m_compositorPlayer;
 
     bool m_currentTimePending;
     bool m_stateIsBeingUpdated;

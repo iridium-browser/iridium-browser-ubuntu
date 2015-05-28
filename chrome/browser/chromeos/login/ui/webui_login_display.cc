@@ -8,9 +8,11 @@
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/screens/chrome_user_selection_screen.h"
 #include "chrome/browser/chromeos/login/signin_screen_controller.h"
+#include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/grit/chromium_strings.h"
@@ -23,10 +25,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/views/widget/widget.h"
-
-#if !defined(USE_ATHENA)
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
-#endif
 
 namespace chromeos {
 
@@ -136,6 +134,7 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
   // Only display hints about keyboard layout if the error is authentication-
   // related.
   if (error_msg_id != IDS_LOGIN_ERROR_WHITELIST &&
+      error_msg_id != IDS_ENTERPRISE_LOGIN_ERROR_WHITELIST &&
       error_msg_id != IDS_LOGIN_ERROR_OWNER_KEY_LOST &&
       error_msg_id != IDS_LOGIN_ERROR_OWNER_REQUIRED) {
     // Display a warning if Caps Lock is on.
@@ -238,16 +237,12 @@ void WebUILoginDisplay::MigrateUserData(const std::string& old_password) {
 }
 
 void WebUILoginDisplay::LoadWallpaper(const std::string& username) {
-#if !defined(USE_ATHENA)
   WallpaperManager::Get()->SetUserWallpaperDelayed(username);
-#endif
 }
 
 void WebUILoginDisplay::LoadSigninWallpaper() {
-#if !defined(USE_ATHENA)
   WallpaperManager::Get()->SetDefaultWallpaperDelayed(
       chromeos::login::kSignInUser);
-#endif
 }
 
 void WebUILoginDisplay::OnSigninScreenReady() {

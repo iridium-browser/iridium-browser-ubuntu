@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 
 #include "base/auto_reset.h"
+#include "base/profiler/scoped_tracker.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -17,7 +18,9 @@
 #include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar_delegate.h"
+#include "chrome/common/pref_names.h"
 #include "components/crx_file/id_util.h"
+#include "components/pref_registry/pref_registry_syncable.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/runtime_data.h"
 #include "extensions/common/extension.h"
@@ -30,20 +33,12 @@ namespace {
 
 using WeakToolbarActions = std::vector<ToolbarActionViewController*>;
 
-#if defined(OS_MACOSX)
-const int kItemSpacing = 2;
-const int kLeftPadding = kItemSpacing + 1;
-const int kRightPadding = 0;
-const int kOverflowLeftPadding = kItemSpacing;
-const int kOverflowRightPadding = kItemSpacing;
-#else
 // Matches ToolbarView::kStandardSpacing;
 const int kLeftPadding = 3;
 const int kRightPadding = kLeftPadding;
 const int kItemSpacing = kLeftPadding;
 const int kOverflowLeftPadding = kItemSpacing;
 const int kOverflowRightPadding = kItemSpacing;
-#endif
 
 enum DimensionType { WIDTH, HEIGHT };
 
@@ -454,6 +449,19 @@ int ToolbarActionsBar::IconHeight() {
   return GetIconDimension(HEIGHT);
 }
 
+// static
+void ToolbarActionsBar::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(
+      prefs::kToolbarIconSurfacingBubbleAcknowledged,
+      false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterInt64Pref(
+      prefs::kToolbarIconSurfacingBubbleLastShowTime,
+      0,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+}
+
 gfx::Size ToolbarActionsBar::GetPreferredSize() const {
   int icon_count = GetIconCount();
   if (in_overflow_mode()) {
@@ -566,6 +574,10 @@ void ToolbarActionsBar::CreateActions() {
     return;
 
   {
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/463337
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile1(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("ToolbarActionsBar::CreateActions1"));
     // We don't redraw the view while creating actions.
     base::AutoReset<bool> layout_resetter(&suppress_layout_, true);
 
@@ -584,6 +596,12 @@ void ToolbarActionsBar::CreateActions() {
     // Component actions come second, and are suppressed if the extension
     // actions are being highlighted.
     if (!model_->is_highlighting()) {
+      // TODO(robliao): Remove ScopedTracker below once https://crbug.com/463337
+      // is fixed.
+      tracked_objects::ScopedTracker tracking_profile2(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "ToolbarActionsBar::CreateActions2"));
+
       ScopedVector<ToolbarActionViewController> component_actions =
           ComponentToolbarActionsFactory::GetInstance()->
               GetComponentToolbarActions();
@@ -595,8 +613,17 @@ void ToolbarActionsBar::CreateActions() {
       component_actions.weak_clear();
     }
 
-    if (!toolbar_actions_.empty())
+    if (!toolbar_actions_.empty()) {
+      // TODO(robliao): Remove ScopedTracker below once https://crbug.com/463337
+      // is fixed.
+      tracked_objects::ScopedTracker tracking_profile3(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "ToolbarActionsBar::CreateActions3"));
       ReorderActions();
+    }
+
+    tracked_objects::ScopedTracker tracking_profile4(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("ToolbarActionsBar::CreateActions4"));
 
     for (size_t i = 0; i < toolbar_actions_.size(); ++i)
       delegate_->AddViewForAction(toolbar_actions_[i], i);
@@ -674,7 +701,35 @@ void ToolbarActionsBar::OnDragDrop(int dragged_index,
   }
 }
 
-void ToolbarActionsBar::ToolbarExtensionAdded(
+bool ToolbarActionsBar::ShouldShowInfoBubble() {
+  // If the redesign isn't running, or the user has already acknowledged it,
+  // we don't show the bubble.
+  PrefService* prefs = browser_->profile()->GetPrefs();
+  if (!extensions::FeatureSwitch::extension_action_redesign()->IsEnabled() ||
+      (prefs->HasPrefPath(prefs::kToolbarIconSurfacingBubbleAcknowledged) &&
+       prefs->GetBoolean(prefs::kToolbarIconSurfacingBubbleAcknowledged)))
+    return false;
+
+  // We don't show more than once per day.
+  if (prefs->HasPrefPath(prefs::kToolbarIconSurfacingBubbleLastShowTime)) {
+    base::Time last_shown_time = base::Time::FromInternalValue(
+        prefs->GetInt64(prefs::kToolbarIconSurfacingBubbleLastShowTime));
+    if (base::Time::Now() - last_shown_time < base::TimeDelta::FromDays(1))
+      return false;
+  }
+
+  if (!model_->RedesignIsShowingNewIcons()) {
+    // We only show the bubble if there are any new icons present - otherwise,
+    // the user won't see anything different, so we treat it as acknowledged.
+    OnToolbarActionsBarBubbleClosed(
+        ToolbarActionsBarBubbleDelegate::ACKNOWLEDGED);
+    return false;
+  }
+
+  return true;
+}
+
+void ToolbarActionsBar::OnToolbarExtensionAdded(
     const extensions::Extension* extension,
     int index) {
   DCHECK(GetActionForId(extension->id()) == nullptr) <<
@@ -705,7 +760,7 @@ void ToolbarActionsBar::ToolbarExtensionAdded(
   ResizeDelegate(gfx::Tween::LINEAR, true);
 }
 
-void ToolbarActionsBar::ToolbarExtensionRemoved(
+void ToolbarActionsBar::OnToolbarExtensionRemoved(
     const extensions::Extension* extension) {
   ToolbarActions::iterator iter = toolbar_actions_.begin();
   while (iter != toolbar_actions_.end() && (*iter)->GetId() != extension->id())
@@ -748,7 +803,7 @@ void ToolbarActionsBar::ToolbarExtensionRemoved(
   }
 }
 
-void ToolbarActionsBar::ToolbarExtensionMoved(
+void ToolbarActionsBar::OnToolbarExtensionMoved(
     const extensions::Extension* extension,
     int index) {
   DCHECK(index >= 0 && index < static_cast<int>(toolbar_actions_.size()));
@@ -758,7 +813,7 @@ void ToolbarActionsBar::ToolbarExtensionMoved(
   ReorderActions();
 }
 
-void ToolbarActionsBar::ToolbarExtensionUpdated(
+void ToolbarActionsBar::OnToolbarExtensionUpdated(
     const extensions::Extension* extension) {
   ToolbarActionViewController* action = GetActionForId(extension->id());
   // There might not be a view in cases where we are highlighting or if we
@@ -789,7 +844,7 @@ bool ToolbarActionsBar::ShowExtensionActionPopup(
   return action && action->ExecuteAction(grant_active_tab);
 }
 
-void ToolbarActionsBar::ToolbarVisibleCountChanged() {
+void ToolbarActionsBar::OnToolbarVisibleCountChanged() {
   ResizeDelegate(gfx::Tween::EASE_OUT, false);
   SetOverflowedActionWantsToRun();
 }
@@ -814,7 +869,7 @@ void ToolbarActionsBar::ResizeDelegate(gfx::Tween::Type tween_type,
   }
 }
 
-void ToolbarActionsBar::ToolbarHighlightModeChanged(bool is_highlighting) {
+void ToolbarActionsBar::OnToolbarHighlightModeChanged(bool is_highlighting) {
   // It's a bit of a pain that we delete and recreate everything here, but given
   // everything else going on (the lack of highlight, [n] more extensions
   // appearing, etc), it's not worth the extra complexity to create and insert
@@ -830,11 +885,35 @@ void ToolbarActionsBar::OnToolbarModelInitialized() {
   // We shouldn't have any actions before the model is initialized.
   DCHECK(toolbar_actions_.empty());
   CreateActions();
+
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/463337 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "ToolbarActionsBar::OnToolbarModelInitialized"));
   ResizeDelegate(gfx::Tween::EASE_OUT, false);
 }
 
 Browser* ToolbarActionsBar::GetBrowser() {
   return browser_;
+}
+
+void ToolbarActionsBar::OnToolbarActionsBarBubbleShown() {
+  // Record the last time the bubble was shown.
+  browser_->profile()->GetPrefs()->SetInt64(
+      prefs::kToolbarIconSurfacingBubbleLastShowTime,
+      base::Time::Now().ToInternalValue());
+}
+
+void ToolbarActionsBar::OnToolbarActionsBarBubbleClosed(CloseAction action) {
+  if (action == ToolbarActionsBarBubbleDelegate::ACKNOWLEDGED) {
+    PrefService* prefs = browser_->profile()->GetPrefs();
+    prefs->SetBoolean(prefs::kToolbarIconSurfacingBubbleAcknowledged, true);
+    // Once the bubble is acknowledged, we no longer need to store the last
+    // show time.
+    if (prefs->HasPrefPath(prefs::kToolbarIconSurfacingBubbleLastShowTime))
+      prefs->ClearPref(prefs::kToolbarIconSurfacingBubbleLastShowTime);
+  }
 }
 
 void ToolbarActionsBar::ReorderActions() {

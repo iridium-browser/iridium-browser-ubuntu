@@ -5,8 +5,9 @@
 #include "config.h"
 #include "core/paint/GridPainter.h"
 
-#include "core/rendering/PaintInfo.h"
-#include "core/rendering/RenderGrid.h"
+#include "core/layout/LayoutGrid.h"
+#include "core/layout/PaintInfo.h"
+#include "core/paint/BlockPainter.h"
 
 namespace blink {
 
@@ -28,7 +29,7 @@ static GridSpan dirtiedGridAreas(const Vector<LayoutUnit>& coordinates, LayoutUn
 
 class GridItemsSorter {
 public:
-    bool operator()(const std::pair<RenderBox*, size_t>& firstChild, const std::pair<RenderBox*, size_t>& secondChild) const
+    bool operator()(const std::pair<LayoutBox*, size_t>& firstChild, const std::pair<LayoutBox*, size_t>& secondChild) const
     {
         if (firstChild.first->style()->order() != secondChild.first->style()->order())
             return firstChild.first->style()->order() < secondChild.first->style()->order();
@@ -39,51 +40,45 @@ public:
 
 void GridPainter::paintChildren(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    ASSERT_WITH_SECURITY_IMPLICATION(!m_renderGrid.gridIsDirty());
+    ASSERT(!m_layoutGrid.needsLayout());
+    ASSERT_WITH_SECURITY_IMPLICATION(!m_layoutGrid.gridIsDirty());
 
-    LayoutRect localPaintInvalidationRect = paintInfo.rect;
+    LayoutRect localPaintInvalidationRect = LayoutRect(paintInfo.rect);
     localPaintInvalidationRect.moveBy(-paintOffset);
 
-    GridSpan dirtiedColumns = dirtiedGridAreas(m_renderGrid.columnPositions(), localPaintInvalidationRect.x(), localPaintInvalidationRect.maxX());
-    GridSpan dirtiedRows = dirtiedGridAreas(m_renderGrid.rowPositions(), localPaintInvalidationRect.y(), localPaintInvalidationRect.maxY());
+    GridSpan dirtiedColumns = dirtiedGridAreas(m_layoutGrid.columnPositions(), localPaintInvalidationRect.x(), localPaintInvalidationRect.maxX());
+    GridSpan dirtiedRows = dirtiedGridAreas(m_layoutGrid.rowPositions(), localPaintInvalidationRect.y(), localPaintInvalidationRect.maxY());
 
-    Vector<std::pair<RenderBox*, size_t> > gridItemsToBePainted;
+    Vector<std::pair<LayoutBox*, size_t>> gridItemsToBePainted;
 
     for (GridSpan::iterator row = dirtiedRows.begin(); row != dirtiedRows.end(); ++row) {
         for (GridSpan::iterator column = dirtiedColumns.begin(); column != dirtiedColumns.end(); ++column) {
-            const Vector<RenderBox*, 1>& children = m_renderGrid.gridCell(row.toInt(), column.toInt());
+            const Vector<LayoutBox*, 1>& children = m_layoutGrid.gridCell(row.toInt(), column.toInt());
             for (auto* child : children)
-                gridItemsToBePainted.append(std::make_pair(child, m_renderGrid.paintIndexForGridItem(child)));
+                gridItemsToBePainted.append(std::make_pair(child, m_layoutGrid.paintIndexForGridItem(child)));
         }
     }
 
-    for (auto* item: m_renderGrid.itemsOverflowingGridArea()) {
+    for (auto* item: m_layoutGrid.itemsOverflowingGridArea()) {
         if (item->frameRect().intersects(localPaintInvalidationRect))
-            gridItemsToBePainted.append(std::make_pair(item, m_renderGrid.paintIndexForGridItem(item)));
+            gridItemsToBePainted.append(std::make_pair(item, m_layoutGrid.paintIndexForGridItem(item)));
     }
 
     // Sort grid items following order-modified document order.
     // See http://www.w3.org/TR/css-flexbox/#order-modified-document-order
     std::stable_sort(gridItemsToBePainted.begin(), gridItemsToBePainted.end(), GridItemsSorter());
 
-    RenderBox* previous = 0;
+    LayoutBox* previous = 0;
     for (const auto& gridItemAndPaintIndex : gridItemsToBePainted) {
         // We might have duplicates because of spanning children are included in all cells they span.
         // Skip them here to avoid painting items several times.
-        RenderBox* current = gridItemAndPaintIndex.first;
+        LayoutBox* current = gridItemAndPaintIndex.first;
         if (current == previous)
             continue;
 
-        paintChild(*current, paintInfo, paintOffset);
+        BlockPainter(m_layoutGrid).paintChildAsInlineBlock(*current, paintInfo, paintOffset);
         previous = current;
     }
-}
-
-void GridPainter::paintChild(RenderBox& child, const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
-{
-    LayoutPoint childPoint = m_renderGrid.flipForWritingModeForChild(&child, paintOffset);
-    if (!child.hasSelfPaintingLayer() && !child.isFloating())
-        child.paint(paintInfo, childPoint);
 }
 
 } // namespace blink

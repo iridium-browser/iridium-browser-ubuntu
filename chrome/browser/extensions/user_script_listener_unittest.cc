@@ -77,9 +77,9 @@ class SimpleTestJob : public net::URLRequestTestJob {
 base::DictionaryValue* LoadManifestFile(const base::FilePath path,
                                         std::string* error) {
   EXPECT_TRUE(base::PathExists(path));
-  JSONFileValueSerializer serializer(path);
+  JSONFileValueDeserializer deserializer(path);
   return static_cast<base::DictionaryValue*>(
-      serializer.Deserialize(NULL, error));
+      deserializer.Deserialize(NULL, error));
 }
 
 scoped_refptr<Extension> LoadExtension(const std::string& filename,
@@ -159,7 +159,7 @@ class UserScriptListenerTest : public ExtensionServiceTestBase {
       net::TestURLRequestContext* context) {
     GURL url(url_string);
     scoped_ptr<net::URLRequest> request(context->CreateRequest(
-        url, net::DEFAULT_PRIORITY, delegate, NULL));
+        url, net::DEFAULT_PRIORITY, delegate));
 
     ResourceThrottle* throttle = listener_->CreateResourceThrottle(
         url, content::RESOURCE_TYPE_MAIN_FRAME);
@@ -329,7 +329,7 @@ TEST_F(UserScriptListenerTest, ResumeBeforeStart) {
   net::TestURLRequestContext context;
   GURL url(kMatchingUrl);
   scoped_ptr<net::URLRequest> request(context.CreateRequest(
-      url, net::DEFAULT_PRIORITY, &delegate, NULL));
+      url, net::DEFAULT_PRIORITY, &delegate));
 
   ResourceThrottle* throttle =
       listener_->CreateResourceThrottle(url, content::RESOURCE_TYPE_MAIN_FRAME);

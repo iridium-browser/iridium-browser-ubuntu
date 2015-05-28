@@ -26,6 +26,7 @@
       'fsync.c',
       'ftruncate.c',
       'getcwd.c',
+      'getcwd_without_malloc.c',
       'getdents.c',
       'gethostname.c',
       'getpagesize.c',
@@ -217,7 +218,6 @@
       'imc_recvmsg.c',
       'imc_sendmsg.c',
       'imc_socketpair.c',
-      'nameservice.c',
     ],
   },
 

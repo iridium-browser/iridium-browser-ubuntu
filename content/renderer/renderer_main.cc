@@ -5,21 +5,21 @@
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
+#include "base/debug/leak_annotations.h"
 #include "base/debug/stack_trace.h"
-#include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/metrics/stats_counters.h"
 #include "base/pending_task.h"
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "base/timer/hi_res_timer_manager.h"
+#include "base/trace_event/trace_event.h"
 #include "content/child/child_process.h"
 #include "content/common/content_constants_internal.h"
 #include "content/public/common/content_switches.h"
@@ -64,11 +64,6 @@ static void HandleRendererErrorTestParameters(
 
   if (command_line.HasSwitch(switches::kRendererStartupDialog))
     ChildProcess::WaitForDebugger("Renderer");
-
-  // This parameter causes an assertion.
-  if (command_line.HasSwitch(switches::kRendererAssertTest)) {
-    DCHECK(false);
-  }
 }
 
 // This is a simplified version of the browser Jankometer, which measures
@@ -101,8 +96,8 @@ class RendererMessageLoopObserver : public base::MessageLoop::TaskObserver {
 // mainline routine for running as the Renderer process
 int RendererMain(const MainFunctionParams& parameters) {
   TRACE_EVENT_BEGIN_ETW("RendererMain", 0, "");
-  base::debug::TraceLog::GetInstance()->SetProcessName("Renderer");
-  base::debug::TraceLog::GetInstance()->SetProcessSortIndex(
+  base::trace_event::TraceLog::GetInstance()->SetProcessName("Renderer");
+  base::trace_event::TraceLog::GetInstance()->SetProcessSortIndex(
       kTraceEventRendererProcessSortIndex);
 
   const base::CommandLine& parsed_command_line = parameters.command_line;
@@ -137,11 +132,6 @@ int RendererMain(const MainFunctionParams& parameters) {
   HandleRendererErrorTestParameters(parsed_command_line);
 
   RendererMainPlatformDelegate platform(parameters);
-
-
-  base::StatsCounterTimer stats_counter_timer("Content.RendererInit");
-  base::StatsScope<base::StatsCounterTimer> startup_timer(stats_counter_timer);
-
   RendererMessageLoopObserver task_observer;
 #if defined(OS_MACOSX)
   // As long as scrollbars on Mac are painted with Cocoa, the message pump
@@ -174,11 +164,9 @@ int RendererMain(const MainFunctionParams& parameters) {
   base::FieldTrialList field_trial_list(NULL);
   // Ensure any field trials in browser are reflected into renderer.
   if (parsed_command_line.HasSwitch(switches::kForceFieldTrials)) {
-    // Field trials are created in an "activated" state to ensure they get
-    // reported in crash reports.
     bool result = base::FieldTrialList::CreateTrialsFromString(
         parsed_command_line.GetSwitchValueASCII(switches::kForceFieldTrials),
-        base::FieldTrialList::ACTIVATE_TRIALS,
+        base::FieldTrialList::DONT_ACTIVATE_TRIALS,
         std::set<std::string>());
     DCHECK(result);
   }
@@ -221,10 +209,7 @@ int RendererMain(const MainFunctionParams& parameters) {
     RenderProcessImpl render_process;
     new RenderThreadImpl(main_message_loop.Pass());
 #endif
-
     base::HighResolutionTimerManager hi_res_timer_manager;
-
-    startup_timer.Stop();  // End of Startup Time Measurement.
 
     if (run_loop) {
 #if defined(OS_MACOSX)
@@ -235,6 +220,11 @@ int RendererMain(const MainFunctionParams& parameters) {
       base::MessageLoop::current()->Run();
       TRACE_EVENT_END_ETW("RendererMain.START_MSG_LOOP", 0, 0);
     }
+#if defined(LEAK_SANITIZER)
+    // Run leak detection before RenderProcessImpl goes out of scope. This helps
+    // ignore shutdown-only leaks.
+    __lsan_do_leak_check();
+#endif
   }
   platform.PlatformUninitialize();
   TRACE_EVENT_END_ETW("RendererMain", 0, "");

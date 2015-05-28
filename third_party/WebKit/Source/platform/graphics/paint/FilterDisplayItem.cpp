@@ -10,19 +10,49 @@
 
 namespace blink {
 
-void BeginFilterDisplayItem::replay(GraphicsContext* context)
+BeginFilterDisplayItem::BeginFilterDisplayItem(const DisplayItemClientWrapper& client, PassRefPtr<SkImageFilter> imageFilter, const FloatRect& bounds)
+    : PairedBeginDisplayItem(client, BeginFilter)
+    , m_imageFilter(imageFilter)
+    , m_bounds(bounds)
 {
-    context->save();
-    FloatRect boundaries = mapImageFilterRect(m_imageFilter.get(), m_bounds);
-    context->translate(m_bounds.x().toFloat(), m_bounds.y().toFloat());
-    boundaries.move(-m_bounds.x().toFloat(), -m_bounds.y().toFloat());
-    context->beginLayer(1, CompositeSourceOver, &boundaries, ColorFilterNone, m_imageFilter.get());
-    context->translate(-m_bounds.x().toFloat(), -m_bounds.y().toFloat());
+}
+
+BeginFilterDisplayItem::BeginFilterDisplayItem(const DisplayItemClientWrapper& client, PassRefPtr<SkImageFilter> imageFilter, const FloatRect& bounds, PassOwnPtr<WebFilterOperations> webFilterOperations)
+    : PairedBeginDisplayItem(client, BeginFilter)
+    , m_imageFilter(imageFilter)
+    , m_webFilterOperations(webFilterOperations)
+    , m_bounds(bounds)
+{
+}
+
+static FloatRect mapImageFilterRect(SkImageFilter* filter, const FloatRect& bounds)
+{
+    SkRect filterBounds;
+    filter->computeFastBounds(bounds, &filterBounds);
+    filterBounds.offset(-bounds.x(), -bounds.y());
+    return filterBounds;
+}
+
+void BeginFilterDisplayItem::replay(GraphicsContext& context)
+{
+    context.save();
+
+    FloatRect imageFilterBounds = mapImageFilterRect(m_imageFilter.get(), m_bounds);
+
+    context.translate(m_bounds.x(), m_bounds.y());
+    context.beginLayer(1, SkXfermode::kSrcOver_Mode, &imageFilterBounds, ColorFilterNone, m_imageFilter.get());
+    context.translate(-m_bounds.x(), -m_bounds.y());
 }
 
 void BeginFilterDisplayItem::appendToWebDisplayItemList(WebDisplayItemList* list) const
 {
-    list->appendFilterItem(m_imageFilter.get(), FloatRect(m_bounds));
+    list->appendFilterItem(*m_webFilterOperations, m_bounds);
+}
+
+bool BeginFilterDisplayItem::drawsContent() const
+{
+    // A filter with no inputs must produce its own content.
+    return m_imageFilter->countInputs() == 0;
 }
 
 #ifndef NDEBUG
@@ -30,14 +60,14 @@ void BeginFilterDisplayItem::dumpPropertiesAsDebugString(WTF::StringBuilder& str
 {
     DisplayItem::dumpPropertiesAsDebugString(stringBuilder);
     stringBuilder.append(WTF::String::format(", filter bounds: [%f,%f,%f,%f]",
-        m_bounds.x().toFloat(), m_bounds.y().toFloat(), m_bounds.width().toFloat(), m_bounds.height().toFloat()));
+        m_bounds.x(), m_bounds.y(), m_bounds.width(), m_bounds.height()));
 }
 #endif
 
-void EndFilterDisplayItem::replay(GraphicsContext* context)
+void EndFilterDisplayItem::replay(GraphicsContext& context)
 {
-    context->endLayer();
-    context->restore();
+    context.endLayer();
+    context.restore();
 }
 
 void EndFilterDisplayItem::appendToWebDisplayItemList(WebDisplayItemList* list) const

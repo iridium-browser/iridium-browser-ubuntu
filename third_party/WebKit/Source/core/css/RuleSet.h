@@ -39,11 +39,10 @@ namespace blink {
 enum AddRuleFlags {
     RuleHasNoSpecialState         = 0,
     RuleHasDocumentSecurityOrigin = 1,
-    RuleCanUseFastCheckSelector   = 1 << 1,
 };
 
 enum PropertyWhitelistType {
-    PropertyWhitelistNone   = 0,
+    PropertyWhitelistNone,
     PropertyWhitelistCue,
     PropertyWhitelistFirstLetter,
 };
@@ -62,7 +61,7 @@ public:
     {
     }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     RawPtrWillBeMember<StyleRule> m_rule;
     unsigned m_selectorIndex;
@@ -91,7 +90,7 @@ public:
     static const unsigned maximumIdentifierCount = 4;
     const unsigned* descendantSelectorIdentifierHashes() const { return m_descendantSelectorIdentifierHashes; }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     RawPtrWillBeMember<StyleRule> m_rule;
@@ -120,7 +119,7 @@ static_assert(sizeof(RuleData) == sizeof(SameSizeAsRuleData), "RuleData should s
 
 class RuleSet : public NoBaseWillBeGarbageCollectedFinalized<RuleSet> {
     WTF_MAKE_NONCOPYABLE(RuleSet);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(RuleSet);
 public:
     static PassOwnPtrWillBeRawPtr<RuleSet> create() { return adoptPtrWillBeNoop(new RuleSet); }
 
@@ -139,10 +138,10 @@ public:
     const WillBeHeapVector<RuleData>* focusPseudoClassRules() const { ASSERT(!m_pendingRules); return &m_focusPseudoClassRules; }
     const WillBeHeapVector<RuleData>* universalRules() const { ASSERT(!m_pendingRules); return &m_universalRules; }
     const WillBeHeapVector<RuleData>* shadowHostRules() const { ASSERT(!m_pendingRules); return &m_shadowHostRules; }
-    const WillBeHeapVector<RawPtrWillBeMember<StyleRulePage> >& pageRules() const { ASSERT(!m_pendingRules); return m_pageRules; }
-    const WillBeHeapVector<RawPtrWillBeMember<StyleRuleViewport> >& viewportRules() const { ASSERT(!m_pendingRules); return m_viewportRules; }
-    const WillBeHeapVector<RawPtrWillBeMember<StyleRuleFontFace> >& fontFaceRules() const { return m_fontFaceRules; }
-    const WillBeHeapVector<RawPtrWillBeMember<StyleRuleKeyframes> >& keyframesRules() const { return m_keyframesRules; }
+    const WillBeHeapVector<RawPtrWillBeMember<StyleRulePage>>& pageRules() const { ASSERT(!m_pendingRules); return m_pageRules; }
+    const WillBeHeapVector<RawPtrWillBeMember<StyleRuleViewport>>& viewportRules() const { ASSERT(!m_pendingRules); return m_viewportRules; }
+    const WillBeHeapVector<RawPtrWillBeMember<StyleRuleFontFace>>& fontFaceRules() const { return m_fontFaceRules; }
+    const WillBeHeapVector<RawPtrWillBeMember<StyleRuleKeyframes>>& keyframesRules() const { return m_keyframesRules; }
     const WillBeHeapVector<MinimalRuleData>& treeBoundaryCrossingRules() const { return m_treeBoundaryCrossingRules; }
     const WillBeHeapVector<MinimalRuleData>& shadowDistributedRules() const { return m_shadowDistributedRules; }
     const MediaQueryResultList& viewportDependentMediaQueryResults() const { return m_viewportDependentMediaQueryResults; }
@@ -160,11 +159,11 @@ public:
     void show();
 #endif
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
-    typedef WillBeHeapHashMap<AtomicString, OwnPtrWillBeMember<WillBeHeapLinkedStack<RuleData> > > PendingRuleMap;
-    typedef WillBeHeapHashMap<AtomicString, OwnPtrWillBeMember<WillBeHeapTerminatedArray<RuleData> > > CompactRuleMap;
+    typedef WillBeHeapHashMap<AtomicString, OwnPtrWillBeMember<WillBeHeapLinkedStack<RuleData>>> PendingRuleMap;
+    typedef WillBeHeapHashMap<AtomicString, OwnPtrWillBeMember<WillBeHeapTerminatedArray<RuleData>>> CompactRuleMap;
 
     RuleSet()
         : m_ruleCount(0)
@@ -177,7 +176,7 @@ private:
     void addFontFaceRule(StyleRuleFontFace*);
     void addKeyframesRule(StyleRuleKeyframes*);
 
-    void addChildRules(const WillBeHeapVector<RefPtrWillBeMember<StyleRuleBase> >&, const MediaQueryEvaluator& medium, AddRuleFlags);
+    void addChildRules(const WillBeHeapVector<RefPtrWillBeMember<StyleRuleBase>>&, const MediaQueryEvaluator& medium, AddRuleFlags);
     bool findBestRuleSetAndAdd(const CSSSelector&, RuleData&);
 
     void compactRules();
@@ -192,7 +191,7 @@ private:
         PendingRuleMap tagRules;
         PendingRuleMap shadowPseudoElementRules;
 
-        void trace(Visitor*);
+        DECLARE_TRACE();
 
     private:
         PendingRuleMaps() { }
@@ -215,10 +214,10 @@ private:
     WillBeHeapVector<RuleData> m_universalRules;
     WillBeHeapVector<RuleData> m_shadowHostRules;
     RuleFeatureSet m_features;
-    WillBeHeapVector<RawPtrWillBeMember<StyleRulePage> > m_pageRules;
-    WillBeHeapVector<RawPtrWillBeMember<StyleRuleViewport> > m_viewportRules;
-    WillBeHeapVector<RawPtrWillBeMember<StyleRuleFontFace> > m_fontFaceRules;
-    WillBeHeapVector<RawPtrWillBeMember<StyleRuleKeyframes> > m_keyframesRules;
+    WillBeHeapVector<RawPtrWillBeMember<StyleRulePage>> m_pageRules;
+    WillBeHeapVector<RawPtrWillBeMember<StyleRuleViewport>> m_viewportRules;
+    WillBeHeapVector<RawPtrWillBeMember<StyleRuleFontFace>> m_fontFaceRules;
+    WillBeHeapVector<RawPtrWillBeMember<StyleRuleKeyframes>> m_keyframesRules;
     WillBeHeapVector<MinimalRuleData> m_treeBoundaryCrossingRules;
     WillBeHeapVector<MinimalRuleData> m_shadowDistributedRules;
 

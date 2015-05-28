@@ -49,7 +49,13 @@ class Override(object):
 
   def Restore(self):
     for module_name, original_module in self._overrides.iteritems():
-      setattr(self._base_module, module_name, original_module)
+      if original_module is None:
+        # This will happen when we override built-in functions, like open.
+        # If we don't delete the attribute, we will shadow the built-in
+        # function with an attribute set to None.
+        delattr(self._base_module, module_name)
+      else:
+        setattr(self._base_module, module_name, original_module)
     self._overrides = {}
 
 
@@ -285,6 +291,17 @@ class CloudStorageModuleStub(object):
           self, self.INTERNAL_BUCKET, remote_path, local_path, True)
     return result
 
+  def GetFilesInDirectoryIfChanged(self, directory, bucket):
+    if os.path.dirname(directory) == directory: # If in the root dir.
+      raise ValueError('Trying to serve root directory from HTTP server.')
+    for dirpath, _, filenames in os.walk(directory):
+      for filename in filenames:
+        path, extension = os.path.splitext(
+            os.path.join(dirpath, filename))
+        if extension != '.sha1':
+          continue
+        self.GetIfChanged(path, bucket)
+
   def CalculateHash(self, file_path):
     return self.local_file_hashes[file_path]
 
@@ -349,12 +366,16 @@ class OsModuleStub(object):
     def __init__(self, sys_module):
       self.sys = sys_module
       self.files = []
+      self.dirs = []
 
     def exists(self, path):
       return path in self.files
 
     def isfile(self, path):
       return path in self.files
+
+    def isdir(self, path):
+      return path in self.dirs
 
     def join(self, *paths):
       def IsAbsolutePath(path):
@@ -378,6 +399,10 @@ class OsModuleStub(object):
         return tmp.replace('\\', '/')
 
     @staticmethod
+    def abspath(path):
+      return os.path.abspath(path)
+
+    @staticmethod
     def expanduser(path):
       return os.path.expanduser(path)
 
@@ -389,8 +414,13 @@ class OsModuleStub(object):
     def splitext(path):
       return os.path.splitext(path)
 
+    @staticmethod
+    def splitdrive(path):
+      return os.path.splitdrive(path)
+
   X_OK = os.X_OK
 
+  sep = os.sep
   pathsep = os.pathsep
 
   def __init__(self, sys_module=sys):
@@ -402,6 +432,7 @@ class OsModuleStub(object):
     self.program_files = None
     self.program_files_x86 = None
     self.devnull = os.devnull
+    self._directory = {}
 
   def access(self, path, _):
     return path in self.path.files
@@ -423,6 +454,10 @@ class OsModuleStub(object):
 
   def chdir(self, path):
     pass
+
+  def walk(self, top):
+    for dir_name in self._directory:
+      yield top, dir_name, self._directory[dir_name]
 
 
 class PerfControlModuleStub(object):
@@ -489,6 +524,10 @@ class CertUtilsStub(object):
   @staticmethod
   def generate_dummy_ca_cert():
     return '-', '-'
+
+  @staticmethod
+  def has_sni():
+    return True
 
 class AdbInstallCertStub(object):
   class AndroidCertInstaller(object):

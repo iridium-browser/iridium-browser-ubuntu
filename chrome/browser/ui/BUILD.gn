@@ -30,6 +30,7 @@ static_library("ui") {
   # browser, then we can clean up these dependencies.
   public_deps = [
     "//components/dom_distiller/core",
+    "//content/public/browser",
     "//sync",
   ]
   deps = [
@@ -47,21 +48,17 @@ static_library("ui") {
     "//components/app_modal",
     "//components/auto_login_parser",
     "//components/dom_distiller/webui",
-    "//components/feedback/proto",
-    "//components/history/core/browser:proto",
     "//components/invalidation",
     "//components/onc",
     "//components/password_manager/core/browser",
     "//components/resources",
     "//components/strings",
     "//components/update_client",
-    "//content/public/browser",
     "//content/public/common",
     "//crypto",
     "//skia",
     "//third_party/cacheinvalidation",
     "//third_party/icu",
-    "//third_party/libusb",
     "//third_party/libxml",
     "//third_party/zlib",
     "//ui/accessibility",
@@ -98,9 +95,9 @@ static_library("ui") {
       "//chrome/installer/util",
       "//components/autofill/content/browser:risk_proto",
       "//components/power",
+      "//components/suggestions/proto",
       "//device/nfc",
       "//media",
-      "//mojo/edk/system",
       "//net:net_with_v8",
       "//storage/browser",
       "//storage/common",
@@ -109,24 +106,16 @@ static_library("ui") {
       "//third_party/expat",
       "//third_party/hunspell",
       "//third_party/leveldatabase",
+      "//third_party/mojo/src/mojo/edk/system",
       "//third_party/npapi",
       "//third_party/libjingle",
       "//third_party/re2",
+      "//ui/base/ime",
       "//ui/compositor",
       "//ui/surface",
       "//ui/web_dialogs",
       "//v8",
     ]
-
-    # TODO(GYP)
-    #'defines': [
-    #  '<@(nacl_defines)',
-    #],
-    #'direct_dependent_settings': {
-    #  'defines': [
-    #    '<@(nacl_defines)',
-    #  ],
-    #  },
   } else {
     # iOS.
     sources +=
@@ -143,8 +132,10 @@ static_library("ui") {
                     ".",
                     "//chrome")
     deps += [
-      "//device/bluetooth",
       "//components/copresence",
+      "//components/feedback/proto",
+      "//device/bluetooth",
+      "//third_party/libusb",
     ]
   }
 
@@ -158,20 +149,10 @@ static_library("ui") {
                     ".",
                     "//chrome")
   }
-  if (enable_task_manager) {
-    sources += rebase_path(gypi_values.chrome_browser_ui_task_manager_sources,
-                           ".",
-                           "//chrome")
-    if (!toolkit_views || is_mac) {
-      sources -= [ "views/task_manager_view.cc" ]
-    }
-  }
-  if (!enable_nacl) {
+  if (enable_nacl) {
     sources +=
         rebase_path(gypi_values.chrome_browser_ui_nacl_sources, ".", "//chrome")
-    deps += [
-      #"//native_client/src/trusted/service_runtime/service_runtime.gyp:sel",  TODO(GYP)
-    ]
+    deps += [ "//native_client/src/trusted/service_runtime:sel" ]
   }
   if (enable_configuration_policy) {
     sources += rebase_path(gypi_values.chrome_browser_ui_policy_sources,
@@ -183,7 +164,7 @@ static_library("ui") {
     sources += rebase_path(gypi_values.chrome_browser_ui_plugin_sources,
                            ".",
                            "//chrome")
-    deps += [ "//ppapi:ppapi_ipc" ]
+    deps += [ "//ppapi/proxy:ipc" ]
   }
   if (safe_browsing_mode == 1) {
     defines += [ "FULL_SAFE_BROWSING" ]
@@ -225,24 +206,6 @@ static_library("ui") {
                            ".",
                            "//chrome")
   }
-  if (use_athena) {
-    sources += rebase_path(gypi_values.chrome_browser_ui_athena_sources,
-                           ".",
-                           "//chrome")
-  } else {  # Not athena.
-    if (!is_android) {
-      sources += rebase_path(
-              gypi_values.chrome_browser_ui_non_athena_non_mobile_sources,
-              ".",
-              "//chrome")
-    }
-    if (use_ash) {
-      sources +=
-          rebase_path(gypi_values.chrome_browser_ui_ash_non_athena_sources,
-                      ".",
-                      "//chrome")
-    }
-  }
   if (toolkit_views) {
     sources += rebase_path(gypi_values.chrome_browser_ui_views_sources,
                            ".",
@@ -256,17 +219,41 @@ static_library("ui") {
     }
     if (is_mac) {
       if (mac_views_browser) {
+        sources += rebase_path(
+                gypi_values.chrome_browser_ui_views_mac_experimental_sources,
+                ".",
+                "//chrome")
+        sources +=
+            rebase_path(gypi_values.chrome_browser_ui_views_non_mac_sources,
+                        ".",
+                        "//chrome")
         sources -= [
+          "cocoa/apps/chrome_app_window_client_cocoa.mm",
+          "cocoa/autofill/card_unmask_prompt_view_bridge.mm",
+          "cocoa/autofill/generated_credit_card_bubble_cocoa.mm",
+          "cocoa/autofill/new_credit_card_bubble_cocoa.mm",
           "cocoa/bookmarks/bookmark_drag_drop_cocoa.mm",
           "cocoa/browser_window_factory_cocoa.mm",
+          "cocoa/constrained_web_dialog_delegate_mac.mm",
+          "cocoa/extensions/browser_action_test_util_mac.mm",
+          "cocoa/extensions/extension_action_platform_delegate_cocoa.mm",
+          "cocoa/extensions/extension_install_dialog_controller.mm",
+          "cocoa/extensions/extension_installed_bubble_bridge.mm",
+          "cocoa/extensions/extension_uninstall_dialog_cocoa.mm",
+          "cocoa/extensions/media_galleries_dialog_cocoa.mm",
+          "cocoa/infobars/alternate_nav_infobar_controller.mm",
+          "cocoa/infobars/confirm_infobar_controller.mm",
+          "cocoa/login_prompt_cocoa.mm",
+          "cocoa/panels/panel_stack_window_cocoa.mm",
+          "cocoa/simple_message_box_mac.mm",
+          "cocoa/single_web_contents_dialog_manager_cocoa.cc",
+          "cocoa/ssl_client_certificate_selector_cocoa.mm",
           "cocoa/tab_dialogs_cocoa.mm",
+          "cocoa/tab_modal_confirm_dialog_mac.mm",
+          "cocoa/task_manager_mac.mm",
+          "cocoa/web_dialog_window_controller.mm",
         ]
-      } else {
-        sources -= [
-          "views/bookmarks/bookmark_drag_drop_views.cc",
-          "views/frame/browser_window_factory.cc",
-          "views/tab_dialogs_views.cc",
-        ]
+        deps += [ "//extensions/components/native_app_window" ]
       }
     } else {
       sources +=
@@ -337,13 +324,10 @@ static_library("ui") {
     deps += [
       "//chrome/browser:jni_headers",
       "//crypto:platform",
-
-      #'../components/components.gyp:web_contents_delegate_android',  TODO(GYP)
+      "//components/web_contents_delegate_android",
     ]
     deps -= [
       "//chrome/browser/ui/views",
-      "//components/feedback/proto",
-      "//third_party/libusb",
       "//ui/events",
     ]
     sources += rebase_path(gypi_values.chrome_browser_ui_android_sources,
@@ -357,12 +341,11 @@ static_library("ui") {
     sources +=
         rebase_path(gypi_values.chrome_browser_ui_mac_sources, ".", "//chrome")
     deps += [
-      "//third_party/google_toolbox_for_mac",
       ":generate_localizer",
-
-      #'../third_party/apple_sample_code/apple_sample_code.gyp:apple_sample_code',  TODO(GYP)
-      #'../third_party/molokocacao/molokocacao.gyp:molokocacao',  TODO(GYP)
-      #'../third_party/mozilla/mozilla.gyp:mozilla',  TODO(GYP)
+      "//third_party/apple_sample_code",
+      "//third_party/google_toolbox_for_mac",
+      "//third_party/molokocacao",
+      "//third_party/mozilla",
     ]
     include_dirs = [ "$target_gen_dir" ]
     libs += [ "Quartz.framework" ]
@@ -377,19 +360,22 @@ static_library("ui") {
   if (is_win) {
     sources +=
         rebase_path(gypi_values.chrome_browser_ui_win_sources, ".", "//chrome")
+    sources -= [
+      "views/apps/keyboard_hook_handler.cc",
+      "views/frame/taskbar_decorator.cc",
+    ]
     public_deps += [
       "//ui/views",
       "//ui/views/controls/webview",
     ]
     deps += [
+      "//chrome/browser/metro_utils",
       "//chrome/installer/util:strings",
+      "//google_update",
       "//third_party/wtl",
       "//third_party/iaccessible2",
       "//third_party/isimpledom",
       "//ui/app_list",
-
-      #'metro_utils',  TODO(GYP)
-      #'../google_update/google_update.gyp:google_update',  TODO(GYP)
     ]
   } else {  # 'OS!="win"
     if (toolkit_views) {
@@ -509,6 +495,7 @@ source_set("test_support") {
 
   sources = [
     "browser.h",
+    "cocoa/extensions/browser_action_test_util_mac.mm",
     "cocoa/find_bar/find_bar_host_unittest_util_cocoa.mm",
     "cocoa/run_loop_testing.h",
     "cocoa/run_loop_testing.mm",
@@ -526,12 +513,17 @@ source_set("test_support") {
     "pdf/pdf_browsertest_base.h",
     "test/test_confirm_bubble_model.cc",
     "test/test_confirm_bubble_model.h",
+    "toolbar/test_toolbar_action_view_controller.cc",
+    "toolbar/test_toolbar_action_view_controller.h",
     "website_settings/mock_permission_bubble_request.cc",
     "website_settings/mock_permission_bubble_request.h",
   ]
 
   if (toolkit_views) {
     sources += [ "views/find_bar_host_unittest_util_views.cc" ]
+    if (!is_mac) {
+      sources += [ "views/toolbar/browser_action_test_util_views.cc" ]
+    }
   }
 
   public_deps = [

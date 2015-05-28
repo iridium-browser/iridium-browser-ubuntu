@@ -34,13 +34,11 @@
 #include "platform/geometry/FloatRoundedRect.h"
 #include "platform/graphics/DashArray.h"
 #include "platform/graphics/DrawLooperBuilder.h"
-#include "platform/graphics/ImageBufferSurface.h"
-#include "platform/graphics/ImageFilter.h"
 #include "platform/graphics/ImageOrientation.h"
 #include "platform/graphics/GraphicsContextAnnotation.h"
 #include "platform/graphics/GraphicsContextState.h"
-#include "platform/graphics/RegionTracker.h"
 #include "platform/graphics/skia/SkiaUtils.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "wtf/FastAllocBase.h"
 #include "wtf/Forward.h"
 #include "wtf/Noncopyable.h"
@@ -53,6 +51,7 @@ class SkPath;
 class SkPicture;
 class SkRRect;
 class SkTextBlob;
+struct SkImageInfo;
 struct SkRect;
 
 namespace blink {
@@ -63,7 +62,7 @@ class ImageBuffer;
 class KURL;
 
 class PLATFORM_EXPORT GraphicsContext {
-    WTF_MAKE_NONCOPYABLE(GraphicsContext); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(GraphicsContext); WTF_MAKE_FAST_ALLOCATED(GraphicsContext);
 public:
     enum AccessMode {
         ReadOnly,
@@ -103,8 +102,6 @@ public:
     void disableDestructionChecks() { m_disableDestructionChecks = true; }
 #endif
 
-    bool hasStroke() const { return strokeStyle() != NoStroke && strokeThickness() > 0; }
-
     float strokeThickness() const { return immutableState()->strokeData().thickness(); }
     void setStrokeThickness(float thickness) { mutableState()->setStrokeThickness(thickness); }
 
@@ -116,32 +113,27 @@ public:
     SkColor effectiveStrokeColor() const { return immutableState()->effectiveStrokeColor(); }
 
     Pattern* strokePattern() const { return immutableState()->strokePattern(); }
-    void setStrokePattern(PassRefPtr<Pattern>);
+    void setStrokePattern(PassRefPtr<Pattern>, float alpha = 1);
 
     Gradient* strokeGradient() const { return immutableState()->strokeGradient(); }
-    void setStrokeGradient(PassRefPtr<Gradient>);
+    void setStrokeGradient(PassRefPtr<Gradient>, float alpha = 1);
 
     void setLineCap(LineCap cap) { mutableState()->setLineCap(cap); }
     void setLineDash(const DashArray& dashes, float dashOffset) { mutableState()->setLineDash(dashes, dashOffset); }
     void setLineJoin(LineJoin join) { mutableState()->setLineJoin(join); }
     void setMiterLimit(float limit) { mutableState()->setMiterLimit(limit); }
 
-    WindRule fillRule() const { return immutableState()->fillRule(); }
     void setFillRule(WindRule fillRule) { mutableState()->setFillRule(fillRule); }
 
     Color fillColor() const { return immutableState()->fillColor(); }
     void setFillColor(const Color& color) { mutableState()->setFillColor(color); }
-    SkColor effectiveFillColor() const { return immutableState()->effectiveFillColor(); }
 
-    void setFillPattern(PassRefPtr<Pattern>);
-    Pattern* fillPattern() const { return immutableState()->fillPattern(); }
+    void setFillPattern(PassRefPtr<Pattern>, float alpha = 1);
 
-    void setFillGradient(PassRefPtr<Gradient>);
-    Gradient* fillGradient() const { return immutableState()->fillGradient(); }
+    void setFillGradient(PassRefPtr<Gradient>, float alpha = 1);
 
     SkDrawLooper* drawLooper() const { return immutableState()->drawLooper(); }
 
-    bool getTransformedClipBounds(FloatRect* bounds) const;
     SkMatrix getTotalMatrix() const;
 
     void setShouldAntialias(bool antialias) { mutableState()->setShouldAntialias(antialias); }
@@ -157,14 +149,6 @@ public:
     void setShouldClampToSourceRect(bool clampToSourceRect) { mutableState()->setShouldClampToSourceRect(clampToSourceRect); }
     bool shouldClampToSourceRect() const { return immutableState()->shouldClampToSourceRect(); }
 
-    // FIXME: the setter is only used once, at construction time; convert to a constructor param,
-    // and possibly consolidate with other flags (paintDisabled, isPrinting, ...)
-    void setShouldSmoothFonts(bool smoothFonts) { m_shouldSmoothFonts = smoothFonts; }
-
-    // Turn off LCD text for the paint if not supported on this context.
-    void adjustTextRenderMode(SkPaint*) const;
-    bool couldUseLCDRenderedText() const;
-
     void setTextDrawingMode(TextDrawingModeFlags mode) { mutableState()->setTextDrawingMode(mode); }
     TextDrawingModeFlags textDrawingMode() const { return immutableState()->textDrawingMode(); }
 
@@ -178,20 +162,14 @@ public:
     void setImageInterpolationQuality(InterpolationQuality quality) { mutableState()->setInterpolationQuality(quality); }
     InterpolationQuality imageInterpolationQuality() const { return immutableState()->interpolationQuality(); }
 
-    void setCompositeOperation(CompositeOperator, WebBlendMode = WebBlendModeNormal);
-    CompositeOperator compositeOperation() const { return immutableState()->compositeOperator(); }
-    WebBlendMode blendModeOperation() const { return immutableState()->blendMode(); }
+    // Do not use these methods: they are deprecated/scheduled for removal.
+    void setCompositeOperation(SkXfermode::Mode);
+    SkXfermode::Mode compositeOperation() const;
 
     // Specify the device scale factor which may change the way document markers
     // and fonts are rendered.
     void setDeviceScaleFactor(float factor) { m_deviceScaleFactor = factor; }
     float deviceScaleFactor() const { return m_deviceScaleFactor; }
-
-    // If true we are (most likely) rendering to a web page and the
-    // canvas has been prepared with an opaque background. If false,
-    // the canvas may have transparency (as is the case when rendering
-    // to a canvas object).
-    void setCertainlyOpaque(bool isOpaque) { m_isCertainlyOpaque = isOpaque; }
 
     // Returns if the context is a printing context instead of a display
     // context. Bitmap shouldn't be resampled when printing to keep the best
@@ -202,37 +180,12 @@ public:
     bool isAccelerated() const { return m_accelerated; }
     void setAccelerated(bool accelerated) { m_accelerated = accelerated; }
 
-    // The opaque region is empty until tracking is turned on.
-    // It is never clerared by the context.
-    enum RegionTrackingMode {
-        RegionTrackingDisabled = 0,
-        RegionTrackingOpaque,
-        RegionTrackingOverwrite
-    };
-    void setRegionTrackingMode(RegionTrackingMode);
-    bool regionTrackingEnabled() { return m_regionTrackingMode != RegionTrackingDisabled; }
-    const RegionTracker& opaqueRegion() const { return m_trackedRegion; }
-
-    // The text region is empty until tracking is turned on.
-    // It is never clerared by the context.
-    void setTrackTextRegion(bool track) { m_trackTextRegion = track; }
-    const SkRect& textRegion() const { return m_textRegion; }
-
     AnnotationModeFlags annotationMode() const { return m_annotationMode; }
     void setAnnotationMode(const AnnotationModeFlags mode) { m_annotationMode = mode; }
 
     SkColorFilter* colorFilter() const;
     void setColorFilter(ColorFilter);
     // ---------- End state management methods -----------------
-
-    // Get the contents of the image buffer
-    bool readPixels(const SkImageInfo&, void* pixels, size_t rowBytes, int x, int y);
-
-    // Get the current fill style.
-    const SkPaint& fillPaint() const { return immutableState()->fillPaint(); }
-
-    // Get the current stroke style.
-    const SkPaint& strokePaint() const { return immutableState()->strokePaint(); }
 
     // These draw methods will do both stroking and filling.
     // FIXME: ...except drawRect(), which fills properly but always strokes
@@ -250,50 +203,38 @@ public:
     void strokeEllipse(const FloatRect&);
 
     void fillRect(const FloatRect&);
-    void fillRect(const FloatRect&, const Color&);
-    void fillRect(const FloatRect&, const Color&, CompositeOperator);
+    void fillRect(const FloatRect&, const Color&, SkXfermode::Mode = SkXfermode::kSrcOver_Mode);
     void fillRoundedRect(const FloatRect&, const FloatSize& topLeft, const FloatSize& topRight, const FloatSize& bottomLeft, const FloatSize& bottomRight, const Color&);
     void fillRoundedRect(const FloatRoundedRect&, const Color&);
+    void fillDRRect(const FloatRoundedRect&, const FloatRoundedRect&, const Color&);
 
     void clearRect(const FloatRect&);
 
     void strokeRect(const FloatRect&);
     void strokeRect(const FloatRect&, float lineWidth);
 
-    void fillBetweenRoundedRects(const FloatRect&, const FloatSize& outerTopLeft, const FloatSize& outerTopRight, const FloatSize& outerBottomLeft, const FloatSize& outerBottomRight,
-        const FloatRect&, const FloatSize& innerTopLeft, const FloatSize& innerTopRight, const FloatSize& innerBottomLeft, const FloatSize& innerBottomRight, const Color&);
-    void fillBetweenRoundedRects(const FloatRoundedRect&, const FloatRoundedRect&, const Color&);
-
     void drawPicture(const SkPicture*);
-    void compositePicture(SkPicture*, const FloatRect& dest, const FloatRect& src, CompositeOperator, WebBlendMode);
+    void compositePicture(SkPicture*, const FloatRect& dest, const FloatRect& src, SkXfermode::Mode);
 
-    void drawImage(Image*, const IntPoint&, CompositeOperator = CompositeSourceOver, RespectImageOrientationEnum = DoNotRespectImageOrientation);
-    void drawImage(Image*, const IntRect&, CompositeOperator = CompositeSourceOver, RespectImageOrientationEnum = DoNotRespectImageOrientation);
-    void drawImage(Image*, const FloatRect& destRect);
-    void drawImage(Image*, const FloatRect& destRect, const FloatRect& srcRect, CompositeOperator = CompositeSourceOver, RespectImageOrientationEnum = DoNotRespectImageOrientation);
-    void drawImage(Image*, const FloatRect& destRect, const FloatRect& srcRect, CompositeOperator, WebBlendMode, RespectImageOrientationEnum = DoNotRespectImageOrientation);
+    void drawImage(Image*, const IntPoint&, SkXfermode::Mode = SkXfermode::kSrcOver_Mode, RespectImageOrientationEnum = DoNotRespectImageOrientation);
+    void drawImage(Image*, const IntRect&, SkXfermode::Mode = SkXfermode::kSrcOver_Mode, RespectImageOrientationEnum = DoNotRespectImageOrientation);
+    void drawImage(Image*, const FloatRect& destRect, const FloatRect& srcRect, SkXfermode::Mode = SkXfermode::kSrcOver_Mode, RespectImageOrientationEnum = DoNotRespectImageOrientation);
 
     void drawTiledImage(Image*, const IntRect& destRect, const IntPoint& srcPoint, const IntSize& tileSize,
-        CompositeOperator = CompositeSourceOver, WebBlendMode = WebBlendModeNormal, const IntSize& repeatSpacing = IntSize());
+        SkXfermode::Mode = SkXfermode::kSrcOver_Mode, const IntSize& repeatSpacing = IntSize());
     void drawTiledImage(Image*, const IntRect& destRect, const IntRect& srcRect,
         const FloatSize& tileScaleFactor, Image::TileRule hRule = Image::StretchTile, Image::TileRule vRule = Image::StretchTile,
-        CompositeOperator = CompositeSourceOver);
+        SkXfermode::Mode = SkXfermode::kSrcOver_Mode);
 
-    void drawImageBuffer(ImageBuffer*, const FloatRect& destRect, const FloatRect* srcRect = 0, CompositeOperator = CompositeSourceOver, WebBlendMode = WebBlendModeNormal);
+    void drawImageBuffer(ImageBuffer*, const FloatRect& destRect, const FloatRect* srcRect = 0, SkXfermode::Mode = SkXfermode::kSrcOver_Mode);
 
-    // These methods write to the canvas and modify the opaque region, if tracked.
+    // These methods write to the canvas.
     // Also drawLine(const IntPoint& point1, const IntPoint& point2) and fillRoundedRect
     void writePixels(const SkImageInfo&, const void* pixels, size_t rowBytes, int x, int y);
-    void drawBitmap(const SkBitmap&, SkScalar, SkScalar, const SkPaint* = 0);
     void drawBitmapRect(const SkBitmap&, const SkRect*, const SkRect&, const SkPaint* = 0);
-    void drawImage(const SkImage*, SkScalar, SkScalar, const SkPaint* = 0);
-    void drawImageRect(const SkImage*, const SkRect*, const SkRect&, const SkPaint* = 0);
     void drawOval(const SkRect&, const SkPaint&);
     void drawPath(const SkPath&, const SkPaint&);
     void drawRect(const SkRect&, const SkPaint&);
-    void drawPosText(const void* text, size_t byteLength, const SkPoint pos[], const SkRect& textRect, const SkPaint&);
-    void drawPosTextH(const void* text, size_t byteLength, const SkScalar xpos[], SkScalar constY, const SkRect& textRect, const SkPaint&);
-    void drawTextBlob(const SkTextBlob*, const SkPoint& origin, const SkPaint&);
 
     void clip(const IntRect& rect) { clipRect(rect); }
     void clip(const FloatRect& rect) { clipRect(rect); }
@@ -319,11 +260,10 @@ public:
     };
     void drawLineForDocumentMarker(const FloatPoint&, float width, DocumentMarkerLineStyle);
 
-    // beginLayer()/endLayer() behaves like save()/restore() for only CTM and clip states.
-    void beginTransparencyLayer(float opacity, const FloatRect* = 0);
-    // Apply CompositeOperator when the layer is composited on the backdrop (i.e. endLayer()).
-    // Don't change the current CompositeOperator state.
-    void beginLayer(float opacity, CompositeOperator, const FloatRect* = 0, ColorFilter = ColorFilterNone, ImageFilter* = 0);
+    // beginLayer()/endLayer() behaves like save()/restore() for CTM and clip states.
+    // Apply SkXfermode::Mode when the layer is composited on the backdrop (i.e. endLayer()).
+    void beginLayer(float opacity = 1.0f, SkXfermode::Mode = SkXfermode::kSrcOver_Mode,
+        const FloatRect* = 0, ColorFilter = ColorFilterNone, SkImageFilter* = 0);
     void endLayer();
 
     // Instead of being dispatched to the active canvas, draw commands following beginRecording()
@@ -332,16 +272,17 @@ public:
     void beginRecording(const FloatRect&, uint32_t = 0);
     PassRefPtr<const SkPicture> endRecording();
 
-    bool hasShadow() const;
     void setShadow(const FloatSize& offset, float blur, const Color&,
         DrawLooperBuilder::ShadowTransformMode = DrawLooperBuilder::ShadowRespectsTransforms,
         DrawLooperBuilder::ShadowAlphaMode = DrawLooperBuilder::ShadowRespectsAlpha, ShadowMode = DrawShadowAndForeground);
     void clearShadow() { clearDrawLooper(); clearDropShadowImageFilter(); }
+    void setDropShadowImageFilter(PassRefPtr<SkImageFilter>);
 
     // It is assumed that this draw looper is used only for shadows
     // (i.e. a draw looper is set if and only if there is a shadow).
     // The builder passed into this method will be destroyed.
     void setDrawLooper(PassOwnPtr<DrawLooperBuilder>);
+    void setDrawLooper(PassRefPtr<SkDrawLooper> looper) { mutableState()->setDrawLooper(looper); }
     void clearDrawLooper();
 
     void drawFocusRing(const Vector<IntRect>&, int width, int offset, const Color&);
@@ -362,8 +303,8 @@ public:
     // which is not the final transform used to place content on screen. It cannot be relied upon
     // for testing where a point will appear on screen or how large it will be.
     AffineTransform getCTM() const;
-    void concatCTM(const AffineTransform& affine) { concat(affineTransformToSkMatrix(affine)); }
-    void setCTM(const AffineTransform& affine) { setMatrix(affineTransformToSkMatrix(affine)); }
+    void concatCTM(const AffineTransform&);
+    void setCTM(const AffineTransform&);
     void setMatrix(const SkMatrix&);
 
     void scale(float x, float y);
@@ -376,34 +317,18 @@ public:
     void setURLFragmentForRect(const String& name, const IntRect&);
     void addURLTargetAtPoint(const String& name, const IntPoint&);
 
-    // Create an image buffer compatible with this context, with suitable resolution
-    // for drawing into the buffer and then into this context.
-    PassOwnPtr<ImageBuffer> createRasterBuffer(const IntSize&, OpacityMode = NonOpaque) const;
-
     static void adjustLineToPixelBoundaries(FloatPoint& p1, FloatPoint& p2, float strokeWidth, StrokeStyle);
 
     void beginAnnotation(const AnnotationList&);
     void endAnnotation();
 
-    class AutoCanvasRestorer {
-    public:
-        AutoCanvasRestorer(SkCanvas* canvas, int restoreCount)
-            : m_canvas(canvas)
-            , m_restoreCount(restoreCount)
-        { }
-
-        ~AutoCanvasRestorer();
-    private:
-        SkCanvas* m_canvas;
-        int m_restoreCount;
-    };
-
-    WARN_UNUSED_RETURN PassOwnPtr<AutoCanvasRestorer> preparePaintForDrawRectToRect(
+    // This method can potentially push saves onto the canvas. It returns the initial save count,
+    // and should be balanced with a call to context->canvas()->restoreToCount(initialSaveCount).
+    WARN_UNUSED_RETURN int preparePaintForDrawRectToRect(
         SkPaint*,
         const SkRect& srcRect,
         const SkRect& destRect,
-        CompositeOperator,
-        WebBlendMode,
+        SkXfermode::Mode,
         bool isBitmapWithAlpha,
         bool isLazyDecoded = false,
         bool isDataComplete = true) const;
@@ -420,6 +345,8 @@ public:
     void setInDrawingRecorder(bool);
 #endif
 
+    static PassRefPtr<SkColorFilter> WebCoreColorFilterToSkiaColorFilter(ColorFilter);
+
 private:
     const GraphicsContextState* immutableState() const { return m_paintState; }
 
@@ -429,10 +356,11 @@ private:
         return m_paintState;
     }
 
+    template<typename DrawTextFunc>
+    void drawTextPasses(const DrawTextFunc&);
+
     static void setPathFromPoints(SkPath*, size_t, const FloatPoint*);
     static void setRadii(SkVector*, FloatSize, FloatSize, FloatSize, FloatSize);
-
-    static PassRefPtr<SkColorFilter> WebCoreColorFilterToSkiaColorFilter(ColorFilter);
 
 #if OS(MACOSX)
     static inline int focusRingOutset(int offset) { return offset + 2; }
@@ -460,7 +388,6 @@ private:
     void concat(const SkMatrix&);
     void drawRRect(const SkRRect&, const SkPaint&);
 
-    void setDropShadowImageFilter(PassRefPtr<SkImageFilter>);
     void clearDropShadowImageFilter();
     SkImageFilter* dropShadowImageFilter() const { return immutableState()->dropShadowImageFilter(); }
 
@@ -484,8 +411,6 @@ private:
         }
     }
 
-    void didDrawTextInRect(const SkRect& textRect);
-
     void fillRectWithRoundedHole(const FloatRect&, const FloatRoundedRect& roundedHoleRect, const Color&);
 
     bool isRecording() const;
@@ -501,7 +426,7 @@ private:
     // Paint states stack. Enables local drawing state change with save()/restore() calls.
     // This state controls the appearance of drawn content.
     // We do not delete from this stack to avoid memory churn.
-    Vector<OwnPtr<GraphicsContextState> > m_paintStateStack;
+    Vector<OwnPtr<GraphicsContextState>> m_paintStateStack;
     // Current index on the stack. May not be the last thing on the stack.
     unsigned m_paintStateIndex;
     // Raw pointer to the current state.
@@ -509,33 +434,22 @@ private:
 
     AnnotationModeFlags m_annotationMode;
 
-    Vector<OwnPtr<RecordingState> > m_recordingStateStack;
+    Vector<OwnPtr<RecordingState>> m_recordingStateStack;
 
 #if ENABLE(ASSERT)
-    unsigned m_annotationCount;
     unsigned m_layerCount;
+    unsigned m_annotationCount;
     bool m_disableDestructionChecks;
     bool m_inDrawingRecorder;
 #endif
-    // Tracks the region painted opaque via the GraphicsContext.
-    RegionTracker m_trackedRegion;
 
-    // Tracks the region where text is painted via the GraphicsContext.
-    SkRect m_textRegion;
-
-    unsigned m_disabledState;
+    const DisabledMode m_disabledState;
 
     float m_deviceScaleFactor;
 
-    // Activation for the above region tracking features
-    unsigned m_regionTrackingMode : 2;
-    unsigned m_trackTextRegion : 1;
-
     unsigned m_accelerated : 1;
-    unsigned m_isCertainlyOpaque : 1;
     unsigned m_printing : 1;
     unsigned m_antialiasHairlineImages : 1;
-    unsigned m_shouldSmoothFonts : 1;
 };
 
 } // namespace blink

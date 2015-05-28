@@ -5,7 +5,7 @@
 #ifndef CHROME_RENDERER_PRINTING_CHROME_PRINT_WEB_VIEW_HELPER_DELEGATE_H_
 #define CHROME_RENDERER_PRINTING_CHROME_PRINT_WEB_VIEW_HELPER_DELEGATE_H_
 
-#include "chrome/renderer/printing/print_web_view_helper.h"
+#include "components/printing/renderer/print_web_view_helper.h"
 
 class ChromePrintWebViewHelperDelegate
     : public printing::PrintWebViewHelper::Delegate {
@@ -17,6 +17,11 @@ class ChromePrintWebViewHelperDelegate
 
   blink::WebElement GetPdfElement(blink::WebLocalFrame* frame) override;
 
+  bool IsOutOfProcessPdfEnabled() override;
+
+  bool IsPrintPreviewEnabled() override;
+
+  bool OverridePrint(blink::WebLocalFrame* frame) override;
 };  // class ChromePrintWebViewHelperDelegate
 
 #endif  // CHROME_RENDERER_PRINTING_CHROME_PRINT_WEB_VIEW_HELPER_DELEGATE_H_

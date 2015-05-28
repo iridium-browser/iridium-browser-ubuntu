@@ -39,19 +39,19 @@ public:
     SVGAnimatedLength* width() const { return m_width.get(); }
     SVGAnimatedLength* height() const { return m_height.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGForeignObjectElement(Document&);
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual bool isPresentationAttribute(const QualifiedName&) const override;
+    virtual bool isPresentationAttributeWithSVGDOM(const QualifiedName&) const override;
     virtual void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
-    virtual bool rendererIsNeeded(const RenderStyle&) override;
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
 
     virtual bool selfHasRelativeLengths() const override;
 

@@ -9,9 +9,10 @@
 
 goog.provide('cvox.ExpandingBrailleTranslator');
 
-goog.require('cvox.BrailleUtil');
 goog.require('cvox.LibLouis');
 goog.require('cvox.Spannable');
+goog.require('cvox.ValueSelectionSpan');
+goog.require('cvox.ValueSpan');
 
 
 /**
@@ -48,7 +49,7 @@ cvox.ExpandingBrailleTranslator =
 
 /**
  * What expansion to apply to the part of the translated string marked by the
- * {@code cvox.BrailleUtil.ValueSpan} spannable.
+ * {@code cvox.ValueSpan} spannable.
  * @enum {number}
  */
 cvox.ExpandingBrailleTranslator.ExpansionType = {
@@ -80,7 +81,7 @@ cvox.ExpandingBrailleTranslator.ExpansionType = {
  * @param {!cvox.Spannable} text Text to translate.
  * @param {cvox.ExpandingBrailleTranslator.ExpansionType} expansionType
  *     Indicates how the text marked by a value span, if any, is expanded.
- * @param {function(!ArrayBuffer, !Array.<number>, !Array.<number>)}
+ * @param {function(!ArrayBuffer, !Array<number>, !Array<number>)}
  *     callback Called when the translation is done.  It takes resulting
  *         braille cells and positional mappings as parameters.
  */
@@ -191,7 +192,7 @@ cvox.ExpandingBrailleTranslator.rangeForPosition_ = function(
  * @param {!cvox.Spannable} text Text to find expansion ranges in.
  * @param {cvox.ExpandingBrailleTranslator.ExpansionType} expansionType
  *     Indicates how the text marked up as the value is expanded.
- * @return {!Array.<cvox.ExpandingBrailleTranslator.Range_>} The calculated
+ * @return {!Array<cvox.ExpandingBrailleTranslator.Range_>} The calculated
  *     ranges.
  * @private
  */
@@ -200,7 +201,7 @@ cvox.ExpandingBrailleTranslator.prototype.findExpandRanges_ = function(
   var result = [];
   if (this.uncontractedTranslator_ &&
       expansionType != cvox.ExpandingBrailleTranslator.ExpansionType.NONE) {
-    var value = text.getSpanInstanceOf(cvox.BrailleUtil.ValueSpan);
+    var value = text.getSpanInstanceOf(cvox.ValueSpan);
     if (value) {
       // The below type casts are valid because the ranges must be valid when
       // the span is known to exist.
@@ -227,15 +228,14 @@ cvox.ExpandingBrailleTranslator.prototype.findExpandRanges_ = function(
  * @param {cvox.Spannable} text Text to find ranges in.
  * @param {number} valueStart Start of the value in {@code text}.
  * @param {number} valueEnd End of the value in {@code text}.
- * @param {Array.<cvox.ExpandingBrailleTranslator.Range_>} outRanges
+ * @param {Array<cvox.ExpandingBrailleTranslator.Range_>} outRanges
  *     Destination for the expansion ranges.  Untouched if no ranges
  *     are found.  Note that ranges may be coalesced.
  * @private
  */
 cvox.ExpandingBrailleTranslator.prototype.addRangesForSelection_ = function(
     text, valueStart, valueEnd, outRanges) {
-  var selection = text.getSpanInstanceOf(
-      cvox.BrailleUtil.ValueSelectionSpan);
+  var selection = text.getSpanInstanceOf(cvox.ValueSelectionSpan);
   if (!selection) {
     return;
   }
@@ -282,9 +282,9 @@ cvox.ExpandingBrailleTranslator.prototype.addRangesForSelection_ = function(
  * translation result is empty.
  * @param {number} inputLength Length of the input to the translation.
  *     Used for populating {@code textToBraille} if null.
- * @param {function(!ArrayBuffer, !Array.<number>, !Array.<number>)} callback
+ * @param {function(!ArrayBuffer, !Array<number>, !Array<number>)} callback
  *     The callback to adapt.
- * @return {function(ArrayBuffer, Array.<number>, Array.<number>)}
+ * @return {function(ArrayBuffer, Array<number>, Array<number>)}
  *     An adapted version of the callback.
  * @private
  */

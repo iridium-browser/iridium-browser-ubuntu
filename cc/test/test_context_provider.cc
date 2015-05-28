@@ -13,7 +13,7 @@
 #include "cc/test/test_gles2_interface.h"
 #include "cc/test/test_web_graphics_context_3d.h"
 #include "third_party/skia/include/gpu/GrContext.h"
-#include "third_party/skia/include/gpu/gl/GrGLInterface.h"
+#include "third_party/skia/include/gpu/gl/SkNullGLContext.h"
 
 namespace cc {
 
@@ -69,6 +69,10 @@ bool TestContextProvider::BindToCurrentThread() {
   return true;
 }
 
+void TestContextProvider::DetachFromThread() {
+  context_thread_checker_.DetachFromThread();
+}
+
 ContextProvider::Capabilities TestContextProvider::ContextCapabilities() {
   DCHECK(bound_);
   DCHECK(context_thread_checker_.CalledOnValidThread());
@@ -95,12 +99,24 @@ class GrContext* TestContextProvider::GrContext() {
   if (gr_context_)
     return gr_context_.get();
 
-  skia::RefPtr<const GrGLInterface> null_interface =
-      skia::AdoptRef(GrGLCreateNullInterface());
+  skia::RefPtr<class SkGLContext> gl_context =
+      skia::AdoptRef(SkNullGLContext::Create(kNone_GrGLStandard));
+  gl_context->makeCurrent();
   gr_context_ = skia::AdoptRef(GrContext::Create(
-      kOpenGL_GrBackend,
-      reinterpret_cast<GrBackendContext>(null_interface.get())));
+      kOpenGL_GrBackend, reinterpret_cast<GrBackendContext>(gl_context->gl())));
+
+  // If GlContext is already lost, also abandon the new GrContext.
+  if (IsContextLost())
+    gr_context_->abandonContext();
+
   return gr_context_.get();
+}
+
+void TestContextProvider::SetupLock() {
+}
+
+base::Lock* TestContextProvider::GetLock() {
+  return &context_lock_;
 }
 
 bool TestContextProvider::IsContextLost() {
@@ -140,6 +156,8 @@ void TestContextProvider::OnLostContext() {
   }
   if (!lost_context_callback_.is_null())
     base::ResetAndReturn(&lost_context_callback_).Run();
+  if (gr_context_)
+    gr_context_->abandonContext();
 }
 
 TestWebGraphicsContext3D* TestContextProvider::TestContext3d() {

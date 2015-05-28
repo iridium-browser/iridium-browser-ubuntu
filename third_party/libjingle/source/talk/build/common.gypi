@@ -1,6 +1,6 @@
 #
 # libjingle
-# Copyright 2012, Google Inc.
+# Copyright 2012 Google Inc.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -30,9 +30,7 @@
 {
   'variables': {
     'webrtc_root%': '<(DEPTH)/webrtc',
-    # TODO(ronghuawu): Chromium build will need a different libjingle_root.
     'libjingle_tests_additional_deps%': [],
-    'libjingle_root%': '<(DEPTH)',
     # TODO(ronghuawu): For now, disable the Chrome plugins, which causes a
     # flood of chromium-style warnings.
     'clang_use_chrome_plugins%': 0,
@@ -45,8 +43,8 @@
   },
   'target_defaults': {
     'include_dirs': [
-      '<(libjingle_root)',
       '<(DEPTH)',
+      '../..',
       '../../third_party',
       '../../third_party/webrtc',
       '../../webrtc',
@@ -67,7 +65,6 @@
       'HAVE_SRTP',
       'HAVE_WEBRTC_VIDEO',
       'HAVE_WEBRTC_VOICE',
-      'USE_WEBRTC_DEV_BRANCH',
     ],
     'conditions': [
       # TODO(ronghuawu): Support dynamic library build.

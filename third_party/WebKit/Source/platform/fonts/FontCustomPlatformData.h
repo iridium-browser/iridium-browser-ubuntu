@@ -39,12 +39,6 @@
 #include "wtf/RefPtr.h"
 #include "wtf/text/WTFString.h"
 
-#if OS(MACOSX)
-#include "wtf/RetainPtr.h"
-#include <CoreFoundation/CFBase.h>
-typedef struct CGFont* CGFontRef;
-#endif
-
 class SkTypeface;
 
 namespace blink {
@@ -58,17 +52,12 @@ public:
     static PassOwnPtr<FontCustomPlatformData> create(SharedBuffer*);
     ~FontCustomPlatformData();
 
-    FontPlatformData fontPlatformData(float size, bool bold, bool italic, FontOrientation = Horizontal);
+    FontPlatformData fontPlatformData(float size, bool bold, bool italic, FontOrientation = FontOrientation::Horizontal);
 
     static bool supportsFormat(const String&);
 
 private:
-#if OS(MACOSX)
-    explicit FontCustomPlatformData(CGFontRef, PassRefPtr<SkTypeface>);
-    RetainPtr<CGFontRef> m_cgFont;
-#else
     explicit FontCustomPlatformData(PassRefPtr<SkTypeface>);
-#endif
     RefPtr<SkTypeface> m_typeface;
 };
 

@@ -16,7 +16,7 @@
 #include "media/base/text_track.h"
 #include "media/base/text_track_config.h"
 #include "media/base/video_frame.h"
-#include "media/filters/video_renderer_impl.h"
+#include "media/renderers/video_renderer_impl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace base {
@@ -115,7 +115,7 @@ class PipelineIntegrationTestBase {
 
   void OnSeeked(base::TimeDelta seek_time, PipelineStatus status);
   void OnStatusCallback(PipelineStatus status);
-  void DemuxerEncryptedMediaInitDataCB(const std::string& type,
+  void DemuxerEncryptedMediaInitDataCB(EmeInitDataType type,
                                        const std::vector<uint8>& init_data);
   void set_encrypted_media_init_data_cb(
       const Demuxer::EncryptedMediaInitDataCB& encrypted_media_init_data_cb) {
@@ -140,6 +140,7 @@ class PipelineIntegrationTestBase {
   MOCK_METHOD2(OnAddTextTrack,
                void(const TextTrackConfig& config,
                     const AddTextTrackDoneCB& done_cb));
+  MOCK_METHOD0(OnWaitingForDecryptionKey, void(void));
 };
 
 }  // namespace media

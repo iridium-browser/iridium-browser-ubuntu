@@ -21,7 +21,6 @@ class DataPromoNotification;
 class EventRewriter;
 class EventRewriterController;
 class IdleActionWarningObserver;
-class LightBar;
 class MagnificationManager;
 class PeripheralBatteryObserver;
 class PowerButtonObserver;
@@ -43,22 +42,22 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
  public:
   explicit ChromeBrowserMainPartsChromeos(
       const content::MainFunctionParams& parameters);
-  virtual ~ChromeBrowserMainPartsChromeos();
+  ~ChromeBrowserMainPartsChromeos() override;
 
   // ChromeBrowserMainParts overrides.
-  virtual void PreEarlyInitialization() override;
-  virtual void PreMainMessageLoopStart() override;
-  virtual void PostMainMessageLoopStart() override;
-  virtual void PreMainMessageLoopRun() override;
+  void PreEarlyInitialization() override;
+  void PreMainMessageLoopStart() override;
+  void PostMainMessageLoopStart() override;
+  void PreMainMessageLoopRun() override;
 
   // Stages called from PreMainMessageLoopRun.
-  virtual void PreProfileInit() override;
-  virtual void PostProfileInit() override;
-  virtual void PreBrowserStart() override;
-  virtual void PostBrowserStart() override;
+  void PreProfileInit() override;
+  void PostProfileInit() override;
+  void PreBrowserStart() override;
+  void PostBrowserStart() override;
 
-  virtual void PostMainMessageLoopRun() override;
-  virtual void PostDestroyThreads() override;
+  void PostMainMessageLoopRun() override;
+  void PostDestroyThreads() override;
 
  private:
   scoped_ptr<default_app_order::ExternalLoader> app_order_loader_;
@@ -68,7 +67,6 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   scoped_ptr<IdleActionWarningObserver> idle_action_warning_observer_;
   scoped_ptr<DataPromoNotification> data_promo_notification_;
   scoped_ptr<RendererFreezer> renderer_freezer_;
-  scoped_ptr<LightBar> light_bar_;
   scoped_ptr<WakeOnWifiManager> wake_on_wifi_manager_;
 
   scoped_ptr<internal::DBusServices> dbus_services_;
@@ -78,8 +76,6 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   scoped_ptr<EventRewriterController> keyboard_event_rewriters_;
 
   scoped_refptr<chromeos::ExternalMetrics> external_metrics_;
-
-  bool use_new_network_change_notifier_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsChromeos);
 };

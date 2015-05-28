@@ -4,9 +4,13 @@
 
 source_set("favicon_base") {
   sources = [
+    "fallback_icon_style.cc",
+    "fallback_icon_style.h",
     "favicon_callback.h",
     "favicon_types.cc",
     "favicon_types.h",
+    "favicon_usage_data.cc",
+    "favicon_usage_data.h",
     "favicon_util.cc",
     "favicon_util.h",
     "select_favicon_frames.cc",
@@ -16,7 +20,24 @@ source_set("favicon_base") {
   deps = [
     "//base",
     "//skia",
+    "//ui/base",
     "//ui/gfx",
+    "//ui/gfx/geometry",
     "//url",
+  ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [
+    "select_favicon_frames_unittest.cc",
+  ]
+
+  deps = [
+    ":favicon_base",
+    "//testing/gtest",
+    "//ui/base",
+    "//ui/gfx",
+    "//ui/gfx/geometry",
   ]
 }

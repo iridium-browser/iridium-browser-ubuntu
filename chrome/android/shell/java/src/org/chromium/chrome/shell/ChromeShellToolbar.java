@@ -7,7 +7,6 @@ package org.chromium.chrome.shell;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.Configuration;
-import android.graphics.drawable.ClipDrawable;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -28,6 +27,7 @@ import org.chromium.chrome.browser.TabObserver;
 import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
 import org.chromium.chrome.browser.appmenu.AppMenuHandler;
+import org.chromium.chrome.browser.widget.SmoothProgressBar;
 import org.chromium.chrome.shell.omnibox.SuggestionPopup;
 import org.chromium.content.common.ContentSwitches;
 
@@ -40,17 +40,17 @@ public class ChromeShellToolbar extends LinearLayout {
     private final Runnable mClearProgressRunnable = new Runnable() {
         @Override
         public void run() {
-            mProgressDrawable.setLevel(0);
+            mProgressBar.setProgress(0);
         }
     };
 
     private final Runnable mUpdateProgressRunnable = new Runnable() {
         @Override
         public void run() {
-            mProgressDrawable.setLevel(100 * mProgress);
+            mProgressBar.setProgress(mProgress);
             if (mLoading) {
                 mStopReloadButton.setImageResource(
-                        R.drawable.btn_toolbar_stop);
+                        R.drawable.btn_close);
             } else {
                 mStopReloadButton.setImageResource(R.drawable.btn_toolbar_reload);
                 ApiCompatibilityUtils.postOnAnimationDelayed(ChromeShellToolbar.this,
@@ -60,7 +60,7 @@ public class ChromeShellToolbar extends LinearLayout {
     };
 
     private EditText mUrlTextView;
-    private ClipDrawable mProgressDrawable;
+    private SmoothProgressBar mProgressBar;
 
     private ChromeShellTab mTab;
     private final TabObserver mTabObserver;
@@ -76,6 +76,7 @@ public class ChromeShellToolbar extends LinearLayout {
     private ImageButton mAddButton;
     private int mProgress = 0;
     private boolean mLoading = true;
+    private boolean mFocus = false;
 
     /**
      * @param context The Context the view is running in.
@@ -140,7 +141,7 @@ public class ChromeShellToolbar extends LinearLayout {
     protected void onFinishInflate() {
         super.onFinishInflate();
 
-        mProgressDrawable = (ClipDrawable) findViewById(R.id.toolbar).getBackground();
+        mProgressBar = (SmoothProgressBar) findViewById(R.id.progress);
         initializeUrlField();
         initializeTabSwitcherButton();
         initializeMenuButton();
@@ -178,7 +179,8 @@ public class ChromeShellToolbar extends LinearLayout {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 setKeyboardVisibilityForUrl(hasFocus);
-                mStopReloadButton.setVisibility(hasFocus ? GONE : VISIBLE);
+                mFocus = hasFocus;
+                updateToolbarState();
                 if (!hasFocus && mTab != null) {
                     mUrlTextView.setText(mTab.getWebContents().getUrl());
                     mSuggestionPopup.dismissPopup();
@@ -256,12 +258,13 @@ public class ChromeShellToolbar extends LinearLayout {
     }
 
     /**
-     * Shows or hides the add and the stop/reload button .
-     * @param visibility The visibility status of the add button.
+     * Shows or hides the add button, the stop/reload button and the URL bar.
      */
-    public void showAddButton(boolean visibility) {
-        mAddButton.setVisibility(visibility ? VISIBLE : GONE);
-        mStopReloadButton.setVisibility(visibility ? GONE : VISIBLE);
+    public void updateToolbarState() {
+        boolean tabSwitcherState = mTabManager.isTabSwitcherVisible();
+        mAddButton.setVisibility(tabSwitcherState ? VISIBLE : GONE);
+        mStopReloadButton.setVisibility(tabSwitcherState || mFocus ? GONE : VISIBLE);
+        mUrlTextView.setVisibility(tabSwitcherState ? INVISIBLE : VISIBLE);
     }
 
     /**

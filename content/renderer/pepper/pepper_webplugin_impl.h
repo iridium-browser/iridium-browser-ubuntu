@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_RENDERER_PEPPER_PPEPPER_WEBPLUGIN_IMPL_H_
-#define CONTENT_RENDERER_PEPPER_PPEPPER_WEBPLUGIN_IMPL_H_
+#ifndef CONTENT_RENDERER_PEPPER_PEPPER_WEBPLUGIN_IMPL_H_
+#define CONTENT_RENDERER_PEPPER_PEPPER_WEBPLUGIN_IMPL_H_
 
 #include <string>
 #include <vector>
@@ -11,7 +11,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
-#include "content/public/renderer/render_frame.h"
 #include "ppapi/c/pp_var.h"
 #include "third_party/WebKit/public/web/WebPlugin.h"
 #include "ui/gfx/geometry/rect.h"
@@ -26,6 +25,7 @@ struct WebPrintParams;
 namespace content {
 
 class PepperPluginInstanceImpl;
+class PluginInstanceThrottlerImpl;
 class PluginModule;
 class PPB_URLLoader_Impl;
 class RenderFrameImpl;
@@ -35,7 +35,7 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   PepperWebPluginImpl(PluginModule* module,
                       const blink::WebPluginParams& params,
                       RenderFrameImpl* render_frame,
-                      RenderFrame::PluginPowerSaverMode power_saver_mode);
+                      scoped_ptr<PluginInstanceThrottlerImpl> throttler);
 
   PepperPluginInstanceImpl* instance() { return instance_.get(); }
 
@@ -48,11 +48,12 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   virtual bool getFormValue(blink::WebString& value);
   virtual void paint(blink::WebCanvas* canvas, const blink::WebRect& rect);
   virtual void updateGeometry(
-      const blink::WebRect& frame_rect,
+      const blink::WebRect& window_rect,
       const blink::WebRect& clip_rect,
+      const blink::WebRect& unobscured_rect,
       const blink::WebVector<blink::WebRect>& cut_outs_rects,
       bool is_visible);
-  virtual void updateFocus(bool focused);
+  virtual void updateFocus(bool focused, blink::WebFocusType focus_type);
   virtual void updateVisibility(bool visible);
   virtual bool acceptsInputEvents();
   virtual bool handleInputEvent(const blink::WebInputEvent& event,
@@ -99,7 +100,7 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   // True if the instance represents the entire document in a frame instead of
   // being an embedded resource.
   bool full_frame_;
-  RenderFrame::PluginPowerSaverMode power_saver_mode_;
+  scoped_ptr<PluginInstanceThrottlerImpl> throttler_;
   scoped_refptr<PepperPluginInstanceImpl> instance_;
   gfx::Rect plugin_rect_;
   PP_Var instance_object_;
@@ -110,4 +111,4 @@ class PepperWebPluginImpl : public blink::WebPlugin {
 
 }  // namespace content
 
-#endif  // CONTENT_RENDERER_PEPPER_PPEPPER_WEBPLUGIN_IMPL_H_
+#endif  // CONTENT_RENDERER_PEPPER_PEPPER_WEBPLUGIN_IMPL_H_

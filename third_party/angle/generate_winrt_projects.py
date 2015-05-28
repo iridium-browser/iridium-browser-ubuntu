@@ -26,8 +26,9 @@ def generateProjects(generation_dir, build_winphone):
     gyp_cmd += ' -D angle_build_winrt=1'
     gyp_cmd += ' -D angle_build_winphone=' + ('1' if build_winphone else '0')
     gyp_cmd += ' -D angle_enable_d3d9=0'
+    gyp_cmd += ' -D angle_enable_gl=0'
     gyp_cmd += ' -D angle_standalone=1'
-    gyp_cmd += ' ' + os.path.join(script_dir, 'all.gyp')
+    gyp_cmd += ' ' + os.path.join(script_dir, 'angle.gyp')
 
     print 'Generating projects to ' + generation_dir + ' from gyp files...'
     print gyp_cmd
@@ -36,4 +37,5 @@ def generateProjects(generation_dir, build_winphone):
 
 if __name__ == '__main__':
     # Generate Windows 8.1 projects
-    generateProjects("winrt/windows", False);
+    generateProjects("winrt/8.1/windows", False);
+    generateProjects("winrt/8.1/windowsphone", True);

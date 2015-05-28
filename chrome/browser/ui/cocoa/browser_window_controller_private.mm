@@ -22,7 +22,9 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window_state.h"
+#import "chrome/browser/ui/cocoa/browser_window_enter_fullscreen_transition.h"
 #import "chrome/browser/ui/cocoa/browser_window_layout.h"
+#import "chrome/browser/ui/cocoa/custom_frame_view.h"
 #import "chrome/browser/ui/cocoa/dev_tools_controller.h"
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
@@ -376,7 +378,7 @@ willPositionSheet:(NSWindow*)sheet
   // Add the tab strip after setting the content view and moving the incognito
   // badge (if any), so that the tab strip will be on top (in the z-order).
   if ([self hasTabStrip])
-    [self insertTabStripView:tabStripView intoWindow:destWindow];
+    [[destWindow contentView] addSubview:tabStripView];
 
   [sourceWindow setWindowController:nil];
   [self setWindow:destWindow];
@@ -385,6 +387,8 @@ willPositionSheet:(NSWindow*)sheet
   // Move the status bubble over, if we have one.
   if (statusBubble_)
     statusBubble_->SwitchParentWindow(destWindow);
+
+  permissionBubbleCocoa_->SwitchParentWindow(destWindow);
 
   // Move the title over.
   [destWindow setTitle:[sourceWindow title]];
@@ -425,8 +429,9 @@ willPositionSheet:(NSWindow*)sheet
 }
 
 - (void)configurePresentationModeController {
-  BOOL fullscreen_for_tab =
-      browser_->fullscreen_controller()->IsWindowFullscreenForTabOrPending();
+  BOOL fullscreen_for_tab = browser_->exclusive_access_manager()
+                                ->fullscreen_controller()
+                                ->IsWindowFullscreenForTabOrPending();
   BOOL kiosk_mode =
       base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode);
   BOOL showDropdown =
@@ -614,10 +619,11 @@ willPositionSheet:(NSWindow*)sheet
     [exclusiveAccessBubbleWindowController_ closeImmediately];
     exclusiveAccessBubbleWindowController_.reset(
         [[ExclusiveAccessBubbleWindowController alloc]
-            initWithOwner:self
-                  browser:browser_.get()
-                      url:fullscreenUrl_
-               bubbleType:exclusiveAccessBubbleType_]);
+                       initWithOwner:self
+            exclusive_access_manager:browser_.get()->exclusive_access_manager()
+                             profile:browser_.get()->profile()
+                                 url:fullscreenUrl_
+                          bubbleType:exclusiveAccessBubbleType_]);
     [exclusiveAccessBubbleWindowController_ showWindow];
   }
 }
@@ -669,7 +675,9 @@ willPositionSheet:(NSWindow*)sheet
   NSWindow* window = [self window];
   savedRegularWindowFrame_ = [window frame];
   BOOL mode = enteringPresentationMode_ ||
-       browser_->fullscreen_controller()->IsWindowFullscreenForTabOrPending();
+              browser_->exclusive_access_manager()
+                  ->fullscreen_controller()
+                  ->IsWindowFullscreenForTabOrPending();
   enteringAppKitFullscreen_ = YES;
   enteringAppKitFullscreenOnPrimaryScreen_ =
       [[[self window] screen] isEqual:[[NSScreen screens] objectAtIndex:0]];
@@ -682,6 +690,8 @@ willPositionSheet:(NSWindow*)sheet
 }
 
 - (void)windowDidEnterFullScreen:(NSNotification*)notification {
+  enterFullscreenTransition_.reset();
+
   // In Yosemite, some combination of the titlebar and toolbar always show in
   // full-screen mode. We do not want either to show. Search for the window that
   // contains the views, and hide it. There is no need to ever unhide the view.
@@ -826,6 +836,28 @@ willPositionSheet:(NSWindow*)sheet
   }
 }
 
+- (NSRect)fullscreenButtonFrame {
+  // NSWindowFullScreenButton is 10.7+ and results in log spam on 10.6 if used.
+  if (base::mac::IsOSSnowLeopard())
+    return NSZeroRect;
+
+  NSButton* fullscreenButton =
+      [[self window] standardWindowButton:NSWindowFullScreenButton];
+  if (!fullscreenButton)
+    return NSZeroRect;
+
+  NSRect buttonFrame = [fullscreenButton frame];
+
+  // When called from -windowWillExitFullScreen:, the button's frame may not
+  // be updated yet to match the new window size.
+  // We need to return where the button should be positioned.
+  NSView* rootView = [[[self window] contentView] superview];
+  if ([rootView respondsToSelector:@selector(_fullScreenButtonOrigin)])
+    buttonFrame.origin = [rootView _fullScreenButtonOrigin];
+
+  return buttonFrame;
+}
+
 - (void)updateLayoutParameters:(BrowserWindowLayout*)layout {
   [layout setContentViewSize:[[[self window] contentView] bounds].size];
   [layout setWindowSize:[[self window] frame].size];
@@ -839,10 +871,8 @@ willPositionSheet:(NSWindow*)sheet
       [presentationModeController_ toolbarFraction]];
 
   [layout setHasTabStrip:[self hasTabStrip]];
-  NSButton* fullScreenButton =
-      [[self window] standardWindowButton:NSWindowFullScreenButton];
-  [layout setFullscreenButtonFrame:fullScreenButton ? [fullScreenButton frame]
-                                                    : NSZeroRect];
+  [layout setFullscreenButtonFrame:[self fullscreenButtonFrame]];
+
   if ([self shouldShowAvatar]) {
     NSView* avatar = [avatarButtonController_ view];
     [layout setShouldShowAvatar:YES];
@@ -893,6 +923,8 @@ willPositionSheet:(NSWindow*)sheet
   [[infoBarContainerController_ view] setFrame:output.infoBarFrame];
   [infoBarContainerController_
       setMaxTopArrowHeight:output.infoBarMaxTopArrowHeight];
+  [infoBarContainerController_
+      setInfobarArrowX:[self locationBarBridge]->GetPageInfoBubblePoint().x];
 
   if (!NSIsEmptyRect(output.downloadShelfFrame))
     [[downloadShelfController_ view] setFrame:output.downloadShelfFrame];
@@ -1002,19 +1034,68 @@ willPositionSheet:(NSWindow*)sheet
   }
 }
 
-- (BOOL)shouldUseMavericksAppKitFullscreenHack {
++ (BOOL)systemSettingsRequireMavericksAppKitFullscreenHack {
   if (!base::mac::IsOSMavericks())
     return NO;
-  if (![NSScreen respondsToSelector:@selector(screensHaveSeparateSpaces)] ||
-      ![NSScreen screensHaveSeparateSpaces]) {
+  return [NSScreen respondsToSelector:@selector(screensHaveSeparateSpaces)] &&
+         [NSScreen screensHaveSeparateSpaces];
+}
+
+- (BOOL)shouldUseMavericksAppKitFullscreenHack {
+  if (![[self class] systemSettingsRequireMavericksAppKitFullscreenHack])
     return NO;
-  }
   if (!enteringAppKitFullscreen_)
     return NO;
   if (enteringAppKitFullscreenOnPrimaryScreen_)
     return NO;
 
   return YES;
+}
+
+- (BOOL)shouldUseCustomAppKitFullscreenTransition {
+  if (base::mac::IsOSMountainLionOrEarlier())
+    return NO;
+
+  NSView* root = [[self.window contentView] superview];
+  if (!root.layer)
+    return NO;
+
+  // AppKit on OSX 10.9 has a bug for applications linked against OSX 10.8 SDK
+  // and earlier. Under specific circumstances, it prevents the custom AppKit
+  // transition from working well. See http://crbug.com/396980 for more
+  // details.
+  if ([[self class] systemSettingsRequireMavericksAppKitFullscreenHack] &&
+      ![[[self window] screen] isEqual:[[NSScreen screens] objectAtIndex:0]]) {
+    return NO;
+  }
+
+  return YES;
+}
+
+- (NSArray*)customWindowsToEnterFullScreenForWindow:(NSWindow*)window {
+  DCHECK([window isEqual:self.window]);
+
+  if (![self shouldUseCustomAppKitFullscreenTransition])
+    return nil;
+
+  enterFullscreenTransition_.reset(
+      [[BrowserWindowEnterFullscreenTransition alloc]
+          initWithWindow:self.window]);
+  return [enterFullscreenTransition_ customWindowsToEnterFullScreen];
+}
+
+- (void)window:(NSWindow*)window
+    startCustomAnimationToEnterFullScreenWithDuration:(NSTimeInterval)duration {
+  DCHECK([window isEqual:self.window]);
+  [enterFullscreenTransition_
+      startCustomAnimationToEnterFullScreenWithDuration:duration];
+}
+
+- (BOOL)shouldConstrainFrameRect {
+  if ([enterFullscreenTransition_ shouldWindowBeUnconstrained])
+    return NO;
+
+  return [super shouldConstrainFrameRect];
 }
 
 @end  // @implementation BrowserWindowController(Private)

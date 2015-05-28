@@ -7,6 +7,7 @@
 #include "src/cpu-profiler-inl.h"
 
 #include "src/compiler.h"
+#include "src/deoptimizer.h"
 #include "src/frames-inl.h"
 #include "src/hashmap.h"
 #include "src/log-inl.h"
@@ -35,6 +36,19 @@ ProfilerEventsProcessor::ProfilerEventsProcessor(ProfileGenerator* generator,
 void ProfilerEventsProcessor::Enqueue(const CodeEventsContainer& event) {
   event.generic.order = ++last_code_event_id_;
   events_buffer_.Enqueue(event);
+}
+
+
+void ProfilerEventsProcessor::AddDeoptStack(Isolate* isolate, Address from,
+                                            int fp_to_sp_delta) {
+  TickSampleEventRecord record(last_code_event_id_);
+  RegisterState regs;
+  Address fp = isolate->c_entry_fp(isolate->thread_local_top());
+  regs.sp = fp - fp_to_sp_delta;
+  regs.fp = fp;
+  regs.pc = from;
+  record.sample.Init(isolate, regs, TickSample::kSkipCEntryFrame);
+  ticks_from_vm_buffer_.Enqueue(record);
 }
 
 
@@ -187,7 +201,6 @@ void CpuProfiler::CallbackEvent(Name* name, Address entry_point) {
       Logger::CALLBACK_TAG,
       profiles_->GetName(name));
   rec->size = 1;
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 
@@ -204,7 +217,6 @@ void CpuProfiler::CodeCreateEvent(Logger::LogEventsAndTags tag,
       CodeEntry::kEmptyResourceName, CpuProfileNode::kNoLineNumberInfo,
       CpuProfileNode::kNoColumnNumberInfo, NULL, code->instruction_start());
   rec->size = code->ExecutableSize();
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 
@@ -221,7 +233,6 @@ void CpuProfiler::CodeCreateEvent(Logger::LogEventsAndTags tag,
       CodeEntry::kEmptyResourceName, CpuProfileNode::kNoLineNumberInfo,
       CpuProfileNode::kNoColumnNumberInfo, NULL, code->instruction_start());
   rec->size = code->ExecutableSize();
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 
@@ -240,16 +251,10 @@ void CpuProfiler::CodeCreateEvent(Logger::LogEventsAndTags tag, Code* code,
       NULL, code->instruction_start());
   if (info) {
     rec->entry->set_no_frame_ranges(info->ReleaseNoFrameRanges());
+    rec->entry->set_inlined_function_infos(info->inlined_function_infos());
   }
-  if (shared->script()->IsScript()) {
-    DCHECK(Script::cast(shared->script()));
-    Script* script = Script::cast(shared->script());
-    rec->entry->set_script_id(script->id()->value());
-    rec->entry->set_bailout_reason(
-        GetBailoutReason(shared->disable_optimization_reason()));
-  }
+  rec->entry->FillFunctionInfo(shared);
   rec->size = code->ExecutableSize();
-  rec->shared = shared->address();
   processor_->Enqueue(evt_rec);
 }
 
@@ -284,12 +289,10 @@ void CpuProfiler::CodeCreateEvent(Logger::LogEventsAndTags tag, Code* code,
       column, line_table, code->instruction_start());
   if (info) {
     rec->entry->set_no_frame_ranges(info->ReleaseNoFrameRanges());
+    rec->entry->set_inlined_function_infos(info->inlined_function_infos());
   }
-  rec->entry->set_script_id(script->id()->value());
+  rec->entry->FillFunctionInfo(shared);
   rec->size = code->ExecutableSize();
-  rec->shared = shared->address();
-  rec->entry->set_bailout_reason(
-      GetBailoutReason(shared->disable_optimization_reason()));
   processor_->Enqueue(evt_rec);
 }
 
@@ -306,7 +309,6 @@ void CpuProfiler::CodeCreateEvent(Logger::LogEventsAndTags tag,
       CodeEntry::kEmptyResourceName, CpuProfileNode::kNoLineNumberInfo,
       CpuProfileNode::kNoColumnNumberInfo, NULL, code->instruction_start());
   rec->size = code->ExecutableSize();
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 
@@ -329,17 +331,20 @@ void CpuProfiler::CodeDisableOptEvent(Code* code, SharedFunctionInfo* shared) {
 }
 
 
-void CpuProfiler::CodeDeleteEvent(Address from) {
+void CpuProfiler::CodeDeoptEvent(Code* code, Address pc, int fp_to_sp_delta) {
+  CodeEventsContainer evt_rec(CodeEventRecord::CODE_DEOPT);
+  CodeDeoptEventRecord* rec = &evt_rec.CodeDeoptEventRecord_;
+  Deoptimizer::DeoptInfo info = Deoptimizer::GetDeoptInfo(code, pc);
+  rec->start = code->address();
+  rec->deopt_reason = Deoptimizer::GetDeoptReason(info.deopt_reason);
+  rec->position = info.position;
+  rec->pc_offset = pc - code->instruction_start();
+  processor_->Enqueue(evt_rec);
+  processor_->AddDeoptStack(isolate_, pc, fp_to_sp_delta);
 }
 
 
-void CpuProfiler::SharedFunctionInfoMoveEvent(Address from, Address to) {
-  CodeEventsContainer evt_rec(CodeEventRecord::SHARED_FUNC_MOVE);
-  SharedFunctionInfoMoveEventRecord* rec =
-      &evt_rec.SharedFunctionInfoMoveEventRecord_;
-  rec->from = from;
-  rec->to = to;
-  processor_->Enqueue(evt_rec);
+void CpuProfiler::CodeDeleteEvent(Address from) {
 }
 
 
@@ -353,7 +358,6 @@ void CpuProfiler::GetterCallbackEvent(Name* name, Address entry_point) {
       profiles_->GetName(name),
       "get ");
   rec->size = 1;
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 
@@ -382,7 +386,6 @@ void CpuProfiler::SetterCallbackEvent(Name* name, Address entry_point) {
       profiles_->GetName(name),
       "set ");
   rec->size = 1;
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 

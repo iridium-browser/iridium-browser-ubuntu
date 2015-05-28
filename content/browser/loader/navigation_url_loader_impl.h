@@ -9,6 +9,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "content/browser/loader/navigation_url_loader.h"
 
 namespace net {
@@ -26,9 +27,7 @@ class NavigationURLLoaderImpl : public NavigationURLLoader {
   // The caller is responsible for ensuring that |delegate| outlives the loader.
   NavigationURLLoaderImpl(BrowserContext* browser_context,
                           int64 frame_tree_node_id,
-                          const CommonNavigationParams& common_params,
                           scoped_ptr<NavigationRequestInfo> request_info,
-                          ResourceRequestBody* request_body,
                           NavigationURLLoaderDelegate* delegate);
   ~NavigationURLLoaderImpl() override;
 
@@ -49,6 +48,10 @@ class NavigationURLLoaderImpl : public NavigationURLLoader {
 
   // Notifies the delegate the request failed to return a response.
   void NotifyRequestFailed(int net_error);
+
+  // Notifies the delegate the begin navigation request was handled and a
+  // potential first network request is about to be made.
+  void NotifyRequestStarted(base::TimeTicks timestamp);
 
   NavigationURLLoaderDelegate* delegate_;
 

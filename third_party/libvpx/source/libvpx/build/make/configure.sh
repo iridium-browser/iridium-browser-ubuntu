@@ -83,6 +83,8 @@ Build options:
   ${toggle_gprof}             enable/disable gprof profiling instrumentation
   ${toggle_gcov}              enable/disable gcov coverage instrumentation
   ${toggle_thumb}             enable/disable building arm assembly in thumb mode
+  ${toggle_dependency_tracking}
+                              disable to speed up one-time build
 
 Install options:
   ${toggle_install_docs}      control whether docs are installed
@@ -201,7 +203,7 @@ disabled(){
 soft_enable() {
   for var in $*; do
     if ! disabled $var; then
-      log_echo "  enabling $var"
+      enabled $var || log_echo "  enabling $var"
       enable_feature $var
     fi
   done
@@ -210,7 +212,7 @@ soft_enable() {
 soft_disable() {
   for var in $*; do
     if ! enabled $var; then
-      log_echo "  disabling $var"
+      disabled $var || log_echo "  disabling $var"
       disable_feature $var
     fi
   done
@@ -508,9 +510,11 @@ process_common_cmdline() {
         elif [ $action = "disable" ] && ! disabled $option ; then
           echo "${CMDLINE_SELECT}" | grep "^ *$option\$" >/dev/null ||
             die_unknown $opt
+          log_echo "  disabling $option"
         elif [ $action = "enable" ] && ! enabled $option ; then
           echo "${CMDLINE_SELECT}" | grep "^ *$option\$" >/dev/null ||
             die_unknown $opt
+          log_echo "  enabling $option"
         fi
         ${action}_feature $option
         ;;
@@ -606,6 +610,13 @@ setup_gnu_toolchain() {
   EXE_SFX=
 }
 
+# Reliably find the newest available Darwin SDKs. (Older versions of
+# xcrun don't support --show-sdk-path.)
+show_darwin_sdk_path() {
+  xcrun --sdk $1 --show-sdk-path 2>/dev/null ||
+    xcodebuild -sdk $1 -version Path 2>/dev/null
+}
+
 process_common_toolchain() {
   if [ -z "$toolchain" ]; then
     gcctarget="${CHOST:-$(gcc -dumpmachine 2> /dev/null)}"
@@ -666,6 +677,10 @@ process_common_toolchain() {
         tgt_isa=x86_64
         tgt_os=darwin13
         ;;
+      *darwin14*)
+        tgt_isa=x86_64
+        tgt_os=darwin14
+        ;;
       x86_64*mingw32*)
         tgt_os=win64
         ;;
@@ -725,30 +740,16 @@ process_common_toolchain() {
   IOS_VERSION_MIN="6.0"
 
   # Handle darwin variants. Newer SDKs allow targeting older
-  # platforms, so find the newest SDK available.
+  # platforms, so use the newest one available.
   case ${toolchain} in
     *-darwin*)
-      if [ -z "${DEVELOPER_DIR}" ]; then
-        DEVELOPER_DIR=`xcode-select -print-path 2> /dev/null`
-        [ $? -ne 0 ] && OSX_SKIP_DIR_CHECK=1
-      fi
-      if [ -z "${OSX_SKIP_DIR_CHECK}" ]; then
-        OSX_SDK_ROOTS="${DEVELOPER_DIR}/SDKs"
-        OSX_SDK_VERSIONS="MacOSX10.4u.sdk MacOSX10.5.sdk MacOSX10.6.sdk"
-        OSX_SDK_VERSIONS="${OSX_SDK_VERSIONS} MacOSX10.7.sdk"
-        for v in ${OSX_SDK_VERSIONS}; do
-          if [ -d "${OSX_SDK_ROOTS}/${v}" ]; then
-            osx_sdk_dir="${OSX_SDK_ROOTS}/${v}"
-          fi
-        done
+      osx_sdk_dir="$(show_darwin_sdk_path macosx)"
+      if [ -d "${osx_sdk_dir}" ]; then
+        add_cflags  "-isysroot ${osx_sdk_dir}"
+        add_ldflags "-isysroot ${osx_sdk_dir}"
       fi
       ;;
   esac
-
-  if [ -d "${osx_sdk_dir}" ]; then
-    add_cflags  "-isysroot ${osx_sdk_dir}"
-    add_ldflags "-isysroot ${osx_sdk_dir}"
-  fi
 
   case ${toolchain} in
     *-darwin8-*)
@@ -775,12 +776,18 @@ process_common_toolchain() {
       add_cflags  "-mmacosx-version-min=10.9"
       add_ldflags "-mmacosx-version-min=10.9"
       ;;
+    *-darwin14-*)
+      add_cflags  "-mmacosx-version-min=10.10"
+      add_ldflags "-mmacosx-version-min=10.10"
+      ;;
     *-iphonesimulator-*)
       add_cflags  "-miphoneos-version-min=${IOS_VERSION_MIN}"
       add_ldflags "-miphoneos-version-min=${IOS_VERSION_MIN}"
-      osx_sdk_dir="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-      add_cflags  "-isysroot ${osx_sdk_dir}"
-      add_ldflags "-isysroot ${osx_sdk_dir}"
+      iossim_sdk_dir="$(show_darwin_sdk_path iphonesimulator)"
+      if [ -d "${iossim_sdk_dir}" ]; then
+        add_cflags  "-isysroot ${iossim_sdk_dir}"
+        add_ldflags "-isysroot ${iossim_sdk_dir}"
+      fi
       ;;
   esac
 
@@ -805,7 +812,12 @@ process_common_toolchain() {
           ;;
         armv7|armv7s)
           soft_enable neon
-          soft_enable neon_asm
+          # Only enable neon_asm when neon is also enabled.
+          enabled neon && soft_enable neon_asm
+          # If someone tries to force it through, die.
+          if disabled neon && enabled neon_asm; then
+            die "Disabling neon while keeping neon-asm is not supported"
+          fi
           soft_enable media
           soft_enable fast_unaligned
           ;;
@@ -947,7 +959,7 @@ EOF
           ;;
 
         darwin*)
-          XCRUN_FIND="xcrun --sdk iphoneos -find"
+          XCRUN_FIND="xcrun --sdk iphoneos --find"
           CXX="$(${XCRUN_FIND} clang++)"
           CC="$(${XCRUN_FIND} clang)"
           AR="$(${XCRUN_FIND} ar)"
@@ -974,9 +986,13 @@ EOF
           # options that were put in above
           ASFLAGS="-arch ${tgt_isa} -g"
 
-          alt_libc="$(xcrun --sdk iphoneos --show-sdk-path)"
-          add_cflags -arch ${tgt_isa} -isysroot ${alt_libc}
+          add_cflags -arch ${tgt_isa}
           add_ldflags -arch ${tgt_isa}
+
+          alt_libc="$(show_darwin_sdk_path iphoneos)"
+          if [ -d "${alt_libc}" ]; then
+            add_cflags -isysroot ${alt_libc}
+          fi
 
           if [ "${LD}" = "${CXX}" ]; then
             add_ldflags -miphoneos-version-min="${IOS_VERSION_MIN}"
@@ -1118,7 +1134,7 @@ EOF
       bits=32
       enabled x86_64 && bits=64
       check_cpp <<EOF && bits=x32
-#ifndef __ILP32__
+#if !defined(__ILP32__) || !defined(__x86_64__)
 #error "not x32"
 #endif
 EOF
@@ -1145,6 +1161,14 @@ EOF
         auto|"")
           which nasm >/dev/null 2>&1 && AS=nasm
           which yasm >/dev/null 2>&1 && AS=yasm
+          if [ "${AS}" = nasm ] ; then
+            # Apple ships version 0.98 of nasm through at least Xcode 6. Revisit
+            # this check if they start shipping a compatible version.
+            apple=`nasm -v | grep "Apple"`
+            [ -n "${apple}" ] \
+              && echo "Unsupported version of nasm: ${apple}" \
+              && AS=""
+          fi
           [ "${AS}" = auto ] || [ -z "${AS}" ] \
             && die "Neither yasm nor nasm have been found"
           ;;
@@ -1237,11 +1261,7 @@ EOF
     fi
   fi
 
-  tgt_os_no_version=$(echo "${tgt_os}" | tr -d "[0-9]")
-  # Default use_x86inc to yes when we are 64 bit, non-pic, or on any
-  # non-Darwin target.
-  if [ "${tgt_isa}" = "x86_64" ] || [ "${pic}" != "yes" ] || \
-      [ "${tgt_os_no_version}" != "darwin" ]; then
+  if [ "${tgt_isa}" = "x86_64" ] || [ "${tgt_isa}" = "x86" ]; then
     soft_enable use_x86inc
   fi
 
@@ -1266,9 +1286,6 @@ EOF
     # Try to find which inline keywords are supported
     check_cc <<EOF && INLINE="inline"
 static inline function() {}
-EOF
-    check_cc <<EOF && INLINE="__inline__ __attribute__((always_inline))"
-static __attribute__((always_inline)) function() {}
 EOF
 
   # Almost every platform uses pthreads.

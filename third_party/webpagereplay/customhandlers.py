@@ -73,7 +73,7 @@ class CustomHandlers(object):
         try:
           os.makedirs(options.screenshot_dir)
         except IOError:
-          logging.error('Unable to create screenshot dir: %s', 
+          logging.error('Unable to create screenshot dir: %s',
                          options.screenshot_dir)
           options.screenshot_dir = None
       if options.screenshot_dir:
@@ -96,9 +96,6 @@ class CustomHandlers(object):
 
   def get_generator_url_response_code(self, request, url_suffix):
     """Parse special generator URLs for the embedded response code.
-
-    Clients like perftracker can use URLs of this form to request
-    a response with a particular response code.
 
     Args:
       request: an ArchivedHttpRequest instance

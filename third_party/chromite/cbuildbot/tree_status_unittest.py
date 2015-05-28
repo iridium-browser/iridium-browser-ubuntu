@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright 2014 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,19 +6,13 @@
 
 from __future__ import print_function
 
-import os
-import sys
+import mock
 import urllib
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
 
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import tree_status
 from chromite.lib import cros_test_lib
 from chromite.lib import timeout_util
-
-import mock
 
 
 # pylint: disable=protected-access
@@ -259,20 +252,16 @@ class TestGettingSheriffEmails(cros_test_lib.MockTestCase):
     # Test parsing when there is only one sheriff.
     raw_line = "document.write('taco')"
     self.PatchObject(tree_status, '_OpenSheriffURL', return_value=raw_line)
-    self.assertEqual(tree_status.GetSheriffEmailAddresses('build'),
+    self.assertEqual(tree_status.GetSheriffEmailAddresses('chrome'),
                      ['taco@google.com'])
 
     # Test parsing when there are multiple sheriffs.
     raw_line = "document.write('taco, burrito')"
     self.PatchObject(tree_status, '_OpenSheriffURL', return_value=raw_line)
-    self.assertEqual(tree_status.GetSheriffEmailAddresses('build'),
+    self.assertEqual(tree_status.GetSheriffEmailAddresses('chrome'),
                      ['taco@google.com', 'burrito@google.com'])
 
     # Test parsing when sheriff is None.
     raw_line = "document.write('None (channel is sheriff)')"
     self.PatchObject(tree_status, '_OpenSheriffURL', return_value=raw_line)
-    self.assertEqual(tree_status.GetSheriffEmailAddresses('lab'), [])
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()
+    self.assertEqual(tree_status.GetSheriffEmailAddresses('chrome'), [])

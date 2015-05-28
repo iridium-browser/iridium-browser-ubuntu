@@ -32,6 +32,7 @@
 #ifndef PingLoader_h
 #define PingLoader_h
 
+#include "core/CoreExport.h"
 #include "core/fetch/ResourceLoaderOptions.h"
 #include "core/page/PageLifecycleObserver.h"
 #include "platform/Timer.h"
@@ -56,10 +57,10 @@ class ResourceRequest;
 // The ping loader is used by audit pings, beacon transmissions and image loads
 // during page unloading.
 //
-class PingLoader : public RefCountedWillBeRefCountedGarbageCollected<PingLoader>, public PageLifecycleObserver, private blink::WebURLLoaderClient {
+class CORE_EXPORT PingLoader : public RefCountedWillBeRefCountedGarbageCollected<PingLoader>, public PageLifecycleObserver, private blink::WebURLLoaderClient {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(PingLoader);
     WTF_MAKE_NONCOPYABLE(PingLoader);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(PingLoader);
 public:
     virtual ~PingLoader();
 
@@ -72,12 +73,14 @@ public:
     static void sendLinkAuditPing(LocalFrame*, const KURL& pingURL, const KURL& destinationURL);
     static void sendViolationReport(LocalFrame*, const KURL& reportURL, PassRefPtr<FormData> report, ViolationReportType);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     PingLoader(LocalFrame*, ResourceRequest&, const FetchInitiatorInfo&, StoredCredentials);
 
     static void start(LocalFrame*, ResourceRequest&, const FetchInitiatorInfo&, StoredCredentials = AllowStoredCredentials);
+
+    void dispose();
 
 private:
     virtual void didReceiveResponse(blink::WebURLLoader*, const blink::WebURLResponse&) override;
@@ -88,8 +91,6 @@ private:
     void timeout(Timer<PingLoader>*);
 
     void didFailLoading(Page*);
-
-    void dispose();
 
     OwnPtr<blink::WebURLLoader> m_loader;
     Timer<PingLoader> m_timeout;

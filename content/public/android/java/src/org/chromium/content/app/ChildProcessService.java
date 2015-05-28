@@ -20,7 +20,9 @@ import org.chromium.base.BaseSwitches;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.CommandLine;
 import org.chromium.base.JNINamespace;
+import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.Linker;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.browser.ChildProcessConnection;
@@ -29,6 +31,7 @@ import org.chromium.content.common.IChildProcessCallback;
 import org.chromium.content.common.IChildProcessService;
 
 import java.util.ArrayList;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -63,6 +66,8 @@ public class ChildProcessService extends Service {
     private boolean mLibraryInitialized = false;
     // Becomes true once the service is bound. Access must synchronize around mMainThread.
     private boolean mIsBound = false;
+
+    private final Semaphore mActivitySemaphore = new Semaphore(1);
 
     // Binder object used by clients for this service.
     private final IChildProcessService.Stub mBinder = new IChildProcessService.Stub() {
@@ -128,6 +133,7 @@ public class ChildProcessService extends Service {
 
         mMainThread = new Thread(new Runnable() {
             @Override
+            @SuppressFBWarnings("DM_EXIT")
             public void run()  {
                 try {
                     // CommandLine must be initialized before others, e.g., Linker.isUsed()
@@ -163,7 +169,8 @@ public class ChildProcessService extends Service {
 
                     boolean loadAtFixedAddressFailed = false;
                     try {
-                        LibraryLoader.loadNow(getApplicationContext(), false);
+                        LibraryLoader.get(LibraryProcessType.PROCESS_CHILD)
+                                .loadNow(getApplicationContext(), false);
                         isLoaded = true;
                     } catch (ProcessInitException e) {
                         if (requestedSharedRelro) {
@@ -177,7 +184,8 @@ public class ChildProcessService extends Service {
                     if (!isLoaded && requestedSharedRelro) {
                         Linker.disableSharedRelros();
                         try {
-                            LibraryLoader.loadNow(getApplicationContext(), false);
+                            LibraryLoader.get(LibraryProcessType.PROCESS_CHILD)
+                                    .loadNow(getApplicationContext(), false);
                             isLoaded = true;
                         } catch (ProcessInitException e) {
                             Log.e(TAG, "Failed to load native library on retry", e);
@@ -186,10 +194,10 @@ public class ChildProcessService extends Service {
                     if (!isLoaded) {
                         System.exit(-1);
                     }
-                    LibraryLoader.registerRendererProcessHistogram(
-                            requestedSharedRelro,
-                            loadAtFixedAddressFailed);
-                    LibraryLoader.initialize();
+                    LibraryLoader.get(LibraryProcessType.PROCESS_CHILD)
+                            .registerRendererProcessHistogram(requestedSharedRelro,
+                                    loadAtFixedAddressFailed);
+                    LibraryLoader.get(LibraryProcessType.PROCESS_CHILD).initialize();
                     synchronized (mMainThread) {
                         mLibraryInitialized = true;
                         mMainThread.notifyAll();
@@ -208,8 +216,10 @@ public class ChildProcessService extends Service {
                     nativeInitChildProcess(sContext.get().getApplicationContext(),
                             ChildProcessService.this, fileIds, fileFds,
                             mCpuCount, mCpuFeatures);
-                    ContentMain.start();
-                    nativeExitChildProcess();
+                    if (mActivitySemaphore.tryAcquire()) {
+                        ContentMain.start();
+                        nativeExitChildProcess();
+                    }
                 } catch (InterruptedException e) {
                     Log.w(TAG, MAIN_THREAD_NAME + " startup failed: " + e);
                 } catch (ProcessInitException e) {
@@ -221,11 +231,16 @@ public class ChildProcessService extends Service {
     }
 
     @Override
+    @SuppressFBWarnings("DM_EXIT")
     public void onDestroy() {
         Log.i(TAG, "Destroying ChildProcessService pid=" + Process.myPid());
         super.onDestroy();
-        if (mCommandLineParams == null) {
-            // This process was destroyed before it even started. Nothing more to do.
+        if (mActivitySemaphore.tryAcquire()) {
+            // TODO(crbug.com/457406): This is a bit hacky, but there is no known better solution
+            // as this service will get reused (at least if not sandboxed).
+            // In fact, we might really want to always exit() from onDestroy(), not just from
+            // the early return here.
+            System.exit(0);
             return;
         }
         synchronized (mMainThread) {

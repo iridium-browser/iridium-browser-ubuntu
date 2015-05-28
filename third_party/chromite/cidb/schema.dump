@@ -134,7 +134,7 @@ CREATE TABLE `clActionTable` (
   `change_number` int(11) NOT NULL,
   `patch_number` int(11) NOT NULL,
   `change_source` enum('internal','external') NOT NULL,
-  `action` enum('picked_up','submitted','kicked_out','submit_failed','verified','pre_cq_inflight','pre_cq_passed','pre_cq_failed','pre_cq_launching','pre_cq_waiting','pre_cq_ready_to_submit','requeued','screened_for_pre_cq','validation_pending_pre_cq','irrelevant_to_slave','trybot_launching','speculative','forgiven','pre_cq_fully_verified') NOT NULL,
+  `action` enum('picked_up','submitted','kicked_out','submit_failed','verified','pre_cq_inflight','pre_cq_passed','pre_cq_failed','pre_cq_launching','pre_cq_waiting','pre_cq_ready_to_submit','requeued','screened_for_pre_cq','validation_pending_pre_cq','irrelevant_to_slave','trybot_launching','speculative','forgiven','pre_cq_fully_verified','pre_cq_reset') NOT NULL,
   `reason` varchar(80) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -168,6 +168,53 @@ CREATE TABLE `failureTable` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 
+DROP TABLE IF EXISTS `failureView`;
+/*!50001 DROP VIEW IF EXISTS `failureView`*/;
+SET @saved_cs_client     = @@character_set_client;
+SET character_set_client = utf8;
+/*!50001 CREATE TABLE `failureView` (
+  `id` tinyint NOT NULL,
+  `build_stage_id` tinyint NOT NULL,
+  `outer_failure_id` tinyint NOT NULL,
+  `exception_type` tinyint NOT NULL,
+  `exception_message` tinyint NOT NULL,
+  `exception_category` tinyint NOT NULL,
+  `extra_info` tinyint NOT NULL,
+  `timestamp` tinyint NOT NULL,
+  `stage_name` tinyint NOT NULL,
+  `board` tinyint NOT NULL,
+  `stage_status` tinyint NOT NULL,
+  `stage_last_updated` tinyint NOT NULL,
+  `stage_start_time` tinyint NOT NULL,
+  `stage_finish_time` tinyint NOT NULL,
+  `stage_final` tinyint NOT NULL,
+  `build_id` tinyint NOT NULL,
+  `build_last_updated` tinyint NOT NULL,
+  `master_build_id` tinyint NOT NULL,
+  `buildbot_generation` tinyint NOT NULL,
+  `builder_name` tinyint NOT NULL,
+  `waterfall` tinyint NOT NULL,
+  `build_number` tinyint NOT NULL,
+  `build_config` tinyint NOT NULL,
+  `bot_hostname` tinyint NOT NULL,
+  `build_start_time` tinyint NOT NULL,
+  `build_finish_time` tinyint NOT NULL,
+  `build_status` tinyint NOT NULL,
+  `build_type` tinyint NOT NULL,
+  `chrome_version` tinyint NOT NULL,
+  `milestone_version` tinyint NOT NULL,
+  `platform_version` tinyint NOT NULL,
+  `full_version` tinyint NOT NULL,
+  `sdk_version` tinyint NOT NULL,
+  `toolchain_url` tinyint NOT NULL,
+  `build_final` tinyint NOT NULL,
+  `metadata_url` tinyint NOT NULL,
+  `summary` tinyint NOT NULL,
+  `deadline` tinyint NOT NULL
+) ENGINE=MyISAM */;
+SET character_set_client = @saved_cs_client;
+
+
 DROP TABLE IF EXISTS `schemaVersionTable`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -178,6 +225,22 @@ CREATE TABLE `schemaVersionTable` (
   PRIMARY KEY (`schemaVersion`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+
+/*!50001 DROP TABLE IF EXISTS `failureView`*/;
+/*!50001 DROP VIEW IF EXISTS `failureView`*/;
+/*!50001 SET @saved_cs_client          = @@character_set_client */;
+/*!50001 SET @saved_cs_results         = @@character_set_results */;
+/*!50001 SET @saved_col_connection     = @@collation_connection */;
+/*!50001 SET character_set_client      = latin1 */;
+/*!50001 SET character_set_results     = latin1 */;
+/*!50001 SET collation_connection      = latin1_swedish_ci */;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`%` SQL SECURITY DEFINER */
+/*!50001 VIEW `failureView` AS select `f`.`id` AS `id`,`f`.`build_stage_id` AS `build_stage_id`,`f`.`outer_failure_id` AS `outer_failure_id`,`f`.`exception_type` AS `exception_type`,`f`.`exception_message` AS `exception_message`,`f`.`exception_category` AS `exception_category`,`f`.`extra_info` AS `extra_info`,`f`.`timestamp` AS `timestamp`,`bs`.`name` AS `stage_name`,`bs`.`board` AS `board`,`bs`.`status` AS `stage_status`,`bs`.`last_updated` AS `stage_last_updated`,`bs`.`start_time` AS `stage_start_time`,`bs`.`finish_time` AS `stage_finish_time`,`bs`.`final` AS `stage_final`,`b`.`id` AS `build_id`,`b`.`last_updated` AS `build_last_updated`,`b`.`master_build_id` AS `master_build_id`,`b`.`buildbot_generation` AS `buildbot_generation`,`b`.`builder_name` AS `builder_name`,`b`.`waterfall` AS `waterfall`,`b`.`build_number` AS `build_number`,`b`.`build_config` AS `build_config`,`b`.`bot_hostname` AS `bot_hostname`,`b`.`start_time` AS `build_start_time`,`b`.`finish_time` AS `build_finish_time`,`b`.`status` AS `build_status`,`b`.`build_type` AS `build_type`,`b`.`chrome_version` AS `chrome_version`,`b`.`milestone_version` AS `milestone_version`,`b`.`platform_version` AS `platform_version`,`b`.`full_version` AS `full_version`,`b`.`sdk_version` AS `sdk_version`,`b`.`toolchain_url` AS `toolchain_url`,`b`.`final` AS `build_final`,`b`.`metadata_url` AS `metadata_url`,`b`.`summary` AS `summary`,`b`.`deadline` AS `deadline` from ((`failureTable` `f` join `buildStageTable` `bs` on((`f`.`build_stage_id` = `bs`.`id`))) join `buildTable` `b` on((`bs`.`build_id` = `b`.`id`))) */;
+/*!50001 SET character_set_client      = @saved_cs_client */;
+/*!50001 SET character_set_results     = @saved_cs_results */;
+/*!50001 SET collation_connection      = @saved_col_connection */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;

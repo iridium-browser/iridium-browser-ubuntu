@@ -3,8 +3,8 @@
 # found in the LICENSE file.
 import json
 
-from telemetry import value as value_module
 from telemetry import perf_tests_helper
+from telemetry import value as value_module
 from telemetry.value import histogram_util
 
 class HistogramValueBucket(object):
@@ -29,18 +29,16 @@ class HistogramValueBucket(object):
 class HistogramValue(value_module.Value):
   def __init__(self, page, name, units,
                raw_value=None, raw_value_json=None, important=True,
-               description=None):
+               description=None, tir_label=None):
     super(HistogramValue, self).__init__(page, name, units, important,
-                                         description)
+                                         description, tir_label)
     if raw_value_json:
       assert raw_value == None, \
              'Don\'t specify both raw_value and raw_value_json'
       raw_value = json.loads(raw_value_json)
     if raw_value:
-      assert 'buckets' in raw_value
-      assert isinstance(raw_value['buckets'], list)
       self.buckets = []
-      for bucket in raw_value['buckets']:
+      for bucket in histogram_util.GetHistogramBucketsFromRawValue(raw_value):
         self.buckets.append(HistogramValueBucket(
           low=bucket['low'],
           high=bucket['high'],
@@ -54,12 +52,13 @@ class HistogramValue(value_module.Value):
     else:
       page_name = None
     return ('HistogramValue(%s, %s, %s, raw_json_string="%s", '
-            'important=%s, description=%s') % (
-              page_name,
-              self.name, self.units,
-              self.ToJSONString(),
-              self.important,
-              self.description)
+            'important=%s, description=%s, tir_label=%s') % (
+                page_name,
+                self.name, self.units,
+                self.ToJSONString(),
+                self.important,
+                self.description,
+                self.tir_label)
 
   def GetBuildbotDataType(self, output_context):
     if self._IsImportantGivenOutputIntent(output_context):
@@ -105,6 +104,9 @@ class HistogramValue(value_module.Value):
     kwargs = value_module.Value.GetConstructorKwArgs(value_dict, page_dict)
     kwargs['raw_value'] = value_dict
 
+    if 'tir_label' in value_dict:
+      kwargs['tir_label'] = value_dict['tir_label']
+
     return HistogramValue(**kwargs)
 
   @classmethod
@@ -115,7 +117,7 @@ class HistogramValue(value_module.Value):
         v0.page, v0.name, v0.units,
         raw_value_json=histogram_util.AddHistograms(
             [v.ToJSONString() for v in values]),
-        important=v0.important)
+        important=v0.important, tir_label=v0.tir_label)
 
   @classmethod
   def MergeLikeValuesFromDifferentPages(cls, values,

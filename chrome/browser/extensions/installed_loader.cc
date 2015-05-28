@@ -10,6 +10,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -23,6 +24,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
+#include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -228,8 +230,9 @@ void InstalledLoader::Load(const ExtensionInfo& info, bool write_to_prefs) {
 }
 
 void InstalledLoader::LoadAllExtensions() {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  TRACE_EVENT0("browser,startup", "InstalledLoader::LoadAllExtensions");
+  SCOPED_UMA_HISTOGRAM_TIMER("Extensions.LoadAllTime2");
   base::TimeTicks start_time = base::TimeTicks::Now();
 
   Profile* profile = extension_service_->profile();
@@ -303,8 +306,14 @@ void InstalledLoader::LoadAllExtensions() {
   UMA_HISTOGRAM_COUNTS_100("Extensions.Disabled",
                            extension_registry_->disabled_extensions().size());
 
+  // TODO(rkaplow): Obsolete this when verified similar to LoadAllTime2.
   UMA_HISTOGRAM_TIMES("Extensions.LoadAllTime",
                       base::TimeTicks::Now() - start_time);
+  RecordExtensionsMetrics();
+}
+
+void InstalledLoader::RecordExtensionsMetrics() {
+  Profile* profile = extension_service_->profile();
 
   int app_user_count = 0;
   int app_external_count = 0;
@@ -324,6 +333,7 @@ void InstalledLoader::LoadAllExtensions() {
   int incognito_not_allowed_count = 0;
   int file_access_allowed_count = 0;
   int file_access_not_allowed_count = 0;
+  int eventless_event_pages_count = 0;
 
   const ExtensionSet& extensions = extension_registry_->enabled_extensions();
   ExtensionActionManager* extension_action_manager =
@@ -405,6 +415,18 @@ void InstalledLoader::LoadAllExtensions() {
       UMA_HISTOGRAM_ENUMERATION("Extensions.BackgroundPageType",
                                 GetBackgroundPageType(extension),
                                 NUM_BACKGROUND_PAGE_TYPES);
+
+      if (GetBackgroundPageType(extension) == EVENT_PAGE) {
+        // Count extension event pages with no registered events. Either the
+        // event page is badly designed, or there may be a bug where the event
+        // page failed to start after an update (crbug.com/469361).
+        if (EventRouter::Get(extension_service_->profile())->
+                GetRegisteredEvents(extension->id()).size() == 0) {
+          ++eventless_event_pages_count;
+          VLOG(1) << "Event page without registered event listeners: "
+                  << extension->id() << " " << extension->name();
+        }
+      }
     }
 
     // Using an enumeration shows us the total installed ratio across all users.
@@ -570,6 +592,8 @@ void InstalledLoader::LoadAllExtensions() {
   }
   UMA_HISTOGRAM_COUNTS_100("Extensions.CorruptExtensionTotalDisables",
                            extension_prefs_->GetCorruptedDisableCount());
+  UMA_HISTOGRAM_COUNTS_100("Extensions.EventlessEventPages",
+                           eventless_event_pages_count);
 }
 
 int InstalledLoader::GetCreationFlags(const ExtensionInfo* info) {

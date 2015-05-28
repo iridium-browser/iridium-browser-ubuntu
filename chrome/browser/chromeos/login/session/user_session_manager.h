@@ -28,13 +28,19 @@ class PrefRegistrySimple;
 class PrefService;
 class Profile;
 
+namespace net {
+class URLRequestContextGetter;
+}
+
 namespace user_manager {
-
 class User;
-
 }  // namespace user_manager
 
 namespace chromeos {
+
+namespace test {
+class UserSessionManagerTestApi;
+}  // namespace test
 
 class EasyUnlockKeyManager;
 class InputEventsBlocker;
@@ -104,14 +110,23 @@ class UserSessionManager
   // |start_url| is an optional URL to be opened in Guest session browser.
   void CompleteGuestSessionLogin(const GURL& start_url);
 
-  // Start user session given |user_context| and |authenticator| which holds
-  // authentication context (profile).
+  // Creates and returns the authenticator to use.
+  // Single Authenticator instance is used for entire login process,
+  // even for multiple retries. Authenticator instance holds reference to
+  // login profile and is later used during fetching of OAuth tokens.
+  scoped_refptr<Authenticator> CreateAuthenticator(
+      AuthStatusConsumer* consumer);
+
+  // Start user session given |user_context|.
+  // OnProfilePrepared() will be called on |delegate| once Profile is ready.
   void StartSession(const UserContext& user_context,
                     StartSessionType start_session_type,
-                    scoped_refptr<Authenticator> authenticator,
                     bool has_auth_cookies,
                     bool has_active_session,
                     UserSessionManagerDelegate* delegate);
+
+  // Invalidates |delegate|, which was passed to StartSession method call.
+  void DelegateDeleted(UserSessionManagerDelegate* delegate);
 
   // Perform additional actions once system wide notification
   // "UserLoggedIn" has been sent.
@@ -197,8 +212,7 @@ class UserSessionManager
   void AddSessionStateObserver(chromeos::UserSessionStateObserver* observer);
   void RemoveSessionStateObserver(chromeos::UserSessionStateObserver* observer);
 
-  virtual void ActiveUserChanged(
-      const user_manager::User* active_user) override;
+  void ActiveUserChanged(const user_manager::User* active_user) override;
 
   // Returns default IME state for user session.
   scoped_refptr<input_method::InputMethodManager::State> GetDefaultIMEState(
@@ -210,34 +224,49 @@ class UserSessionManager
   // Update Easy unlock cryptohome keys for given user context.
   void UpdateEasyUnlockKeys(const UserContext& user_context);
 
+  // Returns the auth request context associated with auth data.
+  net::URLRequestContextGetter* GetAuthRequestContext() const;
+
   // Removes a profile from the per-user input methods states map.
   void RemoveProfileForTesting(Profile* profile);
 
+  bool has_auth_cookies() const { return has_auth_cookies_; }
+
  private:
+  friend class test::UserSessionManagerTestApi;
   friend struct DefaultSingletonTraits<UserSessionManager>;
 
   typedef std::set<std::string> SigninSessionRestoreStateSet;
 
   UserSessionManager();
-  virtual ~UserSessionManager();
+  ~UserSessionManager() override;
 
   // OAuth2LoginManager::Observer overrides:
-  virtual void OnSessionRestoreStateChanged(
+  void OnSessionRestoreStateChanged(
       Profile* user_profile,
       OAuth2LoginManager::SessionRestoreState state) override;
 
   // net::NetworkChangeNotifier::ConnectionTypeObserver overrides:
-  virtual void OnConnectionTypeChanged(
+  void OnConnectionTypeChanged(
       net::NetworkChangeNotifier::ConnectionType type) override;
 
   // UserSessionManagerDelegate overrides:
   // Used when restoring user sessions after crash.
-  virtual void OnProfilePrepared(Profile* profile,
-                                 bool browser_launched) override;
+  void OnProfilePrepared(Profile* profile, bool browser_launched) override;
+
+  void ChildAccountStatusReceivedCallback(Profile* profile);
+
+  void StopChildStatusObserving(Profile* profile);
 
   void CreateUserSession(const UserContext& user_context,
                          bool has_auth_cookies);
   void PreStartSession();
+
+  // Store any useful UserContext data early on when profile has not been
+  // created yet and user services were not yet initialized. Can store
+  // information in Local State like GAIA ID.
+  void StoreUserContextDataBeforeProfileIsCreated();
+
   void StartCrosSession();
   void NotifyUserLoggedIn();
   void PrepareProfile();
@@ -330,12 +359,27 @@ class UserSessionManager
       InputEventsBlocker* input_events_blocker,
       const locale_util::LanguageSwitchResult& result);
 
+  // Test API methods.
+
+  // Injects |user_context| that will be used to create StubAuthenticator
+  // instance when CreateAuthenticator() is called.
+  void InjectStubUserContext(const UserContext& user_context);
+
+  // Controls whether browser instance should be launched after sign in
+  // (used in tests).
+  void set_should_launch_browser_in_tests(bool should_launch_browser) {
+    should_launch_browser_ = should_launch_browser;
+  }
+
   UserSessionManagerDelegate* delegate_;
 
   // Authentication/user context.
   UserContext user_context_;
   scoped_refptr<Authenticator> authenticator_;
   StartSessionType start_session_type_;
+
+  // Injected user context for stub authenticator.
+  scoped_ptr<UserContext> injected_user_context_;
 
   // True if the authentication context's cookie jar contains authentication
   // cookies from the authentication extension login flow.
@@ -364,9 +408,6 @@ class UserSessionManager
   // Sesion restore strategy.
   OAuth2LoginManager::SessionRestoreStrategy session_restore_strategy_;
 
-  // OAuth2 refresh token for session restore.
-  std::string oauth2_refresh_token_;
-
   // Set of user_id for those users that we should restore authentication
   // session when notified about online state change.
   SigninSessionRestoreStateSet pending_signin_restore_sessions_;
@@ -384,6 +425,14 @@ class UserSessionManager
   scoped_ptr<EasyUnlockKeyManager> easy_unlock_key_manager_;
   bool running_easy_unlock_key_ops_;
   base::Closure easy_unlock_key_ops_finished_callback_;
+
+  // Whether should launch browser, tests may override this value.
+  bool should_launch_browser_;
+
+  // Child account status is necessary for InitializeStartUrls call.
+  bool waiting_for_child_account_status_;
+
+  base::WeakPtrFactory<UserSessionManager> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(UserSessionManager);
 };

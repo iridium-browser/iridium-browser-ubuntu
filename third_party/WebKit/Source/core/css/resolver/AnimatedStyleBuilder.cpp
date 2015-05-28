@@ -44,7 +44,6 @@
 #include "core/animation/animatable/AnimatableLengthPoint3D.h"
 #include "core/animation/animatable/AnimatableLengthSize.h"
 #include "core/animation/animatable/AnimatableRepeatable.h"
-#include "core/animation/animatable/AnimatableSVGLength.h"
 #include "core/animation/animatable/AnimatableSVGPaint.h"
 #include "core/animation/animatable/AnimatableShadow.h"
 #include "core/animation/animatable/AnimatableShapeValue.h"
@@ -57,7 +56,7 @@
 #include "core/css/CSSPropertyMetadata.h"
 #include "core/css/resolver/StyleBuilder.h"
 #include "core/css/resolver/StyleResolverState.h"
-#include "core/rendering/style/RenderStyle.h"
+#include "core/style/ComputedStyle.h"
 #include "wtf/MathExtras.h"
 #include "wtf/TypeTraits.h"
 
@@ -65,13 +64,22 @@ namespace blink {
 
 namespace {
 
-Length animatableValueToLength(const AnimatableValue* value, const StyleResolverState& state, ValueRange range = ValueRangeAll)
+Length animatableValueToLengthWithZoom(const AnimatableValue* value, float zoom, ValueRange range = ValueRangeAll)
 {
     if (value->isLength())
-        return toAnimatableLength(value)->length(state.style()->effectiveZoom(), range);
-    RefPtrWillBeRawPtr<CSSValue> cssValue = toAnimatableUnknown(value)->toCSSValue();
-    CSSPrimitiveValue* cssPrimitiveValue = toCSSPrimitiveValue(cssValue.get());
-    return cssPrimitiveValue->convertToLength<AnyConversion>(state.cssToLengthConversionData());
+        return toAnimatableLength(value)->length(zoom, range);
+    ASSERT(toAnimatableUnknown(value)->toCSSValueID() == CSSValueAuto);
+    return Length(Auto);
+}
+
+Length animatableValueToLength(const AnimatableValue* value, const StyleResolverState& state, ValueRange range = ValueRangeAll)
+{
+    return animatableValueToLengthWithZoom(value, state.style()->effectiveZoom(), range);
+}
+
+UnzoomedLength animatableValueToUnzoomedLength(const AnimatableValue* value, const StyleResolverState&, ValueRange range = ValueRangeAll)
+{
+    return UnzoomedLength(animatableValueToLengthWithZoom(value, 1, range));
 }
 
 BorderImageLength animatableValueToBorderImageLength(const AnimatableValue* value, const StyleResolverState& state)
@@ -80,9 +88,8 @@ BorderImageLength animatableValueToBorderImageLength(const AnimatableValue* valu
         return BorderImageLength(toAnimatableLength(value)->length(state.style()->effectiveZoom(), ValueRangeNonNegative));
     if (value->isDouble())
         return BorderImageLength(clampTo<double>(toAnimatableDouble(value)->toDouble(), 0));
-    RefPtrWillBeRawPtr<CSSValue> cssValue = toAnimatableUnknown(value)->toCSSValue();
-    CSSPrimitiveValue* cssPrimitiveValue = toCSSPrimitiveValue(cssValue.get());
-    return BorderImageLength(cssPrimitiveValue->convertToLength<AnyConversion>(state.cssToLengthConversionData()));
+    ASSERT(toAnimatableUnknown(value)->toCSSValueID() == CSSValueAuto);
+    return Length(Auto);
 }
 
 template<typename T> T animatableValueRoundClampTo(const AnimatableValue* value, T min = defaultMinimumForClamp<T>(), T max = defaultMaximumForClamp<T>())
@@ -145,18 +152,10 @@ void setFillSize(FillLayer* fillLayer, const AnimatableValue* value, StyleResolv
         CSSToStyleMap::mapFillSize(state, fillLayer, toAnimatableUnknown(value)->toCSSValue().get());
 }
 
-PassRefPtrWillBeRawPtr<SVGLength> animatableValueToNonNegativeSVGLength(const AnimatableValue* value)
-{
-    RefPtrWillBeRawPtr<SVGLength> length = toAnimatableSVGLength(value)->toSVGLength();
-    if (length->valueInSpecifiedUnits() < 0)
-        length->setValueInSpecifiedUnits(0);
-    return length.release();
-}
-
 template <CSSPropertyID property>
 void setOnFillLayers(FillLayer& fillLayers, const AnimatableValue* value, StyleResolverState& state)
 {
-    const WillBeHeapVector<RefPtrWillBeMember<AnimatableValue> >& values = toAnimatableRepeatable(value)->values();
+    const WillBeHeapVector<RefPtrWillBeMember<AnimatableValue>>& values = toAnimatableRepeatable(value)->values();
     ASSERT(!values.isEmpty());
     FillLayer* fillLayer = &fillLayers;
     FillLayer* prev = 0;
@@ -276,7 +275,7 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
         StyleBuilder::applyProperty(property, state, toAnimatableUnknown(value)->toCSSValue().get());
         return;
     }
-    RenderStyle* style = state.style();
+    ComputedStyle* style = state.style();
     switch (property) {
     case CSSPropertyBackgroundColor:
         style->setBackgroundColor(toAnimatableColor(value)->color());
@@ -295,7 +294,8 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
         setOnFillLayers<CSSPropertyBackgroundSize>(style->accessBackgroundLayers(), value, state);
         return;
     case CSSPropertyBaselineShift:
-        style->setBaselineShiftValue(toAnimatableSVGLength(value)->toSVGLength());
+        style->accessSVGStyle().setBaselineShift(BS_LENGTH);
+        style->accessSVGStyle().setBaselineShiftValue(animatableValueToLength(value, state));
         return;
     case CSSPropertyBorderBottomColor:
         style->setBorderBottomColor(toAnimatableColor(value)->color());
@@ -314,7 +314,8 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
         style->setBorderImageOutset(animatableValueToBorderImageLengthBox(value, state));
         return;
     case CSSPropertyBorderImageSlice:
-        style->setBorderImageSlices(animatableValueToLengthBox(value, state, ValueRangeNonNegative));
+        style->setBorderImageSlices(animatableValueToLengthBox(toAnimatableLengthBoxAndBool(value)->box(), state, ValueRangeNonNegative));
+        style->setBorderImageSlicesFill(toAnimatableLengthBoxAndBool(value)->flag());
         return;
     case CSSPropertyBorderImageSource:
         style->setBorderImageSource(state.styleImage(property, toAnimatableImage(value)->toCSSValue()));
@@ -390,6 +391,9 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
         return;
     case CSSPropertyFontSize:
         state.fontBuilder().setSize(animatableValueToFontSize(value));
+        return;
+    case CSSPropertyFontSizeAdjust:
+        state.fontBuilder().setSizeAdjust(clampTo<float>(toAnimatableDouble(value)->toDouble(), 0));
         return;
     case CSSPropertyFontStretch:
         state.fontBuilder().setStretch(animatableValueToFontStretch(value));
@@ -478,7 +482,7 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
         style->setRight(animatableValueToLength(value, state));
         return;
     case CSSPropertyStrokeWidth:
-        style->setStrokeWidth(animatableValueToNonNegativeSVGLength(value));
+        style->setStrokeWidth(animatableValueToUnzoomedLength(value, state, ValueRangeNonNegative));
         return;
     case CSSPropertyStopColor:
         style->setStopColor(toAnimatableColor(value)->color());
@@ -487,10 +491,10 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
         style->setStopOpacity(clampTo<float>(toAnimatableDouble(value)->toDouble(), 0, 1));
         return;
     case CSSPropertyStrokeDasharray:
-        style->setStrokeDashArray(toAnimatableStrokeDasharrayList(value)->toSVGLengthList());
+        style->setStrokeDashArray(toAnimatableStrokeDasharrayList(value)->toSVGDashArray(style->effectiveZoom()));
         return;
     case CSSPropertyStrokeDashoffset:
-        style->setStrokeDashOffset(toAnimatableSVGLength(value)->toSVGLength());
+        style->setStrokeDashOffset(animatableValueToLength(value, state));
         return;
     case CSSPropertyStrokeMiterlimit:
         style->setStrokeMiterLimit(clampTo<float>(toAnimatableDouble(value)->toDouble(), 1));
@@ -602,12 +606,27 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
     case CSSPropertyTransformOrigin:
         style->setTransformOrigin(animatableValueToTransformOrigin(value, state));
         return;
-    case CSSPropertyMotionPosition:
-        style->setMotionPosition(animatableValueToLength(value, state, ValueRangeNonNegative));
+    case CSSPropertyMotionOffset:
+        style->setMotionOffset(animatableValueToLength(value, state));
         return;
     case CSSPropertyMotionRotation:
         style->setMotionRotation(toAnimatableDoubleAndBool(value)->toDouble());
         style->setMotionRotationType(toAnimatableDoubleAndBool(value)->flag() ? MotionRotationAuto : MotionRotationFixed);
+        return;
+    case CSSPropertyWebkitPerspectiveOriginX:
+        style->setPerspectiveOriginX(animatableValueToLength(value, state));
+        return;
+    case CSSPropertyWebkitPerspectiveOriginY:
+        style->setPerspectiveOriginY(animatableValueToLength(value, state));
+        return;
+    case CSSPropertyWebkitTransformOriginX:
+        style->setTransformOriginX(animatableValueToLength(value, state));
+        return;
+    case CSSPropertyWebkitTransformOriginY:
+        style->setTransformOriginY(animatableValueToLength(value, state));
+        return;
+    case CSSPropertyWebkitTransformOriginZ:
+        style->setTransformOriginZ(toAnimatableDouble(value)->toDouble());
         return;
     case CSSPropertyWidows:
         style->setWidows(animatableValueRoundClampTo<unsigned short>(value, 1));
@@ -627,9 +646,28 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
     case CSSPropertyZIndex:
         style->setZIndex(animatableValueRoundClampTo<int>(value));
         return;
-    case CSSPropertyZoom:
-        style->setZoom(clampTo<float>(toAnimatableDouble(value)->toDouble(), std::numeric_limits<float>::denorm_min()));
+    case CSSPropertyCx:
+        style->setCx(animatableValueToLength(value, state));
         return;
+    case CSSPropertyCy:
+        style->setCy(animatableValueToLength(value, state));
+        return;
+    case CSSPropertyX:
+        style->setX(animatableValueToLength(value, state));
+        return;
+    case CSSPropertyY:
+        style->setY(animatableValueToLength(value, state));
+        return;
+    case CSSPropertyR:
+        style->setR(animatableValueToLength(value, state, ValueRangeNonNegative));
+        return;
+    case CSSPropertyRx:
+        style->setRx(animatableValueToLength(value, state, ValueRangeNonNegative));
+        return;
+    case CSSPropertyRy:
+        style->setRy(animatableValueToLength(value, state, ValueRangeNonNegative));
+        return;
+
     default:
         ASSERT_NOT_REACHED();
     }

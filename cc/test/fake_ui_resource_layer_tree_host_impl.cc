@@ -4,6 +4,7 @@
 
 #include "cc/test/fake_ui_resource_layer_tree_host_impl.h"
 
+#include "cc/resources/ui_resource_bitmap.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
 
 namespace cc {
@@ -11,7 +12,9 @@ namespace cc {
 FakeUIResourceLayerTreeHostImpl::FakeUIResourceLayerTreeHostImpl(
     Proxy* proxy,
     SharedBitmapManager* manager)
-    : FakeLayerTreeHostImpl(proxy, manager), fake_next_resource_id_(1) {}
+    : FakeLayerTreeHostImpl(proxy, manager, nullptr),
+      fake_next_resource_id_(1) {
+}
 
 FakeUIResourceLayerTreeHostImpl::~FakeUIResourceLayerTreeHostImpl() {}
 

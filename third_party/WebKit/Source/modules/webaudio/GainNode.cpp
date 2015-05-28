@@ -23,31 +23,29 @@
  */
 
 #include "config.h"
-
 #if ENABLE(WEB_AUDIO)
-
 #include "modules/webaudio/GainNode.h"
 
-#include "platform/audio/AudioBus.h"
 #include "modules/webaudio/AudioNodeInput.h"
 #include "modules/webaudio/AudioNodeOutput.h"
+#include "platform/audio/AudioBus.h"
 
 namespace blink {
 
-GainNode::GainNode(AudioContext* context, float sampleRate)
-    : AudioNode(NodeTypeGain, context, sampleRate)
+GainHandler::GainHandler(AudioNode& node, float sampleRate)
+    : AudioHandler(NodeTypeGain, node, sampleRate)
     , m_lastGain(1.0)
-    , m_sampleAccurateGainValues(AudioNode::ProcessingSizeInFrames) // FIXME: can probably share temp buffer in context
+    , m_sampleAccurateGainValues(ProcessingSizeInFrames) // FIXME: can probably share temp buffer in context
 {
-    m_gain = AudioParam::create(context, 1.0);
+    m_gain = AudioParam::create(context(), 1.0);
 
     addInput();
-    addOutput(AudioNodeOutput::create(this, 1));
+    addOutput(1);
 
     initialize();
 }
 
-void GainNode::process(size_t framesToProcess)
+void GainHandler::process(size_t framesToProcess)
 {
     // FIXME: for some cases there is a nice optimization to avoid processing here, and let the gain change
     // happen in the summing junction input of the AudioNode we're connected to.
@@ -56,17 +54,17 @@ void GainNode::process(size_t framesToProcess)
     AudioBus* outputBus = output(0)->bus();
     ASSERT(outputBus);
 
-    if (!isInitialized() || !input(0)->isConnected())
+    if (!isInitialized() || !input(0)->isConnected()) {
         outputBus->zero();
-    else {
+    } else {
         AudioBus* inputBus = input(0)->bus();
 
-        if (gain()->hasSampleAccurateValues()) {
+        if (gain()->handler().hasSampleAccurateValues()) {
             // Apply sample-accurate gain scaling for precise envelopes, grain windows, etc.
             ASSERT(framesToProcess <= m_sampleAccurateGainValues.size());
             if (framesToProcess <= m_sampleAccurateGainValues.size()) {
                 float* gainValues = m_sampleAccurateGainValues.data();
-                gain()->calculateSampleAccurateValues(gainValues, framesToProcess);
+                gain()->handler().calculateSampleAccurateValues(gainValues, framesToProcess);
                 outputBus->copyWithSampleAccurateGainValuesFrom(*inputBus, gainValues, framesToProcess);
             }
         } else {
@@ -81,11 +79,13 @@ void GainNode::process(size_t framesToProcess)
 // As soon as we know the channel count of our input, we can lazily initialize.
 // Sometimes this may be called more than once with different channel counts, in which case we must safely
 // uninitialize and then re-initialize with the new channel count.
-void GainNode::checkNumberOfChannelsForInput(AudioNodeInput* input)
+void GainHandler::checkNumberOfChannelsForInput(AudioNodeInput* input)
 {
-    ASSERT(context()->isAudioThread() && context()->isGraphOwner());
+    ASSERT(context()->isAudioThread());
+    ASSERT(context()->isGraphOwner());
 
-    ASSERT(input && input == this->input(0));
+    ASSERT(input);
+    ASSERT(input == this->input(0));
     if (input != this->input(0))
         return;
 
@@ -102,13 +102,31 @@ void GainNode::checkNumberOfChannelsForInput(AudioNodeInput* input)
         initialize();
     }
 
-    AudioNode::checkNumberOfChannelsForInput(input);
+    AudioHandler::checkNumberOfChannelsForInput(input);
 }
 
-void GainNode::trace(Visitor* visitor)
+DEFINE_TRACE(GainHandler)
 {
     visitor->trace(m_gain);
-    AudioNode::trace(visitor);
+    AudioHandler::trace(visitor);
+}
+
+// ----------------------------------------------------------------
+
+GainNode::GainNode(AudioContext& context, float sampelRate)
+    : AudioNode(context)
+{
+    setHandler(new GainHandler(*this, sampelRate));
+}
+
+GainNode* GainNode::create(AudioContext* context, float sampleRate)
+{
+    return new GainNode(*context, sampleRate);
+}
+
+AudioParam* GainNode::gain() const
+{
+    return static_cast<GainHandler&>(handler()).gain();
 }
 
 } // namespace blink

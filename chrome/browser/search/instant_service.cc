@@ -5,7 +5,9 @@
 #include "chrome/browser/search/instant_service.h"
 
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/favicon/fallback_icon_service_factory.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_io_context.h"
 #include "chrome/browser/search/instant_service_observer.h"
@@ -19,10 +21,16 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/thumbnails/thumbnail_list_source.h"
 #include "chrome/browser/ui/search/instant_search_prerenderer.h"
+#include "chrome/browser/ui/webui/fallback_icon_source.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
+#include "chrome/browser/ui/webui/large_icon_source.h"
 #include "chrome/browser/ui/webui/ntp/thumbnail_source.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/render_messages.h"
+#include "components/favicon/core/fallback_icon_service.h"
+#include "components/favicon/core/favicon_service.h"
+#include "components/history/core/browser/top_sites.h"
+#include "components/keyed_service/core/service_access_type.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -92,12 +100,10 @@ InstantService::InstantService(Profile* profile)
                  content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
                  content::NotificationService::AllSources());
 
-  history::TopSites* top_sites = profile_->GetTopSites();
-  if (top_sites) {
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_TOP_SITES_CHANGED,
-                   content::Source<history::TopSites>(top_sites));
-  }
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile_);
+  if (top_sites)
+    top_sites->AddObserver(this);
 
   if (profile_ && profile_->GetResourceContext()) {
     content::BrowserThread::PostTask(
@@ -125,6 +131,16 @@ InstantService::InstantService(Profile* profile)
   content::URLDataSource::Add(profile_, new ThumbnailListSource(profile_));
 #endif  // !defined(OS_ANDROID)
 
+  favicon::FaviconService* favicon_service =
+      FaviconServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
+  favicon::FallbackIconService* fallback_icon_service =
+      FallbackIconServiceFactory::GetForBrowserContext(profile_);
+
+  content::URLDataSource::Add(profile_,
+      new LargeIconSource(favicon_service, fallback_icon_service));
+  content::URLDataSource::Add(
+      profile_, new FallbackIconSource(fallback_icon_service));
   content::URLDataSource::Add(
       profile_, new FaviconSource(profile_, FaviconSource::FAVICON));
   content::URLDataSource::Add(profile_, new MostVisitedIframeSource());
@@ -161,7 +177,8 @@ void InstantService::RemoveObserver(InstantServiceObserver* observer) {
 }
 
 void InstantService::DeleteMostVisitedItem(const GURL& url) {
-  history::TopSites* top_sites = profile_->GetTopSites();
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile_);
   if (!top_sites)
     return;
 
@@ -169,7 +186,8 @@ void InstantService::DeleteMostVisitedItem(const GURL& url) {
 }
 
 void InstantService::UndoMostVisitedDeletion(const GURL& url) {
-  history::TopSites* top_sites = profile_->GetTopSites();
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile_);
   if (!top_sites)
     return;
 
@@ -177,7 +195,8 @@ void InstantService::UndoMostVisitedDeletion(const GURL& url) {
 }
 
 void InstantService::UndoAllMostVisitedDeletions() {
-  history::TopSites* top_sites = profile_->GetTopSites();
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile_);
   if (!top_sites)
     return;
 
@@ -206,6 +225,12 @@ void InstantService::Shutdown() {
         base::Bind(&InstantIOContext::ClearInstantProcessesOnIO,
                    instant_io_context_));
   }
+
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile_);
+  if (top_sites)
+    top_sites->RemoveObserver(this);
+
   instant_io_context_ = NULL;
 }
 
@@ -221,15 +246,6 @@ void InstantService::Observe(int type,
       OnRendererProcessTerminated(
           content::Source<content::RenderProcessHost>(source)->GetID());
       break;
-    case chrome::NOTIFICATION_TOP_SITES_CHANGED: {
-      history::TopSites* top_sites = profile_->GetTopSites();
-      if (top_sites) {
-        top_sites->GetMostVisitedURLs(
-            base::Bind(&InstantService::OnMostVisitedItemsReceived,
-                       weak_ptr_factory_.GetWeakPtr()), false);
-      }
-      break;
-    }
 #if defined(ENABLE_THEMES)
     case chrome::NOTIFICATION_BROWSER_THEME_CHANGED: {
       OnThemeChanged(content::Source<ThemeService>(source).ptr());
@@ -408,19 +424,31 @@ void InstantService::OnTemplateURLServiceChanged() {
   // changed, the effective URLs might change if they reference the Google base
   // URL. The TemplateURLService will notify us when the effective URL changes
   // in this way but it's up to us to do the work to check both.
+  bool google_base_url_domain_changed = false;
   GURL google_base_url(UIThreadSearchTermsData(profile_).GoogleBaseURLValue());
   if (google_base_url != previous_google_base_url_) {
     previous_google_base_url_ = google_base_url;
     if (template_url && template_url->HasGoogleBaseURLs(
             UIThreadSearchTermsData(profile_)))
-      default_search_provider_changed = true;
+      google_base_url_domain_changed = true;
   }
 
-  if (default_search_provider_changed) {
+  if (default_search_provider_changed || google_base_url_domain_changed) {
     ResetInstantSearchPrerenderer();
-    FOR_EACH_OBSERVER(InstantServiceObserver, observers_,
-                      DefaultSearchProviderChanged());
+    FOR_EACH_OBSERVER(
+        InstantServiceObserver, observers_,
+        DefaultSearchProviderChanged(google_base_url_domain_changed));
   }
+}
+
+void InstantService::TopSitesLoaded(history::TopSites* top_sites) {
+}
+
+void InstantService::TopSitesChanged(history::TopSites* top_sites) {
+  top_sites->GetMostVisitedURLs(
+      base::Bind(&InstantService::OnMostVisitedItemsReceived,
+                 weak_ptr_factory_.GetWeakPtr()),
+      false);
 }
 
 void InstantService::ResetInstantSearchPrerenderer() {

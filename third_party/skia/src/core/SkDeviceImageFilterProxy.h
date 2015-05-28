@@ -16,28 +16,25 @@ class SkDeviceImageFilterProxy : public SkImageFilter::Proxy {
 public:
     SkDeviceImageFilterProxy(SkBaseDevice* device, const SkSurfaceProps& props)
         : fDevice(device)
-        , fProps(props.flags(),
-                 SkBaseDevice::CreateInfo::AdjustGeometry(SkImageInfo(),
-                                                          SkBaseDevice::kImageFilter_Usage,
-                                                          props.pixelGeometry()))
+        , fProps(props.flags(), kUnknown_SkPixelGeometry)
     {}
 
-    virtual SkBaseDevice* createDevice(int w, int h) SK_OVERRIDE {
+    SkBaseDevice* createDevice(int w, int h) override {
         SkBaseDevice::CreateInfo cinfo(SkImageInfo::MakeN32Premul(w, h),
-                                       SkBaseDevice::kImageFilter_Usage,
+                                       SkBaseDevice::kPossible_TileUsage,
                                        kUnknown_SkPixelGeometry);
-        return fDevice->onCreateCompatibleDevice(cinfo);
+        return fDevice->onCreateDevice(cinfo, NULL);
     }
-    virtual bool canHandleImageFilter(const SkImageFilter* filter) SK_OVERRIDE {
+    bool canHandleImageFilter(const SkImageFilter* filter) override {
         return fDevice->canHandleImageFilter(filter);
     }
     virtual bool filterImage(const SkImageFilter* filter, const SkBitmap& src,
                              const SkImageFilter::Context& ctx,
-                             SkBitmap* result, SkIPoint* offset) SK_OVERRIDE {
+                             SkBitmap* result, SkIPoint* offset) override {
         return fDevice->filterImage(filter, src, ctx, result, offset);
     }
 
-    virtual const SkSurfaceProps* surfaceProps() const SK_OVERRIDE {
+    const SkSurfaceProps* surfaceProps() const override {
         return &fProps;
     }
 

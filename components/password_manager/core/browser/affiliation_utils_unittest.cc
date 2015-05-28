@@ -4,6 +4,9 @@
 
 #include "components/password_manager/core/browser/affiliation_utils.h"
 
+#include "base/command_line.h"
+#include "base/metrics/field_trial.h"
+#include "components/password_manager/core/common/password_manager_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/url_constants.h"
 
@@ -127,7 +130,7 @@ TEST(AffiliationUtilsTest, InvalidAndroidFacetURIs) {
       // Package name with illegal characters.
       "android://hash@com.$example.android",
       "android://hash@com-example-android",
-      "android://hash@com%2Dexample.android",  // Escaped '-'.
+      "android://hash@com%2Dexample.android",             // Escaped '-'.
       "android://hash@com.example.sz\xc3\xb3t\xc3\xa1r",  // UTF-8 o' and a'.
       // Empty, non-existent and malformed hash part.
       "android://@com.example.android",
@@ -190,6 +193,46 @@ TEST(AffiliationUtilsTest, NotEqualEquivalenceClasses) {
   EXPECT_FALSE(AreEquivalenceClassesEqual(b, c));
   EXPECT_FALSE(AreEquivalenceClassesEqual(c, a));
   EXPECT_FALSE(AreEquivalenceClassesEqual(c, b));
+}
+
+TEST(AffiliationUtilsTest, IsAffiliationBasedMatchingEnabled) {
+  const char kFieldTrialName[] = "AffiliationBasedMatching";
+
+  struct {
+    const char* field_trial_group;
+    const char* command_line_switch;
+    bool expected_enabled;
+  } kTestCases[] = {
+      {"", "", false},
+      {"", switches::kEnableAffiliationBasedMatching, true},
+      {"", switches::kDisableAffiliationBasedMatching, false},
+      {"garbage value", "", false},
+      {"disabled", "", false},
+      {"disabled2", "", false},
+      {"Disabled", "", false},
+      {"Disabled", switches::kDisableAffiliationBasedMatching, false},
+      {"Disabled", switches::kEnableAffiliationBasedMatching, true},
+      {"enabled", "", true},
+      {"enabled2", "", true},
+      {"Enabled", "", true},
+      {"Enabled", switches::kDisableAffiliationBasedMatching, false},
+      {"Enabled", switches::kEnableAffiliationBasedMatching, true}};
+
+  for (const auto& test_case : kTestCases) {
+    SCOPED_TRACE(testing::Message("Command line = ")
+                 << test_case.command_line_switch);
+    SCOPED_TRACE(testing::Message("Group name = ")
+                 << test_case.field_trial_group);
+
+    base::FieldTrialList field_trials(nullptr);
+    base::FieldTrialList::CreateFieldTrial(kFieldTrialName,
+                                           test_case.field_trial_group);
+
+    base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
+    command_line.AppendSwitch(test_case.command_line_switch);
+    EXPECT_EQ(test_case.expected_enabled,
+              IsAffiliationBasedMatchingEnabled(command_line));
+  }
 }
 
 }  // namespace password_manager

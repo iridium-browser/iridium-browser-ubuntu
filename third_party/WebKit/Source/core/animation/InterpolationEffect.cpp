@@ -10,7 +10,7 @@ namespace blink {
 void InterpolationEffect::getActiveInterpolations(double fraction, double iterationDuration, OwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>>& result) const
 {
     if (!result)
-        result = adoptPtrWillBeNoop(new WillBeHeapVector<RefPtrWillBeMember<Interpolation> >());
+        result = adoptPtrWillBeNoop(new WillBeHeapVector<RefPtrWillBeMember<Interpolation>>());
 
     size_t existingSize = result->size();
     size_t resultIndex = 0;
@@ -32,16 +32,55 @@ void InterpolationEffect::getActiveInterpolations(double fraction, double iterat
         result->shrink(resultIndex);
 }
 
-void InterpolationEffect::InterpolationRecord::trace(Visitor* visitor)
+void InterpolationEffect::addInterpolationsFromKeyframes(CSSPropertyID property, Element* element, const ComputedStyle* baseStyle, Keyframe::PropertySpecificKeyframe& keyframeA, Keyframe::PropertySpecificKeyframe& keyframeB, double applyFrom, double applyTo)
+{
+    RefPtrWillBeRawPtr<Interpolation> interpolation = keyframeA.maybeCreateInterpolation(property, keyframeB, element, baseStyle);
+
+    if (interpolation) {
+        addInterpolation(interpolation, &keyframeA.easing(), keyframeA.offset(), keyframeB.offset(), applyFrom, applyTo);
+    } else {
+        RefPtrWillBeRawPtr<Interpolation> interpolationA = keyframeA.maybeCreateInterpolation(property, keyframeA, element, baseStyle);
+        RefPtrWillBeRawPtr<Interpolation> interpolationB = keyframeB.maybeCreateInterpolation(property, keyframeB, element, baseStyle);
+
+        ASSERT(interpolationA);
+        ASSERT(interpolationB);
+
+        Vector<TimingFunction::PartitionRegion> regions = Vector<TimingFunction::PartitionRegion>();
+        keyframeA.easing().partition(regions);
+
+        size_t regionIndex = 0;
+        for (const auto& region : regions) {
+            double regionStart = blend(keyframeA.offset(), keyframeB.offset(), region.start);
+            double regionEnd = blend(keyframeA.offset(), keyframeB.offset(), region.end);
+
+            double regionApplyFrom = regionIndex == 0 ? applyFrom : regionStart;
+            double regionApplyTo = regionIndex == regions.size() - 1 ? applyTo : regionEnd;
+
+            if (region.half == TimingFunction::RangeHalf::Lower) {
+                interpolation = interpolationA;
+            } else if (region.half == TimingFunction::RangeHalf::Upper) {
+                interpolation = interpolationB;
+            } else {
+                ASSERT_NOT_REACHED();
+                continue;
+            }
+
+            addInterpolation(interpolation.release(),
+                &keyframeA.easing(), regionStart, regionEnd, regionApplyFrom, regionApplyTo);
+
+            regionIndex++;
+        }
+    }
+}
+
+DEFINE_TRACE(InterpolationEffect::InterpolationRecord)
 {
     visitor->trace(m_interpolation);
 }
 
-void InterpolationEffect::trace(Visitor* visitor)
+DEFINE_TRACE(InterpolationEffect)
 {
-#if ENABLE_OILPAN
     visitor->trace(m_interpolations);
-#endif
 }
 
-}
+} // namespace blink

@@ -29,19 +29,19 @@
 #ifndef AXSVGRoot_h
 #define AXSVGRoot_h
 
-#include "modules/accessibility/AXRenderObject.h"
+#include "modules/accessibility/AXLayoutObject.h"
 
 namespace blink {
 
 class AXObjectCacheImpl;
 
-class AXSVGRoot final : public AXRenderObject {
+class AXSVGRoot final : public AXLayoutObject {
 
 protected:
-    AXSVGRoot(RenderObject*, AXObjectCacheImpl*);
+    AXSVGRoot(LayoutObject*, AXObjectCacheImpl*);
 
 public:
-    static PassRefPtr<AXSVGRoot> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXSVGRoot> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AXSVGRoot();
 
     void setParent(AXObject*) override;

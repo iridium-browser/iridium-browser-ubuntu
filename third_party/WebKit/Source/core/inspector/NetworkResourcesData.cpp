@@ -65,7 +65,7 @@ XHRReplayData::XHRReplayData(ExecutionContext* executionContext, const AtomicStr
 {
 }
 
-void XHRReplayData::trace(Visitor* visitor)
+DEFINE_TRACE(XHRReplayData)
 {
     ContextLifecycleObserver::trace(visitor);
 }
@@ -334,13 +334,15 @@ void NetworkResourcesData::clear(const String& preservedLoaderId)
     m_requestIdToResourceDataMap.swap(preservedMap);
 
     m_reusedXHRReplayDataRequestIds.clear();
-}
-
-void NetworkResourcesData::setResourcesDataSizeLimits(size_t maximumResourcesContentSize, size_t maximumSingleResourceContentSize)
-{
-    clear();
     m_maximumResourcesContentSize = maximumResourcesContentSize;
     m_maximumSingleResourceContentSize = maximumSingleResourceContentSize;
+}
+
+void NetworkResourcesData::setResourcesDataSizeLimits(size_t resourcesContentSize, size_t singleResourceContentSize)
+{
+    clear();
+    m_maximumResourcesContentSize = resourcesContentSize;
+    m_maximumSingleResourceContentSize = singleResourceContentSize;
 }
 
 NetworkResourcesData::ResourceData* NetworkResourcesData::resourceDataForRequestId(const String& requestId)

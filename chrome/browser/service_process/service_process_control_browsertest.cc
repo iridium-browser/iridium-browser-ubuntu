@@ -9,7 +9,7 @@
 #include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/process/kill.h"
-#include "base/process/process_handle.h"
+#include "base/process/process.h"
 #include "base/process/process_iterator.h"
 #include "base/test/test_timeouts.h"
 #include "chrome/browser/ui/browser.h"
@@ -25,12 +25,9 @@
 class ServiceProcessControlBrowserTest
     : public InProcessBrowserTest {
  public:
-  ServiceProcessControlBrowserTest()
-      : service_process_handle_(base::kNullProcessHandle) {
+  ServiceProcessControlBrowserTest() {
   }
   virtual ~ServiceProcessControlBrowserTest() {
-    base::CloseProcessHandle(service_process_handle_);
-    service_process_handle_ = base::kNullProcessHandle;
   }
 
   void HistogramsCallback() {
@@ -69,7 +66,10 @@ class ServiceProcessControlBrowserTest
   }
 
   virtual void SetUp() override {
-    service_process_handle_ = base::kNullProcessHandle;
+    // This should not be needed because TearDown() ends with a closed
+    // service_process_, but HistogramsTimeout and Histograms fail without this
+    // on Mac.
+    service_process_.Close();
   }
 
   virtual void TearDown() override {
@@ -79,11 +79,12 @@ class ServiceProcessControlBrowserTest
     // ForceServiceProcessShutdown removes the process from launched on Mac.
     ForceServiceProcessShutdown("", 0);
 #endif  // OS_MACOSX
-    if (service_process_handle_ != base::kNullProcessHandle) {
-      EXPECT_TRUE(base::WaitForSingleProcess(
-          service_process_handle_,
-          TestTimeouts::action_max_timeout()));
-      service_process_handle_ = base::kNullProcessHandle;
+    if (service_process_.IsValid()) {
+      int exit_code;
+      EXPECT_TRUE(service_process_.WaitForExitWithTimeout(
+          TestTimeouts::action_max_timeout(), &exit_code));
+      EXPECT_EQ(0, exit_code);
+      service_process_.Close();
     }
   }
 
@@ -91,12 +92,14 @@ class ServiceProcessControlBrowserTest
     base::ProcessId service_pid;
     EXPECT_TRUE(GetServiceProcessData(NULL, &service_pid));
     EXPECT_NE(static_cast<base::ProcessId>(0), service_pid);
-    EXPECT_TRUE(base::OpenProcessHandleWithAccess(
-        service_pid,
-        base::kProcessAccessWaitForTermination |
-        // we need query permission to get exit code
-        base::kProcessAccessQueryInformation,
-        &service_process_handle_));
+#if defined(OS_WIN)
+    service_process_ =
+        base::Process::OpenWithAccess(service_pid,
+                                      SYNCHRONIZE | PROCESS_QUERY_INFORMATION);
+#else
+    service_process_ = base::Process::Open(service_pid);
+#endif
+    EXPECT_TRUE(service_process_.IsValid());
     // Quit the current message. Post a QuitTask instead of just calling Quit()
     // because this can get invoked in the context of a Launch() call and we
     // may not be in Run() yet.
@@ -112,7 +115,7 @@ class ServiceProcessControlBrowserTest
   }
 
  private:
-  base::ProcessHandle service_process_handle_;
+  base::Process service_process_;
 };
 
 class RealServiceProcessControlBrowserTest

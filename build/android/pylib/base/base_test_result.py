@@ -64,6 +64,11 @@ class BaseTestResult(object):
     """Get the test name."""
     return self._name
 
+  def SetType(self, test_type):
+    """Set the test result type."""
+    assert test_type in ResultType.GetTypes()
+    self._test_type = test_type
+
   def GetType(self):
     """Get the test result type."""
     return self._test_type
@@ -71,6 +76,10 @@ class BaseTestResult(object):
   def GetDuration(self):
     """Get the test duration."""
     return self._duration
+
+  def SetLog(self, log):
+    """Set the test log."""
+    self._log = log
 
   def GetLog(self):
     """Get the test log."""

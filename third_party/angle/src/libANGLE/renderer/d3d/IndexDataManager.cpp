@@ -10,7 +10,6 @@
 #include "libANGLE/renderer/d3d/IndexDataManager.h"
 #include "libANGLE/renderer/d3d/BufferD3D.h"
 #include "libANGLE/renderer/d3d/IndexBuffer.h"
-#include "libANGLE/renderer/d3d/RendererD3D.h"
 #include "libANGLE/Buffer.h"
 #include "libANGLE/formatutils.h"
 
@@ -56,10 +55,11 @@ static void ConvertIndices(GLenum sourceType, GLenum destinationType, const void
     else UNREACHABLE();
 }
 
-IndexDataManager::IndexDataManager(RendererD3D *renderer)
-    : mRenderer(renderer),
-      mStreamingBufferShort(NULL),
-      mStreamingBufferInt(NULL)
+IndexDataManager::IndexDataManager(BufferFactoryD3D *factory, RendererClass rendererClass)
+    : mFactory(factory),
+      mRendererClass(rendererClass),
+      mStreamingBufferShort(nullptr),
+      mStreamingBufferInt(nullptr)
 {
 }
 
@@ -84,8 +84,10 @@ gl::Error IndexDataManager::prepareIndexData(GLenum type, GLsizei count, gl::Buf
     {
         offset = static_cast<unsigned int>(reinterpret_cast<uintptr_t>(indices));
 
-        storage = BufferD3D::makeBufferD3D(buffer->getImplementation());
+        storage = GetImplAs<BufferD3D>(buffer);
 
+        // We'll trust that the compiler will optimize the % below:
+        // the operands are unsigned and the divisor is a constant.
         switch (type)
         {
           case GL_UNSIGNED_BYTE:  alignedOffset = (offset % sizeof(GLubyte) == 0);  break;
@@ -115,26 +117,18 @@ gl::Error IndexDataManager::prepareIndexData(GLenum type, GLsizei count, gl::Buf
     if (directStorage)
     {
         streamOffset = offset;
-
-        if (!buffer->getIndexRangeCache()->findRange(type, offset, count, NULL, NULL))
-        {
-            buffer->getIndexRangeCache()->addRange(type, offset, count, translated->indexRange, offset);
-        }
     }
     else if (staticBuffer && staticBuffer->getBufferSize() != 0 && staticBuffer->getIndexType() == type && alignedOffset)
     {
         indexBuffer = staticBuffer;
 
-        if (!staticBuffer->getIndexRangeCache()->findRange(type, offset, count, NULL, &streamOffset))
-        {
-            streamOffset = (offset / typeInfo.bytes) * gl::GetTypeInfo(destinationIndexType).bytes;
-            staticBuffer->getIndexRangeCache()->addRange(type, offset, count, translated->indexRange, streamOffset);
-        }
+        // Using bit-shift here is faster than using division.
+        streamOffset = (offset >> typeInfo.bytesShift) << gl::GetTypeInfo(destinationIndexType).bytesShift;
     }
 
     // Avoid D3D11's primitive restart index value
     // see http://msdn.microsoft.com/en-us/library/windows/desktop/bb205124(v=vs.85).aspx
-    if (translated->indexRange.end == 0xFFFF && type == GL_UNSIGNED_SHORT && mRenderer->getMajorShaderModel() > 3)
+    if (translated->indexRange.end == 0xFFFF && type == GL_UNSIGNED_SHORT && mRendererClass == RENDERER_D3D11)
     {
         destinationIndexType = GL_UNSIGNED_INT;
         directStorage = false;
@@ -158,7 +152,8 @@ gl::Error IndexDataManager::prepareIndexData(GLenum type, GLsizei count, gl::Buf
             if (staticBuffer->getBufferSize() == 0 && alignedOffset)
             {
                 indexBuffer = staticBuffer;
-                convertCount = storage->getSize() / typeInfo.bytes;
+                // Using bit-shift here is faster than using division.
+                convertCount = storage->getSize() >> typeInfo.bytesShift;
             }
             else
             {
@@ -169,13 +164,14 @@ gl::Error IndexDataManager::prepareIndexData(GLenum type, GLsizei count, gl::Buf
 
         ASSERT(indexBuffer);
 
-        if (convertCount > std::numeric_limits<unsigned int>::max() / destTypeInfo.bytes)
+        // Using bit-shift here is faster than using division.
+        if (convertCount > (std::numeric_limits<unsigned int>::max() >> destTypeInfo.bytesShift))
         {
             return gl::Error(GL_OUT_OF_MEMORY, "Reserving %u indices of %u bytes each exceeds the maximum buffer size.",
                              convertCount, destTypeInfo.bytes);
         }
 
-        unsigned int bufferSizeRequired = convertCount * destTypeInfo.bytes;
+        unsigned int bufferSizeRequired = convertCount << destTypeInfo.bytesShift;
         error = indexBuffer->reserveBufferSpace(bufferSizeRequired, type);
         if (error.isError())
         {
@@ -208,21 +204,22 @@ gl::Error IndexDataManager::prepareIndexData(GLenum type, GLsizei count, gl::Buf
 
         if (staticBuffer)
         {
-            streamOffset = (offset / typeInfo.bytes) * destTypeInfo.bytes;
-            staticBuffer->getIndexRangeCache()->addRange(type, offset, count, translated->indexRange, streamOffset);
+            // Using bit-shift here is faster than using division.
+            streamOffset = (offset >> typeInfo.bytesShift) << destTypeInfo.bytesShift;
         }
     }
 
     translated->storage = directStorage ? storage : NULL;
     translated->indexBuffer = indexBuffer ? indexBuffer->getIndexBuffer() : NULL;
     translated->serial = directStorage ? storage->getSerial() : indexBuffer->getSerial();
-    translated->startIndex = streamOffset / destTypeInfo.bytes;
+    // Using bit-shift here is faster than using division.
+    translated->startIndex = (streamOffset >> destTypeInfo.bytesShift);
     translated->startOffset = streamOffset;
     translated->indexType = destinationIndexType;
 
     if (storage)
     {
-        storage->promoteStaticUsage(count * typeInfo.bytes);
+        storage->promoteStaticUsage(count << typeInfo.bytesShift);
     }
 
     return gl::Error(GL_NO_ERROR);
@@ -235,7 +232,7 @@ gl::Error IndexDataManager::getStreamingIndexBuffer(GLenum destinationIndexType,
     {
         if (!mStreamingBufferInt)
         {
-            mStreamingBufferInt = new StreamingIndexBufferInterface(mRenderer);
+            mStreamingBufferInt = new StreamingIndexBufferInterface(mFactory);
             gl::Error error = mStreamingBufferInt->reserveBufferSpace(INITIAL_INDEX_BUFFER_SIZE, GL_UNSIGNED_INT);
             if (error.isError())
             {
@@ -253,7 +250,7 @@ gl::Error IndexDataManager::getStreamingIndexBuffer(GLenum destinationIndexType,
 
         if (!mStreamingBufferShort)
         {
-            mStreamingBufferShort = new StreamingIndexBufferInterface(mRenderer);
+            mStreamingBufferShort = new StreamingIndexBufferInterface(mFactory);
             gl::Error error = mStreamingBufferShort->reserveBufferSpace(INITIAL_INDEX_BUFFER_SIZE, GL_UNSIGNED_SHORT);
             if (error.isError())
             {

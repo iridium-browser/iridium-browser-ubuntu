@@ -6,15 +6,16 @@
 
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/browser/web_contents/aura/image_window_delegate.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "ui/aura/window.h"
+#include "ui/aura_extra/image_window_delegate.h"
 #include "ui/base/layout.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image_png_rep.h"
@@ -57,7 +58,8 @@ class ImageLayerDelegate : public ui::LayerDelegate {
 
  private:
   // Overridden from ui::LayerDelegate:
-  void OnPaintLayer(gfx::Canvas* canvas) override {
+  void OnPaintLayer(const ui::PaintContext& context) override {
+    gfx::Canvas* canvas = context.canvas();
     if (image_.IsEmpty()) {
       canvas->DrawColor(SK_ColorWHITE);
     } else {
@@ -162,7 +164,7 @@ void OverscrollNavigationOverlay::StartObserving() {
 
 void OverscrollNavigationOverlay::SetOverlayWindow(
     scoped_ptr<aura::Window> window,
-    ImageWindowDelegate* delegate) {
+    aura_extra::ImageWindowDelegate* delegate) {
   window_ = window.Pass();
   if (window_.get() && window_->parent())
     window_->parent()->StackChildAtTop(window_.get());
@@ -208,8 +210,7 @@ void OverscrollNavigationOverlay::StopObservingIfDone() {
 
 ui::Layer* OverscrollNavigationOverlay::CreateSlideLayer(int offset) {
   const NavigationControllerImpl& controller = web_contents_->GetController();
-  const NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
-      controller.GetEntryAtOffset(offset));
+  const NavigationEntryImpl* entry = controller.GetEntryAtOffset(offset);
 
   gfx::Image image;
   if (entry && entry->screenshot().get()) {
@@ -305,7 +306,7 @@ void OverscrollNavigationOverlay::DidFirstVisuallyNonEmptyPaint() {
   }
 }
 
-void OverscrollNavigationOverlay::DidStopLoading(RenderViewHost* host) {
+void OverscrollNavigationOverlay::DidStopLoading() {
   // Don't compare URLs in this case - it's possible they won't match if
   // a gesture-nav initiated navigation was interrupted by some other in-site
   // navigation ((e.g., from a script, or from a bookmark).

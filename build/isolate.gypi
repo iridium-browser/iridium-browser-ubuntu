@@ -74,24 +74,32 @@
         # the .isolate file but are not considered relative paths.
         '--extra-variable', 'version_full=<(version_full)',
 
-        '--config-variable', 'OS=<(OS)',
         '--config-variable', 'CONFIGURATION_NAME=<(CONFIGURATION_NAME)',
+        '--config-variable', 'OS=<(OS)',
         '--config-variable', 'asan=<(asan)',
         '--config-variable', 'chromeos=<(chromeos)',
         '--config-variable', 'component=<(component)',
+        '--config-variable', 'disable_nacl=<(disable_nacl)',
+        '--config-variable', 'enable_plugins=<(enable_plugins)',
         '--config-variable', 'fastbuild=<(fastbuild)',
+        '--config-variable', 'icu_use_data_file_flag=<(icu_use_data_file_flag)',
         # TODO(kbr): move this to chrome_tests.gypi:gles2_conform_tests_run
         # once support for user-defined config variables is added.
         '--config-variable',
           'internal_gles2_conform_tests=<(internal_gles2_conform_tests)',
-        '--config-variable', 'icu_use_data_file_flag=<(icu_use_data_file_flag)',
-        '--config-variable', 'v8_use_external_startup_data=<(v8_use_external_startup_data)',
-        '--config-variable', 'lsan=<(lsan)',
         '--config-variable', 'libpeer_target_type=<(libpeer_target_type)',
-        '--config-variable', 'use_openssl=<(use_openssl)',
+        '--config-variable', 'lsan=<(lsan)',
+        '--config-variable', 'msan=<(msan)',
         '--config-variable', 'target_arch=<(target_arch)',
+        '--config-variable', 'tsan=<(tsan)',
+        '--config-variable', 'use_custom_libcxx=<(use_custom_libcxx)',
+        '--config-variable', 'use_instrumented_libraries=<(use_instrumented_libraries)',
+        '--config-variable',
+        'use_prebuilt_instrumented_libraries=<(use_prebuilt_instrumented_libraries)',
+        '--config-variable', 'use_openssl=<(use_openssl)',
         '--config-variable', 'use_ozone=<(use_ozone)',
-        '--config-variable', 'disable_nacl=<(disable_nacl)',
+        '--config-variable', 'use_x11=<(use_x11)',
+        '--config-variable', 'v8_use_external_startup_data=<(v8_use_external_startup_data)',
       ],
       'conditions': [
         # Note: When gyp merges lists, it appends them to the old value.
@@ -104,9 +112,6 @@
         }],
         ["test_isolation_outdir!=''", {
           'action': [ '--isolate-server', '<(test_isolation_outdir)' ],
-        }],
-        ['test_isolation_fail_on_missing == 0', {
-          'action': ['--ignore_broken_items'],
         }],
         ["test_isolation_mode == 'prepare'", {
           'outputs': [

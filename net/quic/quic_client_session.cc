@@ -104,6 +104,8 @@ base::Value* NetLogQuicClientSessionCallback(
   dict->SetString("host", server_id->host());
   dict->SetInteger("port", server_id->port());
   dict->SetBoolean("is_https", server_id->is_https());
+  dict->SetBoolean("privacy_mode",
+                   server_id->privacy_mode() == PRIVACY_MODE_ENABLED);
   dict->SetBoolean("require_confirmation", require_confirmation);
   return dict;
 }
@@ -156,24 +158,25 @@ QuicClientSession::QuicClientSession(
     TransportSecurityState* transport_security_state,
     scoped_ptr<QuicServerInfo> server_info,
     const QuicConfig& config,
+    const char* const connection_description,
+    base::TimeTicks dns_resolution_end_time,
     base::TaskRunner* task_runner,
     NetLog* net_log)
     : QuicClientSessionBase(connection, config),
       require_confirmation_(false),
       stream_factory_(stream_factory),
       socket_(socket.Pass()),
-      read_buffer_(new IOBufferWithSize(kMaxPacketSize)),
       transport_security_state_(transport_security_state),
       server_info_(server_info.Pass()),
-      read_pending_(false),
       num_total_streams_(0),
       task_runner_(task_runner),
       net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_QUIC_SESSION)),
-      logger_(new QuicConnectionLogger(this, net_log_)),
-      num_packets_read_(0),
+      packet_reader_(socket_.get(), this, net_log_),
+      dns_resolution_end_time_(dns_resolution_end_time),
+      logger_(new QuicConnectionLogger(this, connection_description, net_log_)),
       going_away_(false),
       weak_factory_(this) {
-  connection->set_debug_visitor(logger_);
+  connection->set_debug_visitor(logger_.get());
   IPEndPoint address;
   if (socket && socket->GetLocalAddress(&address) == OK &&
       address.GetFamily() == ADDRESS_FAMILY_IPV6) {
@@ -430,6 +433,10 @@ QuicClientSession::CreateOutgoingReliableStreamImpl() {
   ActivateStream(stream);
   ++num_total_streams_;
   UMA_HISTOGRAM_COUNTS("Net.QuicSession.NumOpenStreams", GetNumOpenStreams());
+  // The previous histogram puts 100 in a bucket betweeen 86-113 which does
+  // not shed light on if chrome ever things it has more than 100 streams open.
+  UMA_HISTOGRAM_BOOLEAN("Net.QuicSession.TooManyOpenStream",
+                        GetNumOpenStreams() > 100);
   return stream;
 }
 
@@ -590,6 +597,12 @@ void QuicClientSession::OnClosedStream() {
 }
 
 void QuicClientSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
+  if (stream_factory_ && event == HANDSHAKE_CONFIRMED &&
+      (stream_factory_->OnHandshakeConfirmed(
+          this, logger_->ReceivedPacketLossRate()))) {
+    return;
+  }
+
   if (!callback_.is_null() &&
       (!require_confirmation_ ||
        event == HANDSHAKE_CONFIRMED || event == ENCRYPTION_REESTABLISHED)) {
@@ -603,6 +616,7 @@ void QuicClientSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
     UMA_HISTOGRAM_TIMES("Net.QuicSession.HandshakeConfirmedTime",
                         base::TimeTicks::Now() - handshake_start_);
     if (server_info_) {
+      // TODO(rtenneti): Should we delete this histogram?
       // Track how long it has taken to finish handshake once we start waiting
       // for reading of QUIC server information from disk cache. We could use
       // this data to compare total time taken if we were to cancel the disk
@@ -614,6 +628,13 @@ void QuicClientSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
             "Net.QuicServerInfo.WaitForDataReady.HandshakeConfirmedTime",
             base::TimeTicks::Now() - wait_for_data_start_time);
       }
+    }
+    // Track how long it has taken to finish handshake after we have finished
+    // DNS host resolution.
+    if (!dns_resolution_end_time_.is_null()) {
+      UMA_HISTOGRAM_TIMES(
+          "Net.QuicSession.HostResolution.HandshakeConfirmedTime",
+          base::TimeTicks::Now() - dns_resolution_end_time_);
     }
 
     ObserverSet::iterator it = observers_.begin();
@@ -754,38 +775,26 @@ void QuicClientSession::OnProofVerifyDetailsAvailable(
 }
 
 void QuicClientSession::StartReading() {
-  if (read_pending_) {
-    return;
-  }
-  read_pending_ = true;
-  int rv = socket_->Read(read_buffer_.get(),
-                         read_buffer_->size(),
-                         base::Bind(&QuicClientSession::OnReadComplete,
-                                    weak_factory_.GetWeakPtr()));
-  UMA_HISTOGRAM_BOOLEAN("Net.QuicSession.AsyncRead", rv == ERR_IO_PENDING);
-  if (rv == ERR_IO_PENDING) {
-    num_packets_read_ = 0;
-    return;
-  }
-
-  if (++num_packets_read_ > 32) {
-    num_packets_read_ = 0;
-    // Data was read, process it.
-    // Schedule the work through the message loop to 1) prevent infinite
-    // recursion and 2) avoid blocking the thread for too long.
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&QuicClientSession::OnReadComplete,
-                   weak_factory_.GetWeakPtr(), rv));
-  } else {
-    OnReadComplete(rv);
-  }
+  packet_reader_.StartReading();
 }
 
-void QuicClientSession::CloseSessionOnError(int error) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Net.QuicSession.CloseSessionOnError", -error);
-  CloseSessionOnErrorInner(error, QUIC_INTERNAL_ERROR);
+void QuicClientSession::CloseSessionOnError(int error,
+                                            QuicErrorCode quic_error) {
+  RecordAndCloseSessionOnError(error, quic_error);
   NotifyFactoryOfSessionClosed();
+}
+
+void QuicClientSession::CloseSessionOnErrorAndNotifyFactoryLater(
+    int error,
+    QuicErrorCode quic_error) {
+  RecordAndCloseSessionOnError(error, quic_error);
+  NotifyFactoryOfSessionClosedLater();
+}
+
+void QuicClientSession::RecordAndCloseSessionOnError(int error,
+                                                     QuicErrorCode quic_error) {
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Net.QuicSession.CloseSessionOnError", -error);
+  CloseSessionOnErrorInner(error, quic_error);
 }
 
 void QuicClientSession::CloseSessionOnErrorInner(int net_error,
@@ -861,33 +870,23 @@ base::WeakPtr<QuicClientSession> QuicClientSession::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
 
-void QuicClientSession::OnReadComplete(int result) {
-  read_pending_ = false;
-  if (result == 0)
-    result = ERR_CONNECTION_CLOSED;
+void QuicClientSession::OnReadError(int result) {
+  DVLOG(1) << "Closing session on read error: " << result;
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Net.QuicSession.ReadError", -result);
+  NotifyFactoryOfSessionGoingAway();
+  CloseSessionOnErrorInner(result, QUIC_PACKET_READ_ERROR);
+  NotifyFactoryOfSessionClosedLater();
+}
 
-  if (result < 0) {
-    DVLOG(1) << "Closing session on read error: " << result;
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Net.QuicSession.ReadError", -result);
-    NotifyFactoryOfSessionGoingAway();
-    CloseSessionOnErrorInner(result, QUIC_PACKET_READ_ERROR);
-    NotifyFactoryOfSessionClosedLater();
-    return;
-  }
-
-  QuicEncryptedPacket packet(read_buffer_->data(), result);
-  IPEndPoint local_address;
-  IPEndPoint peer_address;
-  socket_->GetLocalAddress(&local_address);
-  socket_->GetPeerAddress(&peer_address);
-  // ProcessUdpPacket might result in |this| being deleted, so we
-  // use a weak pointer to be safe.
+bool QuicClientSession::OnPacket(const QuicEncryptedPacket& packet,
+                                 IPEndPoint local_address,
+                                 IPEndPoint peer_address) {
   connection()->ProcessUdpPacket(local_address, peer_address, packet);
   if (!connection()->connected()) {
     NotifyFactoryOfSessionClosedLater();
-    return;
+    return false;
   }
-  StartReading();
+  return true;
 }
 
 void QuicClientSession::NotifyFactoryOfSessionGoingAway() {

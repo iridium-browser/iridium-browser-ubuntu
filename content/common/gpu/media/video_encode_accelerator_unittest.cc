@@ -20,6 +20,7 @@
 #include "media/base/bitstream_buffer.h"
 #include "media/base/test_data_util.h"
 #include "media/filters/h264_parser.h"
+#include "media/video/fake_video_encode_accelerator.h"
 #include "media/video/video_encode_accelerator.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -101,6 +102,11 @@ const unsigned int kMinFramesForBitrateTests = 300;
 //   Bitrate is only forced for tests that test bitrate.
 const char* g_default_in_filename = "bear_320x192_40frames.yuv";
 const char* g_default_in_parameters = ":320:192:1:out.h264:200000";
+
+// Enabled by including a --fake_encoder flag to the command line invoking the
+// test.
+bool g_fake_encoder = false;
+
 // Environment to store test stream data for all test cases.
 class VideoEncodeAcceleratorTestEnvironment;
 VideoEncodeAcceleratorTestEnvironment* g_env;
@@ -395,7 +401,7 @@ class H264Validator : public StreamValidator {
         seen_pps_(false),
         seen_idr_(false) {}
 
-  virtual void ProcessStreamBuffer(const uint8* stream, size_t size) override;
+  void ProcessStreamBuffer(const uint8* stream, size_t size) override;
 
  private:
   // Set to true when encoder provides us with the corresponding NALU type.
@@ -462,7 +468,7 @@ class VP8Validator : public StreamValidator {
       : StreamValidator(frame_cb),
         seen_keyframe_(false) {}
 
-  virtual void ProcessStreamBuffer(const uint8* stream, size_t size) override;
+  void ProcessStreamBuffer(const uint8* stream, size_t size) override;
 
  private:
   // Have we already got a keyframe in the stream?
@@ -510,7 +516,7 @@ class VEAClient : public VideoEncodeAccelerator::Client {
             bool mid_stream_bitrate_switch,
             bool mid_stream_framerate_switch,
             bool run_at_fps);
-  virtual ~VEAClient();
+  ~VEAClient() override;
   void CreateEncoder();
   void DestroyEncoder();
 
@@ -518,17 +524,18 @@ class VEAClient : public VideoEncodeAccelerator::Client {
   double frames_per_second();
 
   // VideoDecodeAccelerator::Client implementation.
-  virtual void RequireBitstreamBuffers(unsigned int input_count,
-                                       const gfx::Size& input_coded_size,
-                                       size_t output_buffer_size) override;
-  virtual void BitstreamBufferReady(int32 bitstream_buffer_id,
-                                    size_t payload_size,
-                                    bool key_frame) override;
-  virtual void NotifyError(VideoEncodeAccelerator::Error error) override;
+  void RequireBitstreamBuffers(unsigned int input_count,
+                               const gfx::Size& input_coded_size,
+                               size_t output_buffer_size) override;
+  void BitstreamBufferReady(int32 bitstream_buffer_id,
+                            size_t payload_size,
+                            bool key_frame) override;
+  void NotifyError(VideoEncodeAccelerator::Error error) override;
 
  private:
   bool has_encoder() { return encoder_.get(); }
 
+  scoped_ptr<media::VideoEncodeAccelerator> CreateFakeVEA();
   scoped_ptr<media::VideoEncodeAccelerator> CreateV4L2VEA();
   scoped_ptr<media::VideoEncodeAccelerator> CreateVaapiVEA();
 
@@ -624,8 +631,11 @@ class VEAClient : public VideoEncodeAccelerator::Client {
   // Request a keyframe every keyframe_period_ frames.
   const unsigned int keyframe_period_;
 
-  // Frame number for which we requested a keyframe.
-  unsigned int keyframe_requested_at_;
+  // Number of keyframes requested by now.
+  unsigned int num_keyframes_requested_;
+
+  // Next keyframe expected before next_keyframe_at_ + kMaxKeyframeDelay.
+  unsigned int next_keyframe_at_;
 
   // True if we are asking encoder for a particular bitrate.
   bool force_bitrate_;
@@ -687,7 +697,7 @@ VEAClient::VEAClient(TestStream* test_stream,
     : state_(CS_CREATED),
       test_stream_(test_stream),
       note_(note),
-      next_input_id_(1),
+      next_input_id_(0),
       next_output_buffer_id_(0),
       pos_in_input_stream_(0),
       num_required_input_buffers_(0),
@@ -698,7 +708,8 @@ VEAClient::VEAClient(TestStream* test_stream,
       seen_keyframe_in_this_buffer_(false),
       save_to_file_(save_to_file),
       keyframe_period_(keyframe_period),
-      keyframe_requested_at_(kMaxFrameNum),
+      num_keyframes_requested_(0),
+      next_keyframe_at_(kMaxFrameNum),
       force_bitrate_(force_bitrate),
       current_requested_bitrate_(0),
       current_framerate_(0),
@@ -712,11 +723,13 @@ VEAClient::VEAClient(TestStream* test_stream,
   if (keyframe_period_)
     CHECK_LT(kMaxKeyframeDelay, keyframe_period_);
 
-  validator_ = StreamValidator::Create(
-      test_stream_->requested_profile,
-      base::Bind(&VEAClient::HandleEncodedFrame, base::Unretained(this)));
-
-  CHECK(validator_.get());
+  // Fake encoder produces an invalid stream, so skip validating it.
+  if (!g_fake_encoder) {
+    validator_ = StreamValidator::Create(
+        test_stream_->requested_profile,
+        base::Bind(&VEAClient::HandleEncodedFrame, base::Unretained(this)));
+    CHECK(validator_);
+  }
 
   if (save_to_file_) {
     CHECK(!test_stream_->out_filename.empty());
@@ -733,6 +746,17 @@ VEAClient::VEAClient(TestStream* test_stream,
 }
 
 VEAClient::~VEAClient() { CHECK(!has_encoder()); }
+
+scoped_ptr<media::VideoEncodeAccelerator> VEAClient::CreateFakeVEA() {
+  scoped_ptr<media::VideoEncodeAccelerator> encoder;
+  if (g_fake_encoder) {
+    encoder.reset(
+        new media::FakeVideoEncodeAccelerator(
+            scoped_refptr<base::SingleThreadTaskRunner>(
+                base::MessageLoopProxy::current())));
+  }
+  return encoder.Pass();
+}
 
 scoped_ptr<media::VideoEncodeAccelerator> VEAClient::CreateV4L2VEA() {
   scoped_ptr<media::VideoEncodeAccelerator> encoder;
@@ -758,6 +782,7 @@ void VEAClient::CreateEncoder() {
   CHECK(!has_encoder());
 
   scoped_ptr<media::VideoEncodeAccelerator> encoders[] = {
+    CreateFakeVEA(),
     CreateV4L2VEA(),
     CreateVaapiVEA()
   };
@@ -911,7 +936,11 @@ void VEAClient::BitstreamBufferReady(int32 bitstream_buffer_id,
 
   const uint8* stream_ptr = static_cast<const uint8*>(shm->memory());
   if (payload_size > 0) {
-    validator_->ProcessStreamBuffer(stream_ptr, payload_size);
+    if (validator_) {
+      validator_->ProcessStreamBuffer(stream_ptr, payload_size);
+    } else {
+      HandleEncodedFrame(key_frame);
+    }
 
     if (save_to_file_) {
       if (IsVP8(test_stream_->requested_profile))
@@ -1024,8 +1053,8 @@ void VEAClient::FeedEncoderWithOneInput() {
 
   bool force_keyframe = false;
   if (keyframe_period_ && next_input_id_ % keyframe_period_ == 0) {
-    keyframe_requested_at_ = next_input_id_;
     force_keyframe = true;
+    ++num_keyframes_requested_;
   }
 
   scoped_refptr<media::VideoFrame> video_frame =
@@ -1061,12 +1090,6 @@ bool VEAClient::HandleEncodedFrame(bool keyframe) {
   ++num_frames_since_last_check_;
 
   last_frame_ready_time_ = base::TimeTicks::Now();
-  if (keyframe) {
-    // Got keyframe, reset keyframe detection regardless of whether we
-    // got a frame in time or not.
-    keyframe_requested_at_ = kMaxFrameNum;
-    seen_keyframe_in_this_buffer_ = true;
-  }
 
   // Because the keyframe behavior requirements are loose, we give
   // the encoder more freedom here. It could either deliver a keyframe
@@ -1078,7 +1101,14 @@ bool VEAClient::HandleEncodedFrame(bool keyframe) {
   // earlier than we requested one (in time), and not later than
   // kMaxKeyframeDelay frames after the frame, for which we requested
   // it, comes back encoded.
-  EXPECT_LE(num_encoded_frames_, keyframe_requested_at_ + kMaxKeyframeDelay);
+  EXPECT_LE(num_encoded_frames_, next_keyframe_at_ + kMaxKeyframeDelay);
+
+  if (keyframe) {
+    if (num_keyframes_requested_ > 0)
+      --num_keyframes_requested_;
+    next_keyframe_at_ += keyframe_period_;
+    seen_keyframe_in_this_buffer_ = true;
+  }
 
   if (num_encoded_frames_ == num_frames_to_encode_ / 2) {
     VerifyStreamProperties();
@@ -1126,6 +1156,14 @@ void VEAClient::VerifyStreamProperties() {
                 current_requested_bitrate_,
                 kBitrateTolerance * current_requested_bitrate_);
   }
+
+  // All requested keyframes should've been provided. Allow the last requested
+  // frame to remain undelivered if we haven't reached the maximum frame number
+  // by which it should have arrived.
+  if (num_encoded_frames_ < next_keyframe_at_  + kMaxKeyframeDelay)
+    EXPECT_LE(num_keyframes_requested_, 1UL);
+  else
+    EXPECT_EQ(num_keyframes_requested_, 0UL);
 }
 
 void VEAClient::WriteIvfFileHeader() {
@@ -1352,6 +1390,10 @@ int main(int argc, char** argv) {
     if (it->first == "num_frames_to_encode") {
       std::string input(it->second.begin(), it->second.end());
       CHECK(base::StringToInt(input, &content::g_num_frames_to_encode));
+      continue;
+    }
+    if (it->first == "fake_encoder") {
+      content::g_fake_encoder = true;
       continue;
     }
     if (it->first == "run_at_fps") {

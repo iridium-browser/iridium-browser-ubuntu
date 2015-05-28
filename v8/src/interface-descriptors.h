@@ -28,8 +28,10 @@ class PlatformInterfaceDescriptor;
   V(FastCloneShallowArray)                    \
   V(FastCloneShallowObject)                   \
   V(CreateAllocationSite)                     \
+  V(CreateWeakCell)                           \
   V(CallFunction)                             \
   V(CallFunctionWithFeedback)                 \
+  V(CallFunctionWithFeedbackAndVector)        \
   V(CallConstruct)                            \
   V(RegExpConstructResult)                    \
   V(TransitionElementsKind)                   \
@@ -38,6 +40,7 @@ class PlatformInterfaceDescriptor;
   V(ArrayConstructor)                         \
   V(InternalArrayConstructorConstantArgCount) \
   V(InternalArrayConstructor)                 \
+  V(Compare)                                  \
   V(CompareNil)                               \
   V(ToBoolean)                                \
   V(BinaryOp)                                 \
@@ -47,8 +50,9 @@ class PlatformInterfaceDescriptor;
   V(Named)                                    \
   V(CallHandler)                              \
   V(ArgumentAdaptor)                          \
-  V(ApiGetter)                                \
   V(ApiFunction)                              \
+  V(ApiAccessor)                              \
+  V(ApiGetter)                                \
   V(ArgumentsAccessRead)                      \
   V(StoreArrayLiteralElement)                 \
   V(MathPowTagged)                            \
@@ -316,6 +320,19 @@ class CreateAllocationSiteDescriptor : public CallInterfaceDescriptor {
 };
 
 
+class CreateWeakCellDescriptor : public CallInterfaceDescriptor {
+ public:
+  enum ParameterIndices {
+    kVectorIndex,
+    kSlotIndex,
+    kValueIndex,
+    kParameterCount
+  };
+
+  DECLARE_DESCRIPTOR(CreateWeakCellDescriptor, CallInterfaceDescriptor)
+};
+
+
 class CallFunctionDescriptor : public CallInterfaceDescriptor {
  public:
   DECLARE_DESCRIPTOR(CallFunctionDescriptor, CallInterfaceDescriptor)
@@ -325,6 +342,14 @@ class CallFunctionDescriptor : public CallInterfaceDescriptor {
 class CallFunctionWithFeedbackDescriptor : public CallInterfaceDescriptor {
  public:
   DECLARE_DESCRIPTOR(CallFunctionWithFeedbackDescriptor,
+                     CallInterfaceDescriptor)
+};
+
+
+class CallFunctionWithFeedbackAndVectorDescriptor
+    : public CallInterfaceDescriptor {
+ public:
+  DECLARE_DESCRIPTOR(CallFunctionWithFeedbackAndVectorDescriptor,
                      CallInterfaceDescriptor)
 };
 
@@ -379,6 +404,12 @@ class InternalArrayConstructorDescriptor : public CallInterfaceDescriptor {
  public:
   DECLARE_DESCRIPTOR(InternalArrayConstructorDescriptor,
                      CallInterfaceDescriptor)
+};
+
+
+class CompareDescriptor : public CallInterfaceDescriptor {
+ public:
+  DECLARE_DESCRIPTOR(CompareDescriptor, CallInterfaceDescriptor)
 };
 
 
@@ -440,6 +471,12 @@ class ArgumentAdaptorDescriptor : public CallInterfaceDescriptor {
 class ApiFunctionDescriptor : public CallInterfaceDescriptor {
  public:
   DECLARE_DESCRIPTOR(ApiFunctionDescriptor, CallInterfaceDescriptor)
+};
+
+
+class ApiAccessorDescriptor : public CallInterfaceDescriptor {
+ public:
+  DECLARE_DESCRIPTOR(ApiAccessorDescriptor, CallInterfaceDescriptor)
 };
 
 

@@ -15,27 +15,33 @@
 
 namespace blink {
 
-DrawingRecorder::DrawingRecorder(GraphicsContext* context, const DisplayItemClient displayItemClient, DisplayItem::Type displayItemType, const FloatRect& bounds)
+DrawingRecorder::DrawingRecorder(GraphicsContext& context, const DisplayItemClientWrapper& displayItemClient, DisplayItem::Type displayItemType, const FloatRect& bounds)
     : m_context(context)
     , m_displayItemClient(displayItemClient)
     , m_displayItemType(displayItemType)
-    , m_bounds(bounds)
     , m_canUseCachedDrawing(false)
+#if ENABLE(ASSERT)
+    , m_checkedCachedDrawing(false)
+    , m_displayItemPosition(RuntimeEnabledFeatures::slimmingPaintEnabled() ? m_context.displayItemList()->newDisplayItemsSize() : 0)
+#endif
 {
     if (!RuntimeEnabledFeatures::slimmingPaintEnabled())
         return;
 
+    ASSERT(DisplayItem::isDrawingType(displayItemType));
 #if ENABLE(ASSERT)
-    context->setInDrawingRecorder(true);
+    context.setInDrawingRecorder(true);
 #endif
-    ASSERT(context->displayItemList());
-    m_canUseCachedDrawing = context->displayItemList()->clientCacheIsValid(displayItemClient);
-#if ENABLE(ASSERT)
+    ASSERT(context.displayItemList());
+    m_canUseCachedDrawing = context.displayItemList()->clientCacheIsValid(displayItemClient.displayItemClient())
+        && !RuntimeEnabledFeatures::slimmingPaintUnderInvalidationCheckingEnabled();
+
+#ifndef NDEBUG
     // Enable recording to check if any painter is still doing unnecessary painting when we can use cache.
-    m_context->beginRecording(bounds);
+    context.beginRecording(bounds);
 #else
     if (!m_canUseCachedDrawing)
-        m_context->beginRecording(bounds);
+        context.beginRecording(bounds);
 #endif
 }
 
@@ -45,37 +51,32 @@ DrawingRecorder::~DrawingRecorder()
         return;
 
 #if ENABLE(ASSERT)
-    m_context->setInDrawingRecorder(false);
+    ASSERT(m_checkedCachedDrawing);
+    m_context.setInDrawingRecorder(false);
 #endif
 
     OwnPtr<DisplayItem> displayItem;
 
     if (m_canUseCachedDrawing) {
-#if ENABLE(ASSERT)
-        RefPtr<const SkPicture> picture = m_context->endRecording();
-        ASSERT(!picture || !picture->approximateOpCount());
+#ifndef NDEBUG
+        RefPtr<const SkPicture> picture = m_context.endRecording();
+        if (picture && picture->approximateOpCount()) {
+            WTF_LOG_ERROR("Unnecessary painting for %s\n. Should check recorder.canUseCachedDrawing() before painting",
+                m_displayItemClient.debugName().utf8().data());
+        }
 #endif
-        displayItem = CachedDisplayItem::create(m_displayItemClient, m_displayItemType);
+        displayItem = CachedDisplayItem::create(m_displayItemClient, DisplayItem::drawingTypeToCachedType(m_displayItemType));
     } else {
-        RefPtr<const SkPicture> picture = m_context->endRecording();
+        RefPtr<const SkPicture> picture = m_context.endRecording();
         if (!picture || !picture->approximateOpCount())
-            displayItem = DisplayItem::create(m_displayItemClient, m_displayItemType);
-        else
-            displayItem = DrawingDisplayItem::create(m_displayItemClient, m_displayItemType, picture);
+            return;
+        displayItem = DrawingDisplayItem::create(m_displayItemClient, m_displayItemType, picture);
     }
 
-#ifndef NDEBUG
-    displayItem->setClientDebugString(m_clientDebugString);
+#if ENABLE(ASSERT)
+    ASSERT(m_displayItemPosition == m_context.displayItemList()->newDisplayItemsSize());
 #endif
-
-    m_context->displayItemList()->add(displayItem.release());
+    m_context.displayItemList()->add(displayItem.release());
 }
-
-#ifndef NDEBUG
-void DrawingRecorder::setClientDebugString(const WTF::String& clientDebugString)
-{
-    m_clientDebugString = clientDebugString;
-}
-#endif
 
 } // namespace blink

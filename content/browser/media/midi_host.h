@@ -16,6 +16,7 @@
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/browser_thread.h"
 #include "media/midi/midi_manager.h"
+#include "media/midi/midi_port_info.h"
 
 namespace media {
 class MidiManager;
@@ -39,6 +40,8 @@ class CONTENT_EXPORT MidiHost
   void CompleteStartSession(media::MidiResult result) override;
   void AddInputPort(const media::MidiPortInfo& info) override;
   void AddOutputPort(const media::MidiPortInfo& info) override;
+  void SetInputPortState(uint32 port, media::MidiPortState state) override;
+  void SetOutputPortState(uint32 port, media::MidiPortState state) override;
   void ReceiveMidiData(uint32 port,
                        const uint8* data,
                        size_t length,
@@ -55,12 +58,13 @@ class CONTENT_EXPORT MidiHost
 
   void OnEndSession();
 
+ protected:
+  ~MidiHost() override;
+
  private:
   FRIEND_TEST_ALL_PREFIXES(MidiHostTest, IsValidWebMIDIData);
   friend class base::DeleteHelper<MidiHost>;
   friend class BrowserThread;
-
-  ~MidiHost() override;
 
   // Returns true if |data| fulfills the requirements of MidiOutput.send API
   // defined in the WebMIDI spec.
@@ -101,6 +105,12 @@ class CONTENT_EXPORT MidiHost
 
   // Protects access to |sent_bytes_in_flight_|.
   base::Lock in_flight_lock_;
+
+  // How many output port exists.
+  uint32 output_port_count_;
+
+  // Protects access to |output_port_count_|.
+  base::Lock output_port_count_lock_;
 
   DISALLOW_COPY_AND_ASSIGN(MidiHost);
 };

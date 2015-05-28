@@ -13,7 +13,6 @@
     'public/android/java/src/org/chromium/content/browser/accessibility/BrowserAccessibilityManager.java',
     'public/android/java/src/org/chromium/content/browser/BrowserStartupController.java',
     'public/android/java/src/org/chromium/content/browser/ChildProcessLauncher.java',
-    'public/android/java/src/org/chromium/content/browser/ContentSettings.java',
     'public/android/java/src/org/chromium/content/browser/ContentReadbackHandler.java',
     'public/android/java/src/org/chromium/content/browser/ContentVideoView.java',
     'public/android/java/src/org/chromium/content/browser/ContentViewCore.java',
@@ -38,9 +37,9 @@
     'public/android/java/src/org/chromium/content/browser/TimeZoneMonitor.java',
     'public/android/java/src/org/chromium/content/browser/TouchEventSynthesizer.java',
     'public/android/java/src/org/chromium/content/browser/TracingControllerAndroid.java',
-    'public/android/java/src/org/chromium/content/browser/WebContentsObserver.java',
     'public/android/java/src/org/chromium/content/browser/framehost/NavigationControllerImpl.java',
     'public/android/java/src/org/chromium/content/browser/webcontents/WebContentsImpl.java',
+    'public/android/java/src/org/chromium/content/browser/webcontents/WebContentsObserverProxy.java',
     'public/android/java/src/org/chromium/content_public/browser/LoadUrlParams.java',
    ],
   'variables': {

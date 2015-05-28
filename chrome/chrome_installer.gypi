@@ -67,10 +67,10 @@
             'installer/gcapi/gcapi_last_run_test.cc',
             'installer/gcapi/gcapi_omaha_experiment_test.cc',
             'installer/gcapi/gcapi_reactivation_test.cc',
-            'installer/gcapi/gcapi_test_registry_overrider.cc',
-            'installer/gcapi/gcapi_test_registry_overrider.h',
             'installer/gcapi/gcapi_test.cc',
             'installer/gcapi/gcapi_test.rc',
+            'installer/gcapi/gcapi_test_registry_overrider.cc',
+            'installer/gcapi/gcapi_test_registry_overrider.h',
             'installer/gcapi/resource.h',
           ],
         },
@@ -93,6 +93,7 @@
             '..',
           ],
           'sources': [
+            '<(SHARED_INTERMEDIATE_DIR)/chrome_version/other_version.rc',
             'installer/setup/compat_checks_unittest.cc',
             'installer/setup/setup_constants.cc',
             'installer/util/advanced_firewall_manager_win_unittest.cc',
@@ -137,7 +138,6 @@
             'installer/util/uninstall_metrics_unittest.cc',
             'installer/util/wmi_unittest.cc',
             'installer/util/work_item_list_unittest.cc',
-            '<(SHARED_INTERMEDIATE_DIR)/chrome_version/other_version.rc',
           ],
           'msvs_settings': {
             'VCManifestTool': {
@@ -237,19 +237,21 @@
           'sources': [
             '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.rc',
             'installer/mini_installer/chrome.release',
+            'installer/setup/app_launcher_installer.cc',
+            'installer/setup/app_launcher_installer.h',
             'installer/setup/archive_patch_helper.cc',
             'installer/setup/archive_patch_helper.h',
             'installer/setup/install.cc',
             'installer/setup/install.h',
             'installer/setup/install_worker.cc',
             'installer/setup/install_worker.h',
-            'installer/setup/setup_main.cc',
-            'installer/setup/setup_main.h',
             'installer/setup/setup.ico',
             'installer/setup/setup.rc',
             'installer/setup/setup_constants.cc',
             'installer/setup/setup_constants.h',
             'installer/setup/setup_exe_version.rc.version',
+            'installer/setup/setup_main.cc',
+            'installer/setup/setup_main.h',
             'installer/setup/setup_resource.h',
             'installer/setup/setup_util.cc',
             'installer/setup/setup_util.h',
@@ -357,6 +359,8 @@
             'installer/mini_installer/mini_string.cc',
             'installer/mini_installer/mini_string.h',
             'installer/mini_installer/mini_string_test.cc',
+            'installer/setup/app_launcher_installer.cc',  # Move to lib
+            'installer/setup/app_launcher_installer.h',  # Move to lib
             'installer/setup/archive_patch_helper.cc',  # Move to lib
             'installer/setup/archive_patch_helper.h',   # Move to lib
             'installer/setup/archive_patch_helper_unittest.cc',
@@ -457,7 +461,6 @@
           '<(PRODUCT_DIR)/chrome',
           '<(PRODUCT_DIR)/chrome_sandbox',
           '<(PRODUCT_DIR)/libffmpegsumo.so',
-          '<(PRODUCT_DIR)/libpdf.so',
           '<(PRODUCT_DIR)/xdg-mime',
           '<(PRODUCT_DIR)/xdg-settings',
           '<(PRODUCT_DIR)/locales/en-US.pak',

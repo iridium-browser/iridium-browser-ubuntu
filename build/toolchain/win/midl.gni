@@ -16,6 +16,7 @@ import("//build/config/win/visual_studio_version.gni")
 #   out_dir (optional)
 #       Directory to write the generated files to. Defaults to target_gen_dir.
 #
+#   deps (optional)
 #   visibility (optional)
 
 template("midl") {
@@ -56,10 +57,10 @@ template("midl") {
       "$out_dir/$proxy_file",
     ]
 
-    if (cpu_arch == "x86") {
+    if (current_cpu == "x86") {
       win_tool_arch = "environment.x86"
       idl_target_platform = "win32"
-    } else if (cpu_arch == "x64") {
+    } else if (current_cpu == "x64") {
       win_tool_arch = "environment.x64"
       idl_target_platform = "x64"
     } else {
@@ -82,6 +83,10 @@ template("midl") {
       idl_target_platform,
       "/Oicf",
     ]
+
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+    }
   }
 
   source_set(target_name) {

@@ -29,7 +29,6 @@
 
 class SkBitmap;
 class FrameMsg_Navigate;
-struct FrameMsg_Navigate_Params;
 struct MediaPlayerAction;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewMsg_PostMessage_Params;
@@ -84,6 +83,13 @@ struct FileChooserParams;
 // you will not be able to traverse pages back and forward. We need to determine
 // if we want to bring that and other functionality down into this object so it
 // can be shared by others.
+//
+// DEPRECATED: RenderViewHostImpl is being removed as part of the SiteIsolation
+// project. New code should not be added here, but to either RenderFrameHostImpl
+// (if frame specific) or WebContentsImpl (if page specific).
+//
+// For context, please see https://crbug.com/467770 and
+// http://www.chromium.org/developers/design-documents/site-isolation.
 class CONTENT_EXPORT RenderViewHostImpl
     : public RenderViewHost,
       public RenderWidgetHostImpl {
@@ -153,7 +159,6 @@ class CONTENT_EXPORT RenderViewHostImpl
   void ExecutePluginActionAtLocation(
       const gfx::Point& location,
       const blink::WebPluginAction& action) override;
-  void ExitFullscreen() override;
   void FilesSelectedInChooser(
       const std::vector<content::FileChooserFileInfo>& files,
       FileChooserParams::Mode permissions) override;
@@ -169,15 +174,11 @@ class CONTENT_EXPORT RenderViewHostImpl
   WebPreferences GetWebkitPreferences() override;
   void UpdateWebkitPreferences(const WebPreferences& prefs) override;
   void OnWebkitPreferencesChanged() override;
-  void GetAudioOutputControllers(
-      const GetAudioOutputControllersCallback& callback) const override;
   void SelectWordAroundCaret() override;
 
 #if defined(OS_ANDROID)
-  virtual void ActivateNearestFindResult(int request_id,
-                                         float x,
-                                         float y) override;
-  virtual void RequestFindMatchRects(int current_version) override;
+  void ActivateNearestFindResult(int request_id, float x, float y) override;
+  void RequestFindMatchRects(int current_version) override;
 #endif
 
   void set_delegate(RenderViewHostDelegate* d) {
@@ -204,9 +205,6 @@ class CONTENT_EXPORT RenderViewHostImpl
   base::TerminationStatus render_view_termination_status() const {
     return render_view_termination_status_;
   }
-
-  // Returns the content specific prefs for this RenderViewHost.
-  WebPreferences ComputeWebkitPrefs(const GURL& url);
 
   // Tracks whether this RenderViewHost is in an active state (rather than
   // pending swap out, pending deletion, or swapped out), according to its main
@@ -272,7 +270,6 @@ class CONTENT_EXPORT RenderViewHostImpl
   void LostMouseLock() override;
   void SetIsLoading(bool is_loading) override;
   void ForwardMouseEvent(const blink::WebMouseEvent& mouse_event) override;
-  void OnPointerEventActivate() override;
   void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event) override;
   gfx::Rect GetRootWindowResizerRect() const override;
 
@@ -337,11 +334,10 @@ class CONTENT_EXPORT RenderViewHostImpl
   // IPC message handlers.
   void OnShowView(int route_id,
                   WindowOpenDisposition disposition,
-                  const gfx::Rect& initial_pos,
+                  const gfx::Rect& initial_rect,
                   bool user_gesture);
-  void OnShowWidget(int route_id, const gfx::Rect& initial_pos);
+  void OnShowWidget(int route_id, const gfx::Rect& initial_rect);
   void OnShowFullscreenWidget(int route_id);
-  void OnRunModal(int opener_id, IPC::Message* reply_msg);
   void OnRenderViewReady();
   void OnRenderProcessGone(int status, int error_code);
   void OnUpdateState(int32 page_id, const PageState& state);
@@ -349,7 +345,6 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnClose();
   void OnRequestMove(const gfx::Rect& pos);
   void OnDocumentAvailableInMainFrame(bool uses_temporary_zoom_level);
-  void OnToggleFullscreen(bool enter_fullscreen);
   void OnDidContentsPreferredSizeChange(const gfx::Size& new_size);
   void OnPasteFromSelectionClipboard();
   void OnRouteCloseEvent();
@@ -366,6 +361,7 @@ class CONTENT_EXPORT RenderViewHostImpl
                             const gfx::Rect& node_bounds_in_viewport);
   void OnClosePageACK();
   void OnDidZoomURL(double zoom_level, const GURL& url);
+  void OnPageScaleFactorIsOneChanged(bool is_one);
   void OnRunFileChooser(const FileChooserParams& params);
   void OnFocusedNodeTouched(bool editable);
 
@@ -382,6 +378,12 @@ class CONTENT_EXPORT RenderViewHostImpl
   // Delay to wait on closing the WebContents for a beforeunload/unload handler
   // to fire.
   static const int64 kUnloadTimeoutMS;
+
+  // Returns the content specific prefs for this RenderViewHost.
+  // TODO(creis): Move most of this method to RenderProcessHost, since it's
+  // mostly the same across all RVHs in a process.  Move the rest to RFH.
+  // See https://crbug.com/304341.
+  WebPreferences ComputeWebkitPrefs();
 
   // Returns whether the current RenderProcessHost has read access to the files
   // reported in |state|.
@@ -430,12 +432,6 @@ class CONTENT_EXPORT RenderViewHostImpl
 
   // Routing ID for the main frame's RenderFrameHost.
   int main_frame_routing_id_;
-
-  // If we were asked to RunModal, then this will hold the reply_msg that we
-  // must return to the renderer to unblock it.
-  IPC::Message* run_modal_reply_msg_;
-  // This will hold the routing id of the RenderView that opened us.
-  int run_modal_opener_id_;
 
   // Set to true when waiting for a ViewHostMsg_ClosePageACK.
   // TODO(creis): Move to RenderFrameHost and RenderWidgetHost.

@@ -31,9 +31,9 @@
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/ElementTraversal.h"
-#include "core/editing/TextIterator.h"
 #include "core/editing/VisibleUnits.h"
 #include "core/editing/htmlediting.h"
+#include "core/editing/iterators/TextIterator.h"
 #include "core/html/HTMLBRElement.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLLIElement.h"
@@ -412,7 +412,7 @@ PassRefPtrWillBeRawPtr<HTMLElement> InsertListCommand::listifyParagraph(const Vi
     return listElement;
 }
 
-void InsertListCommand::trace(Visitor* visitor)
+DEFINE_TRACE(InsertListCommand)
 {
     visitor->trace(m_listElement);
     CompositeEditCommand::trace(visitor);

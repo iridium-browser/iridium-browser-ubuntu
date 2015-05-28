@@ -104,7 +104,7 @@ void MediaQueryList::stop()
     removeAllEventListeners();
 }
 
-bool MediaQueryList::mediaFeaturesChanged(WillBeHeapVector<RefPtrWillBeMember<MediaQueryListListener> >* listenersToNotify)
+bool MediaQueryList::mediaFeaturesChanged(WillBeHeapVector<RefPtrWillBeMember<MediaQueryListListener>>* listenersToNotify)
 {
     m_matchesDirty = true;
     if (!updateMatches())
@@ -131,7 +131,7 @@ bool MediaQueryList::matches()
     return m_matches;
 }
 
-void MediaQueryList::trace(Visitor* visitor)
+DEFINE_TRACE(MediaQueryList)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_matcher);

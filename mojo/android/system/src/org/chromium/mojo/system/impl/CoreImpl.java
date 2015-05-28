@@ -16,6 +16,7 @@ import org.chromium.mojo.system.MessagePipeHandle;
 import org.chromium.mojo.system.MojoException;
 import org.chromium.mojo.system.MojoResult;
 import org.chromium.mojo.system.Pair;
+import org.chromium.mojo.system.RunLoop;
 import org.chromium.mojo.system.SharedBufferHandle;
 import org.chromium.mojo.system.SharedBufferHandle.DuplicateOptions;
 import org.chromium.mojo.system.SharedBufferHandle.MapFlags;
@@ -24,6 +25,7 @@ import org.chromium.mojo.system.UntypedHandle;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -103,7 +105,7 @@ public class CoreImpl implements Core, AsyncWaiter {
                         new HandleSignals(buffer.getInt(8 * (handles.size() + i))),
                         new HandleSignals(buffer.getInt(8 * (handles.size() + i) + 4)));
             }
-            result.setSignalStates(states);
+            result.setSignalStates(Arrays.asList(states));
         }
         return result;
     }
@@ -202,6 +204,22 @@ public class CoreImpl implements Core, AsyncWaiter {
     @Override
     public AsyncWaiter getDefaultAsyncWaiter() {
         return this;
+    }
+
+    /**
+     * @see Core#createDefaultRunLoop()
+     */
+    @Override
+    public RunLoop createDefaultRunLoop() {
+        return null;
+    }
+
+    /**
+     * @see Core#getCurrentRunLoop()
+     */
+    @Override
+    public RunLoop getCurrentRunLoop() {
+        return null;
     }
 
     /**

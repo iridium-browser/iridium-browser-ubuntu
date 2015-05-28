@@ -16,11 +16,11 @@
 #include "net/base/address_list.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/base/test_completion_callback.h"
 #include "net/cert/test_root_certs.h"
 #include "net/dns/host_resolver.h"
+#include "net/log/net_log.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -59,6 +59,8 @@ void GetKeyExchangesList(int key_exchange, base::ListValue* values) {
     values->Append(new base::StringValue("rsa"));
   if (key_exchange & BaseTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA)
     values->Append(new base::StringValue("dhe_rsa"));
+  if (key_exchange & BaseTestServer::SSLOptions::KEY_EXCHANGE_ECDHE_RSA)
+    values->Append(new base::StringValue("ecdhe_rsa"));
 }
 
 void GetCiphersList(int cipher, base::ListValue* values) {
@@ -70,6 +72,8 @@ void GetCiphersList(int cipher, base::ListValue* values) {
     values->Append(new base::StringValue("aes256"));
   if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_3DES)
     values->Append(new base::StringValue("3des"));
+  if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_AES128GCM)
+    values->Append(new base::StringValue("aes128gcm"));
 }
 
 base::StringValue* GetTLSIntoleranceType(
@@ -103,7 +107,7 @@ BaseTestServer::SSLOptions::SSLOptions()
       staple_ocsp_response(false),
       ocsp_server_unavailable(false),
       enable_npn(false),
-      disable_session_cache(false) {
+      alert_after_handshake(false) {
 }
 
 BaseTestServer::SSLOptions::SSLOptions(
@@ -121,7 +125,7 @@ BaseTestServer::SSLOptions::SSLOptions(
       staple_ocsp_response(false),
       ocsp_server_unavailable(false),
       enable_npn(false),
-      disable_session_cache(false) {
+      alert_after_handshake(false) {
 }
 
 BaseTestServer::SSLOptions::~SSLOptions() {}
@@ -172,7 +176,8 @@ BaseTestServer::BaseTestServer(Type type, const std::string& host)
     : type_(type),
       started_(false),
       log_to_console_(false),
-      ws_basic_auth_(false) {
+      ws_basic_auth_(false),
+      no_anonymous_ftp_user_(false) {
   Init(host);
 }
 
@@ -181,7 +186,8 @@ BaseTestServer::BaseTestServer(Type type, const SSLOptions& ssl_options)
       type_(type),
       started_(false),
       log_to_console_(false),
-      ws_basic_auth_(false) {
+      ws_basic_auth_(false),
+      no_anonymous_ftp_user_(false) {
   DCHECK(UsingSSL(type));
   Init(GetHostname(type, ssl_options));
 }
@@ -397,6 +403,11 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
     arguments->Set("ws-basic-auth", base::Value::CreateNullValue());
   }
 
+  if (no_anonymous_ftp_user_) {
+    DCHECK_EQ(TYPE_FTP, type_);
+    arguments->Set("no-anonymous-ftp-user", base::Value::CreateNullValue());
+  }
+
   if (UsingSSL(type_)) {
     // Check the certificate arguments of the HTTPS server.
     base::FilePath certificate_path(certificates_dir_);
@@ -484,8 +495,8 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
     }
     if (ssl_options_.enable_npn)
       arguments->Set("enable-npn", base::Value::CreateNullValue());
-    if (ssl_options_.disable_session_cache)
-      arguments->Set("disable-session-cache", base::Value::CreateNullValue());
+    if (ssl_options_.alert_after_handshake)
+      arguments->Set("alert-after-handshake", base::Value::CreateNullValue());
   }
 
   return GenerateAdditionalArguments(arguments);

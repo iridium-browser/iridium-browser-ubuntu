@@ -17,9 +17,9 @@
 #include <utility>  // pair
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/audio_coding/neteq/mock/mock_decoder_database.h"
 #include "webrtc/modules/audio_coding/neteq/packet.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 using ::testing::Return;
 using ::testing::ReturnNull;
@@ -31,6 +31,28 @@ static const size_t kPayloadLength = 10;
 static const size_t kRedHeaderLength = 4;  // 4 bytes RED header.
 static const uint16_t kSequenceNumber = 0;
 static const uint32_t kBaseTimestamp = 0x12345678;
+
+// A possible Opus packet that contains FEC is the following.
+// The frame is 20 ms in duration.
+//
+// 0                   1                   2                   3
+// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |0|0|0|0|1|0|0|0|x|1|x|x|x|x|x|x|x|                             |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                             |
+// |                    Compressed frame 1 (N-2 bytes)...          :
+// :                                                               |
+// |                                                               |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+void CreateOpusFecPayload(uint8_t* payload, size_t payload_length,
+                          uint8_t payload_value) {
+  if (payload_length < 2) {
+    return;
+  }
+  payload[0] = 0x08;
+  payload[1] = 0x40;
+  memset(&payload[2], payload_value, payload_length - 2);
+}
 
 // RED headers (according to RFC 2198):
 //
@@ -52,7 +74,8 @@ static const uint32_t kBaseTimestamp = 0x12345678;
 // "behind" the the previous payload.
 Packet* CreateRedPayload(size_t num_payloads,
                          uint8_t* payload_types,
-                         int timestamp_offset) {
+                         int timestamp_offset,
+                         bool embed_opus_fec = false) {
   Packet* packet = new Packet;
   packet->header.payloadType = kRedPayloadType;
   packet->header.timestamp = kBaseTimestamp;
@@ -84,52 +107,34 @@ Packet* CreateRedPayload(size_t num_payloads,
   }
   for (size_t i = 0; i < num_payloads; ++i) {
     // Write |i| to all bytes in each payload.
-    memset(payload_ptr, static_cast<int>(i), kPayloadLength);
+    if (embed_opus_fec) {
+      CreateOpusFecPayload(payload_ptr, kPayloadLength,
+                           static_cast<uint8_t>(i));
+    } else {
+      memset(payload_ptr, static_cast<int>(i), kPayloadLength);
+    }
     payload_ptr += kPayloadLength;
   }
   packet->payload = payload;
   return packet;
 }
 
-
-// A possible Opus packet that contains FEC is the following.
-// The frame is 20 ms in duration.
-//
-// 0                   1                   2                   3
-// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// |0|0|0|0|1|0|0|0|x|1|x|x|x|x|x|x|x|                             |
-// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                             |
-// |                    Compressed frame 1 (N-2 bytes)...          :
-// :                                                               |
-// |                                                               |
-// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-Packet* CreateOpusFecPacket(uint8_t payload_type, size_t payload_length,
-                            uint8_t payload_value) {
-  Packet* packet = new Packet;
-  packet->header.payloadType = payload_type;
-  packet->header.timestamp = kBaseTimestamp;
-  packet->header.sequenceNumber = kSequenceNumber;
-  packet->payload_length = payload_length;
-  uint8_t* payload = new uint8_t[packet->payload_length];
-  payload[0] = 0x08;
-  payload[1] = 0x40;
-  memset(&payload[2], payload_value, payload_length - 2);
-  packet->payload = payload;
-  return packet;
-}
-
 // Create a packet with all payload bytes set to |payload_value|.
 Packet* CreatePacket(uint8_t payload_type, size_t payload_length,
-                     uint8_t payload_value) {
+                     uint8_t payload_value, bool opus_fec = false) {
   Packet* packet = new Packet;
   packet->header.payloadType = payload_type;
   packet->header.timestamp = kBaseTimestamp;
   packet->header.sequenceNumber = kSequenceNumber;
   packet->payload_length = payload_length;
   uint8_t* payload = new uint8_t[packet->payload_length];
-  memset(payload, payload_value, payload_length);
   packet->payload = payload;
+  if (opus_fec) {
+    CreateOpusFecPayload(packet->payload, packet->payload_length,
+                         payload_value);
+  } else {
+    memset(payload, payload_value, payload_length);
+  }
   return packet;
 }
 
@@ -366,27 +371,27 @@ TEST(AudioPayloadSplitter, NonSplittable) {
   // Tell the mock decoder database to return DecoderInfo structs with different
   // codec types.
   // Use scoped pointers to avoid having to delete them later.
-  scoped_ptr<DecoderDatabase::DecoderInfo> info0(
+  rtc::scoped_ptr<DecoderDatabase::DecoderInfo> info0(
       new DecoderDatabase::DecoderInfo(kDecoderISAC, 16000, NULL, false));
   EXPECT_CALL(decoder_database, GetDecoderInfo(0))
       .WillRepeatedly(Return(info0.get()));
-  scoped_ptr<DecoderDatabase::DecoderInfo> info1(
+  rtc::scoped_ptr<DecoderDatabase::DecoderInfo> info1(
       new DecoderDatabase::DecoderInfo(kDecoderISACswb, 32000, NULL, false));
   EXPECT_CALL(decoder_database, GetDecoderInfo(1))
       .WillRepeatedly(Return(info1.get()));
-  scoped_ptr<DecoderDatabase::DecoderInfo> info2(
+  rtc::scoped_ptr<DecoderDatabase::DecoderInfo> info2(
       new DecoderDatabase::DecoderInfo(kDecoderRED, 8000, NULL, false));
   EXPECT_CALL(decoder_database, GetDecoderInfo(2))
       .WillRepeatedly(Return(info2.get()));
-  scoped_ptr<DecoderDatabase::DecoderInfo> info3(
+  rtc::scoped_ptr<DecoderDatabase::DecoderInfo> info3(
       new DecoderDatabase::DecoderInfo(kDecoderAVT, 8000, NULL, false));
   EXPECT_CALL(decoder_database, GetDecoderInfo(3))
       .WillRepeatedly(Return(info3.get()));
-  scoped_ptr<DecoderDatabase::DecoderInfo> info4(
+  rtc::scoped_ptr<DecoderDatabase::DecoderInfo> info4(
       new DecoderDatabase::DecoderInfo(kDecoderCNGnb, 8000, NULL, false));
   EXPECT_CALL(decoder_database, GetDecoderInfo(4))
       .WillRepeatedly(Return(info4.get()));
-  scoped_ptr<DecoderDatabase::DecoderInfo> info5(
+  rtc::scoped_ptr<DecoderDatabase::DecoderInfo> info5(
       new DecoderDatabase::DecoderInfo(kDecoderArbitrary, 8000, NULL, false));
   EXPECT_CALL(decoder_database, GetDecoderInfo(5))
       .WillRepeatedly(Return(info5.get()));
@@ -524,7 +529,7 @@ TEST_P(SplitBySamplesTest, PayloadSizes) {
   // codec types.
   // Use scoped pointers to avoid having to delete them later.
   // (Sample rate is set to 8000 Hz, but does not matter.)
-  scoped_ptr<DecoderDatabase::DecoderInfo> info(
+  rtc::scoped_ptr<DecoderDatabase::DecoderInfo> info(
       new DecoderDatabase::DecoderInfo(decoder_type_, 8000, NULL, false));
   EXPECT_CALL(decoder_database, GetDecoderInfo(kPayloadType))
       .WillRepeatedly(Return(info.get()));
@@ -603,7 +608,7 @@ TEST_P(SplitIlbcTest, NumFrames) {
   // Tell the mock decoder database to return DecoderInfo structs with different
   // codec types.
   // Use scoped pointers to avoid having to delete them later.
-  scoped_ptr<DecoderDatabase::DecoderInfo> info(
+  rtc::scoped_ptr<DecoderDatabase::DecoderInfo> info(
       new DecoderDatabase::DecoderInfo(kDecoderILBC, 8000, NULL, false));
   EXPECT_CALL(decoder_database, GetDecoderInfo(kPayloadType))
       .WillRepeatedly(Return(info.get()));
@@ -666,7 +671,7 @@ TEST(IlbcPayloadSplitter, TooLargePayload) {
   packet_list.push_back(packet);
 
   MockDecoderDatabase decoder_database;
-  scoped_ptr<DecoderDatabase::DecoderInfo> info(
+  rtc::scoped_ptr<DecoderDatabase::DecoderInfo> info(
       new DecoderDatabase::DecoderInfo(kDecoderILBC, 8000, NULL, false));
   EXPECT_CALL(decoder_database, GetDecoderInfo(kPayloadType))
       .WillRepeatedly(Return(info.get()));
@@ -697,7 +702,7 @@ TEST(IlbcPayloadSplitter, UnevenPayload) {
   packet_list.push_back(packet);
 
   MockDecoderDatabase decoder_database;
-  scoped_ptr<DecoderDatabase::DecoderInfo> info(
+  rtc::scoped_ptr<DecoderDatabase::DecoderInfo> info(
       new DecoderDatabase::DecoderInfo(kDecoderILBC, 8000, NULL, false));
   EXPECT_CALL(decoder_database, GetDecoderInfo(kPayloadType))
       .WillRepeatedly(Return(info.get()));
@@ -726,7 +731,7 @@ TEST(FecPayloadSplitter, MixedPayload) {
   decoder_database.RegisterPayload(0, kDecoderOpus);
   decoder_database.RegisterPayload(1, kDecoderPCMu);
 
-  Packet* packet = CreateOpusFecPacket(0, 10, 0xFF);
+  Packet* packet = CreatePacket(0, 10, 0xFF, true);
   packet_list.push_back(packet);
 
   packet = CreatePacket(0, 10, 0); // Non-FEC Opus payload.
@@ -772,6 +777,69 @@ TEST(FecPayloadSplitter, MixedPayload) {
   VerifyPacket(packet, 10, 1, kSequenceNumber, kBaseTimestamp, 0, true);
   delete [] packet->payload;
   delete packet;
+}
+
+TEST(FecPayloadSplitter, EmbedFecInRed) {
+  PacketList packet_list;
+  DecoderDatabase decoder_database;
+
+  const int kTimestampOffset = 20 * 48;  // 20 ms * 48 kHz.
+  uint8_t payload_types[] = {0, 0};
+  decoder_database.RegisterPayload(0, kDecoderOpus);
+  Packet* packet = CreateRedPayload(2, payload_types, kTimestampOffset, true);
+  packet_list.push_back(packet);
+
+  PayloadSplitter splitter;
+  EXPECT_EQ(PayloadSplitter::kOK,
+            splitter.SplitRed(&packet_list));
+  EXPECT_EQ(PayloadSplitter::kOK,
+            splitter.SplitFec(&packet_list, &decoder_database));
+
+  EXPECT_EQ(4u, packet_list.size());
+
+  // Check first packet. FEC packet copied from primary payload in RED.
+  packet = packet_list.front();
+  EXPECT_EQ(0, packet->header.payloadType);
+  EXPECT_EQ(kBaseTimestamp - kTimestampOffset, packet->header.timestamp);
+  EXPECT_EQ(kPayloadLength, packet->payload_length);
+  EXPECT_FALSE(packet->primary);
+  EXPECT_EQ(packet->payload[3], 1);
+  delete [] packet->payload;
+  delete packet;
+  packet_list.pop_front();
+
+  // Check second packet. Normal packet copied from primary payload in RED.
+  packet = packet_list.front();
+  EXPECT_EQ(0, packet->header.payloadType);
+  EXPECT_EQ(kBaseTimestamp, packet->header.timestamp);
+  EXPECT_EQ(kPayloadLength, packet->payload_length);
+  EXPECT_TRUE(packet->primary);
+  EXPECT_EQ(packet->payload[3], 1);
+  delete [] packet->payload;
+  delete packet;
+  packet_list.pop_front();
+
+  // Check third packet. FEC packet copied from secondary payload in RED.
+  packet = packet_list.front();
+  EXPECT_EQ(0, packet->header.payloadType);
+  EXPECT_EQ(kBaseTimestamp - 2 * kTimestampOffset, packet->header.timestamp);
+  EXPECT_EQ(kPayloadLength, packet->payload_length);
+  EXPECT_FALSE(packet->primary);
+  EXPECT_EQ(packet->payload[3], 0);
+  delete [] packet->payload;
+  delete packet;
+  packet_list.pop_front();
+
+  // Check fourth packet. Normal packet copied from primary payload in RED.
+  packet = packet_list.front();
+  EXPECT_EQ(0, packet->header.payloadType);
+  EXPECT_EQ(kBaseTimestamp - kTimestampOffset, packet->header.timestamp);
+  EXPECT_EQ(kPayloadLength, packet->payload_length);
+  EXPECT_TRUE(packet->primary);
+  EXPECT_EQ(packet->payload[3], 0);
+  delete [] packet->payload;
+  delete packet;
+  packet_list.pop_front();
 }
 
 }  // namespace webrtc

@@ -9,10 +9,9 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_path.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/default_pref_store.h"
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_filter.h"
@@ -24,6 +23,7 @@
 #include "base/prefs/pref_value_store.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
@@ -94,76 +94,90 @@ const PrefHashFilter::TrackedPreferenceMetadata kTrackedPrefs[] = {
   {
     0, prefs::kShowHomeButton,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     1, prefs::kHomePageIsNewTabPage,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     2, prefs::kHomePage,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     3, prefs::kRestoreOnStartup,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     4, prefs::kURLsToRestoreOnStartup,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
 #if defined(ENABLE_EXTENSIONS)
   {
     5, extensions::pref_names::kExtensions,
     PrefHashFilter::NO_ENFORCEMENT,
-    PrefHashFilter::TRACKING_STRATEGY_SPLIT
+    PrefHashFilter::TRACKING_STRATEGY_SPLIT,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
 #endif
   {
     6, prefs::kGoogleServicesLastUsername,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_PERSONAL
   },
   {
     7, prefs::kSearchProviderOverrides,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     8, prefs::kDefaultSearchProviderSearchURL,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     9, prefs::kDefaultSearchProviderKeyword,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     10, prefs::kDefaultSearchProviderName,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
 #if !defined(OS_ANDROID)
   {
     11, prefs::kPinnedTabs,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     13, prefs::kProfileResetPromptMementoInProfilePrefs,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
 #endif
   {
     14, DefaultSearchManager::kDefaultSearchProviderDataPrefName,
     PrefHashFilter::NO_ENFORCEMENT,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     // Protecting kPreferenceResetTime does two things:
@@ -178,35 +192,49 @@ const PrefHashFilter::TrackedPreferenceMetadata kTrackedPrefs[] = {
     //     preference here.
     15, prefs::kPreferenceResetTime,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     17, sync_driver::prefs::kSyncRemainingRollbackTries,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     18, prefs::kSafeBrowsingIncidentsSent,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
 #if defined(OS_WIN)
   {
     19, prefs::kSwReporterPromptVersion,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
   {
     20, prefs::kSwReporterPromptReason,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
   },
 #endif
   {
     21, prefs::kGoogleServicesUsername,
     PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_PERSONAL
   },
+#if defined(OS_WIN)
+  {
+    22, prefs::kSwReporterPromptSeed,
+    PrefHashFilter::ENFORCE_ON_LOAD,
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_IMPERSONAL
+  },
+#endif
   // See note at top, new items added here also need to be added to
   // histograms.xml's TrackedPreference enum.
 };
@@ -413,9 +441,12 @@ void PrepareFactory(
 
 #if defined(ENABLE_SUPERVISED_USERS)
   if (supervised_user_settings) {
-    factory->set_supervised_user_prefs(
-        make_scoped_refptr(
-            new SupervisedUserPrefStore(supervised_user_settings)));
+    scoped_refptr<PrefStore> supervised_user_prefs = make_scoped_refptr(
+        new SupervisedUserPrefStore(supervised_user_settings));
+    // TODO(bauerb): Temporary CHECK while investigating
+    // https://crbug.com/425785. Remove when that bug is fixed.
+    CHECK(async || supervised_user_prefs->IsInitializationComplete());
+    factory->set_supervised_user_prefs(supervised_user_prefs);
   }
 #endif
 
@@ -473,6 +504,7 @@ scoped_ptr<PrefServiceSyncable> CreateProfilePrefs(
     const scoped_refptr<user_prefs::PrefRegistrySyncable>& pref_registry,
     bool async) {
   TRACE_EVENT0("browser", "chrome_prefs::CreateProfilePrefs");
+  SCOPED_UMA_HISTOGRAM_TIMER("PrefService.CreateProfilePrefsTime");
 
   // A StartSyncFlare used to kick sync early in case of a reset event. This is
   // done since sync may bring back the user's server value post-reset which

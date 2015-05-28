@@ -13,46 +13,96 @@ namespace content {
 
 // static
 SharedWorkerDevToolsManager* SharedWorkerDevToolsManager::GetInstance() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return Singleton<SharedWorkerDevToolsManager>::get();
+}
+
+DevToolsAgentHostImpl*
+SharedWorkerDevToolsManager::GetDevToolsAgentHostForWorker(
+    int worker_process_id,
+    int worker_route_id) {
+  AgentHostMap::iterator it = workers_.find(
+      WorkerId(worker_process_id, worker_route_id));
+  return it == workers_.end() ? NULL : it->second;
+}
+
+void SharedWorkerDevToolsManager::AddAllAgentHosts(
+    SharedWorkerDevToolsAgentHost::List* result) {
+  for (auto& worker : workers_) {
+    if (!worker.second->IsTerminated())
+      result->push_back(worker.second);
+  }
 }
 
 bool SharedWorkerDevToolsManager::WorkerCreated(
     int worker_process_id,
     int worker_route_id,
     const SharedWorkerInstance& instance) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   const WorkerId id(worker_process_id, worker_route_id);
-  AgentHostMap::iterator it = FindExistingWorkerAgentHost(instance);
-  if (it == workers().end()) {
-    workers()[id] = new SharedWorkerDevToolsAgentHost(id, instance);
-    DevToolsManager::GetInstance()->AgentHostChanged(workers()[id]);
+  AgentHostMap::iterator it =
+      FindExistingWorkerAgentHost(instance);
+  if (it == workers_.end()) {
+    workers_[id] = new SharedWorkerDevToolsAgentHost(id, instance);
+    DevToolsManager::GetInstance()->AgentHostChanged(workers_[id]);
     return false;
   }
-  WorkerRestarted(id, it);
+
+  // Worker restarted.
+  SharedWorkerDevToolsAgentHost* agent_host = it->second;
+  agent_host->WorkerRestarted(id);
+  workers_.erase(it);
+  workers_[id] = agent_host;
+  DevToolsManager::GetInstance()->AgentHostChanged(agent_host);
   return true;
 }
 
-SharedWorkerDevToolsManager::AgentHostMap::iterator
-SharedWorkerDevToolsManager::FindExistingWorkerAgentHost(
-    const SharedWorkerInstance& instance) {
-  AgentHostMap::iterator it = workers().begin();
-  for (; it != workers().end(); ++it) {
-    if (static_cast<SharedWorkerDevToolsAgentHost*>(
-            it->second)->Matches(instance))
-      break;
-  }
-  return it;
+void SharedWorkerDevToolsManager::WorkerReadyForInspection(
+    int worker_process_id,
+    int worker_route_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  const WorkerId id(worker_process_id, worker_route_id);
+  AgentHostMap::iterator it = workers_.find(id);
+  DCHECK(it != workers_.end());
+  it->second->WorkerReadyForInspection();
 }
 
+void SharedWorkerDevToolsManager::WorkerDestroyed(
+    int worker_process_id,
+    int worker_route_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  const WorkerId id(worker_process_id, worker_route_id);
+  AgentHostMap::iterator it = workers_.find(id);
+  DCHECK(it != workers_.end());
+  scoped_refptr<SharedWorkerDevToolsAgentHost> agent_host(it->second);
+  agent_host->WorkerDestroyed();
+  DevToolsManager::GetInstance()->AgentHostChanged(agent_host);
+}
+
+void SharedWorkerDevToolsManager::RemoveInspectedWorkerData(WorkerId id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  workers_.erase(id);
+}
 SharedWorkerDevToolsManager::SharedWorkerDevToolsManager() {
 }
 
 SharedWorkerDevToolsManager::~SharedWorkerDevToolsManager() {
 }
 
-void SharedWorkerDevToolsManager::ResetForTesting() {
-  workers().clear();
+SharedWorkerDevToolsManager::AgentHostMap::iterator
+SharedWorkerDevToolsManager::FindExistingWorkerAgentHost(
+    const SharedWorkerInstance& instance) {
+  AgentHostMap::iterator it = workers_.begin();
+  for (; it != workers_.end(); ++it) {
+    if (it->second->Matches(instance))
+      break;
+  }
+  return it;
 }
+
+void SharedWorkerDevToolsManager::ResetForTesting() {
+  workers_.clear();
+}
+
 
 }  // namespace content

@@ -19,10 +19,11 @@
 #include "chrome/browser/supervised_user/experimental/supervised_user_blacklist.h"
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
 #include "chrome/browser/supervised_user/supervised_users.h"
-#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/sync_type_preference_provider.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/sync_driver/sync_service_observer.h"
+#include "net/url_request/url_request_context_getter.h"
 
 #if defined(ENABLE_EXTENSIONS)
 #include "extensions/browser/management_policy.h"
@@ -42,6 +43,7 @@ class SupervisedUserWhitelistService;
 
 namespace base {
 class FilePath;
+class Version;
 }
 
 namespace content {
@@ -50,10 +52,6 @@ class WebContents;
 
 namespace extensions {
 class ExtensionRegistry;
-}
-
-namespace net {
-class URLRequestContextGetter;
 }
 
 namespace user_prefs {
@@ -68,13 +66,13 @@ class SupervisedUserService : public KeyedService,
                               public extensions::ManagementPolicy::Provider,
 #endif
                               public SyncTypePreferenceProvider,
-                              public ProfileSyncServiceObserver,
+                              public sync_driver::SyncServiceObserver,
                               public chrome::BrowserListObserver,
                               public SupervisedUserURLFilter::Observer {
  public:
-  typedef base::Callback<void(content::WebContents*)> NavigationBlockedCallback;
-  typedef base::Callback<void(const GoogleServiceAuthError&)> AuthErrorCallback;
-  typedef base::Callback<void(bool)> SuccessCallback;
+  using NavigationBlockedCallback = base::Callback<void(content::WebContents*)>;
+  using AuthErrorCallback = base::Callback<void(const GoogleServiceAuthError&)>;
+  using SuccessCallback = base::Callback<void(bool)>;
 
   class Delegate {
    public:
@@ -114,13 +112,17 @@ class SupervisedUserService : public KeyedService,
   // Returns the whitelist service.
   SupervisedUserWhitelistService* GetWhitelistService();
 
-  // Whether the user can request access to blocked URLs.
+  // Whether the user can request to get access to blocked URLs or to new
+  // extensions.
   bool AccessRequestsEnabled();
 
-  // Adds an access request for the given URL. The requests are stored using
-  // a prefix followed by a URIEncoded version of the URL. Each entry contains
-  // a dictionary which currently has the timestamp of the request in it.
-  void AddAccessRequest(const GURL& url, const SuccessCallback& callback);
+  // Adds an access request for the given URL.
+  void AddURLAccessRequest(const GURL& url, const SuccessCallback& callback);
+
+  // Adds an update request for the given WebStore item (App/Extension).
+  void AddExtensionUpdateRequest(const std::string& extension_id,
+                                 const base::Version& version,
+                                 const SuccessCallback& callback);
 
   // Returns the email address of the custodian.
   std::string GetCustodianEmailAddress() const;
@@ -137,8 +139,7 @@ class SupervisedUserService : public KeyedService,
   // is empty, or the empty string is there is no second custodian.
   std::string GetSecondCustodianName() const;
 
-  // Initializes this object. This method does nothing if the profile is not
-  // supervised.
+  // Initializes this object.
   void Init();
 
   // Initializes this profile for syncing, using the provided |refresh_token| to
@@ -165,19 +166,10 @@ class SupervisedUserService : public KeyedService,
   void AddPermissionRequestCreator(
       scoped_ptr<PermissionRequestCreator> creator);
 
-#if defined(ENABLE_EXTENSIONS)
-  // extensions::ManagementPolicy::Provider implementation:
-  std::string GetDebugPolicyProviderName() const override;
-  bool UserMayLoad(const extensions::Extension* extension,
-                   base::string16* error) const override;
-  bool UserMayModifySettings(const extensions::Extension* extension,
-                             base::string16* error) const override;
-#endif
-
   // SyncTypePreferenceProvider implementation:
   syncer::ModelTypeSet GetPreferredDataTypes() const override;
 
-  // ProfileSyncServiceObserver implementation:
+  // sync_driver::SyncServiceObserver implementation:
   void OnStateChanged() override;
 
   // chrome::BrowserListObserver implementation:
@@ -195,6 +187,11 @@ class SupervisedUserService : public KeyedService,
                            ChangesIncludedSessionOnChangedSettings);
   FRIEND_TEST_ALL_PREFIXES(SupervisedUserServiceTest,
                            ChangesSyncSessionStateOnChangedSettings);
+  FRIEND_TEST_ALL_PREFIXES(SupervisedUserServiceExtensionTest,
+                           ExtensionManagementPolicyProvider);
+
+  using CreatePermissionRequestCallback =
+      base::Callback<void(PermissionRequestCreator*, const SuccessCallback&)>;
 
   // A bridge from the UI thread to the SupervisedUserURLFilters, one of which
   // lives on the IO thread. This class mediates access to them and makes sure
@@ -216,8 +213,11 @@ class SupervisedUserService : public KeyedService,
     void SetManualHosts(scoped_ptr<std::map<std::string, bool>> host_map);
     void SetManualURLs(scoped_ptr<std::map<GURL, bool>> url_map);
 
-    void InitAsyncURLChecker(net::URLRequestContextGetter* context,
-                             const std::string& cx);
+    void InitAsyncURLChecker(
+        const scoped_refptr<net::URLRequestContextGetter>& context,
+        const std::string& cx);
+
+    void Clear();
 
    private:
     void OnBlacklistLoaded(const base::Closure& callback);
@@ -259,11 +259,14 @@ class SupervisedUserService : public KeyedService,
   void OnCustodianInfoChanged();
 
 #if defined(ENABLE_EXTENSIONS)
-  // Internal implementation for ExtensionManagementPolicy::Delegate methods.
-  // If |error| is not NULL, it will be filled with an error message if the
-  // requested extension action (install, modify status, etc.) is not permitted.
-  bool ExtensionManagementPolicyImpl(const extensions::Extension* extension,
-                                     base::string16* error) const;
+  // extensions::ManagementPolicy::Provider implementation:
+  std::string GetDebugPolicyProviderName() const override;
+  bool UserMayLoad(const extensions::Extension* extension,
+                   base::string16* error) const override;
+  bool UserMayModifySettings(const extensions::Extension* extension,
+                             base::string16* error) const override;
+  bool MustRemainInstalled(const extensions::Extension* extension,
+                           base::string16* error) const override;
 
   // Extensions helper to SetActive().
   void SetExtensionsActive();
@@ -272,13 +275,15 @@ class SupervisedUserService : public KeyedService,
   SupervisedUserSettingsService* GetSettingsService();
 
   size_t FindEnabledPermissionRequestCreator(size_t start);
-  void AddAccessRequestInternal(const GURL& url,
-                                const SuccessCallback& callback,
-                                size_t index);
-  void OnPermissionRequestIssued(const GURL& url,
-                                 const SuccessCallback& callback,
-                                 size_t index,
-                                 bool success);
+  void AddPermissionRequestInternal(
+      const CreatePermissionRequestCallback& create_request,
+      const SuccessCallback& callback,
+      size_t index);
+  void OnPermissionRequestIssued(
+      const CreatePermissionRequestCallback& create_request,
+      const SuccessCallback& callback,
+      size_t index,
+      bool success);
 
   void OnSupervisedUserIdChanged();
 

@@ -40,7 +40,7 @@
 #include "core/events/ScopedEventQueue.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "core/rendering/RenderTextControl.h"
+#include "core/layout/LayoutTextControl.h"
 #include "platform/text/PlatformLocale.h"
 #include "wtf/MathExtras.h"
 #include "wtf/PassOwnPtr.h"
@@ -258,11 +258,6 @@ String NumberInputType::rangeUnderflowText(const Decimal& minimum) const
     return locale().queryString(WebLocalizedString::ValidationRangeUnderflow, localizeValue(serialize(minimum)));
 }
 
-bool NumberInputType::shouldRespectSpeechAttribute()
-{
-    return true;
-}
-
 bool NumberInputType::supportsPlaceholder() const
 {
     return true;
@@ -272,16 +267,16 @@ void NumberInputType::minOrMaxAttributeChanged()
 {
     InputType::minOrMaxAttributeChanged();
 
-    if (element().renderer())
-        element().renderer()->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
+    if (element().layoutObject())
+        element().layoutObject()->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::AttributeChanged);
 }
 
 void NumberInputType::stepAttributeChanged()
 {
     InputType::stepAttributeChanged();
 
-    if (element().renderer())
-        element().renderer()->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
+    if (element().layoutObject())
+        element().layoutObject()->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::AttributeChanged);
 }
 
 bool NumberInputType::supportsSelectionAPI() const

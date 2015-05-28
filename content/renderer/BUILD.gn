@@ -16,7 +16,10 @@ source_set("renderer") {
                         ".",
                         "//content")
 
-  configs += [ "//content:content_implementation" ]
+  configs += [
+    "//content:content_implementation",
+    "//build/config/compiler:no_size_t_to_int_warning",
+  ]
 
   deps = [
     # TODO(GYP) bug 376846 remove this. This should be inherited from //net but
@@ -38,15 +41,15 @@ source_set("renderer") {
     "//jingle:jingle_glue",
     "//media",
     "//media/blink",
-    "//mojo/edk/js",
     "//mojo/environment:chromium",
-    "//mojo/public/js",
-    "//mojo/public/interfaces/application",
     "//net",
     "//skia",
     "//storage/common",
     "//third_party/icu",
     "//third_party/libjingle",
+    "//third_party/mojo/src/mojo/edk/js",
+    "//third_party/mojo/src/mojo/public/js",
+    "//third_party/mojo/src/mojo/public/interfaces/application",
     "//third_party/npapi",
     "//third_party/WebKit/public:blink",
     "//third_party/widevine/cdm:version_h",
@@ -95,6 +98,8 @@ source_set("renderer") {
       "java/gin_java_bridge_object.h",
       "java/gin_java_bridge_value_converter.cc",
       "java/gin_java_bridge_value_converter.h",
+      "java/gin_java_function_invocation_helper.cc",
+      "java/gin_java_function_invocation_helper.h",
     ]
   }
 
@@ -132,8 +137,8 @@ source_set("renderer") {
     ]
   } else {
     sources += [
-      "media/webrtc_logging_noop.cc",
       "media/webrtc_logging.h",
+      "media/webrtc_logging_noop.cc",
     ]
   }
 
@@ -143,9 +148,10 @@ source_set("renderer") {
             ".",
             "//content")
     deps += [
-      "//ppapi:ppapi_host",
-      "//ppapi:ppapi_proxy",
-      "//ppapi:ppapi_shared",
+      "//media/cast:sender",
+      "//ppapi/host",
+      "//ppapi/proxy",
+      "//ppapi/shared_impl",
       "//third_party/libyuv",
     ]
   } else {
@@ -186,5 +192,13 @@ source_set("renderer") {
       "media/crypto/renderer_cdm_manager.cc",
       "media/crypto/renderer_cdm_manager.h",
     ]
+  }
+
+  if (enable_media_mojo_renderer) {
+    sources += [
+      "media/media_renderer_service_provider.cc",
+      "media/media_renderer_service_provider.h",
+    ]
+    deps += [ "//media/mojo/services:renderer_proxy" ]
   }
 }

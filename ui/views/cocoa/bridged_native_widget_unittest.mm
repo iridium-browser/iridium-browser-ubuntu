@@ -78,15 +78,18 @@ class MockNativeWidgetMac : public NativeWidgetMac {
   }
 
   // internal::NativeWidgetPrivate:
-  virtual void InitNativeWidget(const Widget::InitParams& params) override {
+  void InitNativeWidget(const Widget::InitParams& params) override {
     ownership_ = params.ownership;
 
     // Usually the bridge gets initialized here. It is skipped to run extra
     // checks in tests, and so that a second window isn't created.
     delegate()->OnNativeWidgetCreated(true);
+
+    // To allow events to dispatch to a view, it needs a way to get focus.
+    bridge_->SetFocusManager(GetWidget()->GetFocusManager());
   }
 
-  virtual void ReorderNativeViews() override {
+  void ReorderNativeViews() override {
     // Called via Widget::Init to set the content view. No-op in these tests.
   }
 
@@ -107,10 +110,14 @@ class BridgedNativeWidgetTestBase : public ui::CocoaTest {
   }
 
   // Overridden from testing::Test:
-  virtual void SetUp() override {
+  void SetUp() override {
     ui::CocoaTest::SetUp();
 
     init_params_.native_widget = native_widget_mac_;
+
+    // Use a frameless window, otherwise Widget will try to center the window
+    // before the tests covering the Init() flow are ready to do that.
+    init_params_.type = Widget::InitParams::TYPE_WINDOW_FRAMELESS;
 
     // To control the lifetime without an actual window that must be closed,
     // tests in this file need to use WIDGET_OWNS_NATIVE_WIDGET.
@@ -133,7 +140,7 @@ class BridgedNativeWidgetTestBase : public ui::CocoaTest {
 class BridgedNativeWidgetTest : public BridgedNativeWidgetTestBase {
  public:
   BridgedNativeWidgetTest();
-  virtual ~BridgedNativeWidgetTest();
+  ~BridgedNativeWidgetTest() override;
 
   // Install a textfield in the view hierarchy and make it the text input
   // client.
@@ -143,13 +150,14 @@ class BridgedNativeWidgetTest : public BridgedNativeWidgetTestBase {
   std::string GetText();
 
   // testing::Test:
-  virtual void SetUp() override;
-  virtual void TearDown() override;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   scoped_ptr<views::View> view_;
   scoped_ptr<BridgedNativeWidget> bridge_;
   BridgedContentView* ns_view_;  // Weak. Owned by bridge_.
+  base::MessageLoopForUI message_loop_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BridgedNativeWidgetTest);
@@ -165,6 +173,12 @@ void BridgedNativeWidgetTest::InstallTextField(const std::string& text) {
   Textfield* textfield = new Textfield();
   textfield->SetText(ASCIIToUTF16(text));
   view_->AddChildView(textfield);
+
+  // Request focus so the InputMethod can dispatch events to the RootView, and
+  // have them delivered to the textfield. Note that focusing a textfield
+  // schedules a task to flash the cursor, so this requires |message_loop_|.
+  textfield->RequestFocus();
+
   [ns_view_ setTextInputClient:textfield];
 }
 

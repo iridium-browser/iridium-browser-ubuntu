@@ -45,7 +45,7 @@ class MacTool(object):
     """Transforms a tool name like copy-info-plist to CopyInfoPlist"""
     return name_string.title().replace('-', '')
 
-  def ExecCopyBundleResource(self, source, dest):
+  def ExecCopyBundleResource(self, source, dest, convert_to_binary):
     """Copies a resource file to the bundle/Resources directory, performing any
     necessary compilation on each resource."""
     extension = os.path.splitext(source)[1].lower()
@@ -62,7 +62,7 @@ class MacTool(object):
     elif extension == '.storyboard':
       return self._CopyXIBFile(source, dest)
     elif extension == '.strings':
-      self._CopyStringsFile(source, dest)
+      self._CopyStringsFile(source, dest, convert_to_binary)
     else:
       shutil.copy(source, dest)
 
@@ -92,7 +92,11 @@ class MacTool(object):
         sys.stdout.write(line)
     return ibtoolout.returncode
 
-  def _CopyStringsFile(self, source, dest):
+  def _ConvertToBinary(self, dest):
+    subprocess.check_call([
+        'xcrun', 'plutil', '-convert', 'binary1', '-o', dest, dest])
+
+  def _CopyStringsFile(self, source, dest, convert_to_binary):
     """Copies a .strings file using iconv to reconvert the input into UTF-16."""
     input_code = self._DetectInputEncoding(source) or "UTF-8"
 
@@ -111,6 +115,9 @@ class MacTool(object):
     fp = open(dest, 'wb')
     fp.write(s.decode(input_code).encode('UTF-16'))
     fp.close()
+
+    if convert_to_binary == 'True':
+      self._ConvertToBinary(dest)
 
   def _DetectInputEncoding(self, file_name):
     """Reads the first few bytes from file_name and tries to guess the text
@@ -131,7 +138,7 @@ class MacTool(object):
     else:
       return None
 
-  def ExecCopyInfoPlist(self, source, dest, *keys):
+  def ExecCopyInfoPlist(self, source, dest, convert_to_binary, *keys):
     """Copies the |source| Info.plist to the destination directory |dest|."""
     # Read the source Info.plist into memory.
     fd = open(source, 'r')
@@ -185,6 +192,9 @@ class MacTool(object):
     # "compiled".
     self._WritePkgInfo(dest)
 
+    if convert_to_binary == 'True':
+      self._ConvertToBinary(dest)
+
   def _WritePkgInfo(self, info_plist):
     """This writes the PkgInfo file from the data stored in Info.plist."""
     plist = plistlib.readPlist(info_plist)
@@ -234,14 +244,13 @@ class MacTool(object):
     for line in err.splitlines():
       if not libtool_re.match(line) and not libtool_re5.match(line):
         print >>sys.stderr, line
-    # Unconditionally touch any file .a file on the command line if present if
-    # succeeded. A bit hacky.
+    # Unconditionally touch the output .a file on the command line if present
+    # and the command succeeded. A bit hacky.
     if not libtoolout.returncode:
-      archives = [
-        cmd for cmd in cmd_list if cmd.endswith('.a') and os.path.isfile(cmd)
-      ]
-      if len(archives) == 1:
-        os.utime(archives[0], None)
+      for i in range(len(cmd_list) - 1):
+        if cmd_list[i] == "-o" and cmd_list[i+1].endswith('.a'):
+          os.utime(cmd_list[i+1], None)
+          break
     return libtoolout.returncode
 
   def ExecPackageFramework(self, framework, version):

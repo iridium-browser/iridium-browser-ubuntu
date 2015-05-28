@@ -13,7 +13,7 @@
 
 namespace {
 const char kHighResAvatarDownloadUrlPrefix[] =
-    "http://www.gstatic.com/chrome/profile_avatars/";
+    "https://www.gstatic.com/chrome/profile_avatars/";
 }
 
 ProfileAvatarDownloader::ProfileAvatarDownloader(
@@ -44,7 +44,7 @@ void ProfileAvatarDownloader::Start() {
 }
 
 // BitmapFetcherDelegate overrides.
-void ProfileAvatarDownloader::OnFetchComplete(const GURL url,
+void ProfileAvatarDownloader::OnFetchComplete(const GURL& url,
                                               const SkBitmap* bitmap) {
   if (!bitmap || !cache_)
     return;

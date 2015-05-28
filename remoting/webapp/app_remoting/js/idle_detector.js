@@ -38,16 +38,12 @@ remoting.IdleDetector = function(idleWarning, callback) {
   this.callback_ = callback;
 
   /**
-   * @type {number?} The id of the running timer, or null if no timer is
+   * @private {number?} The id of the running timer, or null if no timer is
    *     running.
-   * @private
    */
   this.timerId_ = null;
 
-  /**
-   * @type {?function():void}
-   * @private
-   */
+  /** @private {?function():void} */
   this.resetTimeoutRef_ = null;
 
   var manifest = chrome.runtime.getManifest();
@@ -148,7 +144,7 @@ remoting.IdleDetector.prototype.showIdleWarning_ = function(show) {
 }
 
 /**
- * @param {Array.<{left: number, top: number, width: number, height: number}>}
+ * @param {Array<{left: number, top: number, width: number, height: number}>}
  *     rects List of rectangles.
  */
 remoting.IdleDetector.prototype.addToRegion = function(rects) {

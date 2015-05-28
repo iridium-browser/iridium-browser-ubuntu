@@ -26,11 +26,12 @@
 #ifndef FrameSelection_h
 #define FrameSelection_h
 
+#include "core/CoreExport.h"
 #include "core/dom/Range.h"
 #include "core/editing/Caret.h"
 #include "core/editing/EditingStyle.h"
 #include "core/editing/VisibleSelection.h"
-#include "core/rendering/ScrollAlignment.h"
+#include "core/layout/ScrollAlignment.h"
 #include "platform/Timer.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/LayoutRect.h"
@@ -53,9 +54,9 @@ enum RevealExtentOption {
     DoNotRevealExtent
 };
 
-class FrameSelection final : public NoBaseWillBeGarbageCollectedFinalized<FrameSelection>, public VisibleSelection::ChangeObserver, private CaretBase {
+class CORE_EXPORT FrameSelection final : public NoBaseWillBeGarbageCollectedFinalized<FrameSelection>, public VisibleSelection::ChangeObserver, private CaretBase {
     WTF_MAKE_NONCOPYABLE(FrameSelection);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(FrameSelection);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(FrameSelection);
 public:
     static PassOwnPtrWillBeRawPtr<FrameSelection> create(LocalFrame* frame = nullptr)
@@ -122,6 +123,9 @@ public:
     bool modify(EAlteration, SelectionDirection, TextGranularity, EUserTriggered = NotUserTriggered);
     enum VerticalDirection { DirectionUp, DirectionDown };
     bool modify(EAlteration, unsigned verticalDistance, VerticalDirection, EUserTriggered = NotUserTriggered, CursorAlignOnScroll = AlignCursorOnScrollIfNeeded);
+    // Currently we support only CharaterGranularity and WordGranurarity.
+    void moveRangeSelectionExtent(const VisiblePosition&, TextGranularity);
+    void moveRangeSelection(const VisiblePosition& base, const VisiblePosition& extent, TextGranularity);
 
     TextGranularity granularity() const { return m_granularity; }
 
@@ -137,7 +141,7 @@ public:
     Position end() const { return m_selection.end(); }
 
     // Return the renderer that is responsible for painting the caret (in the selection start node)
-    RenderBlock* caretRenderer() const;
+    LayoutBlock* caretRenderer() const;
 
     // Bounds of (possibly transformed) caret in absolute coords
     IntRect absoluteCaretBounds();
@@ -201,6 +205,7 @@ public:
     void setTypingStyle(PassRefPtrWillBeRawPtr<EditingStyle>);
     void clearTypingStyle();
 
+    String selectedHTMLForClipboard() const;
     String selectedText() const;
     String selectedTextForClipboard() const;
 
@@ -219,7 +224,7 @@ public:
     // VisibleSelection::ChangeObserver interface.
     virtual void didChangeVisibleSelection() override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit FrameSelection(LocalFrame*);

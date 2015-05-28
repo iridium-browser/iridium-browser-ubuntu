@@ -11,11 +11,12 @@
 
 #include "common/angleutils.h"
 #include "common/mathutil.h"
-#include "libANGLE/renderer/d3d/d3d9/ShaderCache.h"
-#include "libANGLE/renderer/d3d/d3d9/VertexDeclarationCache.h"
 #include "libANGLE/renderer/d3d/HLSLCompiler.h"
 #include "libANGLE/renderer/d3d/RendererD3D.h"
-#include "libANGLE/renderer/RenderTarget.h"
+#include "libANGLE/renderer/d3d/RenderTargetD3D.h"
+#include "libANGLE/renderer/d3d/d3d9/DebugAnnotator9.h"
+#include "libANGLE/renderer/d3d/d3d9/ShaderCache.h"
+#include "libANGLE/renderer/d3d/d3d9/VertexDeclarationCache.h"
 
 namespace gl
 {
@@ -29,33 +30,54 @@ class AttributeMap;
 
 namespace rx
 {
-class VertexDataManager;
+class Blit9;
 class IndexDataManager;
 class StreamingIndexBufferInterface;
 class StaticIndexBufferInterface;
+class VertexDataManager;
+struct ClearParameters;
 struct TranslatedAttribute;
-class Blit9;
+
+enum D3D9InitError
+{
+    D3D9_INIT_SUCCESS = 0,
+    // Failed to load the D3D or ANGLE compiler
+    D3D9_INIT_COMPILER_ERROR,
+    // Failed to load a necessary DLL
+    D3D9_INIT_MISSING_DEP,
+    // Device creation error
+    D3D9_INIT_CREATE_DEVICE_ERROR,
+    // System does not meet minimum shader spec
+    D3D9_INIT_UNSUPPORTED_VERSION,
+    // System does not support stretchrect from textures
+    D3D9_INIT_UNSUPPORTED_STRETCHRECT,
+    // A call returned out of memory or device lost
+    D3D9_INIT_OUT_OF_MEMORY,
+    // Other unspecified error
+    D3D9_INIT_OTHER_ERROR,
+    NUM_D3D9_INIT_ERRORS
+};
 
 class Renderer9 : public RendererD3D
 {
   public:
-    Renderer9(egl::Display *display, EGLNativeDisplayType hDc, const egl::AttributeMap &attributes);
+    explicit Renderer9(egl::Display *display);
     virtual ~Renderer9();
 
     static Renderer9 *makeRenderer9(Renderer *renderer);
 
-    virtual EGLint initialize();
+    egl::Error initialize() override;
     virtual bool resetDevice();
 
-    virtual int generateConfigs(ConfigDesc **configDescList);
-    virtual void deleteConfigs(ConfigDesc *configDescList);
+    egl::ConfigSet generateConfigs() const override;
 
     void startScene();
     void endScene();
 
-    virtual gl::Error sync(bool block);
+    gl::Error flush() override;
+    gl::Error finish() override;
 
-    virtual SwapChain *createSwapChain(NativeWindow nativeWindow, HANDLE shareHandle, GLenum backBufferFormat, GLenum depthBufferFormat);
+    virtual SwapChainD3D *createSwapChain(NativeWindow nativeWindow, HANDLE shareHandle, GLenum backBufferFormat, GLenum depthBufferFormat);
 
     gl::Error allocateEventQuery(IDirect3DQuery9 **outQuery);
     void freeEventQuery(IDirect3DQuery9* query);
@@ -69,7 +91,9 @@ class Renderer9 : public RendererD3D
     virtual gl::Error setSamplerState(gl::SamplerType type, int index, gl::Texture *texture, const gl::SamplerState &sampler);
     virtual gl::Error setTexture(gl::SamplerType type, int index, gl::Texture *texture);
 
-    virtual gl::Error setUniformBuffers(const gl::Buffer *vertexUniformBuffers[], const gl::Buffer *fragmentUniformBuffers[]);
+    gl::Error setUniformBuffers(const gl::Data &data,
+                                const GLint vertexUniformBuffers[],
+                                const GLint fragmentUniformBuffers[]) override;
 
     virtual gl::Error setRasterizerState(const gl::RasterizerState &rasterState);
     gl::Error setBlendState(const gl::Framebuffer *framebuffer, const gl::BlendState &blendState, const gl::ColorF &blendColor,
@@ -86,17 +110,18 @@ class Renderer9 : public RendererD3D
     virtual gl::Error applyShaders(gl::Program *program, const gl::VertexFormat inputLayout[], const gl::Framebuffer *framebuffer,
                                    bool rasterizerDiscard, bool transformFeedbackActive);
     virtual gl::Error applyUniforms(const ProgramImpl &program, const std::vector<gl::LinkedUniform*> &uniformArray);
-    virtual bool applyPrimitiveType(GLenum primitiveType, GLsizei elementCount);
-    virtual gl::Error applyVertexBuffer(const gl::State &state, GLint first, GLsizei count, GLsizei instances);
+    virtual bool applyPrimitiveType(GLenum primitiveType, GLsizei elementCount, bool usesPointSize);
+    virtual gl::Error applyVertexBuffer(const gl::State &state, GLenum mode, GLint first, GLsizei count, GLsizei instances);
     virtual gl::Error applyIndexBuffer(const GLvoid *indices, gl::Buffer *elementArrayBuffer, GLsizei count, GLenum mode, GLenum type, TranslatedIndexData *indexInfo);
 
-    virtual void applyTransformFeedbackBuffers(const gl::State& state);
+    void applyTransformFeedbackBuffers(const gl::State &state) override;
 
-    virtual gl::Error drawArrays(GLenum mode, GLsizei count, GLsizei instances, bool transformFeedbackActive);
+    gl::Error drawArrays(const gl::Data &data, GLenum mode, GLsizei count, GLsizei instances, bool usesPointSize) override;
     virtual gl::Error drawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices,
                                    gl::Buffer *elementArrayBuffer, const TranslatedIndexData &indexInfo, GLsizei instances);
 
-    gl::Error clear(const gl::ClearParameters &clearParams, const gl::FramebufferAttachment *colorBuffer,
+    gl::Error clear(const ClearParameters &clearParams,
+                    const gl::FramebufferAttachment *colorBuffer,
                     const gl::FramebufferAttachment *depthStencilBuffer);
 
     virtual void markAllStateDirty();
@@ -123,8 +148,6 @@ class Renderer9 : public RendererD3D
     std::string getShaderModelSuffix() const override;
 
     DWORD getCapsDeclTypes() const;
-    virtual int getMinSwapInterval() const;
-    virtual int getMaxSwapInterval() const;
 
     // Pixel operations
     virtual gl::Error copyImage2D(const gl::Framebuffer *framebuffer, const gl::Rectangle &sourceRect, GLenum destFormat,
@@ -137,11 +160,11 @@ class Renderer9 : public RendererD3D
                                        const gl::Offset &destOffset, TextureStorage *storage, GLint level);
 
     // RenderTarget creation
-    virtual gl::Error createRenderTarget(int width, int height, GLenum format, GLsizei samples, RenderTarget **outRT);
+    virtual gl::Error createRenderTarget(int width, int height, GLenum format, GLsizei samples, RenderTargetD3D **outRT);
 
     // Framebuffer creation
-    virtual DefaultAttachmentImpl *createDefaultAttachment(GLenum type, egl::Surface *surface) override;
-    virtual FramebufferImpl *createFramebuffer() override;
+    FramebufferImpl *createDefaultFramebuffer(const gl::Framebuffer::Data &data) override;
+    FramebufferImpl *createFramebuffer(const gl::Framebuffer::Data &data) override;
 
     // Shader creation
     virtual CompilerImpl *createCompiler(const gl::Data &data);
@@ -151,19 +174,19 @@ class Renderer9 : public RendererD3D
     // Shader operations
     virtual gl::Error loadExecutable(const void *function, size_t length, ShaderType type,
                                      const std::vector<gl::LinkedVarying> &transformFeedbackVaryings,
-                                     bool separatedOutputBuffers, ShaderExecutable **outExecutable);
+                                     bool separatedOutputBuffers, ShaderExecutableD3D **outExecutable);
     virtual gl::Error compileToExecutable(gl::InfoLog &infoLog, const std::string &shaderHLSL, ShaderType type,
                                           const std::vector<gl::LinkedVarying> &transformFeedbackVaryings,
-                                          bool separatedOutputBuffers, D3DWorkaroundType workaround,
-                                          ShaderExecutable **outExectuable);
-    virtual UniformStorage *createUniformStorage(size_t storageSize);
+                                          bool separatedOutputBuffers, const D3DCompilerWorkarounds &workarounds,
+                                          ShaderExecutableD3D **outExectuable);
+    virtual UniformStorageD3D *createUniformStorage(size_t storageSize);
 
     // Image operations
-    virtual Image *createImage();
-    gl::Error generateMipmap(Image *dest, Image *source) override;
-    virtual TextureStorage *createTextureStorage2D(SwapChain *swapChain);
-    virtual TextureStorage *createTextureStorage2D(GLenum internalformat, bool renderTarget, GLsizei width, GLsizei height, int levels);
-    virtual TextureStorage *createTextureStorageCube(GLenum internalformat, bool renderTarget, int size, int levels);
+    virtual ImageD3D *createImage();
+    gl::Error generateMipmap(ImageD3D *dest, ImageD3D *source) override;
+    virtual TextureStorage *createTextureStorage2D(SwapChainD3D *swapChain);
+    virtual TextureStorage *createTextureStorage2D(GLenum internalformat, bool renderTarget, GLsizei width, GLsizei height, int levels, bool hintLevelZeroOnly);
+    virtual TextureStorage *createTextureStorageCube(GLenum internalformat, bool renderTarget, int size, int levels, bool hintLevelZeroOnly);
     virtual TextureStorage *createTextureStorage3D(GLenum internalformat, bool renderTarget, GLsizei width, GLsizei height, GLsizei depth, int levels);
     virtual TextureStorage *createTextureStorage2DArray(GLenum internalformat, bool renderTarget, GLsizei width, GLsizei height, GLsizei depth, int levels);
 
@@ -191,7 +214,7 @@ class Renderer9 : public RendererD3D
 
     // Buffer-to-texture and Texture-to-buffer copies
     virtual bool supportsFastCopyBufferToTexture(GLenum internalFormat) const;
-    virtual gl::Error fastCopyBufferToTexture(const gl::PixelUnpackState &unpack, unsigned int offset, RenderTarget *destRenderTarget,
+    virtual gl::Error fastCopyBufferToTexture(const gl::PixelUnpackState &unpack, unsigned int offset, RenderTargetD3D *destRenderTarget,
                                               GLenum destinationFormat, GLenum sourcePixelsType, const gl::Box &destArea);
 
     // D3D9-renderer specific methods
@@ -205,9 +228,11 @@ class Renderer9 : public RendererD3D
 
     gl::Error copyToRenderTarget(IDirect3DSurface9 *dest, IDirect3DSurface9 *source, bool fromManaged);
 
-  private:
-    DISALLOW_COPY_AND_ASSIGN(Renderer9);
+    RendererClass getRendererClass() const override { return RENDERER_D3D9; }
 
+    D3DDEVTYPE getD3D9DeviceType() const { return mDeviceType; }
+
+  private:
     void generateCaps(gl::Caps *outCaps, gl::TextureCapsMap *outTextureCaps, gl::Extensions *outExtensions) const override;
     Workarounds generateWorkarounds() const override;
 
@@ -227,7 +252,6 @@ class Renderer9 : public RendererD3D
     D3DPOOL getBufferPool(DWORD usage) const;
 
     HMODULE mD3d9Module;
-    HDC mDc;
 
     void initializeDevice();
     D3DPRESENT_PARAMETERS getDefaultPresentParameters();
@@ -258,8 +282,6 @@ class Renderer9 : public RendererD3D
     GLsizei mRepeatDraw;
 
     bool mSceneStarted;
-    int mMinSwapInterval;
-    int mMaxSwapInterval;
 
     bool mVertexTextureSupport;
 
@@ -348,6 +370,7 @@ class Renderer9 : public RendererD3D
     } mNullColorbufferCache[NUM_NULL_COLORBUFFER_CACHE_ENTRIES];
     UINT mMaxNullColorbufferLRU;
 
+    DebugAnnotator9 mAnnotator;
 };
 
 }

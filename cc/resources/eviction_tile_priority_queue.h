@@ -25,10 +25,10 @@ class CC_EXPORT EvictionTilePriorityQueue {
     ~PairedTilingSetQueue();
 
     bool IsEmpty() const;
-    Tile* Top(TreePriority tree_priority);
-    void Pop(TreePriority tree_priority);
+    Tile* Top();
+    void Pop();
 
-    WhichTree NextTileIteratorTree(TreePriority tree_priority) const;
+    WhichTree NextTileIteratorTree() const;
 
     scoped_ptr<TilingSetEvictionQueue> active_queue;
     scoped_ptr<TilingSetEvictionQueue> pending_queue;
@@ -42,7 +42,6 @@ class CC_EXPORT EvictionTilePriorityQueue {
 
   void Build(const std::vector<PictureLayerImpl::Pair>& paired_layers,
              TreePriority tree_priority);
-  void Reset();
 
   bool IsEmpty() const;
   Tile* Top();

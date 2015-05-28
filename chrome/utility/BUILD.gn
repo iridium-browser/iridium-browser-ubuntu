@@ -17,6 +17,7 @@ static_library("utility") {
   public_deps = []
   deps = [
     "//base",
+    "//components/search_engines",
     "//components/strings",
     "//components/url_fixer",
     "//content/public/common",
@@ -30,6 +31,7 @@ static_library("utility") {
   ]
 
   if (!is_android) {
+    deps += [ "//net:net_utility_services" ]
     sources +=
         rebase_path(gypi_values.chrome_utility_importer_sources, ".", "..")
   }
@@ -38,8 +40,6 @@ static_library("utility") {
     deps += [
       "//chrome/common/extensions/api",
       "//extensions/utility",
-
-      #"//third_party/libexif",  TODO(GYP)
     ]
 
     public_deps += [ "//chrome/common/extensions/api" ]
@@ -48,6 +48,11 @@ static_library("utility") {
         rebase_path(gypi_values.chrome_utility_extensions_sources, ".", "..")
     sources +=
         rebase_path(gypi_values.chrome_utility_shared_media_sources, ".", "..")
+
+    # Prevent wininet from loading in the renderer. http://crbug.com/460679
+    if (is_win) {
+      ldflags = [ "/DELAYLOAD:wininet.dll" ]
+    }
 
     if (is_win || is_mac) {
       sources +=
@@ -64,6 +69,12 @@ static_library("utility") {
           rebase_path(gypi_values.chrome_utility_mac_media_gallery_sources,
                       ".",
                       "..")
+    }
+
+    # Linux should use system libexif
+    if (!is_linux) {
+      # TODO(thestig): Properly support building on Linux and ChromeOS.
+      deps += [ "//third_party/libexif" ]
     }
   }
 

@@ -21,8 +21,8 @@ static const int kOpusSamplingKhz = 48;
 class OpusSpeedTest : public AudioCodecSpeedTest {
  protected:
   OpusSpeedTest();
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
   virtual float EncodeABlock(int16_t* in_data, uint8_t* bit_stream,
                              int max_bytes, int* encoded_bytes);
   virtual float DecodeABlock(const uint8_t* bit_stream, int encoded_bytes,
@@ -41,8 +41,10 @@ OpusSpeedTest::OpusSpeedTest()
 
 void OpusSpeedTest::SetUp() {
   AudioCodecSpeedTest::SetUp();
+  // If channels_ == 1, use Opus VOIP mode, otherwise, audio mode.
+  int app = channels_ == 1 ? 0 : 1;
   /* Create encoder memory. */
-  EXPECT_EQ(0, WebRtcOpus_EncoderCreate(&opus_encoder_, channels_));
+  EXPECT_EQ(0, WebRtcOpus_EncoderCreate(&opus_encoder_, channels_, app));
   EXPECT_EQ(0, WebRtcOpus_DecoderCreate(&opus_decoder_, channels_));
   /* Set bitrate. */
   EXPECT_EQ(0, WebRtcOpus_SetBitRate(opus_encoder_, bit_rate_));

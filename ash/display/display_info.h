@@ -5,6 +5,7 @@
 #ifndef ASH_DISPLAY_DISPLAY_INFO_H_
 #define ASH_DISPLAY_DISPLAY_INFO_H_
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -103,16 +104,13 @@ class ASH_EXPORT DisplayInfo {
   // actual overscan automatically, but used in the message.
   bool has_overscan() const { return has_overscan_; }
 
-  void set_rotation(gfx::Display::Rotation rotation) { rotation_ = rotation; }
-  gfx::Display::Rotation rotation() const { return rotation_; }
-
   void set_touch_support(gfx::Display::TouchSupport support) {
     touch_support_ = support;
   }
   gfx::Display::TouchSupport touch_support() const { return touch_support_; }
 
-  void set_touch_device_id(unsigned int id) { touch_device_id_ = id; }
-  unsigned int touch_device_id() const { return touch_device_id_; }
+  void set_touch_device_id(int id) { touch_device_id_ = id; }
+  int touch_device_id() const { return touch_device_id_; }
 
   // Gets/Sets the device scale factor of the display.
   float device_scale_factor() const { return device_scale_factor_; }
@@ -138,6 +136,17 @@ class ASH_EXPORT DisplayInfo {
   // (the effective ui scale is 1.0 in this case).
   float configured_ui_scale() const { return configured_ui_scale_; }
   void set_configured_ui_scale(float scale) { configured_ui_scale_ = scale; }
+
+  // Sets the rotation for the given |source|. Setting a new rotation will also
+  // have it become the active rotation.
+  void SetRotation(gfx::Display::Rotation rotation,
+                   gfx::Display::RotationSource source);
+
+  // Returns the currently active rotation for this display.
+  gfx::Display::Rotation GetActiveRotation() const;
+
+  // Returns the rotation set by a given |source|.
+  gfx::Display::Rotation GetRotation(gfx::Display::RotationSource source) const;
 
   // Returns the ui scale and device scale factor actually used to create
   // display that chrome sees. This can be different from one obtained
@@ -231,12 +240,12 @@ class ASH_EXPORT DisplayInfo {
   int64 id_;
   std::string name_;
   bool has_overscan_;
-  gfx::Display::Rotation rotation_;
+  std::map<gfx::Display::RotationSource, gfx::Display::Rotation> rotations_;
   gfx::Display::TouchSupport touch_support_;
 
   // If the display is also a touch device, it will have a positive
   // |touch_device_id_|. Otherwise |touch_device_id_| is 0.
-  unsigned int touch_device_id_;
+  int touch_device_id_;
 
   // This specifies the device's pixel density. (For example, a
   // display whose DPI is higher than the threshold is considered to have
@@ -279,6 +288,8 @@ class ASH_EXPORT DisplayInfo {
 
   // The list of available variations for the color calibration.
   std::vector<ui::ColorCalibrationProfile> available_color_profiles_;
+
+  // If you add a new member, you need to update Copy().
 };
 
 }  // namespace ash

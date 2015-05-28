@@ -23,7 +23,7 @@
 
 #include "core/svg/SVGClipPathElement.h"
 
-#include "core/rendering/svg/RenderSVGResourceClipper.h"
+#include "core/layout/svg/LayoutSVGResourceClipper.h"
 
 namespace blink {
 
@@ -34,18 +34,13 @@ inline SVGClipPathElement::SVGClipPathElement(Document& document)
     addToPropertyMap(m_clipPathUnits);
 }
 
-void SVGClipPathElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGClipPathElement)
 {
     visitor->trace(m_clipPathUnits);
     SVGGraphicsElement::trace(visitor);
 }
 
 DEFINE_NODE_FACTORY(SVGClipPathElement)
-
-void SVGClipPathElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
-}
 
 void SVGClipPathElement::svgAttributeChanged(const QualifiedName& attrName)
 {
@@ -56,7 +51,7 @@ void SVGClipPathElement::svgAttributeChanged(const QualifiedName& attrName)
 
     SVGElement::InvalidationGuard invalidationGuard(this);
 
-    RenderSVGResourceContainer* renderer = toRenderSVGResourceContainer(this->renderer());
+    LayoutSVGResourceContainer* renderer = toLayoutSVGResourceContainer(this->layoutObject());
     if (renderer)
         renderer->invalidateCacheAndMarkForLayout();
 }
@@ -68,13 +63,13 @@ void SVGClipPathElement::childrenChanged(const ChildrenChange& change)
     if (change.byParser)
         return;
 
-    if (RenderObject* object = renderer())
-        object->setNeedsLayoutAndFullPaintInvalidation();
+    if (LayoutObject* object = layoutObject())
+        object->setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::ChildChanged);
 }
 
-RenderObject* SVGClipPathElement::createRenderer(RenderStyle*)
+LayoutObject* SVGClipPathElement::createLayoutObject(const ComputedStyle&)
 {
-    return new RenderSVGResourceClipper(this);
+    return new LayoutSVGResourceClipper(this);
 }
 
 }

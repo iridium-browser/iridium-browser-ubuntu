@@ -181,7 +181,7 @@ AXObject* AXScrollView::webAreaObject() const
         return 0;
 
     Document* doc = m_scrollView->frame().document();
-    if (!doc || !doc->renderView())
+    if (!doc || !doc->layoutView())
         return 0;
 
     return axObjectCache()->getOrCreate(doc);
@@ -206,7 +206,7 @@ LayoutRect AXScrollView::elementRect() const
     if (!m_scrollView)
         return LayoutRect();
 
-    return m_scrollView->frameRect();
+    return LayoutRect(m_scrollView->frameRect());
 }
 
 FrameView* AXScrollView::documentFrameView() const
@@ -224,7 +224,7 @@ AXObject* AXScrollView::computeParent() const
 
     // FIXME: Broken for OOPI.
     HTMLFrameOwnerElement* owner = m_scrollView->frame().deprecatedLocalOwner();
-    if (owner && owner->renderer())
+    if (owner && owner->layoutObject())
         return axObjectCache()->getOrCreate(owner);
 
     return axObjectCache()->getOrCreate(m_scrollView->frame().pagePopupOwner());
@@ -236,7 +236,7 @@ AXObject* AXScrollView::computeParentIfExists() const
         return 0;
 
     HTMLFrameOwnerElement* owner = m_scrollView->frame().deprecatedLocalOwner();
-    if (owner && owner->renderer())
+    if (owner && owner->layoutObject())
         return axObjectCache()->get(owner);
 
     return axObjectCache()->get(m_scrollView->frame().pagePopupOwner());

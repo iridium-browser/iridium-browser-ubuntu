@@ -11,9 +11,9 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/test/test_simple_task_runner.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/test/test_now_source.h"
 
 namespace cc {
@@ -34,9 +34,9 @@ class TestOrderablePendingTask : public base::TestPendingTask {
   bool operator==(const TestOrderablePendingTask& other) const;
   bool operator<(const TestOrderablePendingTask& other) const;
 
-  // debug tracing functions
-  scoped_refptr<base::debug::ConvertableToTraceFormat> AsValue() const;
-  void AsValueInto(base::debug::TracedValue* state) const;
+  // base::trace_event tracing functionality
+  scoped_refptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
+  void AsValueInto(base::trace_event::TracedValue* state) const;
 
  private:
   static size_t task_id_counter;
@@ -73,6 +73,7 @@ class OrderedSimpleTaskRunner : public base::SingleThreadTaskRunner {
     advance_now_ = advance_now;
   }
 
+  size_t NumPendingTasks() const;
   bool HasPendingTasks() const;
   base::TimeTicks NextTaskTime();
   base::TimeDelta DelayToNextTaskTime();
@@ -102,9 +103,9 @@ class OrderedSimpleTaskRunner : public base::SingleThreadTaskRunner {
   bool RunUntilTime(base::TimeTicks time);
   bool RunForPeriod(base::TimeDelta period);
 
-  // base::debug tracing functionality
-  scoped_refptr<base::debug::ConvertableToTraceFormat> AsValue() const;
-  virtual void AsValueInto(base::debug::TracedValue* state) const;
+  // base::trace_event tracing functionality
+  scoped_refptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
+  virtual void AsValueInto(base::trace_event::TracedValue* state) const;
 
   // Common conditions to run for, exposed publicly to allow external users to
   // use their own combinations.

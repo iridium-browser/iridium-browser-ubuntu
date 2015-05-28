@@ -32,6 +32,8 @@
 #include "modules/crypto/CryptoKey.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/V8ObjectBuilder.h"
+#include "bindings/core/v8/V8Uint8Array.h"
 #include "core/dom/ExceptionCode.h"
 #include "platform/CryptoResult.h"
 #include "public/platform/WebCryptoAlgorithmParams.h"
@@ -96,6 +98,41 @@ WebCryptoKeyUsageMask keyUsageStringToMask(const String& usageString)
     return 0;
 }
 
+class DictionaryBuilder : public blink::WebCryptoKeyAlgorithmDictionary {
+public:
+    explicit DictionaryBuilder(V8ObjectBuilder& builder)
+        : m_builder(builder)
+    {
+    }
+
+    virtual void setString(const char* propertyName, const char* value)
+    {
+        m_builder.addString(propertyName, value);
+    }
+
+    virtual void setUint(const char* propertyName, unsigned value)
+    {
+        m_builder.addNumber(propertyName, value);
+    }
+
+    virtual void setAlgorithm(const char* propertyName, const blink::WebCryptoAlgorithm& algorithm)
+    {
+        ASSERT(algorithm.paramsType() == blink::WebCryptoAlgorithmParamsTypeNone);
+
+        V8ObjectBuilder algorithmValue(m_builder.scriptState());
+        algorithmValue.addString("name", blink::WebCryptoAlgorithm::lookupAlgorithmInfo(algorithm.id())->name);
+        m_builder.add(propertyName, algorithmValue);
+    }
+
+    virtual void setUint8Array(const char* propertyName, const blink::WebVector<unsigned char>& vector)
+    {
+        m_builder.add(propertyName, DOMUint8Array::create(vector.data(), vector.size()));
+    }
+
+private:
+    V8ObjectBuilder& m_builder;
+};
+
 } // namespace
 
 CryptoKey::~CryptoKey()
@@ -115,6 +152,14 @@ String CryptoKey::type() const
 bool CryptoKey::extractable() const
 {
     return m_key.extractable();
+}
+
+ScriptValue CryptoKey::algorithm(ScriptState* scriptState)
+{
+    V8ObjectBuilder objectBuilder(scriptState);
+    DictionaryBuilder dictionaryBuilder(objectBuilder);
+    m_key.algorithm().writeToDictionary(&dictionaryBuilder);
+    return objectBuilder.scriptValue();
 }
 
 // FIXME: This creates a new javascript array each time. What should happen

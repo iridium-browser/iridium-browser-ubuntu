@@ -154,11 +154,23 @@ bool IsInputViewEnabled() {
 }
 
 bool IsExperimentalInputViewEnabled() {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalInputViewFeatures)) {
-    return true;
-  }
-  return false;
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExperimentalInputViewFeatures);
+}
+
+bool IsGestureTypingEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableGestureTyping);
+}
+
+bool IsGestureSelectionEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableGestureSelection);
+}
+
+bool IsGestureDeletionEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableGestureDeletion);
 }
 
 bool InsertText(const base::string16& text) {
@@ -314,8 +326,8 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
   // map cannot be used directly.
   static const GritResourceMap kKeyboardResources[] = {
       {"keyboard/locales/en.js", IDR_KEYBOARD_LOCALES_EN},
-      {"keyboard/config/emoji.js", IDR_KEYBOARD_CONFIG_EMOJI},
-      {"keyboard/config/hwt.js", IDR_KEYBOARD_CONFIG_HWT},
+      {"keyboard/config/m-emoji.js", IDR_KEYBOARD_CONFIG_EMOJI},
+      {"keyboard/config/m-hwt.js", IDR_KEYBOARD_CONFIG_HWT},
       {"keyboard/config/us.js", IDR_KEYBOARD_CONFIG_US},
       {"keyboard/emoji.css", IDR_KEYBOARD_CSS_EMOJI},
       {"keyboard/images/backspace.png", IDR_KEYBOARD_IMAGES_BACKSPACE},
@@ -344,8 +356,6 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
       {"keyboard/images/setting.png", IDR_KEYBOARD_IMAGES_SETTINGS},
       {"keyboard/images/shift.png", IDR_KEYBOARD_IMAGES_SHIFT},
       {"keyboard/images/space.png", IDR_KEYBOARD_IMAGES_SPACE},
-      {"keyboard/images/special_characters.png",
-       IDR_KEYBOARD_IMAGES_SPECIAL_CHARACTERS},
       {"keyboard/images/tab.png", IDR_KEYBOARD_IMAGES_TAB},
       {"keyboard/images/triangle.png", IDR_KEYBOARD_IMAGES_TRIANGLE},
       {"keyboard/images/up.png", IDR_KEYBOARD_IMAGES_UP},
@@ -360,7 +370,16 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
        IDR_KEYBOARD_LAYOUTS_COMPACT_NUMBERPAD},
       {"keyboard/inputview_layouts/emoji.js", IDR_KEYBOARD_LAYOUTS_EMOJI},
       {"keyboard/inputview_layouts/handwriting.js", IDR_KEYBOARD_LAYOUTS_HWT},
-      {"keyboard/keyboard_mojo.js", IDR_KEYBOARD_MOJO_JS},
+      {"keyboard/inputview_layouts/m-101kbd.js",
+       IDR_KEYBOARD_LAYOUTS_MATERIAL_101},
+      {"keyboard/inputview_layouts/m-compactkbd-qwerty.js",
+       IDR_KEYBOARD_LAYOUTS_MATERIAL_COMPACT_QWERTY},
+      {"keyboard/inputview_layouts/m-compactkbd-numberpad.js",
+       IDR_KEYBOARD_LAYOUTS_MATERIAL_COMPACT_NUMBERPAD},
+      {"keyboard/inputview_layouts/m-emoji.js",
+       IDR_KEYBOARD_LAYOUTS_MATERIAL_EMOJI},
+      {"keyboard/inputview_layouts/m-handwriting.js",
+       IDR_KEYBOARD_LAYOUTS_MATERIAL_HWT},
       {"keyboard/manifest.json", IDR_KEYBOARD_MANIFEST},
       {"keyboard/sounds/keypress-delete.wav",
        IDR_KEYBOARD_SOUNDS_KEYPRESS_DELETE},

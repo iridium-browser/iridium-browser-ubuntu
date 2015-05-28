@@ -388,7 +388,7 @@ WebInspector.ViewportControl.prototype = {
             return;
         }
 
-        var selection = this.element.window().getSelection();
+        var selection = this.element.getComponentSelection();
         var shouldRestoreSelection = this._updateSelectionModel(selection);
 
         var visibleFrom = this.element.scrollTop;
@@ -490,7 +490,7 @@ WebInspector.ViewportControl.prototype = {
      */
     _selectedText: function()
     {
-        this._updateSelectionModel(this.element.window().getSelection());
+        this._updateSelectionModel(this.element.getComponentSelection());
         if (!this._headSelection || !this._anchorSelection)
             return null;
 
@@ -506,7 +506,7 @@ WebInspector.ViewportControl.prototype = {
 
         var textLines = [];
         for (var i = startSelection.item; i <= endSelection.item; ++i)
-            textLines.push(this._providerElement(i).element().textContent);
+            textLines.push(this._providerElement(i).element().deepTextContent());
 
         var endSelectionElement = this._providerElement(endSelection.item).element();
         if (endSelection.node && endSelection.node.isSelfOrDescendant(endSelectionElement)) {

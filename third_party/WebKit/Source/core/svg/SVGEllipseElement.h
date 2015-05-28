@@ -39,18 +39,21 @@ public:
     SVGAnimatedLength* rx() const { return m_rx.get(); }
     SVGAnimatedLength* ry() const { return m_ry.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGEllipseElement(Document&);
 
+    virtual bool isPresentationAttribute(const QualifiedName&) const override;
+    virtual bool isPresentationAttributeWithSVGDOM(const QualifiedName&) const override;
+    virtual void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;
+
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
     virtual bool selfHasRelativeLengths() const override;
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
 
     RefPtrWillBeMember<SVGAnimatedLength> m_cx;
     RefPtrWillBeMember<SVGAnimatedLength> m_cy;

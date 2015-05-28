@@ -15,6 +15,7 @@
 #include "content/browser/media/media_web_contents_observer.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/common/devtools_messages.h"
 #include "content/common/frame_messages.h"
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
@@ -23,6 +24,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "jni/WebContentsImpl_jni.h"
+#include "net/android/network_library.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF8;
@@ -59,7 +61,7 @@ namespace content {
 // static
 WebContents* WebContents::FromJavaWebContents(
     jobject jweb_contents_android) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!jweb_contents_android)
     return NULL;
 
@@ -70,6 +72,22 @@ WebContents* WebContents::FromJavaWebContents(
   if (!web_contents_android)
     return NULL;
   return web_contents_android->web_contents();
+}
+
+// static
+static void DestroyWebContents(JNIEnv* env,
+                               jclass clazz,
+                               jlong jweb_contents_android_ptr) {
+  WebContentsAndroid* web_contents_android =
+      reinterpret_cast<WebContentsAndroid*>(jweb_contents_android_ptr);
+  if (!web_contents_android)
+    return;
+
+  content::WebContents* web_contents = web_contents_android->web_contents();
+  if (!web_contents)
+    return;
+
+  delete web_contents;
 }
 
 // static
@@ -87,10 +105,16 @@ WebContentsAndroid::WebContentsAndroid(WebContents* web_contents)
                  env,
                  reinterpret_cast<intptr_t>(this),
                  navigation_controller_.GetJavaObject().obj()).obj());
+  RendererPreferences* prefs = web_contents_->GetMutableRendererPrefs();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  prefs->network_contry_iso =
+      command_line->HasSwitch(switches::kNetworkCountryIso) ?
+          command_line->GetSwitchValueASCII(switches::kNetworkCountryIso)
+          : net::android::GetTelephonyNetworkCountryIso();
 }
 
 WebContentsAndroid::~WebContentsAndroid() {
-  Java_WebContentsImpl_destroy(AttachCurrentThread(), obj_.obj());
+  Java_WebContentsImpl_clearNativePtr(AttachCurrentThread(), obj_.obj());
 }
 
 base::android::ScopedJavaLocalRef<jobject>
@@ -152,6 +176,14 @@ ScopedJavaLocalRef<jstring> WebContentsAndroid::GetURL(JNIEnv* env,
                                                        jobject obj) const {
   return ConvertUTF8ToJavaString(env, web_contents_->GetURL().spec());
 }
+
+ScopedJavaLocalRef<jstring> WebContentsAndroid::GetLastCommittedURL(
+    JNIEnv* env,
+    jobject) const {
+  return ConvertUTF8ToJavaString(env,
+                                 web_contents_->GetLastCommittedURL().spec());
+}
+
 
 jboolean WebContentsAndroid::IsIncognito(JNIEnv* env, jobject obj) {
   return web_contents_->GetBrowserContext()->IsOffTheRecord();
@@ -323,10 +355,7 @@ jboolean WebContentsAndroid::IsRenderWidgetHostViewReady(
 }
 
 void WebContentsAndroid::ExitFullscreen(JNIEnv* env, jobject obj) {
-  RenderViewHost* host = web_contents_->GetRenderViewHost();
-  if (!host)
-    return;
-  host->ExitFullscreen();
+  web_contents_->ExitFullscreen();
 }
 
 void WebContentsAndroid::UpdateTopControlsState(
@@ -451,6 +480,30 @@ void WebContentsAndroid::EvaluateJavaScript(JNIEnv* env,
 
   web_contents_->GetMainFrame()->ExecuteJavaScript(
       ConvertJavaStringToUTF16(env, script), js_callback);
+}
+
+void WebContentsAndroid::AddMessageToDevToolsConsole(JNIEnv* env,
+                                                     jobject jobj,
+                                                     jint level,
+                                                     jstring message) {
+  DCHECK_GE(level, 0);
+  DCHECK_LE(level, CONSOLE_MESSAGE_LEVEL_LAST);
+
+  web_contents_->GetMainFrame()->Send(new DevToolsAgentMsg_AddMessageToConsole(
+      web_contents_->GetMainFrame()->GetRoutingID(),
+      static_cast<ConsoleMessageLevel>(level),
+      ConvertJavaStringToUTF8(env, message)));
+}
+
+jboolean WebContentsAndroid::HasAccessedInitialDocument(
+    JNIEnv* env,
+    jobject jobj) {
+  return static_cast<content::WebContentsImpl*>(web_contents_)->
+      HasAccessedInitialDocument();
+}
+
+jint WebContentsAndroid::GetThemeColor(JNIEnv* env, jobject obj) {
+  return web_contents_->GetThemeColor();
 }
 
 }  // namespace content

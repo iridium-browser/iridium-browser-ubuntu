@@ -12,33 +12,27 @@
 
 namespace chromeos {
 
-class CrosSettings;
-
 // CrosSettingsProvider implementation that stores settings in memory unsigned.
 class StubCrosSettingsProvider : public CrosSettingsProvider {
  public:
   explicit StubCrosSettingsProvider(const NotifyObserversCallback& notify_cb);
   StubCrosSettingsProvider();
-  virtual ~StubCrosSettingsProvider();
+  ~StubCrosSettingsProvider() override;
 
   // CrosSettingsProvider implementation.
-  virtual const base::Value* Get(const std::string& path) const override;
-  virtual TrustedStatus PrepareTrustedValues(
-      const base::Closure& callback) override;
-  virtual bool HandlesSetting(const std::string& path) const override;
+  const base::Value* Get(const std::string& path) const override;
+  TrustedStatus PrepareTrustedValues(const base::Closure& callback) override;
+  bool HandlesSetting(const std::string& path) const override;
 
  private:
   // CrosSettingsProvider implementation:
-  virtual void DoSet(const std::string& path,
-                     const base::Value& value) override;
+  void DoSet(const std::string& path, const base::Value& value) override;
 
   // Initializes settings to their defaults.
   void SetDefaults();
 
   // In-memory settings storage.
   PrefValueMap values_;
-
-  CrosSettings* cros_settings_;
 
   DISALLOW_COPY_AND_ASSIGN(StubCrosSettingsProvider);
 };

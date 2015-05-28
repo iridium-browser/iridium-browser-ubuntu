@@ -4,6 +4,9 @@
 
 #include "content/browser/storage_partition_impl.h"
 
+#include <set>
+#include <vector>
+
 #include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/browser_main_loop.h"
@@ -11,7 +14,9 @@
 #include "content/browser/geofencing/geofencing_manager.h"
 #include "content/browser/gpu/shader_disk_cache.h"
 #include "content/browser/host_zoom_map_impl.h"
-#include "content/browser/navigator_connect/navigator_connect_context.h"
+#include "content/browser/navigator_connect/navigator_connect_context_impl.h"
+#include "content/browser/navigator_connect/navigator_connect_service_worker_service_factory.h"
+#include "content/browser/notifications/platform_notification_context_impl.h"
 #include "content/common/dom_storage/dom_storage_types.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -49,7 +54,7 @@ void ClearCookiesOnIOThread(
     const base::Time end,
     const GURL& storage_origin,
     const base::Closure& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   net::CookieStore* cookie_store = rq_context->
       GetURLRequestContext()->cookie_store();
   if (storage_origin.is_empty()) {
@@ -67,7 +72,7 @@ void ClearCookiesOnIOThread(
 
 void CheckQuotaManagedDataDeletionStatus(size_t* deletion_task_count,
                                          const base::Closure& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (*deletion_task_count == 0) {
     delete deletion_task_count;
     callback.Run();
@@ -79,7 +84,7 @@ void OnQuotaManagedOriginDeleted(const GURL& origin,
                                  size_t* deletion_task_count,
                                  const base::Closure& callback,
                                  storage::QuotaStatusCode status) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_GT(*deletion_task_count, 0u);
   if (status != storage::kQuotaStatusOk) {
     DLOG(ERROR) << "Couldn't remove data of type " << type << " for origin "
@@ -104,7 +109,7 @@ void ClearShaderCacheOnIOThread(const base::FilePath& path,
                                 const base::Time begin,
                                 const base::Time end,
                                 const base::Closure& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   ShaderCacheFactory::GetInstance()->ClearByPath(
       path, begin, end, base::Bind(&ClearedShaderCache, callback));
 }
@@ -117,7 +122,7 @@ void OnLocalStorageUsageInfo(
     const base::Time delete_end,
     const base::Closure& callback,
     const std::vector<LocalStorageUsageInfo>& infos) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   for (size_t i = 0; i < infos.size(); ++i) {
     if (!origin_matcher.is_null() &&
@@ -139,7 +144,7 @@ void OnSessionStorageUsageInfo(
     const StoragePartition::OriginMatcherFunction& origin_matcher,
     const base::Closure& callback,
     const std::vector<SessionStorageUsageInfo>& infos) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   for (size_t i = 0; i < infos.size(); ++i) {
     if (!origin_matcher.is_null() &&
@@ -160,7 +165,7 @@ void ClearLocalStorageOnUIThread(
     const base::Time begin,
     const base::Time end,
     const base::Closure& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (!storage_origin.is_empty()) {
     bool can_delete = origin_matcher.is_null() ||
@@ -184,7 +189,7 @@ void ClearSessionStorageOnUIThread(
     const scoped_refptr<storage::SpecialStoragePolicy>& special_storage_policy,
     const StoragePartition::OriginMatcherFunction& origin_matcher,
     const base::Closure& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   dom_storage_context->GetSessionStorageUsage(
       base::Bind(&OnSessionStorageUsageInfo, dom_storage_context,
@@ -347,7 +352,7 @@ void StoragePartitionImpl::DataDeletionHelper::ClearQuotaManagedDataOnIOThread(
     const scoped_refptr<storage::SpecialStoragePolicy>& special_storage_policy,
     const StoragePartition::OriginMatcherFunction& origin_matcher,
     const base::Closure& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   StoragePartitionImpl::QuotaManagedDataDeletionHelper* helper =
       new StoragePartitionImpl::QuotaManagedDataDeletionHelper(
@@ -360,6 +365,7 @@ void StoragePartitionImpl::DataDeletionHelper::ClearQuotaManagedDataOnIOThread(
 }
 
 StoragePartitionImpl::StoragePartitionImpl(
+    BrowserContext* browser_context,
     const base::FilePath& partition_path,
     storage::QuotaManager* quota_manager,
     ChromeAppCacheService* appcache_service,
@@ -367,12 +373,14 @@ StoragePartitionImpl::StoragePartitionImpl(
     storage::DatabaseTracker* database_tracker,
     DOMStorageContextWrapper* dom_storage_context,
     IndexedDBContextImpl* indexed_db_context,
+    CacheStorageContextImpl* cache_storage_context,
     ServiceWorkerContextWrapper* service_worker_context,
     WebRTCIdentityStore* webrtc_identity_store,
     storage::SpecialStoragePolicy* special_storage_policy,
     GeofencingManager* geofencing_manager,
     HostZoomLevelContext* host_zoom_level_context,
-    NavigatorConnectContext* navigator_connect_context)
+    NavigatorConnectContextImpl* navigator_connect_context,
+    PlatformNotificationContextImpl* platform_notification_context)
     : partition_path_(partition_path),
       quota_manager_(quota_manager),
       appcache_service_(appcache_service),
@@ -380,15 +388,20 @@ StoragePartitionImpl::StoragePartitionImpl(
       database_tracker_(database_tracker),
       dom_storage_context_(dom_storage_context),
       indexed_db_context_(indexed_db_context),
+      cache_storage_context_(cache_storage_context),
       service_worker_context_(service_worker_context),
       webrtc_identity_store_(webrtc_identity_store),
       special_storage_policy_(special_storage_policy),
       geofencing_manager_(geofencing_manager),
       host_zoom_level_context_(host_zoom_level_context),
-      navigator_connect_context_(navigator_connect_context) {
+      navigator_connect_context_(navigator_connect_context),
+      platform_notification_context_(platform_notification_context),
+      browser_context_(browser_context) {
 }
 
 StoragePartitionImpl::~StoragePartitionImpl() {
+  browser_context_ = nullptr;
+
   // These message loop checks are just to avoid leaks in unittests.
   if (GetDatabaseTracker() &&
       BrowserThread::IsMessageLoopValid(BrowserThread::FILE)) {
@@ -407,12 +420,16 @@ StoragePartitionImpl::~StoragePartitionImpl() {
   if (GetServiceWorkerContext())
     GetServiceWorkerContext()->Shutdown();
 
+  if (GetCacheStorageContext())
+    GetCacheStorageContext()->Shutdown();
+
   if (GetGeofencingManager())
     GetGeofencingManager()->Shutdown();
+
+  if (GetPlatformNotificationContext())
+    GetPlatformNotificationContext()->Shutdown();
 }
 
-// TODO(ajwong): Break the direct dependency on |context|. We only
-// need 3 pieces of info from it.
 StoragePartitionImpl* StoragePartitionImpl::Create(
     BrowserContext* context,
     bool in_memory,
@@ -466,10 +483,15 @@ StoragePartitionImpl* StoragePartitionImpl::Create(
                                quota_manager->proxy(),
                                idb_task_runner);
 
+  scoped_refptr<CacheStorageContextImpl> cache_storage_context =
+      new CacheStorageContextImpl(context);
+  cache_storage_context->Init(path, quota_manager->proxy(),
+                              context->GetSpecialStoragePolicy());
+
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context =
       new ServiceWorkerContextWrapper(context);
-  service_worker_context->Init(
-      path, quota_manager->proxy(), context->GetSpecialStoragePolicy());
+  service_worker_context->Init(path, quota_manager->proxy(),
+                               context->GetSpecialStoragePolicy());
 
   scoped_refptr<ChromeAppCacheService> appcache_service =
       new ChromeAppCacheService(quota_manager->proxy());
@@ -488,16 +510,28 @@ StoragePartitionImpl* StoragePartitionImpl::Create(
       new HostZoomLevelContext(
           context->CreateZoomLevelDelegate(partition_path)));
 
-  scoped_refptr<NavigatorConnectContext> navigator_connect_context =
-      new NavigatorConnectContext(service_worker_context);
+  scoped_refptr<NavigatorConnectContextImpl> navigator_connect_context =
+      new NavigatorConnectContextImpl();
+  navigator_connect_context->AddFactory(make_scoped_ptr(
+      new NavigatorConnectServiceWorkerServiceFactory(service_worker_context)));
 
-  return new StoragePartitionImpl(
-      partition_path, quota_manager.get(), appcache_service.get(),
+  scoped_refptr<PlatformNotificationContextImpl> platform_notification_context =
+      new PlatformNotificationContextImpl(path, service_worker_context);
+  platform_notification_context->Initialize();
+
+  StoragePartitionImpl* storage_partition = new StoragePartitionImpl(
+      context, partition_path, quota_manager.get(), appcache_service.get(),
       filesystem_context.get(), database_tracker.get(),
       dom_storage_context.get(), indexed_db_context.get(),
-      service_worker_context.get(), webrtc_identity_store.get(),
-      special_storage_policy.get(), geofencing_manager.get(),
-      host_zoom_level_context.get(), navigator_connect_context.get());
+      cache_storage_context.get(), service_worker_context.get(),
+      webrtc_identity_store.get(), special_storage_policy.get(),
+      geofencing_manager.get(), host_zoom_level_context.get(),
+      navigator_connect_context.get(),
+      platform_notification_context.get());
+
+  service_worker_context->set_storage_partition(storage_partition);
+
+  return storage_partition;
 }
 
 base::FilePath StoragePartitionImpl::GetPath() {
@@ -537,6 +571,10 @@ IndexedDBContextImpl* StoragePartitionImpl::GetIndexedDBContext() {
   return indexed_db_context_.get();
 }
 
+CacheStorageContextImpl* StoragePartitionImpl::GetCacheStorageContext() {
+  return cache_storage_context_.get();
+}
+
 ServiceWorkerContextWrapper* StoragePartitionImpl::GetServiceWorkerContext() {
   return service_worker_context_.get();
 }
@@ -559,8 +597,14 @@ ZoomLevelDelegate* StoragePartitionImpl::GetZoomLevelDelegate() {
   return host_zoom_level_context_->GetZoomLevelDelegate();
 }
 
-NavigatorConnectContext* StoragePartitionImpl::GetNavigatorConnectContext() {
+NavigatorConnectContextImpl*
+StoragePartitionImpl::GetNavigatorConnectContext() {
   return navigator_connect_context_.get();
+}
+
+PlatformNotificationContextImpl*
+StoragePartitionImpl::GetPlatformNotificationContext() {
+  return platform_notification_context_.get();
 }
 
 void StoragePartitionImpl::ClearDataImpl(
@@ -572,7 +616,7 @@ void StoragePartitionImpl::ClearDataImpl(
     const base::Time begin,
     const base::Time end,
     const base::Closure& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DataDeletionHelper* helper = new DataDeletionHelper(remove_mask,
                                                       quota_storage_remove_mask,
                                                       callback);
@@ -592,13 +636,13 @@ void StoragePartitionImpl::ClearDataImpl(
 
 void StoragePartitionImpl::
     QuotaManagedDataDeletionHelper::IncrementTaskCountOnIO() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   ++task_count;
 }
 
 void StoragePartitionImpl::
     QuotaManagedDataDeletionHelper::DecrementTaskCountOnIO() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_GT(task_count, 0);
   --task_count;
   if (task_count)
@@ -676,7 +720,7 @@ StoragePartitionImpl::QuotaManagedDataDeletionHelper::ClearOriginsOnIOThread(
   // The QuotaManager manages all storage other than cookies, LocalStorage,
   // and SessionStorage. This loop wipes out most HTML5 storage for the given
   // origins.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!origins.size()) {
     callback.Run();
     return;
@@ -709,7 +753,7 @@ StoragePartitionImpl::QuotaManagedDataDeletionHelper::ClearOriginsOnIOThread(
 }
 
 void StoragePartitionImpl::DataDeletionHelper::IncrementTaskCountOnUI() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ++task_count;
 }
 
@@ -826,7 +870,7 @@ void StoragePartitionImpl::ClearDataForOrigin(
     const GURL& storage_origin,
     net::URLRequestContextGetter* request_context_getter,
     const base::Closure& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ClearDataImpl(remove_mask,
                 quota_storage_remove_mask,
                 storage_origin,
@@ -849,8 +893,18 @@ void StoragePartitionImpl::ClearData(
                 origin_matcher, GetURLRequestContext(), begin, end, callback);
 }
 
+void StoragePartitionImpl::Flush() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (GetDOMStorageContext())
+    GetDOMStorageContext()->Flush();
+}
+
 WebRTCIdentityStore* StoragePartitionImpl::GetWebRTCIdentityStore() {
   return webrtc_identity_store_.get();
+}
+
+BrowserContext* StoragePartitionImpl::browser_context() const {
+  return browser_context_;
 }
 
 void StoragePartitionImpl::OverrideQuotaManagerForTesting(

@@ -16,8 +16,12 @@ import android.test.suitebuilder.annotation.SmallTest;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.accessibility.FontSizePrefs;
+import org.chromium.chrome.browser.preferences.website.ContentSetting;
+import org.chromium.chrome.browser.preferences.website.GeolocationInfo;
+import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridge;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService.LoadListener;
+import org.chromium.chrome.browser.search_engines.TemplateUrlService.TemplateUrl;
 import org.chromium.chrome.shell.ChromeShellTestBase;
 import org.chromium.chrome.shell.preferences.ChromeShellMainPreferences;
 import org.chromium.content.browser.test.util.CallbackHelper;
@@ -25,11 +29,16 @@ import org.chromium.content.browser.test.util.UiUtils;
 
 import java.lang.reflect.Method;
 import java.text.NumberFormat;
+import java.util.List;
 
 /**
  * Tests for the Settings menu.
  */
 public class PreferencesTest extends ChromeShellTestBase {
+
+    // Category for launching the Notification Preferences screen.
+    private static final String CATEGORY_NOTIFICATION_PREFERENCES =
+            "android.intent.category.NOTIFICATION_PREFERENCES";
 
     @Override
     protected void setUp() throws Exception {
@@ -66,25 +75,7 @@ public class PreferencesTest extends ChromeShellTestBase {
     @SmallTest
     @Feature({"Preferences"})
     public void testSearchEnginePreference() throws Exception {
-        // Make sure the template_url_service is loaded.
-        final CallbackHelper onTemplateUrlServiceLoadedHelper = new CallbackHelper();
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                if (TemplateUrlService.getInstance().isLoaded()) {
-                    onTemplateUrlServiceLoadedHelper.notifyCalled();
-                } else {
-                    TemplateUrlService.getInstance().registerLoadListener(new LoadListener() {
-                        @Override
-                        public void onTemplateUrlServiceLoaded() {
-                            onTemplateUrlServiceLoadedHelper.notifyCalled();
-                        }
-                    });
-                    TemplateUrlService.getInstance().load();
-                }
-            }
-        });
-        onTemplateUrlServiceLoadedHelper.waitForCallback(0);
+        ensureTemplateUrlServiceLoaded();
 
         // Set the second search engine as the default using TemplateUrlService.
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
@@ -106,17 +97,118 @@ public class PreferencesTest extends ChromeShellTestBase {
                 SearchEnginePreference pref = (SearchEnginePreference)
                         fragment.findPreference(SearchEnginePreference.PREF_SEARCH_ENGINE);
                 assertNotNull(pref);
-                assertEquals("1", pref.getValue());
+                assertEquals("1", pref.getValueForTesting());
 
-                // Simulate selecting the third search engine and ensure that TemplateUrlService
-                // is updated.
-                if (pref.getOnPreferenceChangeListener().onPreferenceChange(pref, "2")) {
-                    pref.setValue("2");
-                }
-                assertEquals(2, TemplateUrlService.getInstance().getDefaultSearchEngineIndex());
+                // Simulate selecting the third search engine, ensure that TemplateUrlService is
+                // updated, but location permission not granted for the new engine.
+                pref.setValueForTesting("2");
+                TemplateUrlService templateUrlService = TemplateUrlService.getInstance();
+                assertEquals(2, templateUrlService.getDefaultSearchEngineIndex());
+                assertEquals(ContentSetting.ASK, locationPermissionForSearchEngine(2));
+
+                // Simulate selecting the fourth search engine and but set a blocked permission
+                // first and ensure that location permission is NOT granted.
+                String url = templateUrlService.getSearchEngineUrlFromTemplateUrl(3);
+                WebsitePreferenceBridge.nativeSetGeolocationSettingForOrigin(
+                        url, url, ContentSetting.BLOCK.toInt());
+                pref.setValueForTesting("3");
+                assertEquals(3, TemplateUrlService.getInstance().getDefaultSearchEngineIndex());
+                assertEquals(ContentSetting.BLOCK, locationPermissionForSearchEngine(3));
+                assertEquals(ContentSetting.ASK, locationPermissionForSearchEngine(2));
+
+                // Make sure a pre-existing ALLOW value does not get deleted when switching away
+                // from a search engine.
+                url = templateUrlService.getSearchEngineUrlFromTemplateUrl(4);
+                WebsitePreferenceBridge.nativeSetGeolocationSettingForOrigin(
+                        url, url, ContentSetting.ALLOW.toInt());
+                pref.setValueForTesting("4");
+                assertEquals(4, TemplateUrlService.getInstance().getDefaultSearchEngineIndex());
+                assertEquals(ContentSetting.ALLOW, locationPermissionForSearchEngine(4));
+                pref.setValueForTesting("3");
+                assertEquals(ContentSetting.ALLOW, locationPermissionForSearchEngine(4));
             }
         });
     }
+
+    /**
+     * Make sure that when a user switches to a search engine that uses HTTP, the location
+     * permission is not added.
+     */
+    @SmallTest
+    @Feature({"Preferences"})
+    public void testSearchEnginePreferenceHttp() throws Exception {
+        ensureTemplateUrlServiceLoaded();
+
+        final Preferences prefActivity = startPreferences(getInstrumentation(),
+                ChromeShellMainPreferences.class.getName());
+
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                // Ensure that the second search engine in the list is selected.
+                PreferenceFragment fragment = (PreferenceFragment)
+                        prefActivity.getFragmentForTest();
+                SearchEnginePreference pref = (SearchEnginePreference)
+                        fragment.findPreference(SearchEnginePreference.PREF_SEARCH_ENGINE);
+                assertNotNull(pref);
+                assertEquals("0", pref.getValueForTesting());
+
+                // Simulate selecting a search engine that uses HTTP.
+                int index = indexOfFirstHttpSearchEngine();
+                pref.setValueForTesting(Integer.toString(index));
+
+                TemplateUrlService templateUrlService = TemplateUrlService.getInstance();
+                assertEquals(index, templateUrlService.getDefaultSearchEngineIndex());
+                assertEquals(ContentSetting.ASK, locationPermissionForSearchEngine(index));
+            }
+        });
+    }
+
+    private int indexOfFirstHttpSearchEngine() {
+        TemplateUrlService templateUrlService = TemplateUrlService.getInstance();
+        List<TemplateUrl> urls = templateUrlService.getLocalizedSearchEngines();
+        int index;
+        for (index = 0; index < urls.size(); ++index) {
+            String url = templateUrlService.getSearchEngineUrlFromTemplateUrl(index);
+            if (url.startsWith("http:")) {
+                return index;
+            }
+        }
+        fail();
+        return index;
+    }
+
+    private void ensureTemplateUrlServiceLoaded() throws Exception {
+        // Make sure the template_url_service is loaded.
+        final CallbackHelper onTemplateUrlServiceLoadedHelper = new CallbackHelper();
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                if (TemplateUrlService.getInstance().isLoaded()) {
+                    onTemplateUrlServiceLoadedHelper.notifyCalled();
+                } else {
+                    TemplateUrlService.getInstance().registerLoadListener(new LoadListener() {
+                        @Override
+                        public void onTemplateUrlServiceLoaded() {
+                            onTemplateUrlServiceLoadedHelper.notifyCalled();
+                        }
+                    });
+                    TemplateUrlService.getInstance().load();
+                }
+            }
+        });
+        onTemplateUrlServiceLoadedHelper.waitForCallback(0);
+    }
+
+    private ContentSetting locationPermissionForSearchEngine(int index) {
+        String url = TemplateUrlService.getInstance().getSearchEngineUrlFromTemplateUrl(index);
+        GeolocationInfo locationSettings = new GeolocationInfo(url, null);
+        ContentSetting locationPermission = locationSettings.getContentSetting();
+        return locationPermission;
+    }
+
+    // TODO(mvanouwerkerk): Write new preference intent tests for notification settings.
+    // https://crbug.com/461885
 
     /**
      * Tests setting FontScaleFactor and ForceEnableZoom in AccessibilityPreferences and ensures

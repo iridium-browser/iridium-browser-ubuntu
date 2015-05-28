@@ -19,12 +19,14 @@ class NavigatorBluetooth final
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(NavigatorBluetooth);
     DECLARE_EMPTY_VIRTUAL_DESTRUCTOR_WILL_BE_REMOVED(NavigatorBluetooth);
 public:
+    // Gets, or creates, NavigatorBluetooth supplement on Navigator.
+    // See platform/Supplementable.h
     static NavigatorBluetooth& from(Navigator&);
 
     static Bluetooth* bluetooth(Navigator&);
     Bluetooth* bluetooth();
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     NavigatorBluetooth();

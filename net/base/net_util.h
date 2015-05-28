@@ -441,6 +441,8 @@ NET_EXPORT_PRIVATE int GetPortFromSockaddr(const struct sockaddr* address,
 // machine.
 NET_EXPORT_PRIVATE bool IsLocalhost(const std::string& host);
 
+NET_EXPORT_PRIVATE bool IsLocalhostTLD(const std::string& host);
+
 // A subset of IP address attributes which are actionable by the
 // application layer. Currently unimplemented for all hosts;
 // IP_ADDRESS_ATTRIBUTE_NONE is always returned.
@@ -495,6 +497,11 @@ enum HostAddressSelectionPolicy {
 // Can be called only on a thread that allows IO.
 NET_EXPORT bool GetNetworkList(NetworkInterfaceList* networks,
                                int policy);
+
+// Gets the SSID of the currently associated WiFi access point if there is one.
+// Otherwise, returns empty string.
+// Currently only implemented on Linux, ChromeOS and Android.
+NET_EXPORT std::string GetWifiSSID();
 
 // General category of the IEEE 802.11 (wifi) physical layer operating mode.
 enum WifiPHYLayerProtocol {

@@ -4,15 +4,27 @@
 
 static_library("core") {
   sources = [
-    "browser/favicon_client.h",
+    "fallback_icon_client.h",
+    "fallback_icon_service.cc",
+    "fallback_icon_service.h",
+    "favicon_client.h",
     "favicon_driver.h",
+    "favicon_driver_observer.h",
+    "favicon_handler.cc",
+    "favicon_handler.h",
+    "favicon_service.cc",
+    "favicon_service.h",
     "favicon_url.cc",
     "favicon_url.h",
   ]
 
   deps = [
+    "//components/bookmarks/browser",
     "//components/favicon_base",
+    "//components/history/core/browser",
     "//components/keyed_service/core",
-    "//ui/gfx/geometry",
+    "//skia",
+    "//ui/gfx",
+    "//url",
   ]
 }

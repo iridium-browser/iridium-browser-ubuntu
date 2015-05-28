@@ -5,8 +5,8 @@
 #ifndef CC_RESOURCES_TILE_DRAW_INFO_H_
 #define CC_RESOURCES_TILE_DRAW_INFO_H_
 
-#include "base/debug/trace_event_argument.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "cc/resources/platform_color.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/scoped_resource.h"
@@ -17,7 +17,7 @@ namespace cc {
 // This class holds all the state relevant to drawing a tile.
 class CC_EXPORT TileDrawInfo {
  public:
-  enum Mode { RESOURCE_MODE, SOLID_COLOR_MODE, PICTURE_PILE_MODE };
+  enum Mode { RESOURCE_MODE, SOLID_COLOR_MODE, OOM_MODE };
 
   TileDrawInfo();
   ~TileDrawInfo();
@@ -49,7 +49,7 @@ class CC_EXPORT TileDrawInfo {
   }
 
   bool requires_resource() const {
-    return mode_ == RESOURCE_MODE || mode_ == PICTURE_PILE_MODE;
+    return mode_ == RESOURCE_MODE || mode_ == OOM_MODE;
   }
 
   inline bool has_resource() const { return !!resource_; }
@@ -59,7 +59,7 @@ class CC_EXPORT TileDrawInfo {
     resource_ = resource.Pass();
   }
 
-  void AsValueInto(base::debug::TracedValue* state) const;
+  void AsValueInto(base::trace_event::TracedValue* state) const;
 
  private:
   friend class Tile;
@@ -72,7 +72,7 @@ class CC_EXPORT TileDrawInfo {
     solid_color_ = color;
   }
 
-  void set_rasterize_on_demand() { mode_ = PICTURE_PILE_MODE; }
+  void set_oom() { mode_ = OOM_MODE; }
 
   Mode mode_;
   SkColor solid_color_;

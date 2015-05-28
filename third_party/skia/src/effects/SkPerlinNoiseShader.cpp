@@ -78,16 +78,14 @@ struct SkPerlinNoiseShader::PaintingData {
                  SkScalar baseFrequencyX, SkScalar baseFrequencyY,
                  const SkMatrix& matrix)
     {
-        SkVector wavelength = SkVector::Make(SkScalarInvert(baseFrequencyX),
-                                             SkScalarInvert(baseFrequencyY));
-        matrix.mapVectors(&wavelength, 1);
-        fBaseFrequency.fX = SkScalarInvert(wavelength.fX);
-        fBaseFrequency.fY = SkScalarInvert(wavelength.fY);
-        SkVector sizeVec = SkVector::Make(SkIntToScalar(tileSize.fWidth),
-                                          SkIntToScalar(tileSize.fHeight));
-        matrix.mapVectors(&sizeVec, 1);
-        fTileSize.fWidth = SkScalarRoundToInt(sizeVec.fX);
-        fTileSize.fHeight = SkScalarRoundToInt(sizeVec.fY);
+        SkVector vec[2] = {
+            { SkScalarInvert(baseFrequencyX),   SkScalarInvert(baseFrequencyY)  },
+            { SkIntToScalar(tileSize.fWidth),   SkIntToScalar(tileSize.fHeight) },
+        };
+        matrix.mapVectors(vec, 2);
+
+        fBaseFrequency.set(SkScalarInvert(vec[0].fX), SkScalarInvert(vec[0].fY));
+        fTileSize.set(SkScalarRoundToInt(vec[1].fX), SkScalarRoundToInt(vec[1].fY));
         this->init(seed);
         if (!fTileSize.isEmpty()) {
             this->stitch();
@@ -496,9 +494,9 @@ public:
                           const char* outputColor,
                           const char* inputColor,
                           const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
+                          const TextureSamplerArray&) override;
 
-    virtual void setData(const GrGLProgramDataManager&, const GrProcessor&) SK_OVERRIDE;
+    void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
     static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder* b);
 
@@ -532,14 +530,14 @@ public:
         SkDELETE(fPaintingData);
     }
 
-    virtual const char* name() const SK_OVERRIDE { return "PerlinNoise"; }
+    const char* name() const override { return "PerlinNoise"; }
 
     virtual void getGLProcessorKey(const GrGLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const SK_OVERRIDE {
+                                   GrProcessorKeyBuilder* b) const override {
         GrGLPerlinNoise::GenKey(*this, caps, b);
     }
 
-    virtual GrGLFragmentProcessor* createGLInstance() const SK_OVERRIDE {
+    GrGLFragmentProcessor* createGLInstance() const override {
         return SkNEW_ARGS(GrGLPerlinNoise, (*this));
     }
 
@@ -553,7 +551,7 @@ public:
     uint8_t alpha() const { return fAlpha; }
 
 private:
-    virtual bool onIsEqual(const GrFragmentProcessor& sBase) const SK_OVERRIDE {
+    bool onIsEqual(const GrFragmentProcessor& sBase) const override {
         const GrPerlinNoiseEffect& s = sBase.cast<GrPerlinNoiseEffect>();
         return fType == s.fType &&
                fPaintingData->fBaseFrequency == s.fPaintingData->fBaseFrequency &&
@@ -563,7 +561,7 @@ private:
                fPaintingData->fStitchDataInit == s.fPaintingData->fStitchDataInit;
     }
 
-    void onComputeInvariantOutput(GrInvariantOutput* inout) const SK_OVERRIDE {
+    void onComputeInvariantOutput(GrInvariantOutput* inout) const override {
         inout->setToUnknown(GrInvariantOutput::kWillNot_ReadInput);
     }
 
@@ -961,13 +959,13 @@ bool SkPerlinNoiseShader::asFragmentProcessor(GrContext* context, const SkPaint&
     matrix.preConcat(localMatrix);
 
     if (0 == fNumOctaves) {
-        SkColor clearColor = 0;
         if (kFractalNoise_Type == fType) {
-            clearColor = SkColorSetARGB(paint.getAlpha() / 2, 127, 127, 127);
+            uint32_t alpha = paint.getAlpha() >> 1;
+            uint32_t rgb = alpha >> 1;
+            *paintColor = GrColorPackRGBA(rgb, rgb, rgb, alpha);
+        } else {
+            *paintColor = 0;
         }
-        SkAutoTUnref<SkColorFilter> cf(SkColorFilter::CreateModeFilter(
-                                                clearColor, SkXfermode::kSrc_Mode));
-        *fp = cf->asFragmentProcessor(context);
         return true;
     }
 

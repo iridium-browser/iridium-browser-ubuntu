@@ -14,73 +14,86 @@
 var remoting = remoting || {};
 
 /**
- * @param {remoting.Application} app The main app that owns this delegate.
+ * @param {Array<string>} appCapabilities Array of application capabilities.
  * @constructor
- * @implements {remoting.Application.Delegate}
+ * @implements {remoting.ApplicationInterface}
+ * @extends {remoting.Application}
  */
-remoting.DesktopRemoting = function(app) {
-  /**
-   * TODO(garykac): Remove this reference to the Application. It's only
-   * needed to get the current mode when reporting errors. So we should be
-   * able to refactor and remove this reference cycle.
-   *
-   * @type {remoting.Application}
-   * @private
-   */
-  this.app_ = app;
-  app.setDelegate(this);
+remoting.DesktopRemoting = function(appCapabilities) {
+  base.inherits(this, remoting.Application, appCapabilities);
 
   /**
    * Whether to refresh the JID and retry the connection if the current JID
    * is offline.
    *
-   * @type {boolean}
-   * @private
+   * @private {boolean}
    */
   this.refreshHostJidIfOffline_ = true;
+
+  /** @private {remoting.DesktopConnectedView} */
+  this.connectedView_ = null;
 };
 
 /**
- * Display the user's email address and allow access to the rest of the app,
- * including parsing URL parameters.
- *
- * @param {string} email The user's email address.
- * @param {string} fullName The user's full name. This is always null since
- *     CRD doesn't request userinfo.profile permission.
- * @return {void} Nothing.
+ * @return {string} Application product name to be used in UI.
+ * @override {remoting.ApplicationInterface}
  */
-remoting.onUserInfoAvailable = function(email, fullName) {
-  document.getElementById('current-email').innerText = email;
-  document.getElementById('get-started-it2me').disabled = false;
-  document.getElementById('get-started-me2me').disabled = false;
+remoting.DesktopRemoting.prototype.getApplicationName = function() {
+  return chrome.i18n.getMessage(/*i18n-content*/'PRODUCT_NAME');
 };
 
 /**
- * Initialize the application and register all event handlers. After this
- * is called, the app is running and waiting for user events.
- *
- * @return {void} Nothing.
+ * @param {!remoting.Error} error The failure reason.
+ * @override {remoting.ApplicationInterface}
  */
-remoting.DesktopRemoting.prototype.init = function() {
-  remoting.initGlobalObjects();
-  remoting.initIdentity(remoting.onUserInfoAvailable);
+remoting.DesktopRemoting.prototype.signInFailed_ = function(error) {
+  remoting.showErrorMessage(error);
+};
 
+/**
+ * @override {remoting.ApplicationInterface}
+ */
+remoting.DesktopRemoting.prototype.initApplication_ = function() {
   remoting.initElementEventHandlers();
-  remoting.initGlobalEventHandlers();
 
   if (base.isAppsV2()) {
-    remoting.fullscreen = new remoting.FullscreenAppsV2();
     remoting.windowFrame = new remoting.WindowFrame(
         document.getElementById('title-bar'));
     remoting.optionsMenu = remoting.windowFrame.createOptionsMenu();
+
+    var START_FULLSCREEN = 'start-fullscreen';
+    remoting.fullscreen = new remoting.FullscreenAppsV2();
+    remoting.fullscreen.addListener(function(isFullscreen) {
+      chrome.storage.local.set({START_FULLSCREEN: isFullscreen});
+    });
+    // TODO(jamiewalch): This should be handled by the background page when the
+    // window is created, but due to crbug.com/51587 it needs to be done here.
+    // Remove this hack once that bug is fixed.
+    chrome.storage.local.get(
+        START_FULLSCREEN,
+        /** @param {Object} values */
+        function(values) {
+          if (values[START_FULLSCREEN]) {
+            remoting.fullscreen.activate(true);
+          }
+        }
+    );
+
   } else {
     remoting.fullscreen = new remoting.FullscreenAppsV1();
     remoting.toolbar = new remoting.Toolbar(
         document.getElementById('session-toolbar'));
     remoting.optionsMenu = remoting.toolbar.createOptionsMenu();
+
+    window.addEventListener('beforeunload',
+                            this.promptClose_.bind(this), false);
+    window.addEventListener('unload',
+                            remoting.app.disconnect.bind(remoting.app), false);
   }
 
-  remoting.initHostlist_();
+  remoting.initHostlist_(this.connectMe2Me_.bind(this));
+  document.getElementById('access-mode-button').addEventListener(
+      'click', this.connectIt2Me_.bind(this), false);
 
   var homeFeedback = new remoting.MenuButton(
       document.getElementById('help-feedback-main'));
@@ -108,52 +121,42 @@ remoting.DesktopRemoting.prototype.init = function() {
         document.getElementById('startup-mode-box-it2me').hidden = false;
       }
     };
-    isWindowed_(onIsWindowed);
+    this.isWindowed_(onIsWindowed);
   }
 
   remoting.ClientPlugin.factory.preloadPlugin();
-}
-
-/**
- * @return {string} The default remap keys for the current platform.
- */
-remoting.DesktopRemoting.prototype.getDefaultRemapKeys = function() {
-  var remapKeys = '';
-  // By default, under ChromeOS, remap the right Control key to the right
-  // Win / Cmd key.
-  if (remoting.platformIsChromeOS()) {
-    remapKeys = '0x0700e4>0x0700e7';
-  }
-  return remapKeys;
 };
 
 /**
- * @return {Array.<string>} A list of |ClientSession.Capability|s required
- *     by this application.
+ * @param {string} token An OAuth access token.
+ * @override {remoting.ApplicationInterface}
  */
-remoting.DesktopRemoting.prototype.getRequiredCapabilities = function() {
-  return [
-    remoting.ClientSession.Capability.SEND_INITIAL_RESOLUTION,
-    remoting.ClientSession.Capability.RATE_LIMIT_RESIZE_REQUESTS,
-    remoting.ClientSession.Capability.VIDEO_RECORDER,
-    // TODO(aiguha): Add this capability based on a gyp/command-line flag,
-    // rather than by default.
-    remoting.ClientSession.Capability.CAST
-  ];
+remoting.DesktopRemoting.prototype.startApplication_ = function(token) {
+  remoting.identity.getEmail().then(
+      function(/** string */ email) {
+        document.getElementById('current-email').innerText = email;
+        document.getElementById('get-started-it2me').disabled = false;
+        document.getElementById('get-started-me2me').disabled = false;
+      });
+};
+
+/** @override {remoting.ApplicationInterface} */
+remoting.DesktopRemoting.prototype.exitApplication_ = function() {
+  this.closeMainWindow_();
 };
 
 /**
- * Called when a new session has been connected.
- *
- * @param {remoting.ClientSession} clientSession
- * @return {void} Nothing.
+ * @param {remoting.ConnectionInfo} connectionInfo
+ * @override {remoting.ApplicationInterface}
  */
-remoting.DesktopRemoting.prototype.handleConnected = function(clientSession) {
+remoting.DesktopRemoting.prototype.onConnected_ = function(connectionInfo) {
+  this.initSession_(connectionInfo);
+
   // Set the text on the buttons shown under the error message so that they are
   // easy to understand in the case where a successful connection failed, as
   // opposed to the case where a connection never succeeded.
   // TODO(garykac): Investigate to see if these need to be reverted to their
-  // original values in the onDisconnected method.
+  // original values in the onDisconnected_ method.
   var button1 = document.getElementById('client-reconnect-button');
   l10n.localizeElementFromTag(button1, /*i18n-content*/'RECONNECT');
   button1.removeAttribute('autofocus');
@@ -171,20 +174,42 @@ remoting.DesktopRemoting.prototype.handleConnected = function(clientSession) {
     remoting.toolbar.preview();
   }
 
+  this.connectedView_ = new remoting.DesktopConnectedView(
+      document.getElementById('client-container'), connectionInfo);
+
+  // By default, under ChromeOS, remap the right Control key to the right
+  // Win / Cmd key.
+  if (remoting.platformIsChromeOS()) {
+    connectionInfo.plugin().setRemapKeys('0x0700e4>0x0700e7');
+  }
+
+  if (remoting.app.getConnectionMode() === remoting.Application.Mode.ME2ME) {
+    if (remoting.app.hasCapability(remoting.ClientSession.Capability.CAST)) {
+      this.sessionConnector_.registerProtocolExtension(
+          new remoting.CastExtensionHandler());
+    }
+    this.sessionConnector_.registerProtocolExtension(
+        new remoting.GnubbyAuthHandler());
+  }
+  if (connectionInfo.session().hasCapability(
+          remoting.ClientSession.Capability.VIDEO_RECORDER)) {
+    var recorder = new remoting.VideoFrameRecorder();
+    this.sessionConnector_.registerProtocolExtension(recorder);
+    this.connectedView_.setVideoFrameRecorder(recorder);
+  }
+
   if (remoting.pairingRequested) {
+    var that = this;
     /**
      * @param {string} clientId
      * @param {string} sharedSecret
      */
     var onPairingComplete = function(clientId, sharedSecret) {
-      var pairingInfo = {
-        pairingInfo: {
-          clientId: clientId,
-          sharedSecret: sharedSecret
-        }
-      };
-      var connector = remoting.app.getSessionConnector();
-      remoting.HostSettings.save(connector.getHostId(), pairingInfo);
+      var connector = that.sessionConnector_;
+      var host = remoting.hostList.getHostForId(connector.getHostId());
+      host.options.pairingInfo.clientId = clientId;
+      host.options.pairingInfo.sharedSecret = sharedSecret;
+      host.options.save();
       connector.updatePairingInfo(clientId, sharedSecret);
     };
     // Use the platform name as a proxy for the local computer name.
@@ -203,96 +228,155 @@ remoting.DesktopRemoting.prototype.handleConnected = function(clientSession) {
       console.log('Unrecognized client platform. Using navigator.platform.');
       clientName = navigator.platform;
     }
-    clientSession.requestPairing(clientName, onPairingComplete);
+    connectionInfo.session().requestPairing(clientName, onPairingComplete);
   }
 };
 
 /**
- * Called when the current session has been disconnected.
- *
- * @return {void} Nothing.
+ * @override {remoting.ApplicationInterface}
  */
-remoting.DesktopRemoting.prototype.handleDisconnected = function() {
+remoting.DesktopRemoting.prototype.onDisconnected_ = function() {
+  var mode = this.getConnectionMode();
+  if (mode === remoting.Application.Mode.IT2ME) {
+    remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED_IT2ME);
+  } else {
+    remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED_ME2ME);
+  }
+  base.dispose(this.connectedView_);
+  this.connectedView_ = null;
 };
 
 /**
- * Called when the current session's connection has failed.
- *
- * @param {remoting.SessionConnector} connector
- * @param {remoting.Error} error
- * @return {void} Nothing.
+ * @param {!remoting.Error} error
+ * @override {remoting.ApplicationInterface}
  */
-remoting.DesktopRemoting.prototype.handleConnectionFailed = function(
-    connector, error) {
-  /** @type {remoting.DesktopRemoting} */
+remoting.DesktopRemoting.prototype.onConnectionFailed_ = function(error) {
   var that = this;
-
-  /** @param {boolean} success */
-  var onHostListRefresh = function(success) {
+  var onHostListRefresh = function(/** boolean */ success) {
     if (success) {
+      var connector = that.sessionConnector_;
       var host = remoting.hostList.getHostForId(connector.getHostId());
       if (host) {
         connector.retryConnectMe2Me(host);
         return;
       }
     }
-    that.handleError(error);
+    that.onError_(error);
   };
 
-  if (error == remoting.Error.HOST_IS_OFFLINE &&
-      that.refreshHostJidIfOffline_) {
-    that.refreshHostJidIfOffline_ = false;
+  var mode = this.getConnectionMode();
+  if (error.hasTag(remoting.Error.Tag.HOST_IS_OFFLINE) &&
+      mode === remoting.Application.Mode.ME2ME &&
+      this.refreshHostJidIfOffline_) {
+    this.refreshHostJidIfOffline_ = false;
+
     // The plugin will be re-created when the host finished refreshing
     remoting.hostList.refresh(onHostListRefresh);
   } else {
-    this.handleError(error);
+    this.onError_(error);
   }
 };
 
 /**
- * Called when the current session has reached the point where the host has
- * started streaming video frames to the client.
- *
- * @return {void} Nothing.
+ * @param {!remoting.Error} error The error to be localized and displayed.
+ * @override {remoting.ApplicationInterface}
  */
-remoting.DesktopRemoting.prototype.handleVideoStreamingStarted = function() {
-};
+remoting.DesktopRemoting.prototype.onError_ = function(error) {
+  console.error('Connection failed: ' + error.toString());
+  var mode = this.getConnectionMode();
+  base.dispose(this.connectedView_);
+  this.connectedView_ = null;
 
-/**
- * @param {string} type The type of the extension message.
- * @param {Object} message The parsed extension message data.
- * @return {boolean} Return true if the extension message was recognized.
- */
-remoting.DesktopRemoting.prototype.handleExtensionMessage = function(
-    type, message) {
-  return false;
-};
-
-/**
- * Called when an error needs to be displayed to the user.
- *
- * @param {remoting.Error} errorTag The error to be localized and displayed.
- * @return {void} Nothing.
- */
-remoting.DesktopRemoting.prototype.handleError = function(errorTag) {
-  console.error('Connection failed: ' + errorTag);
-  remoting.accessCode = '';
+  if (error.hasTag(remoting.Error.Tag.AUTHENTICATION_FAILED)) {
+    remoting.setMode(remoting.AppMode.HOME);
+    remoting.handleAuthFailureAndRelaunch();
+    return;
+  }
 
   // Reset the refresh flag so that the next connection will retry if needed.
   this.refreshHostJidIfOffline_ = true;
 
   var errorDiv = document.getElementById('connect-error-message');
-  l10n.localizeElementFromTag(errorDiv, /** @type {string} */ (errorTag));
+  l10n.localizeElementFromTag(errorDiv, error.getTag());
 
-  var mode = remoting.clientSession ? remoting.clientSession.getMode()
-      : this.app_.getSessionConnector().getConnectionMode();
-  if (mode == remoting.ClientSession.Mode.IT2ME) {
+  if (mode == remoting.Application.Mode.IT2ME) {
     remoting.setMode(remoting.AppMode.CLIENT_CONNECT_FAILED_IT2ME);
-    remoting.hangoutSessionEvents.raiseEvent(
-        remoting.hangoutSessionEvents.sessionStateChanged,
-        remoting.ClientSession.State.FAILED
-    );
   } else {
     remoting.setMode(remoting.AppMode.CLIENT_CONNECT_FAILED_ME2ME);
   }
+};
+
+/**
+ * Determine whether or not the app is running in a window.
+ * @param {function(boolean):void} callback Callback to receive whether or not
+ *     the current tab is running in windowed mode.
+ * @private
+ */
+remoting.DesktopRemoting.prototype.isWindowed_ = function(callback) {
+  /** @param {chrome.Window} win The current window. */
+  var windowCallback = function(win) {
+    callback(win.type == 'popup');
+  };
+  /** @param {chrome.Tab} tab The current tab. */
+  var tabCallback = function(tab) {
+    if (tab.pinned) {
+      callback(false);
+    } else {
+      chrome.windows.get(tab.windowId, null, windowCallback);
+    }
+  };
+  if (chrome.tabs) {
+    chrome.tabs.getCurrent(tabCallback);
+  } else {
+    console.error('chome.tabs is not available.');
+  }
+}
+
+/**
+ * If an IT2Me client or host is active then prompt the user before closing.
+ * If a Me2Me client is active then don't bother, since closing the window is
+ * the more intuitive way to end a Me2Me session, and re-connecting is easy.
+ * @private
+ */
+remoting.DesktopRemoting.prototype.promptClose_ = function() {
+  if (this.getConnectionMode() === remoting.Application.Mode.IT2ME) {
+    switch (remoting.currentMode) {
+      case remoting.AppMode.CLIENT_CONNECTING:
+      case remoting.AppMode.HOST_WAITING_FOR_CODE:
+      case remoting.AppMode.HOST_WAITING_FOR_CONNECTION:
+      case remoting.AppMode.HOST_SHARED:
+      case remoting.AppMode.IN_SESSION:
+        return chrome.i18n.getMessage(/*i18n-content*/'CLOSE_PROMPT');
+      default:
+        return null;
+    }
+  }
+};
+
+/** @returns {remoting.DesktopConnectedView} */
+remoting.DesktopRemoting.prototype.getConnectedViewForTesting = function() {
+  return this.connectedView_;
+};
+
+/**
+ * Entry-point for Me2Me connections.
+ *
+ * @param {string} hostId The unique id of the host.
+ * @return {void} Nothing.
+ * @private
+ */
+remoting.DesktopRemoting.prototype.connectMe2Me_ = function(hostId) {
+  var host = remoting.hostList.getHostForId(hostId);
+  var flow = new remoting.Me2MeConnectFlow(this.sessionConnector_, host);
+  flow.start();
+};
+
+/**
+ * Entry-point for It2Me connections.
+ *
+ * @private
+ */
+remoting.DesktopRemoting.prototype.connectIt2Me_ = function() {
+  var flow = new remoting.It2MeConnectFlow(this.sessionConnector_);
+  flow.start();
 };

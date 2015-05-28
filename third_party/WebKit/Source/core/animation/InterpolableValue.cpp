@@ -14,7 +14,7 @@ void InterpolableNumber::interpolate(const InterpolableValue &to, const double p
     const InterpolableNumber& toNumber = toInterpolableNumber(to);
     InterpolableNumber& resultNumber = toInterpolableNumber(result);
 
-    if (progress == 0)
+    if (progress == 0 || m_value == toNumber.m_value)
         resultNumber.m_value = m_value;
     else if (progress == 1)
         resultNumber.m_value = toNumber.m_value;
@@ -98,11 +98,9 @@ void InterpolableList::multiply(double scalar, InterpolableValue& result) const
     }
 }
 
-void InterpolableList::trace(Visitor* visitor)
+DEFINE_TRACE(InterpolableList)
 {
-#if ENABLE_OILPAN
     visitor->trace(m_values);
-#endif
     InterpolableValue::trace(visitor);
 }
 
@@ -117,7 +115,7 @@ void InterpolableAnimatableValue::interpolate(const InterpolableValue& to, const
     resultValue.m_value = AnimatableValue::interpolate(m_value.get(), toValue.m_value.get(), progress);
 }
 
-void InterpolableAnimatableValue::trace(Visitor* visitor)
+DEFINE_TRACE(InterpolableAnimatableValue)
 {
     visitor->trace(m_value);
     InterpolableValue::trace(visitor);

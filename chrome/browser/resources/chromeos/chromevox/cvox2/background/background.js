@@ -16,25 +16,11 @@ goog.require('Output');
 goog.require('Output.EventType');
 goog.require('cursors.Cursor');
 goog.require('cvox.ChromeVoxEditableTextBase');
-goog.require('cvox.TabsApiHandler');
-
-// Define types here due to editable_text.js's implicit dependency with
-// ChromeVoxEventWatcher.
-/** @type {Object} */
-cvox.ChromeVoxEventWatcher;
-/** @type {function(boolean)} */
-cvox.ChromeVoxEventWatcher.handleTextChanged;
-/** @type {function()} */
-cvox.ChromeVoxEventWatcher.setUpTextHandler;
 
 goog.scope(function() {
 var AutomationNode = chrome.automation.AutomationNode;
 var Dir = AutomationUtil.Dir;
 var EventType = chrome.automation.EventType;
-
-/** Classic Chrome accessibility API. */
-global.accessibility =
-    chrome.accessibilityPrivate || chrome.experimental.accessibility;
 
 /**
  * ChromeVox2 background page.
@@ -44,18 +30,10 @@ Background = function() {
   /**
    * A list of site substring patterns to use with ChromeVox next. Keep these
    * strings relatively specific.
-   * @type {!Array.<string>}
+   * @type {!Array<string>}
    * @private
    */
   this.whitelist_ = ['chromevox_next_test'];
-
-  /**
-   * @type {cvox.TabsApiHandler}
-   * @private
-   */
-  this.tabsHandler_ = new cvox.TabsApiHandler(cvox.ChromeVox.tts,
-                                              cvox.ChromeVox.braille,
-                                              cvox.ChromeVox.earcons);
 
   /**
    * @type {cursors.Range}
@@ -70,9 +48,6 @@ Background = function() {
    */
   this.active_ = false;
 
-  // Only needed with unmerged ChromeVox classic loaded before.
-  global.accessibility.setAccessibilityEnabled(false);
-
   // Manually bind all functions to |this|.
   for (var func in this) {
     if (typeof(this[func]) == 'function')
@@ -81,7 +56,7 @@ Background = function() {
 
   /**
    * Maps an automation event to its listener.
-   * @type {!Object.<EventType, function(Object) : void>}
+   * @type {!Object<EventType, function(Object) : void>}
    */
   this.listeners_ = {
     alert: this.onEventDefault,
@@ -89,6 +64,7 @@ Background = function() {
     hover: this.onEventDefault,
     menuStart: this.onEventDefault,
     menuEnd: this.onEventDefault,
+    menuListValueChanged: this.onEventDefault,
     loadComplete: this.onLoadComplete,
     textChanged: this.onTextOrTextSelectionChanged,
     textSelectionChanged: this.onTextOrTextSelectionChanged,
@@ -97,43 +73,32 @@ Background = function() {
 
   // Register listeners for ...
   // Desktop.
-  chrome.automation.getDesktop(this.onGotTree);
-
-  // Tabs.
-  chrome.tabs.onUpdated.addListener(this.onTabUpdated);
+  chrome.automation.getDesktop(this.onGotDesktop);
 };
 
 Background.prototype = {
   /**
-   * Handles chrome.tabs.onUpdated.
-   * @param {number} tabId
-   * @param {Object} changeInfo
-   */
-  onTabUpdated: function(tabId, changeInfo) {
-    if (changeInfo.status != 'complete')
-      return;
-    chrome.tabs.get(tabId, function(tab) {
-      if (!tab.url)
-        return;
-
-      var next = this.isWhitelisted_(tab.url);
-
-      this.toggleChromeVoxVersion({next: next, classic: !next});
-    }.bind(this));
-  },
-
-  /**
    * Handles all setup once a new automation tree appears.
-   * @param {chrome.automation.AutomationNode} root
+   * @param {chrome.automation.AutomationNode} desktop
    */
-  onGotTree: function(root) {
+  onGotDesktop: function(desktop) {
     // Register all automation event listeners.
     for (var eventType in this.listeners_)
-      root.addEventListener(eventType, this.listeners_[eventType], true);
+      desktop.addEventListener(eventType, this.listeners_[eventType], true);
 
-    if (root.attributes.docLoaded) {
-      this.onLoadComplete(
-          {target: root, type: chrome.automation.EventType.loadComplete});
+    // Register a tree change observer.
+    desktop.addTreeChangeObserver(this.onTreeChange);
+
+    // The focused state gets set on the containing webView node.
+    var webView = desktop.find({role: chrome.automation.RoleType.webView,
+                                state: {focused: true}});
+    if (webView) {
+      var root = webView.find({role: chrome.automation.RoleType.rootWebArea});
+      if (root) {
+        this.onLoadComplete(
+            {target: root,
+             type: chrome.automation.EventType.loadComplete});
+      }
     }
   },
 
@@ -214,6 +179,26 @@ Background.prototype = {
         if (this.currentRange_)
           this.currentRange_.getStart().getNode().doDefault();
         break;
+      case 'continuousRead':
+        global.isReadingContinuously = true;
+        var continueReading = function(prevRange) {
+          if (!global.isReadingContinuously)
+            return;
+
+          new Output().withSpeechAndBraille(
+                  this.currentRange_, prevRange, Output.EventType.NAVIGATE)
+              .onSpeechEnd(function() { continueReading(prevRange); })
+              .go();
+          prevRange = this.currentRange_;
+          this.currentRange_ =
+              this.currentRange_.move(cursors.Unit.NODE, Dir.FORWARD);
+
+          if (this.currentRange_.equals(prevRange))
+            global.isReadingContinuously = false;
+        }.bind(this);
+
+        continueReading(null);
+        return;
     }
 
     if (pred) {
@@ -230,7 +215,9 @@ Background.prototype = {
 
       var prevRange = this.currentRange_;
       this.currentRange_ = current;
-      new Output(this.currentRange_, prevRange, Output.EventType.NAVIGATE);
+      new Output().withSpeechAndBraille(
+              this.currentRange_, prevRange, Output.EventType.NAVIGATE)
+          .go();
     }
   },
 
@@ -251,7 +238,9 @@ Background.prototype = {
     if (node.root.role != chrome.automation.RoleType.desktop && !this.active_)
       return;
 
-    new Output(this.currentRange_, prevRange, evt.type);
+    new Output().withSpeechAndBraille(
+            this.currentRange_, prevRange, evt.type)
+        .go();
   },
 
   /**
@@ -259,19 +248,35 @@ Background.prototype = {
    * @param {Object} evt
    */
   onLoadComplete: function(evt) {
+    var next = this.isWhitelisted_(evt.target.attributes.url);
+    this.toggleChromeVoxVersion({next: next, classic: !next});
     // Don't process nodes inside of web content if ChromeVox Next is inactive.
     if (evt.target.root.role != chrome.automation.RoleType.desktop &&
         !this.active_)
       return;
 
-    var node = AutomationUtil.findNodePost(evt.target,
+    if (this.currentRange_)
+      return;
+
+    var root = evt.target;
+    var webView = root;
+    while (webView && webView.role != chrome.automation.RoleType.webView)
+      webView = webView.parent;
+
+    if (!webView || !webView.state.focused)
+      return;
+
+    var node = AutomationUtil.findNodePost(root,
         Dir.FORWARD,
         AutomationPredicate.leaf);
+
     if (node)
       this.currentRange_ = cursors.Range.fromNode(node);
 
     if (this.currentRange_)
-      new Output(this.currentRange_, null, evt.type);
+      new Output().withSpeechAndBraille(
+              this.currentRange_, null, evt.type)
+          .go();
   },
 
   /**
@@ -309,7 +314,48 @@ Background.prototype = {
     }
 
     this.editableTextHandler.changed(textChangeEvent);
-    new Output(this.currentRange_, null, evt.type, {braille: true});
+    new Output().withBraille(
+            this.currentRange_, null, evt.type)
+        .go();
+  },
+
+  /**
+   * Called when the automation tree is changed.
+   * @param {chrome.automation.TreeChange} treeChange
+   */
+  onTreeChange: function(treeChange) {
+    var node = treeChange.target;
+    if (!node.containerLiveStatus)
+      return;
+
+    if (node.containerLiveRelevant.indexOf('additions') >= 0 &&
+        treeChange.type == 'nodeCreated')
+      this.outputLiveRegionChange_(node, null);
+    if (node.containerLiveRelevant.indexOf('text') >= 0 &&
+        treeChange.type == 'nodeChanged')
+      this.outputLiveRegionChange_(node, null);
+    if (node.containerLiveRelevant.indexOf('removals') >= 0 &&
+        treeChange.type == 'nodeRemoved')
+      this.outputLiveRegionChange_(node, '@live_regions_removed');
+  },
+
+  /**
+   * Given a node that needs to be spoken as part of a live region
+   * change and an additional optional format string, output the
+   * live region description.
+   * @param {!chrome.automation.AutomationNode} node The changed node.
+   * @param {?string} opt_prependFormatStr If set, a format string for
+   *     cvox2.Output to prepend to the output.
+   * @private
+   **/
+  outputLiveRegionChange_: function(node, opt_prependFormatStr) {
+    var range = cursors.Range.fromNode(node);
+    var output = new Output();
+    if (opt_prependFormatStr) {
+      output.format(opt_prependFormatStr);
+    }
+    output.withSpeech(range, null, Output.EventType.NAVIGATE);
+    output.go();
   },
 
   /**
@@ -347,21 +393,11 @@ Background.prototype = {
 
     if (opt_options.next) {
       if (!chrome.commands.onCommand.hasListener(this.onGotCommand))
-        chrome.commands.onCommand.addListener(this.onGotCommand);
-
-      if (!this.active_)
-        chrome.automation.getTree(this.onGotTree);
-      this.active_ = true;
+          chrome.commands.onCommand.addListener(this.onGotCommand);
+        this.active_ = true;
     } else {
       if (chrome.commands.onCommand.hasListener(this.onGotCommand))
         chrome.commands.onCommand.removeListener(this.onGotCommand);
-
-      if (this.active_) {
-        for (var eventType in this.listeners_) {
-          this.currentRange_.getStart().getNode().root.removeEventListener(
-              eventType, this.listeners_[eventType], true);
-        }
-      }
       this.active_ = false;
     }
 

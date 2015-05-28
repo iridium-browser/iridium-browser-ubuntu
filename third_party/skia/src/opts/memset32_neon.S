@@ -5,10 +5,12 @@
  * found in the LICENSE file.
  ***************************************************************************/
 
+	.syntax unified
 	.code 32
 	.fpu neon
 	.align 4
 	.globl	memset32_neon
+	.hidden memset32_neon
 
 	/* r0 = buffer, r1 = value, r2 = times to write */
 memset32_neon:

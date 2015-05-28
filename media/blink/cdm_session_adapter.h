@@ -23,7 +23,7 @@ class CdmFactory;
 class WebContentDecryptionModuleSessionImpl;
 
 // Owns the CDM instance and makes calls from session objects to the CDM.
-// Forwards the web session ID-based callbacks of the MediaKeys interface to the
+// Forwards the session ID-based callbacks of the MediaKeys interface to the
 // appropriate session object. Callers should hold references to this class
 // as long as they need the CDM instance.
 class CdmSessionAdapter : public base::RefCounted<CdmSessionAdapter> {
@@ -33,6 +33,8 @@ class CdmSessionAdapter : public base::RefCounted<CdmSessionAdapter> {
   // Returns true on success.
   bool Initialize(CdmFactory* cdm_factory,
                   const std::string& key_system,
+                  bool allow_distinctive_identifier,
+                  bool allow_persistent_state,
                   const GURL& security_origin);
 
   // Provides a server certificate to be used to encrypt messages to the
@@ -48,46 +50,49 @@ class CdmSessionAdapter : public base::RefCounted<CdmSessionAdapter> {
 
   // Adds a session to the internal map. Called once the session is successfully
   // initialized. Returns true if the session was registered, false if there is
-  // already an existing session with the same |web_session_id|.
+  // already an existing session with the same |session_id|.
   bool RegisterSession(
-      const std::string& web_session_id,
+      const std::string& session_id,
       base::WeakPtr<WebContentDecryptionModuleSessionImpl> session);
 
   // Removes a session from the internal map.
-  void UnregisterSession(const std::string& web_session_id);
+  void UnregisterSession(const std::string& session_id);
 
   // Initializes a session with the |init_data_type|, |init_data| and
   // |session_type| provided.
-  void InitializeNewSession(const std::string& init_data_type,
+  void InitializeNewSession(EmeInitDataType init_data_type,
                             const uint8* init_data,
                             int init_data_length,
                             MediaKeys::SessionType session_type,
                             scoped_ptr<NewSessionCdmPromise> promise);
 
-  // Loads the session specified by |web_session_id|.
+  // Loads the session specified by |session_id|.
   void LoadSession(MediaKeys::SessionType session_type,
-                   const std::string& web_session_id,
+                   const std::string& session_id,
                    scoped_ptr<NewSessionCdmPromise> promise);
 
-  // Updates the session specified by |web_session_id| with |response|.
-  void UpdateSession(const std::string& web_session_id,
+  // Updates the session specified by |session_id| with |response|.
+  void UpdateSession(const std::string& session_id,
                      const uint8* response,
                      int response_length,
                      scoped_ptr<SimpleCdmPromise> promise);
 
-  // Closes the session specified by |web_session_id|.
-  void CloseSession(const std::string& web_session_id,
+  // Closes the session specified by |session_id|.
+  void CloseSession(const std::string& session_id,
                     scoped_ptr<SimpleCdmPromise> promise);
 
   // Removes stored session data associated with the session specified by
-  // |web_session_id|.
-  void RemoveSession(const std::string& web_session_id,
+  // |session_id|.
+  void RemoveSession(const std::string& session_id,
                      scoped_ptr<SimpleCdmPromise> promise);
 
   // Returns the CdmContext associated with |media_keys_|.
   // TODO(jrummell): Figure out lifetimes, as WMPI may still use the decryptor
   // after WebContentDecryptionModule is freed. http://crbug.com/330324
   CdmContext* GetCdmContext();
+
+  // Returns the key system name.
+  const std::string& GetKeySystem() const;
 
   // Returns a prefix to use for UMAs.
   const std::string& GetKeySystemUMAPrefix() const;
@@ -101,29 +106,30 @@ class CdmSessionAdapter : public base::RefCounted<CdmSessionAdapter> {
   ~CdmSessionAdapter();
 
   // Callbacks for firing session events.
-  void OnSessionMessage(const std::string& web_session_id,
+  void OnSessionMessage(const std::string& session_id,
                         MediaKeys::MessageType message_type,
                         const std::vector<uint8>& message,
                         const GURL& legacy_destination_url);
-  void OnSessionKeysChange(const std::string& web_session_id,
+  void OnSessionKeysChange(const std::string& session_id,
                            bool has_additional_usable_key,
                            CdmKeysInfo keys_info);
-  void OnSessionExpirationUpdate(const std::string& web_session_id,
+  void OnSessionExpirationUpdate(const std::string& session_id,
                                  const base::Time& new_expiry_time);
-  void OnSessionClosed(const std::string& web_session_id);
-  void OnSessionError(const std::string& web_session_id,
-                      MediaKeys::Exception exception_code,
-                      uint32 system_code,
-                      const std::string& error_message);
+  void OnSessionClosed(const std::string& session_id);
+  void OnLegacySessionError(const std::string& session_id,
+                            MediaKeys::Exception exception_code,
+                            uint32 system_code,
+                            const std::string& error_message);
 
   // Helper function of the callbacks.
   WebContentDecryptionModuleSessionImpl* GetSession(
-      const std::string& web_session_id);
+      const std::string& session_id);
 
   scoped_ptr<MediaKeys> media_keys_;
 
   SessionMap sessions_;
 
+  std::string key_system_;
   std::string key_system_uma_prefix_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.

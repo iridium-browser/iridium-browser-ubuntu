@@ -423,7 +423,7 @@ FX_BOOL CPDF_RenderStatus::ProcessType3Text(const CPDF_TextObject* textobj, cons
             }
             if (fill_alpha == 255) {
                 CPDF_RenderStatus status;
-                status.Initialize(m_Level + 1, m_pContext, m_pDevice, NULL, NULL, this, pStates, &Options,
+                status.Initialize(m_pContext, m_pDevice, NULL, NULL, this, pStates, &Options,
                                   pType3Char->m_pForm->m_Transparency, m_bDropObjects, pFormResource, FALSE, pType3Char, fill_argb);
                 status.m_Type3FontCache.Append(m_Type3FontCache);
                 status.m_Type3FontCache.Add(pType3Font);
@@ -440,7 +440,7 @@ FX_BOOL CPDF_RenderStatus::ProcessType3Text(const CPDF_TextObject* textobj, cons
                 }
                 bitmap_device.GetBitmap()->Clear(0);
                 CPDF_RenderStatus status;
-                status.Initialize(m_Level + 1, m_pContext, &bitmap_device, NULL, NULL, this, pStates, &Options,
+                status.Initialize(m_pContext, &bitmap_device, NULL, NULL, this, pStates, &Options,
                                   pType3Char->m_pForm->m_Transparency, m_bDropObjects, pFormResource, FALSE, pType3Char, fill_argb);
                 status.m_Type3FontCache.Append(m_Type3FontCache);
                 status.m_Type3FontCache.Add(pType3Font);
@@ -613,7 +613,7 @@ void CPDF_TextRenderer::DrawTextString(CFX_RenderDevice* pDevice, FX_FLOAT origi
     FX_DWORD* pCharCodes;
     FX_FLOAT* pCharPos;
     if (nChars == 1) {
-        charcode = pFont->GetNextChar(str, offset);
+        charcode = pFont->GetNextChar(str, str.GetLength(), offset);
         pCharCodes = (FX_DWORD*)(FX_UINTPTR)charcode;
         pCharPos = NULL;
     } else {
@@ -621,7 +621,7 @@ void CPDF_TextRenderer::DrawTextString(CFX_RenderDevice* pDevice, FX_FLOAT origi
         pCharPos = FX_Alloc(FX_FLOAT, nChars - 1);
         FX_FLOAT cur_pos = 0;
         for (int i = 0; i < nChars; i ++) {
-            pCharCodes[i] = pFont->GetNextChar(str, offset);
+            pCharCodes[i] = pFont->GetNextChar(str, str.GetLength(), offset);
             if (i) {
                 pCharPos[i - 1] = cur_pos;
             }

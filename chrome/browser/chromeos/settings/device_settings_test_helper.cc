@@ -104,6 +104,8 @@ bool DeviceSettingsTestHelper::HasObserver(const Observer* observer) const {
   return false;
 }
 
+bool DeviceSettingsTestHelper::IsScreenLocked() const { return false; }
+
 void DeviceSettingsTestHelper::EmitLoginPromptVisible() {}
 
 void DeviceSettingsTestHelper::RestartJob(int pid,
@@ -198,7 +200,8 @@ ScopedDeviceSettingsTestHelper::~ScopedDeviceSettingsTestHelper() {
 }
 
 DeviceSettingsTestBase::DeviceSettingsTestBase()
-    : user_manager_(new FakeUserManager()),
+    : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+      user_manager_(new FakeChromeUserManager()),
       user_manager_enabler_(user_manager_),
       owner_key_util_(new ownership::MockOwnerKeyUtil()) {
   OwnerSettingsServiceChromeOSFactory::SetDeviceSettingsServiceForTesting(

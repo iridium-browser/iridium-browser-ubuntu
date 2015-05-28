@@ -15,7 +15,6 @@
 #include "libANGLE/Query.h"
 #include "libANGLE/VertexArray.h"
 #include "libANGLE/formatutils.h"
-#include "libANGLE/renderer/RenderTarget.h"
 
 namespace gl
 {
@@ -36,7 +35,7 @@ void State::initialize(const Caps& caps, GLuint clientVersion)
     mMaxDrawBuffers = caps.maxDrawBuffers;
     mMaxCombinedTextureImageUnits = caps.maxCombinedTextureImageUnits;
 
-    setClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    setColorClearValue(0.0f, 0.0f, 0.0f, 0.0f);
 
     mDepthClearValue = 1.0f;
     mStencilClearValue = 0;
@@ -76,11 +75,11 @@ void State::initialize(const Caps& caps, GLuint clientVersion)
     mDepthStencil.depthMask = true;
     mDepthStencil.stencilTest = false;
     mDepthStencil.stencilFunc = GL_ALWAYS;
-    mDepthStencil.stencilMask = -1;
-    mDepthStencil.stencilWritemask = -1;
+    mDepthStencil.stencilMask = static_cast<GLuint>(-1);
+    mDepthStencil.stencilWritemask = static_cast<GLuint>(-1);
     mDepthStencil.stencilBackFunc = GL_ALWAYS;
-    mDepthStencil.stencilBackMask = -1;
-    mDepthStencil.stencilBackWritemask = -1;
+    mDepthStencil.stencilBackMask = static_cast<GLuint>(-1);
+    mDepthStencil.stencilBackWritemask = static_cast<GLuint>(-1);
     mDepthStencil.stencilFail = GL_KEEP;
     mDepthStencil.stencilPassDepthFail = GL_KEEP;
     mDepthStencil.stencilPassDepthPass = GL_KEEP;
@@ -142,6 +141,8 @@ void State::initialize(const Caps& caps, GLuint clientVersion)
 
     mReadFramebuffer = NULL;
     mDrawFramebuffer = NULL;
+
+    mPrimitiveRestart = false;
 }
 
 void State::reset()
@@ -211,7 +212,7 @@ const DepthStencilState &State::getDepthStencilState() const
     return mDepthStencil;
 }
 
-void State::setClearColor(float red, float green, float blue, float alpha)
+void State::setColorClearValue(float red, float green, float blue, float alpha)
 {
     mColorClearValue.red = red;
     mColorClearValue.green = green;
@@ -219,68 +220,14 @@ void State::setClearColor(float red, float green, float blue, float alpha)
     mColorClearValue.alpha = alpha;
 }
 
-void State::setClearDepth(float depth)
+void State::setDepthClearValue(float depth)
 {
     mDepthClearValue = depth;
 }
 
-void State::setClearStencil(int stencil)
+void State::setStencilClearValue(int stencil)
 {
     mStencilClearValue = stencil;
-}
-
-ClearParameters State::getClearParameters(GLbitfield mask) const
-{
-    ClearParameters clearParams;
-    memset(&clearParams, 0, sizeof(ClearParameters));
-    for (unsigned int i = 0; i < ArraySize(clearParams.clearColor); i++)
-    {
-        clearParams.clearColor[i] = false;
-    }
-    clearParams.colorFClearValue = mColorClearValue;
-    clearParams.colorClearType = GL_FLOAT;
-    clearParams.colorMaskRed = mBlend.colorMaskRed;
-    clearParams.colorMaskGreen = mBlend.colorMaskGreen;
-    clearParams.colorMaskBlue = mBlend.colorMaskBlue;
-    clearParams.colorMaskAlpha = mBlend.colorMaskAlpha;
-    clearParams.clearDepth = false;
-    clearParams.depthClearValue = mDepthClearValue;
-    clearParams.clearStencil = false;
-    clearParams.stencilClearValue = mStencilClearValue;
-    clearParams.stencilWriteMask = mDepthStencil.stencilWritemask;
-    clearParams.scissorEnabled = mScissorTest;
-    clearParams.scissor = mScissor;
-
-    const Framebuffer *framebufferObject = getDrawFramebuffer();
-    if (mask & GL_COLOR_BUFFER_BIT)
-    {
-        if (framebufferObject->hasEnabledColorAttachment())
-        {
-            for (unsigned int i = 0; i < ArraySize(clearParams.clearColor); i++)
-            {
-                clearParams.clearColor[i] = true;
-            }
-        }
-    }
-
-    if (mask & GL_DEPTH_BUFFER_BIT)
-    {
-        if (mDepthStencil.depthMask && framebufferObject->getDepthbuffer() != NULL)
-        {
-            clearParams.clearDepth = true;
-        }
-    }
-
-    if (mask & GL_STENCIL_BUFFER_BIT)
-    {
-        if (framebufferObject->getStencilbuffer() != NULL &&
-            framebufferObject->getStencilbuffer()->getStencilSize() > 0)
-        {
-            clearParams.clearStencil = true;
-        }
-    }
-
-    return clearParams;
 }
 
 void State::setColorMask(bool red, bool green, bool blue, bool alpha)
@@ -532,6 +479,16 @@ void State::setDither(bool enabled)
     mBlend.dither = enabled;
 }
 
+bool State::isPrimitiveRestartEnabled() const
+{
+    return mPrimitiveRestart;
+}
+
+void State::setPrimitiveRestart(bool enabled)
+{
+    mPrimitiveRestart = enabled;
+}
+
 void State::setEnableFeature(GLenum feature, bool enabled)
 {
     switch (feature)
@@ -545,7 +502,7 @@ void State::setEnableFeature(GLenum feature, bool enabled)
       case GL_DEPTH_TEST:                    setDepthTest(enabled);             break;
       case GL_BLEND:                         setBlend(enabled);                 break;
       case GL_DITHER:                        setDither(enabled);                break;
-      case GL_PRIMITIVE_RESTART_FIXED_INDEX: UNIMPLEMENTED();                   break;
+      case GL_PRIMITIVE_RESTART_FIXED_INDEX: setPrimitiveRestart(enabled);      break;
       case GL_RASTERIZER_DISCARD:            setRasterizerDiscard(enabled);     break;
       default:                               UNREACHABLE();
     }
@@ -564,7 +521,7 @@ bool State::getEnableFeature(GLenum feature)
       case GL_DEPTH_TEST:                    return isDepthTestEnabled();
       case GL_BLEND:                         return isBlendEnabled();
       case GL_DITHER:                        return isDitherEnabled();
-      case GL_PRIMITIVE_RESTART_FIXED_INDEX: UNIMPLEMENTED(); return false;
+      case GL_PRIMITIVE_RESTART_FIXED_INDEX: return isPrimitiveRestartEnabled();
       case GL_RASTERIZER_DISCARD:            return isRasterizerDiscardEnabled();
       default:                               UNREACHABLE(); return false;
     }
@@ -618,12 +575,16 @@ void State::setSamplerTexture(GLenum type, Texture *texture)
 
 Texture *State::getSamplerTexture(unsigned int sampler, GLenum type) const
 {
-    return mSamplerTextures.at(type)[sampler].get();
+    const auto it = mSamplerTextures.find(type);
+    ASSERT(it != mSamplerTextures.end());
+    return it->second[sampler].get();
 }
 
 GLuint State::getSamplerTextureId(unsigned int sampler, GLenum type) const
 {
-    return mSamplerTextures.at(type)[sampler].id();
+    const auto it = mSamplerTextures.find(type);
+    ASSERT(it != mSamplerTextures.end());
+    return it->second[sampler].id();
 }
 
 void State::detachTexture(const TextureMap &zeroTextures, GLuint texture)
@@ -646,8 +607,10 @@ void State::detachTexture(const TextureMap &zeroTextures, GLuint texture)
             BindingPointer<Texture> &binding = textureVector[textureIdx];
             if (binding.id() == texture)
             {
+                auto it = zeroTextures.find(textureType);
+                ASSERT(it != zeroTextures.end());
                 // Zero textures are the "default" textures instead of NULL
-                binding.set(zeroTextures.at(textureType).get());
+                binding.set(it->second.get());
             }
         }
     }
@@ -883,6 +846,12 @@ TransformFeedback *State::getCurrentTransformFeedback() const
     return mTransformFeedback.get();
 }
 
+bool State::isTransformFeedbackActiveUnpaused() const
+{
+    gl::TransformFeedback *curTransformFeedback = getCurrentTransformFeedback();
+    return curTransformFeedback && curTransformFeedback->isStarted() && !curTransformFeedback->isPaused();
+}
+
 void State::detachTransformFeedback(GLuint transformFeedback)
 {
     if (mTransformFeedback.id() == transformFeedback)
@@ -918,10 +887,12 @@ GLuint State::getActiveQueryId(GLenum target) const
 
 Query *State::getActiveQuery(GLenum target) const
 {
-    // All query types should already exist in the activeQueries map
-    ASSERT(mActiveQueries.find(target) != mActiveQueries.end());
+    const auto it = mActiveQueries.find(target);
 
-    return mActiveQueries.at(target).get();
+    // All query types should already exist in the activeQueries map
+    ASSERT(it != mActiveQueries.end());
+
+    return it->second.get();
 }
 
 void State::setArrayBufferBinding(Buffer *buffer)
@@ -967,6 +938,20 @@ Buffer *State::getIndexedUniformBuffer(GLuint index) const
     ASSERT(static_cast<size_t>(index) < mUniformBuffers.size());
 
     return mUniformBuffers[index].get();
+}
+
+GLintptr State::getIndexedUniformBufferOffset(GLuint index) const
+{
+    ASSERT(static_cast<size_t>(index) < mUniformBuffers.size());
+
+    return mUniformBuffers[index].getOffset();
+}
+
+GLsizeiptr State::getIndexedUniformBufferSize(GLuint index) const
+{
+    ASSERT(static_cast<size_t>(index) < mUniformBuffers.size());
+
+    return mUniformBuffers[index].getSize();
 }
 
 void State::setGenericTransformFeedbackBufferBinding(Buffer *buffer)
@@ -1070,11 +1055,6 @@ void State::setVertexAttribState(unsigned int attribNum, Buffer *boundBuffer, GL
     getVertexArray()->setAttributeState(attribNum, boundBuffer, size, type, normalized, pureInteger, stride, pointer);
 }
 
-const VertexAttribute &State::getVertexAttribState(unsigned int attribNum) const
-{
-    return getVertexArray()->getVertexAttribute(attribNum);
-}
-
 const VertexAttribCurrentValueData &State::getVertexAttribCurrentValue(unsigned int attribNum) const
 {
     ASSERT(static_cast<size_t>(attribNum) < mVertexAttribCurrentValues.size());
@@ -1111,6 +1091,11 @@ const PixelPackState &State::getPackState() const
     return mPack;
 }
 
+PixelPackState &State::getPackState()
+{
+    return mPack;
+}
+
 void State::setUnpackAlignment(GLint alignment)
 {
     mUnpack.alignment = alignment;
@@ -1121,7 +1106,22 @@ GLint State::getUnpackAlignment() const
     return mUnpack.alignment;
 }
 
+void State::setUnpackRowLength(GLint rowLength)
+{
+    mUnpack.rowLength = rowLength;
+}
+
+GLint State::getUnpackRowLength() const
+{
+    return mUnpack.rowLength;
+}
+
 const PixelUnpackState &State::getUnpackState() const
+{
+    return mUnpack;
+}
+
+PixelUnpackState &State::getUnpackState()
 {
     return mUnpack;
 }
@@ -1219,6 +1219,7 @@ void State::getIntegerv(const gl::Data &data, GLenum pname, GLint *params)
       case GL_PACK_ALIGNMENT:                           *params = mPack.alignment;                                break;
       case GL_PACK_REVERSE_ROW_ORDER_ANGLE:             *params = mPack.reverseRowOrder;                          break;
       case GL_UNPACK_ALIGNMENT:                         *params = mUnpack.alignment;                              break;
+      case GL_UNPACK_ROW_LENGTH:                        *params = mUnpack.rowLength;                              break;
       case GL_GENERATE_MIPMAP_HINT:                     *params = mGenerateMipmapHint;                            break;
       case GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES:      *params = mFragmentShaderDerivativeHint;                  break;
       case GL_ACTIVE_TEXTURE:                           *params = (mActiveSampler + GL_TEXTURE0);                 break;
@@ -1345,19 +1346,19 @@ void State::getIntegerv(const gl::Data &data, GLenum pname, GLint *params)
         break;
       case GL_TEXTURE_BINDING_2D:
         ASSERT(mActiveSampler < mMaxCombinedTextureImageUnits);
-        *params = mSamplerTextures.at(GL_TEXTURE_2D)[mActiveSampler].id();
+        *params = getSamplerTextureId(mActiveSampler, GL_TEXTURE_2D) ;
         break;
       case GL_TEXTURE_BINDING_CUBE_MAP:
         ASSERT(mActiveSampler < mMaxCombinedTextureImageUnits);
-        *params = mSamplerTextures.at(GL_TEXTURE_CUBE_MAP)[mActiveSampler].id();
+        *params = getSamplerTextureId(mActiveSampler, GL_TEXTURE_CUBE_MAP);
         break;
       case GL_TEXTURE_BINDING_3D:
         ASSERT(mActiveSampler < mMaxCombinedTextureImageUnits);
-        *params = mSamplerTextures.at(GL_TEXTURE_3D)[mActiveSampler].id();
+        *params = getSamplerTextureId(mActiveSampler, GL_TEXTURE_3D);
         break;
       case GL_TEXTURE_BINDING_2D_ARRAY:
         ASSERT(mActiveSampler < mMaxCombinedTextureImageUnits);
-        *params = mSamplerTextures.at(GL_TEXTURE_2D_ARRAY)[mActiveSampler].id();
+        *params = getSamplerTextureId(mActiveSampler, GL_TEXTURE_2D_ARRAY);
         break;
       case GL_UNIFORM_BUFFER_BINDING:
         *params = mGenericUniformBuffer.id();
@@ -1445,9 +1446,10 @@ bool State::hasMappedBuffer(GLenum target) const
 {
     if (target == GL_ARRAY_BUFFER)
     {
+        const VertexArray *vao = getVertexArray();
         for (size_t attribIndex = 0; attribIndex < mVertexAttribCurrentValues.size(); attribIndex++)
         {
-            const gl::VertexAttribute &vertexAttrib = getVertexAttribState(static_cast<unsigned int>(attribIndex));
+            const gl::VertexAttribute &vertexAttrib = vao->getVertexAttribute(attribIndex);
             gl::Buffer *boundBuffer = vertexAttrib.buffer.get();
             if (vertexAttrib.enabled && boundBuffer && boundBuffer->isMapped())
             {

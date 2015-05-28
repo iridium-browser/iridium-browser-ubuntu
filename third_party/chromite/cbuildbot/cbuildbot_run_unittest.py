@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,19 +6,16 @@
 
 from __future__ import print_function
 
-import logging
-import os
 import cPickle
-import sys
+import os
+import mock
 import time
 
-sys.path.insert(0, os.path.abspath('%s/../..' % os.path.dirname(__file__)))
 from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import cbuildbot_run
 from chromite.lib import cros_test_lib
 from chromite.lib import parallel
 
-import mock
 
 DEFAULT_ARCHIVE_GS_PATH = 'bogus_bucket/TheArchiveBase'
 DEFAULT_ARCHIVE_BASE = 'gs://%s' % DEFAULT_ARCHIVE_GS_PATH
@@ -31,8 +27,7 @@ DEFAULT_VERSION_STRING = 'TheVersionString'
 DEFAULT_BOARD = 'TheBoard'
 DEFAULT_BOT_NAME = 'TheCoolBot'
 
-# Access to protected member.
-# pylint: disable=W0212
+# pylint: disable=protected-access
 
 DEFAULT_OPTIONS = cros_test_lib.EasyAttr(
     archive_base=DEFAULT_ARCHIVE_BASE,
@@ -182,10 +177,10 @@ class BuilderRunPickleTest(_BuilderRunTestCase):
     self.assertEquals(upload_url, run2.GetArchive().upload_url)
 
     # The attrs objects should be identical.
-    self.assertTrue(run1.attrs is run2.attrs)
+    self.assertIs(run1.attrs, run2.attrs)
 
     # And the run objects themselves are different.
-    self.assertFalse(run1 is run2)
+    self.assertIsNot(run1, run2)
 
   def testPickleBuilderRun(self):
     self._TestPickle(self._NewBuilderRun(config=self.real_config))
@@ -218,7 +213,7 @@ class BuilderRunTest(_BuilderRunTestCase):
 
       # We actually do not support identity and equality checks right now.
       self.assertNotEqual(meth1, meth2)
-      self.assertFalse(meth1 is meth2)
+      self.assertIsNot(meth1, meth2)
 
   def testOptions(self):
     options = _ExtendDefaultOptions(foo=True, bar=10)
@@ -349,8 +344,9 @@ class GetVersionTest(_BuilderRunTestCase):
   def testGetVersionInfo(self):
     verinfo = object()
 
-    with mock.patch('cbuildbot_run.manifest_version.VersionInfo.from_repo',
-                    return_value=verinfo) as m:
+    target = ('chromite.cbuildbot.cbuildbot_run.manifest_version.'
+              'VersionInfo.from_repo')
+    with mock.patch(target, return_value=verinfo) as m:
       result = cbuildbot_run._BuilderRunBase.GetVersionInfo(DEFAULT_BUILDROOT)
       self.assertEquals(result, verinfo)
 
@@ -412,7 +408,7 @@ class ChildBuilderRunTest(_BuilderRunTestCase):
 
       # We actually do not support identity and equality checks right now.
       self.assertNotEqual(meth1, meth2)
-      self.assertFalse(meth1 is meth2)
+      self.assertIsNot(meth1, meth2)
 
 
 class RunAttributesTest(_BuilderRunTestCase):
@@ -644,7 +640,3 @@ class BoardRunAttributesTest(_BuilderRunTestCase):
     """Test that regular attributes are not known to BoardRunAttributes."""
     self.assertRaises(AttributeError, getattr, self.bra, 'release_tag')
     self.assertRaises(AttributeError, setattr, self.bra, 'release_tag', 'foo')
-
-
-if __name__ == '__main__':
-  cros_test_lib.main(level=logging.DEBUG)

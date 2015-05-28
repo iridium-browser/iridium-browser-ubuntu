@@ -8,6 +8,9 @@
 #include "base/sys_info.h"
 #include "base/threading/thread.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/dbus/amplifier_client.h"
+#include "chromeos/dbus/ap_manager_client.h"
+#include "chromeos/dbus/audio_dsp_client.h"
 #include "chromeos/dbus/bluetooth_adapter_client.h"
 #include "chromeos/dbus/bluetooth_agent_manager_client.h"
 #include "chromeos/dbus/bluetooth_device_client.h"
@@ -23,13 +26,14 @@
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_client.h"
-#include "chromeos/dbus/dbus_client_bundle.h"
 #include "chromeos/dbus/debug_daemon_client.h"
 #include "chromeos/dbus/easy_unlock_client.h"
 #include "chromeos/dbus/gsm_sms_client.h"
 #include "chromeos/dbus/image_burner_client.h"
 #include "chromeos/dbus/introspectable_client.h"
+#include "chromeos/dbus/leadership_daemon_manager_client.h"
 #include "chromeos/dbus/lorgnette_manager_client.h"
+#include "chromeos/dbus/metronome_client.h"
 #include "chromeos/dbus/modem_messaging_client.h"
 #include "chromeos/dbus/nfc_adapter_client.h"
 #include "chromeos/dbus/nfc_device_client.h"
@@ -39,7 +43,7 @@
 #include "chromeos/dbus/peer_daemon_manager_client.h"
 #include "chromeos/dbus/permission_broker_client.h"
 #include "chromeos/dbus/power_manager_client.h"
-#include "chromeos/dbus/privet_daemon_client.h"
+#include "chromeos/dbus/privet_daemon_manager_client.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/dbus/shill_device_client.h"
 #include "chromeos/dbus/shill_ipconfig_client.h"
@@ -50,7 +54,6 @@
 #include "chromeos/dbus/sms_client.h"
 #include "chromeos/dbus/system_clock_client.h"
 #include "chromeos/dbus/update_engine_client.h"
-#include "chromeos/device_event_log.h"
 #include "dbus/bus.h"
 #include "dbus/dbus_statistics.h"
 
@@ -61,7 +64,6 @@ static bool g_using_dbus_thread_manager_for_testing = false;
 
 DBusThreadManager::DBusThreadManager(scoped_ptr<DBusClientBundle> client_bundle)
     : client_bundle_(client_bundle.Pass()) {
-  device_event_log::Initialize(0 /* default max entries */);
   dbus::statistics::Initialize();
 
   if (client_bundle_->IsUsingAnyRealClient()) {
@@ -95,7 +97,6 @@ DBusThreadManager::~DBusThreadManager() {
     dbus_thread_->Stop();
 
   dbus::statistics::Shutdown();
-  device_event_log::Shutdown();
 
   if (!g_dbus_thread_manager)
     return;  // Called form Shutdown() or local test instance.
@@ -113,6 +114,18 @@ DBusThreadManager::~DBusThreadManager() {
 
 dbus::Bus* DBusThreadManager::GetSystemBus() {
   return system_bus_.get();
+}
+
+AmplifierClient* DBusThreadManager::GetAmplifierClient() {
+  return client_bundle_->amplifier_client();
+}
+
+ApManagerClient* DBusThreadManager::GetApManagerClient() {
+  return client_bundle_->ap_manager_client();
+}
+
+AudioDspClient* DBusThreadManager::GetAudioDspClient() {
+  return client_bundle_->audio_dsp_client();
 }
 
 BluetoothAdapterClient* DBusThreadManager::GetBluetoothAdapterClient() {
@@ -185,9 +198,19 @@ DebugDaemonClient* DBusThreadManager::GetDebugDaemonClient() {
 EasyUnlockClient* DBusThreadManager::GetEasyUnlockClient() {
   return client_bundle_->easy_unlock_client();
 }
+
+LeadershipDaemonManagerClient*
+DBusThreadManager::GetLeadershipDaemonManagerClient() {
+  return client_bundle_->leadership_daemon_manager_client();
+}
+
 LorgnetteManagerClient*
 DBusThreadManager::GetLorgnetteManagerClient() {
   return client_bundle_->lorgnette_manager_client();
+}
+
+MetronomeClient* DBusThreadManager::GetMetronomeClient() {
+  return client_bundle_->metronome_client();
 }
 
 ShillDeviceClient*
@@ -268,8 +291,8 @@ PowerManagerClient* DBusThreadManager::GetPowerManagerClient() {
   return client_bundle_->power_manager_client();
 }
 
-PrivetDaemonClient* DBusThreadManager::GetPrivetDaemonClient() {
-  return client_bundle_->privet_daemon_client();
+PrivetDaemonManagerClient* DBusThreadManager::GetPrivetDaemonManagerClient() {
+  return client_bundle_->privet_daemon_manager_client();
 }
 
 SessionManagerClient* DBusThreadManager::GetSessionManagerClient() {
@@ -289,6 +312,9 @@ UpdateEngineClient* DBusThreadManager::GetUpdateEngineClient() {
 }
 
 void DBusThreadManager::InitializeClients() {
+  GetAmplifierClient()->Init(GetSystemBus());
+  GetApManagerClient()->Init(GetSystemBus());
+  GetAudioDspClient()->Init(GetSystemBus());
   GetBluetoothAdapterClient()->Init(GetSystemBus());
   GetBluetoothAgentManagerClient()->Init(GetSystemBus());
   GetBluetoothDeviceClient()->Init(GetSystemBus());
@@ -308,11 +334,14 @@ void DBusThreadManager::InitializeClients() {
   GetGsmSMSClient()->Init(GetSystemBus());
   GetImageBurnerClient()->Init(GetSystemBus());
   GetIntrospectableClient()->Init(GetSystemBus());
+  GetLeadershipDaemonManagerClient()->Init(GetSystemBus());
   GetLorgnetteManagerClient()->Init(GetSystemBus());
+  GetMetronomeClient()->Init(GetSystemBus());
   GetModemMessagingClient()->Init(GetSystemBus());
   GetPermissionBrokerClient()->Init(GetSystemBus());
+  GetPeerDaemonManagerClient()->Init(GetSystemBus());
+  GetPrivetDaemonManagerClient()->Init(GetSystemBus());
   GetPowerManagerClient()->Init(GetSystemBus());
-  GetPrivetDaemonClient()->Init(GetSystemBus());
   GetSessionManagerClient()->Init(GetSystemBus());
   GetShillDeviceClient()->Init(GetSystemBus());
   GetShillIPConfigClient()->Init(GetSystemBus());
@@ -443,6 +472,16 @@ DBusThreadManagerSetter::DBusThreadManagerSetter() {
 DBusThreadManagerSetter::~DBusThreadManagerSetter() {
 }
 
+void DBusThreadManagerSetter::SetAmplifierClient(
+    scoped_ptr<AmplifierClient> client) {
+  DBusThreadManager::Get()->client_bundle_->amplifier_client_ = client.Pass();
+}
+
+void DBusThreadManagerSetter::SetAudioDspClient(
+    scoped_ptr<AudioDspClient> client) {
+  DBusThreadManager::Get()->client_bundle_->audio_dsp_client_ = client.Pass();
+}
+
 void DBusThreadManagerSetter::SetBluetoothAdapterClient(
     scoped_ptr<BluetoothAdapterClient> client) {
   DBusThreadManager::Get()->client_bundle_->bluetooth_adapter_client_ =
@@ -535,10 +574,21 @@ void DBusThreadManagerSetter::SetEasyUnlockClient(
   DBusThreadManager::Get()->client_bundle_->easy_unlock_client_ = client.Pass();
 }
 
+void DBusThreadManagerSetter::SetLeadershipDaemonManagerClient(
+    scoped_ptr<LeadershipDaemonManagerClient> client) {
+  DBusThreadManager::Get()->client_bundle_->leadership_daemon_manager_client_ =
+      client.Pass();
+}
+
 void DBusThreadManagerSetter::SetLorgnetteManagerClient(
     scoped_ptr<LorgnetteManagerClient> client) {
   DBusThreadManager::Get()->client_bundle_->lorgnette_manager_client_ =
       client.Pass();
+}
+
+void DBusThreadManagerSetter::SetMetronomeClient(
+    scoped_ptr<MetronomeClient> client) {
+  DBusThreadManager::Get()->client_bundle_->metronome_client_ = client.Pass();
 }
 
 void DBusThreadManagerSetter::SetShillDeviceClient(
@@ -569,6 +619,12 @@ void DBusThreadManagerSetter::SetShillProfileClient(
     scoped_ptr<ShillProfileClient> client) {
   DBusThreadManager::Get()->client_bundle_->shill_profile_client_ =
       client.Pass();
+}
+
+void DBusThreadManagerSetter::SetShillThirdPartyVpnDriverClient(
+    scoped_ptr<ShillThirdPartyVpnDriverClient> client) {
+  DBusThreadManager::Get()
+      ->client_bundle_->shill_third_party_vpn_driver_client_ = client.Pass();
 }
 
 void DBusThreadManagerSetter::SetGsmSMSClient(
@@ -631,15 +687,15 @@ void DBusThreadManagerSetter::SetPermissionBrokerClient(
       client.Pass();
 }
 
-void DBusThreadManagerSetter::SetPowerManagerClient(
-    scoped_ptr<PowerManagerClient> client) {
-  DBusThreadManager::Get()->client_bundle_->power_manager_client_ =
+void DBusThreadManagerSetter::SetPrivetDaemonManagerClient(
+    scoped_ptr<PrivetDaemonManagerClient> client) {
+  DBusThreadManager::Get()->client_bundle_->privet_daemon_manager_client_ =
       client.Pass();
 }
 
-void DBusThreadManagerSetter::SetPrivetDaemonClient(
-    scoped_ptr<PrivetDaemonClient> client) {
-  DBusThreadManager::Get()->client_bundle_->privet_daemon_client_ =
+void DBusThreadManagerSetter::SetPowerManagerClient(
+    scoped_ptr<PowerManagerClient> client) {
+  DBusThreadManager::Get()->client_bundle_->power_manager_client_ =
       client.Pass();
 }
 

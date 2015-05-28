@@ -7,9 +7,9 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/media/midi_messages.h"
 #include "content/renderer/render_thread_impl.h"
 #include "ipc/ipc_logging.h"
@@ -116,6 +116,8 @@ bool MidiMessageFilter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(MidiMsg_SessionStarted, OnSessionStarted)
     IPC_MESSAGE_HANDLER(MidiMsg_AddInputPort, OnAddInputPort)
     IPC_MESSAGE_HANDLER(MidiMsg_AddOutputPort, OnAddOutputPort)
+    IPC_MESSAGE_HANDLER(MidiMsg_SetInputPortState, OnSetInputPortState)
+    IPC_MESSAGE_HANDLER(MidiMsg_SetOutputPortState, OnSetOutputPortState)
     IPC_MESSAGE_HANDLER(MidiMsg_DataReceived, OnDataReceived)
     IPC_MESSAGE_HANDLER(MidiMsg_AcknowledgeSentData, OnAcknowledgeSentData)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -163,6 +165,24 @@ void MidiMessageFilter::OnAddOutputPort(media::MidiPortInfo info) {
       base::Bind(&MidiMessageFilter::HandleAddOutputPort, this, info));
 }
 
+void MidiMessageFilter::OnSetInputPortState(uint32 port,
+                                            media::MidiPortState state) {
+  DCHECK(io_message_loop_->BelongsToCurrentThread());
+  main_message_loop_->PostTask(
+      FROM_HERE,
+      base::Bind(&MidiMessageFilter::HandleSetInputPortState,
+                 this, port, state));
+}
+
+void MidiMessageFilter::OnSetOutputPortState(uint32 port,
+                                             media::MidiPortState state) {
+  DCHECK(io_message_loop_->BelongsToCurrentThread());
+  main_message_loop_->PostTask(
+      FROM_HERE,
+      base::Bind(&MidiMessageFilter::HandleSetOutputPortState,
+                 this, port, state));
+}
+
 void MidiMessageFilter::OnDataReceived(uint32 port,
                                        const std::vector<uint8>& data,
                                        double timestamp) {
@@ -207,17 +227,21 @@ void MidiMessageFilter::HandleClientAdded(media::MidiResult result) {
   }
   base::string16 error16 = base::UTF8ToUTF16(error);
   base::string16 message16 = base::UTF8ToUTF16(message);
-  for (blink::WebMIDIAccessorClient* client : clients_waiting_session_queue_) {
+
+  // A for-loop using iterators does not work because |client| may touch
+  // |clients_waiting_session_queue_| in callbacks.
+  while (!clients_waiting_session_queue_.empty()) {
+    auto client = clients_waiting_session_queue_.back();
+    clients_waiting_session_queue_.pop_back();
     if (result == media::MIDI_OK) {
       // Add the client's input and output ports.
-      const bool active = true;
       for (const auto& info : inputs_) {
         client->didAddInputPort(
             base::UTF8ToUTF16(info.id),
             base::UTF8ToUTF16(info.manufacturer),
             base::UTF8ToUTF16(info.name),
             base::UTF8ToUTF16(info.version),
-            active);
+            ToBlinkState(info.state));
       }
 
       for (const auto& info : outputs_) {
@@ -226,25 +250,38 @@ void MidiMessageFilter::HandleClientAdded(media::MidiResult result) {
             base::UTF8ToUTF16(info.manufacturer),
             base::UTF8ToUTF16(info.name),
             base::UTF8ToUTF16(info.version),
-            active);
+            ToBlinkState(info.state));
       }
     }
     client->didStartSession(result == media::MIDI_OK, error16, message16);
     clients_.insert(client);
   }
-  clients_waiting_session_queue_.clear();
 }
 
 void MidiMessageFilter::HandleAddInputPort(media::MidiPortInfo info) {
   DCHECK(main_message_loop_->BelongsToCurrentThread());
   inputs_.push_back(info);
-  // TODO(toyoshim): Notify to clients that were already added.
+  const base::string16 id = base::UTF8ToUTF16(info.id);
+  const base::string16 manufacturer = base::UTF8ToUTF16(info.manufacturer);
+  const base::string16 name = base::UTF8ToUTF16(info.name);
+  const base::string16 version = base::UTF8ToUTF16(info.version);
+  const blink::WebMIDIAccessorClient::MIDIPortState state =
+      ToBlinkState(info.state);
+  for (auto client : clients_)
+    client->didAddInputPort(id, manufacturer, name, version, state);
 }
 
 void MidiMessageFilter::HandleAddOutputPort(media::MidiPortInfo info) {
   DCHECK(main_message_loop_->BelongsToCurrentThread());
   outputs_.push_back(info);
-  // TODO(toyoshim): Notify to clients that were already added.
+  const base::string16 id = base::UTF8ToUTF16(info.id);
+  const base::string16 manufacturer = base::UTF8ToUTF16(info.manufacturer);
+  const base::string16 name = base::UTF8ToUTF16(info.name);
+  const base::string16 version = base::UTF8ToUTF16(info.version);
+  const blink::WebMIDIAccessorClient::MIDIPortState state =
+      ToBlinkState(info.state);
+  for (auto client : clients_)
+    client->didAddOutputPort(id, manufacturer, name, version, state);
 }
 
 void MidiMessageFilter::HandleDataReceived(uint32 port,
@@ -254,7 +291,7 @@ void MidiMessageFilter::HandleDataReceived(uint32 port,
   DCHECK(main_message_loop_->BelongsToCurrentThread());
   DCHECK(!data.empty());
 
-  for (blink::WebMIDIAccessorClient* client : clients_)
+  for (auto client : clients_)
     client->didReceiveMIDIData(port, &data[0], data.size(), timestamp);
 }
 
@@ -263,6 +300,22 @@ void MidiMessageFilter::HandleAckknowledgeSentData(size_t bytes_sent) {
   DCHECK_GE(unacknowledged_bytes_sent_, bytes_sent);
   if (unacknowledged_bytes_sent_ >= bytes_sent)
     unacknowledged_bytes_sent_ -= bytes_sent;
+}
+
+void MidiMessageFilter::HandleSetInputPortState(uint32 port,
+                                                media::MidiPortState state) {
+  DCHECK(main_message_loop_->BelongsToCurrentThread());
+  inputs_[port].state = state;
+  for (auto client : clients_)
+    client->didSetInputPortState(port, ToBlinkState(state));
+}
+
+void MidiMessageFilter::HandleSetOutputPortState(uint32 port,
+                                                 media::MidiPortState state) {
+  DCHECK(main_message_loop_->BelongsToCurrentThread());
+  outputs_[port].state = state;
+  for (auto client : clients_)
+    client->didSetOutputPortState(port, ToBlinkState(state));
 }
 
 }  // namespace content

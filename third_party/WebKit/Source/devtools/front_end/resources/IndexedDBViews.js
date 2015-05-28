@@ -41,23 +41,24 @@ WebInspector.IDBDatabaseView = function(database)
     this.element.classList.add("indexed-db-database-view");
     this.element.classList.add("storage-view");
 
-    this._headersListElement = this.element.createChild("ol", "outline-disclosure");
-    this._headersTreeOutline = new TreeOutline(this._headersListElement);
+    this._headersTreeOutline = new TreeOutline();
+    this._headersTreeOutline.element.classList.add("outline-disclosure");
+    this.element.appendChild(this._headersTreeOutline.element);
     this._headersTreeOutline.expandTreeElementsWhenArrowing = true;
 
-    this._securityOriginTreeElement = new TreeElement("", null, false);
+    this._securityOriginTreeElement = new TreeElement();
     this._securityOriginTreeElement.selectable = false;
     this._headersTreeOutline.appendChild(this._securityOriginTreeElement);
 
-    this._nameTreeElement = new TreeElement("", null, false);
+    this._nameTreeElement = new TreeElement();
     this._nameTreeElement.selectable = false;
     this._headersTreeOutline.appendChild(this._nameTreeElement);
 
-    this._intVersionTreeElement = new TreeElement("", null, false);
+    this._intVersionTreeElement = new TreeElement();
     this._intVersionTreeElement.selectable = false;
     this._headersTreeOutline.appendChild(this._intVersionTreeElement);
 
-    this._stringVersionTreeElement = new TreeElement("", null, false);
+    this._stringVersionTreeElement = new TreeElement();
     this._stringVersionTreeElement.selectable = false;
     this._headersTreeOutline.appendChild(this._stringVersionTreeElement);
 
@@ -197,7 +198,7 @@ WebInspector.IDBDataView.prototype = {
     {
         var keyPathStringFragment = createDocumentFragment();
         keyPathStringFragment.createTextChild("\"");
-        var keyPathSpan = keyPathStringFragment.createChild("span", "source-code console-formatted-string");
+        var keyPathSpan = keyPathStringFragment.createChild("span", "source-code indexed-db-key-path");
         keyPathSpan.textContent = keyPathString;
         keyPathStringFragment.createTextChild("\"");
         return keyPathStringFragment;
@@ -399,24 +400,16 @@ WebInspector.IDBDataGridNode.prototype = {
 
     _formatValue: function(cell, value)
     {
-        var type = value.subtype || value.type;
-        var contents = cell.createChild("div", "source-code console-formatted-" + type);
-
-        switch (type) {
-        case "object":
-        case "array":
-            var section = new WebInspector.ObjectPropertiesSection(value, value.description);
+        var valueElement = WebInspector.ObjectPropertiesSection.createValueElement(value, false, cell);
+        valueElement.classList.add("source-code");
+        if (value.type === "object") {
+            var section = new WebInspector.ObjectPropertiesSection(value, valueElement);
             section.editable = false;
-            section.skipProto = true;
-            contents.appendChild(section.element);
-            break;
-        case "string":
-            contents.classList.add("primitive-value");
-            contents.createTextChildren("\"", value.description, "\"");
-            break;
-        default:
-            contents.classList.add("primitive-value");
-            contents.createTextChild(value.description);
+            section.skipProto();
+            cell.appendChild(section.element);
+        } else {
+            valueElement.classList.add("primitive-value");
+            cell.appendChild(valueElement);
         }
     },
 

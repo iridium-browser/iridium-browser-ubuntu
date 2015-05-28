@@ -69,6 +69,7 @@ PepperVideoRenderer2D::PepperVideoRenderer2D()
       dips_to_view_scale_(1.0f),
       flush_pending_(false),
       frame_received_(false),
+      debug_dirty_region_(false),
       callback_factory_(this),
       weak_factory_(this) {
 }
@@ -178,6 +179,10 @@ void PepperVideoRenderer2D::OnViewChanged(const pp::View& view) {
   }
 }
 
+void PepperVideoRenderer2D::EnableDebugDirtyRegion(bool enable) {
+  debug_dirty_region_ = enable;
+}
+
 void PepperVideoRenderer2D::OnSessionConfig(
     const protocol::SessionConfig& config) {
   DCHECK(CalledOnValidThread());
@@ -192,12 +197,10 @@ ChromotingStats* PepperVideoRenderer2D::GetStats() {
   return software_video_renderer_->GetStats();
 }
 
-void PepperVideoRenderer2D::ProcessVideoPacket(
-    scoped_ptr<VideoPacket> video_packet,
-    const base::Closure& done) {
+protocol::VideoStub* PepperVideoRenderer2D::GetVideoStub() {
   DCHECK(CalledOnValidThread());
 
-  software_video_renderer_->ProcessVideoPacket(video_packet.Pass(), done);
+  return software_video_renderer_->GetVideoStub();
 }
 
 void PepperVideoRenderer2D::ApplyBuffer(const webrtc::DesktopSize& view_size,
@@ -340,6 +343,11 @@ void PepperVideoRenderer2D::FlushBuffer(const webrtc::DesktopRect& clip_area,
   int error = graphics2d_.Flush(callback);
   CHECK(error == PP_OK_COMPLETIONPENDING);
   flush_pending_ = true;
+
+  // If Debug dirty region is enabled then emit it.
+  if (debug_dirty_region_) {
+    event_handler_->OnVideoFrameDirtyRegion(region);
+  }
 }
 
 void PepperVideoRenderer2D::OnFlushDone(int result,

@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/blacklist.h"
-#include "chrome/browser/extensions/declarative_user_script_manager.h"
 #include "chrome/browser/extensions/error_console/error_console.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -16,6 +15,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/declarative_user_script_manager.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_pref_value_map.h"
 #include "extensions/browser/extension_pref_value_map_factory.h"
@@ -25,6 +25,7 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/info_map.h"
+#include "extensions/browser/lazy_background_task_queue.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/browser/quota_service.h"
 #include "extensions/browser/runtime_data.h"
@@ -48,6 +49,10 @@ TestExtensionSystem::~TestExtensionSystem() {
 void TestExtensionSystem::Shutdown() {
   if (extension_service_)
     extension_service_->Shutdown();
+}
+
+void TestExtensionSystem::CreateLazyBackgroundTaskQueue() {
+  lazy_background_task_queue_.reset(new LazyBackgroundTaskQueue(profile_));
 }
 
 ExtensionPrefs* TestExtensionSystem::CreateExtensionPrefs(
@@ -143,7 +148,7 @@ InfoMap* TestExtensionSystem::info_map() { return info_map_.get(); }
 
 LazyBackgroundTaskQueue*
 TestExtensionSystem::lazy_background_task_queue() {
-  return NULL;
+  return lazy_background_task_queue_.get();
 }
 
 void TestExtensionSystem::SetEventRouter(scoped_ptr<EventRouter> event_router) {

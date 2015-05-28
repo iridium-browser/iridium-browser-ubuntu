@@ -26,6 +26,7 @@ BRANDINGS = [
   'ChromeOS',
   'Chromium',
   'ChromiumOS',
+  'Ensemble',
 ]
 
 
@@ -69,11 +70,14 @@ Platform specific build notes:
       - Add these packages at install time: diffutils, yasm, make, python.
       - Copy chromium/scripts/cygwin-wrapper to /usr/local/bin
 
+    Ensemble will only be built for ia32, x64, ARM & mipsel.
+
 Resulting binaries will be placed in:
   build.TARGET_ARCH.TARGET_OS/Chromium/out/
   build.TARGET_ARCH.TARGET_OS/Chrome/out/
   build.TARGET_ARCH.TARGET_OS/ChromiumOS/out/
-  build.TARGET_ARCH.TARGET_OS/ChromeOS/out/"""
+  build.TARGET_ARCH.TARGET_OS/ChromeOS/out/
+  build.TARGET_ARCH.TARGET_OS/Ensemble/out/"""
 
 
 def PrintAndCheckCall(argv, *args, **kwargs):
@@ -106,7 +110,7 @@ def DetermineHostOsAndArch():
 
 
 def GetDsoName(target_os, dso_name, dso_version):
-  if target_os == 'linux':
+  if target_os in ('linux', 'linux-noasm'):
     return 'lib%s.so.%s' % (dso_name, dso_version)
   elif target_os == 'mac':
     return 'lib%s.%s.dylib' % (dso_name, dso_version)
@@ -144,7 +148,7 @@ def BuildFFmpeg(target_os, target_arch, host_os, host_arch, parallel_jobs,
                   'HAVE_EBP_AVAILABLE 1',
                   'HAVE_EBP_AVAILABLE 0')
 
-  if host_os == target_os and not config_only:
+  if target_os in (host_os, host_os + '-noasm') and not config_only:
     libraries = [
         os.path.join('libavcodec', GetDsoName(target_os, 'avcodec', 56)),
         os.path.join('libavformat', GetDsoName(target_os, 'avformat', 56)),
@@ -219,6 +223,10 @@ def main(argv):
       '--disable-everything',
       '--disable-all',
       '--disable-doc',
+      '--disable-htmlpages',
+      '--disable-manpages',
+      '--disable-podpages',
+      '--disable-txtpages',
       '--disable-static',
       '--enable-avcodec',
       '--enable-avformat',
@@ -233,6 +241,7 @@ def main(argv):
       '--disable-iconv',
       '--disable-lzo',
       '--disable-network',
+      '--disable-sdl',
       '--disable-symver',
       '--disable-xlib',
       '--disable-zlib',
@@ -431,6 +440,13 @@ def main(argv):
       '--enable-parser=flac',
   ])
 
+  # Ensemble specific configuration.
+  configure_flags['Ensemble'].extend([
+      '--enable-decoder=alac,flac',
+      '--enable-demuxer=flac',
+      '--enable-parser=flac',
+  ])
+
   # Google ChromeOS specific configuration.
   # We want to make sure to play everything Android generates and plays.
   # http://developer.android.com/guide/appendix/media-formats.html
@@ -476,6 +492,13 @@ def main(argv):
                     configure_flags['Chromium'] +
                     configure_flags['ChromiumOS'] +
                     configure_args)
+    # Ensemble should be only build on a restricted set of platforms.
+    if target_arch in ['ia32','x64', 'arm', 'mipsel']:
+      do_build_ffmpeg('Ensemble',
+                      configure_flags['Common'] +
+                      configure_flags['Chrome'] +
+                      configure_flags['Ensemble'] +
+                      configure_args)
 
     # ChromeOS enables MPEG4 which requires error resilience :(
     chrome_os_flags = (configure_flags['Common'] +

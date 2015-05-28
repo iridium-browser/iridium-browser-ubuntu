@@ -15,7 +15,7 @@
 #include "cc/resources/tile_task_worker_pool.h"
 
 namespace base {
-namespace debug {
+namespace trace_event {
 class ConvertableToTraceFormat;
 class TracedValue;
 }
@@ -48,6 +48,7 @@ class CC_EXPORT OneCopyTileTaskWorkerPool : public TileTaskWorkerPool,
   void Shutdown() override;
   void ScheduleTasks(TileTaskQueue* queue) override;
   void CheckForCompletedTasks() override;
+  ResourceFormat GetResourceFormat() override;
 
   // Overridden from TileTaskClient:
   scoped_ptr<RasterBuffer> AcquireBufferForRaster(
@@ -96,8 +97,10 @@ class CC_EXPORT OneCopyTileTaskWorkerPool : public TileTaskWorkerPool,
   void ScheduleCheckForCompletedCopyOperationsWithLockAcquired(
       bool wait_if_needed);
   void CheckForCompletedCopyOperations(bool wait_if_needed);
-  scoped_refptr<base::debug::ConvertableToTraceFormat> StateAsValue() const;
-  void StagingStateAsValueInto(base::debug::TracedValue* staging_state) const;
+  scoped_refptr<base::trace_event::ConvertableToTraceFormat> StateAsValue()
+      const;
+  void StagingStateAsValueInto(
+      base::trace_event::TracedValue* staging_state) const;
 
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   TaskGraphRunner* task_graph_runner_;

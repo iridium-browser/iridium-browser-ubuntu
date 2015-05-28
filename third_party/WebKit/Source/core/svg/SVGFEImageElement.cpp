@@ -55,7 +55,7 @@ SVGFEImageElement::~SVGFEImageElement()
 #endif
 }
 
-void SVGFEImageElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFEImageElement)
 {
     visitor->trace(m_preserveAspectRatio);
     SVGFilterPrimitiveStandardAttributes::trace(visitor);
@@ -123,11 +123,6 @@ bool SVGFEImageElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGFEImageElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
-}
-
 void SVGFEImageElement::svgAttributeChanged(const QualifiedName& attrName)
 {
     if (!isSupportedAttribute(attrName)) {
@@ -170,19 +165,17 @@ void SVGFEImageElement::notifyFinished(Resource*)
         return;
 
     Element* parent = parentElement();
-    ASSERT(parent);
-
-    if (!isSVGFilterElement(*parent) || !parent->renderer())
+    if (!parent || !isSVGFilterElement(parent) || !parent->layoutObject())
         return;
 
-    if (RenderObject* renderer = this->renderer())
+    if (LayoutObject* renderer = this->layoutObject())
         markForLayoutAndParentResourceInvalidation(renderer);
 }
 
 PassRefPtrWillBeRawPtr<FilterEffect> SVGFEImageElement::build(SVGFilterBuilder*, Filter* filter)
 {
     if (m_cachedImage)
-        return FEImage::createWithImage(filter, m_cachedImage->imageForRenderer(renderer()), m_preserveAspectRatio->currentValue());
+        return FEImage::createWithImage(filter, m_cachedImage->imageForLayoutObject(layoutObject()), m_preserveAspectRatio->currentValue());
     return FEImage::createWithIRIReference(filter, treeScope(), hrefString(), m_preserveAspectRatio->currentValue());
 }
 

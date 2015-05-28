@@ -38,7 +38,6 @@
 #include "core/dom/Document.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/inspector/DevToolsHost.h"
-#include "core/inspector/InspectorController.h"
 #include "core/inspector/InspectorFrontendClient.h"
 #include "platform/ContextMenu.h"
 #include "public/platform/Platform.h"
@@ -73,6 +72,7 @@ static bool populateContextMenuItems(const v8::Local<v8::Array>& itemArray, Cont
         if (typeString == "separator") {
             ContextMenuItem item(ContextMenuItem(SeparatorType,
                 ContextMenuItemCustomTagNoAction,
+                String(),
                 String()));
             menu.appendItem(item);
         } else if (typeString == "subMenu" && subItems->IsArray()) {
@@ -84,16 +84,17 @@ static bool populateContextMenuItems(const v8::Local<v8::Array>& itemArray, Cont
             ContextMenuItem item(SubmenuType,
                 ContextMenuItemCustomTagNoAction,
                 labelString,
+                String(),
                 &subMenu);
             menu.appendItem(item);
         } else {
             ContextMenuAction typedId = static_cast<ContextMenuAction>(ContextMenuItemBaseCustomTag + id->ToInt32(isolate)->Value());
             TOSTRING_DEFAULT(V8StringResource<TreatNullAsNullString>, labelString, label, false);
-            ContextMenuItem menuItem((typeString == "checkbox" ? CheckableActionType : ActionType), typedId, labelString);
+            ContextMenuItem menuItem((typeString == "checkbox" ? CheckableActionType : ActionType), typedId, labelString, String());
             if (checked->IsBoolean())
-                menuItem.setChecked(checked->ToBoolean(isolate)->Value());
+                menuItem.setChecked(checked.As<v8::Boolean>()->Value());
             if (enabled->IsBoolean())
-                menuItem.setEnabled(enabled->ToBoolean(isolate)->Value());
+                menuItem.setEnabled(enabled.As<v8::Boolean>()->Value());
             menu.appendItem(menuItem);
         }
     }
@@ -128,13 +129,10 @@ void V8DevToolsHost::showContextMenuAtPointMethodCustom(const v8::FunctionCallba
     if (info.Length() < 3)
         return;
 
-    v8::Local<v8::Value> x = v8::Local<v8::Value>::Cast(info[0]);
-    if (!x->IsNumber())
-        return;
+    ExceptionState exceptionState(ExceptionState::ExecutionContext, "showContextMenuAtPoint", "DevToolsHost", info.Holder(), info.GetIsolate());
 
-    v8::Local<v8::Value> y = v8::Local<v8::Value>::Cast(info[1]);
-    if (!y->IsNumber())
-        return;
+    TONATIVE_VOID_EXCEPTIONSTATE(float, x, toRestrictedFloat(info.GetIsolate(), info[0], exceptionState), exceptionState);
+    TONATIVE_VOID_EXCEPTIONSTATE(float, y, toRestrictedFloat(info.GetIsolate(), info[1], exceptionState), exceptionState);
 
     v8::Local<v8::Value> array = v8::Local<v8::Value>::Cast(info[2]);
     if (!array->IsArray())
@@ -157,12 +155,12 @@ void V8DevToolsHost::showContextMenuAtPointMethodCustom(const v8::FunctionCallba
         DOMWindow* window = V8Window::toImpl(windowWrapper);
         document = window ? toLocalDOMWindow(window)->document() : nullptr;
     }
-    if (!document || !document->page())
+    if (!document || !document->frame())
         return;
 
     DevToolsHost* devtoolsHost = V8DevToolsHost::toImpl(info.Holder());
     Vector<ContextMenuItem> items = menu.items();
-    devtoolsHost->showContextMenu(document->page(), static_cast<float>(x->NumberValue()), static_cast<float>(y->NumberValue()), items);
+    devtoolsHost->showContextMenu(document->frame(), x, y, items);
 }
 
 } // namespace blink

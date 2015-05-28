@@ -98,7 +98,7 @@ SearchOperation::~SearchOperation() {
 void SearchOperation::Search(const std::string& search_query,
                              const GURL& next_link,
                              const SearchCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (next_link.is_empty()) {
@@ -118,9 +118,9 @@ void SearchOperation::Search(const std::string& search_query,
 
 void SearchOperation::SearchAfterGetFileList(
     const SearchCallback& callback,
-    google_apis::GDataErrorCode gdata_error,
+    google_apis::DriveApiErrorCode gdata_error,
     scoped_ptr<google_apis::FileList> file_list) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   FileError error = GDataToFileError(gdata_error);
@@ -167,7 +167,7 @@ void SearchOperation::SearchAfterResolveSearchResult(
     const GURL& next_link,
     scoped_ptr<std::vector<SearchResultInfo> > result,
     FileError error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
   DCHECK(result);
 

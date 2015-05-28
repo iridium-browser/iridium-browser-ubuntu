@@ -15,6 +15,7 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread.h"
@@ -37,13 +38,13 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/metrics/metrics_service.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/cookie_crypto_delegate.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/notification_service.h"
 #include "net/cookies/cookie_monster.h"
+#include "net/extras/sqlite/cookie_crypto_delegate.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -56,6 +57,7 @@
 #include "chrome/browser/safe_browsing/incident_reporting/blacklist_load_analyzer.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_reporting_service.h"
 #include "chrome/browser/safe_browsing/incident_reporting/off_domain_inclusion_detector.h"
+#include "chrome/browser/safe_browsing/incident_reporting/script_request_detector.h"
 #include "chrome/browser/safe_browsing/incident_reporting/variations_seed_signature_analyzer.h"
 #endif
 
@@ -231,10 +233,12 @@ void SafeBrowsingService::Initialize() {
   if (IsIncidentReportingServiceEnabled()) {
     incident_service_.reset(new safe_browsing::IncidentReportingService(
         this, url_request_context_getter_));
+    script_request_detector_.reset(new safe_browsing::ScriptRequestDetector(
+        incident_service_->GetIncidentReceiver()));
   }
 
   off_domain_inclusion_detector_.reset(
-      new safe_browsing::OffDomainInclusionDetector);
+      new safe_browsing::OffDomainInclusionDetector(database_manager_));
 #endif
 
   // Track the safe browsing preference of existing profiles.
@@ -278,6 +282,7 @@ void SafeBrowsingService::ShutDown() {
 
 #if defined(FULL_SAFE_BROWSING)
   off_domain_inclusion_detector_.reset();
+  script_request_detector_.reset();
   incident_service_.reset();
 #endif
 
@@ -359,6 +364,8 @@ void SafeBrowsingService::OnResourceRequest(const net::URLRequest* request) {
 #if defined(FULL_SAFE_BROWSING)
   if (off_domain_inclusion_detector_)
     off_domain_inclusion_detector_->OnResourceRequest(request);
+  if (script_request_detector_)
+    script_request_detector_->OnResourceRequest(request);
 #endif
 }
 
@@ -571,6 +578,11 @@ void SafeBrowsingService::RefreshState() {
       break;
     }
   }
+
+  // TODO(asvitkine): Experimental code for measuring start up impact of SB.
+  // Remove when experimentation is complete. http://crbug.com/450037
+  if (!variations::GetVariationParamValue("LightSpeed", "DisableSB").empty())
+    enable = false;
 
   if (enable)
     Start();

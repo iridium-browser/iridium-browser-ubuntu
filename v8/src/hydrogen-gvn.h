@@ -7,7 +7,6 @@
 
 #include <iosfwd>
 
-#include "src/compiler.h"
 #include "src/hydrogen.h"
 #include "src/hydrogen-instructions.h"
 #include "src/zone.h"
@@ -71,7 +70,7 @@ class SideEffectsTracker FINAL BASE_EMBEDDED {
 
  private:
   friend std::ostream& operator<<(std::ostream& os, const TrackedEffects& f);
-  bool ComputeGlobalVar(Unique<Cell> cell, int* index);
+  bool ComputeGlobalVar(Unique<PropertyCell> cell, int* index);
   bool ComputeInobjectField(HObjectAccess access, int* index);
 
   static int GlobalVar(int index) {
@@ -87,7 +86,7 @@ class SideEffectsTracker FINAL BASE_EMBEDDED {
 
   // Track up to four global vars.
   static const int kNumberOfGlobalVars = 4;
-  Unique<Cell> global_vars_[kNumberOfGlobalVars];
+  Unique<PropertyCell> global_vars_[kNumberOfGlobalVars];
   int num_global_vars_;
 
   // Track up to n inobject fields.

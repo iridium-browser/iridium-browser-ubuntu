@@ -88,7 +88,7 @@ std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
   waiter.reset(new AccessibilityNotificationWaiter(
       shell(), AccessibilityModeComplete, ui::AX_EVENT_NONE));
 
-  // Execute the "go" function in the script.
+
   web_contents->GetMainFrame()->ExecuteJavaScript(
       base::ASCIIToUTF16("go()"));
 
@@ -138,10 +138,9 @@ void DumpAccessibilityEventsTest::RunEventTest(
     const base::FilePath::CharType* file_path) {
   base::FilePath dir_test_data;
   ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &dir_test_data));
-  base::FilePath test_path(
-      dir_test_data.AppendASCII("accessibility/event"));
-  ASSERT_TRUE(base::PathExists(test_path))
-      << test_path.LossyDisplayName();
+  base::FilePath test_path(dir_test_data.AppendASCII("accessibility")
+      .AppendASCII("event"));
+  ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
 
   base::FilePath event_file = test_path.Append(base::FilePath(file_path));
   RunTest(event_file, "accessibility/event");
@@ -151,13 +150,89 @@ void DumpAccessibilityEventsTest::RunEventTest(
 #if defined(OS_WIN) || defined(OS_MACOSX)
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAddAlert) {
+  RunEventTest(FILE_PATH_LITERAL("add-alert.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAddChild) {
+  RunEventTest(FILE_PATH_LITERAL("add-child.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAddHiddenAttribute) {
+  RunEventTest(FILE_PATH_LITERAL("add-hidden-attribute.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAddHiddenAttributeSubtree) {
+  RunEventTest(FILE_PATH_LITERAL("add-hidden-attribute-subtree.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAddSubtree) {
+  RunEventTest(FILE_PATH_LITERAL("add-subtree.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
                        AccessibilityEventsCheckedStateChanged) {
-  RunEventTest(FILE_PATH_LITERAL("events-checked-state-changed.html"));
+  RunEventTest(FILE_PATH_LITERAL("checked-state-changed.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsCSSDisplay) {
+  RunEventTest(FILE_PATH_LITERAL("css-display.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsCSSVisibility) {
+  RunEventTest(FILE_PATH_LITERAL("css-visibility.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsDescriptionChange) {
+  RunEventTest(FILE_PATH_LITERAL("description-change.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsInnerHtmlChange) {
+  RunEventTest(FILE_PATH_LITERAL("inner-html-change.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
                        AccessibilityEventsInputTypeTextValueChanged) {
-  RunEventTest(FILE_PATH_LITERAL("events-input-type-text-value-changed.html"));
+  RunEventTest(FILE_PATH_LITERAL("input-type-text-value-changed.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsNameChange) {
+  RunEventTest(FILE_PATH_LITERAL("name-change.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsRemoveChild) {
+  RunEventTest(FILE_PATH_LITERAL("remove-child.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsRemoveHiddenAttribute) {
+  RunEventTest(FILE_PATH_LITERAL("remove-hidden-attribute.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(
+    DumpAccessibilityEventsTest,
+    AccessibilityEventsRemoveHiddenAttributeSubtree) {
+  RunEventTest(FILE_PATH_LITERAL("remove-hidden-attribute-subtree.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsRemoveSubtree) {
+  RunEventTest(FILE_PATH_LITERAL("remove-subtree.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsTextChanged) {
+  RunEventTest(FILE_PATH_LITERAL("text-changed.html"));
 }
 
 #endif  // defined(OS_WIN)

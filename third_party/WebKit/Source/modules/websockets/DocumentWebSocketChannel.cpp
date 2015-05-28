@@ -34,6 +34,7 @@
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/fetch/UniqueIdentifier.h"
 #include "core/fileapi/FileReaderLoader.h"
 #include "core/fileapi/FileReaderLoaderClient.h"
 #include "core/frame/LocalFrame.h"
@@ -43,7 +44,6 @@
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/MixedContentChecker.h"
-#include "core/loader/UniqueIdentifier.h"
 #include "modules/websockets/WebSocketChannelClient.h"
 #include "modules/websockets/WebSocketFrame.h"
 #include "platform/Logging.h"
@@ -74,7 +74,7 @@ public:
     virtual void didFinishLoading() override;
     virtual void didFail(FileError::ErrorCode) override;
 
-    void trace(Visitor* visitor)
+    DEFINE_INLINE_TRACE()
     {
         visitor->trace(m_channel);
     }
@@ -137,7 +137,7 @@ bool DocumentWebSocketChannel::connect(const KURL& url, const String& protocol)
         return false;
 
     if (executionContext()->isDocument() && document()->frame()) {
-        if (MixedContentChecker::shouldBlockConnection(document()->frame(), url))
+        if (MixedContentChecker::shouldBlockWebSocket(document()->frame(), url))
             return false;
     }
     if (MixedContentChecker::isMixedContent(document()->securityOrigin(), url)) {
@@ -166,7 +166,6 @@ bool DocumentWebSocketChannel::connect(const KURL& url, const String& protocol)
     flowControlIfNecessary();
     if (m_identifier) {
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "WebSocketCreate", "data", InspectorWebSocketCreateEvent::data(document(), m_identifier, url, protocol));
-        // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
         InspectorInstrumentation::didCreateWebSocket(document(), m_identifier, url, protocol);
     }
     return true;
@@ -215,7 +214,7 @@ void DocumentWebSocketChannel::send(const DOMArrayBuffer& buffer, unsigned byteO
     sendInternal();
 }
 
-void DocumentWebSocketChannel::send(PassOwnPtr<Vector<char> > data)
+void DocumentWebSocketChannel::send(PassOwnPtr<Vector<char>> data)
 {
     WTF_LOG(Network, "DocumentWebSocketChannel %p sendVector(%p, %llu)", this, data.get(), static_cast<unsigned long long>(data->size()));
     if (m_identifier) {
@@ -259,7 +258,6 @@ void DocumentWebSocketChannel::disconnect()
     WTF_LOG(Network, "DocumentWebSocketChannel %p disconnect()", this);
     if (m_identifier) {
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "WebSocketDestroy", "data", InspectorWebSocketEvent::data(document(), m_identifier));
-        // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
         InspectorInstrumentation::didCloseWebSocket(document(), m_identifier);
     }
     abortAsyncOperations();
@@ -270,7 +268,7 @@ void DocumentWebSocketChannel::disconnect()
 
 DocumentWebSocketChannel::Message::Message(const String& text)
     : type(MessageTypeText)
-    , text(text.utf8(StrictUTF8ConversionReplacingUnpairedSurrogatesWithFFFD)) { }
+    , text(text.utf8()) { }
 
 DocumentWebSocketChannel::Message::Message(PassRefPtr<BlobDataHandle> blobDataHandle)
     : type(MessageTypeBlob)
@@ -280,7 +278,7 @@ DocumentWebSocketChannel::Message::Message(PassRefPtr<DOMArrayBuffer> arrayBuffe
     : type(MessageTypeArrayBuffer)
     , arrayBuffer(arrayBuffer) { }
 
-DocumentWebSocketChannel::Message::Message(PassOwnPtr<Vector<char> > vectorData)
+DocumentWebSocketChannel::Message::Message(PassOwnPtr<Vector<char>> vectorData)
     : type(MessageTypeVector)
     , vectorData(vectorData) { }
 
@@ -408,19 +406,14 @@ Document* DocumentWebSocketChannel::document()
     return toDocument(context);
 }
 
-void DocumentWebSocketChannel::didConnect(WebSocketHandle* handle, bool fail, const WebString& selectedProtocol, const WebString& extensions)
+void DocumentWebSocketChannel::didConnect(WebSocketHandle* handle, const WebString& selectedProtocol, const WebString& extensions)
 {
-    WTF_LOG(Network, "DocumentWebSocketChannel %p didConnect(%p, %d, %s, %s)", this, handle, fail, selectedProtocol.utf8().data(), extensions.utf8().data());
+    WTF_LOG(Network, "DocumentWebSocketChannel %p didConnect(%p, %s, %s)", this, handle, selectedProtocol.utf8().c_str(), extensions.utf8().c_str());
 
     ASSERT(m_handle);
     ASSERT(handle == m_handle);
     ASSERT(m_client);
 
-    if (fail) {
-        failAsError("Cannot connect to " + m_url.string() + ".");
-        // failAsError may delete this object.
-        return;
-    }
     m_client->didConnect(selectedProtocol, extensions);
 }
 
@@ -433,7 +426,6 @@ void DocumentWebSocketChannel::didStartOpeningHandshake(WebSocketHandle* handle,
 
     if (m_identifier) {
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "WebSocketSendHandshakeRequest", "data", InspectorWebSocketEvent::data(document(), m_identifier));
-        // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
         InspectorInstrumentation::willSendWebSocketHandshakeRequest(document(), m_identifier, &request.toCoreRequest());
         m_handshakeRequest = WebSocketHandshakeRequest::create(request.toCoreRequest());
     }
@@ -448,7 +440,6 @@ void DocumentWebSocketChannel::didFinishOpeningHandshake(WebSocketHandle* handle
 
     if (m_identifier) {
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "WebSocketReceiveHandshakeResponse", "data", InspectorWebSocketEvent::data(document(), m_identifier));
-        // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
         InspectorInstrumentation::didReceiveWebSocketHandshakeResponse(document(), m_identifier, m_handshakeRequest.get(), &response.toCoreResponse());
     }
     m_handshakeRequest.clear();
@@ -515,7 +506,7 @@ void DocumentWebSocketChannel::didReceiveData(WebSocketHandle* handle, bool fin,
             m_client->didReceiveTextMessage(message);
         }
     } else {
-        OwnPtr<Vector<char> > binaryData = adoptPtr(new Vector<char>);
+        OwnPtr<Vector<char>> binaryData = adoptPtr(new Vector<char>);
         binaryData->swap(m_receivingMessageData);
         m_client->didReceiveBinaryMessage(binaryData.release());
     }
@@ -532,7 +523,6 @@ void DocumentWebSocketChannel::didClose(WebSocketHandle* handle, bool wasClean, 
 
     if (m_identifier) {
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "WebSocketDestroy", "data", InspectorWebSocketEvent::data(document(), m_identifier));
-        // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
         InspectorInstrumentation::didCloseWebSocket(document(), m_identifier);
         m_identifier = 0;
     }
@@ -587,7 +577,7 @@ void DocumentWebSocketChannel::didFailLoadingBlob(FileError::ErrorCode errorCode
     // |this| can be deleted here.
 }
 
-void DocumentWebSocketChannel::trace(Visitor* visitor)
+DEFINE_TRACE(DocumentWebSocketChannel)
 {
     visitor->trace(m_blobLoader);
     visitor->trace(m_client);

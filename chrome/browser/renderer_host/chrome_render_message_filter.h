@@ -21,7 +21,7 @@ namespace chrome_browser_net {
 class Predictor;
 }
 
-namespace dns_prefetch {
+namespace network_hints {
 struct LookupRequest;
 }
 
@@ -59,8 +59,8 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
 
   ~ChromeRenderMessageFilter() override;
 
-  void OnDnsPrefetch(const dns_prefetch::LookupRequest& request);
-  void OnPreconnect(const GURL& url);
+  void OnDnsPrefetch(const network_hints::LookupRequest& request);
+  void OnPreconnect(const GURL& url, int count);
   void OnResourceTypeStats(const blink::WebCache::ResourceTypeStats& stats);
   void OnUpdatedCacheStats(const blink::WebCache::UsageStats& stats);
   void OnV8HeapStats(int v8_memory_allocated, int v8_memory_used);
@@ -121,6 +121,10 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
 #if defined(ENABLE_PLUGINS)
   void OnIsCrashReportingEnabled(bool* enabled);
 #endif
+
+  // Called when a message is received from a renderer that a trial has been
+  // activated (ChromeViewHostMsg_FieldTrialActivated).
+  void OnFieldTrialActivated(const std::string& trial_name);
 
   const int render_process_id_;
 

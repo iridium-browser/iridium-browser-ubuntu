@@ -48,6 +48,9 @@ namespace media {
 // Ref: http://tools.ietf.org/html/draft-ietf-jose-json-web-key and:
 // http://tools.ietf.org/html/draft-jones-jose-json-private-and-symmetric-key
 
+// Vector of key IDs.
+typedef std::vector<std::vector<uint8>> KeyIdList;
+
 // Vector of [key_id, key_value] pairs. Values are raw binary data, stored in
 // strings for convenience.
 typedef std::pair<std::string, std::string> KeyIdAndKeyPair;
@@ -64,12 +67,17 @@ MEDIA_EXPORT bool ExtractKeysFromJWKSet(const std::string& jwk_set,
                                         KeyIdAndKeyPairs* keys,
                                         MediaKeys::SessionType* session_type);
 
-// Create a license request message for the |key_id| and |session_type|
-// specified. Currently ClearKey generates a message for each key individually,
-// so no need to take a list of |key_id|'s. |license| is updated to contain the
-// resulting JSON string.
-MEDIA_EXPORT void CreateLicenseRequest(const uint8* key_id,
-                                       int key_id_length,
+// Extracts the Key Ids from a Key IDs Initialization Data
+// (https://w3c.github.io/encrypted-media/keyids-format.html). If |input| looks
+// valid, then true is returned and |key_ids| is updated to contain the values
+// found. Otherwise return false and |error_message| contains the reason.
+MEDIA_EXPORT bool ExtractKeyIdsFromKeyIdsInitData(const std::string& input,
+                                                  KeyIdList* key_ids,
+                                                  std::string* error_message);
+
+// Creates a license request message for the |key_ids| and |session_type|
+// specified. |license| is updated to contain the resulting JSON string.
+MEDIA_EXPORT void CreateLicenseRequest(const KeyIdList& key_ids,
                                        MediaKeys::SessionType session_type,
                                        std::vector<uint8>* license);
 

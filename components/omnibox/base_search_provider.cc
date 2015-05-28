@@ -210,7 +210,7 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
   match.answer_contents = suggestion.answer_contents();
   match.answer_type = suggestion.answer_type();
   match.answer = SuggestionAnswer::copy(suggestion.answer());
-  if (suggestion.type() == AutocompleteMatchType::SEARCH_SUGGEST_INFINITE) {
+  if (suggestion.type() == AutocompleteMatchType::SEARCH_SUGGEST_TAIL) {
     match.RecordAdditionalInfo(
         kACMatchPropertyInputText, base::UTF16ToUTF8(input.text()));
     match.RecordAdditionalInfo(
@@ -222,8 +222,11 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
             suggestion.suggestion().length() - match.contents.length()));
   }
 
-  if (!suggestion.annotation().empty())
+  if (!suggestion.annotation().empty()) {
     match.description = suggestion.annotation();
+    AutocompleteMatch::AddLastClassificationIfNecessary(
+        &match.description_class, 0, ACMatchClassification::NONE);
+  }
 
   // suggestion.match_contents() should have already been collapsed.
   match.allowed_to_be_default_match =

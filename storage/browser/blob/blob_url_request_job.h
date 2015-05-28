@@ -12,8 +12,8 @@
 #include "net/http/http_byte_range.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_request_job.h"
+#include "storage/browser/blob/blob_data_snapshot.h"
 #include "storage/browser/storage_browser_export.h"
-#include "storage/common/blob/blob_data.h"
 
 namespace base {
 class MessageLoopProxy;
@@ -38,7 +38,7 @@ class STORAGE_EXPORT BlobURLRequestJob
  public:
   BlobURLRequestJob(net::URLRequest* request,
                     net::NetworkDelegate* network_delegate,
-                    const scoped_refptr<BlobData>& blob_data,
+                    scoped_ptr<BlobDataSnapshot> blob_data,
                     storage::FileSystemContext* file_system_context,
                     base::MessageLoopProxy* resolving_message_loop_proxy);
 
@@ -70,10 +70,10 @@ class STORAGE_EXPORT BlobURLRequestJob
   bool ReadItem();
   void AdvanceItem();
   void AdvanceBytesRead(int result);
-  bool ReadBytesItem(const BlobData::Item& item, int bytes_to_read);
+  bool ReadBytesItem(const BlobDataItem& item, int bytes_to_read);
   bool ReadFileItem(FileStreamReader* reader, int bytes_to_read);
 
-  void DidReadFile(int result);
+  void DidReadFile(int chunk_number, int result);
   void DeleteCurrentFileReader();
 
   int ComputeBytesToRead() const;
@@ -92,7 +92,7 @@ class STORAGE_EXPORT BlobURLRequestJob
   // Creates a FileStreamReader for the item at |index| with additional_offset.
   void CreateFileStreamReader(size_t index, int64 additional_offset);
 
-  scoped_refptr<BlobData> blob_data_;
+  scoped_ptr<BlobDataSnapshot> blob_data_;
 
   // Variables for controlling read from |blob_data_|.
   scoped_refptr<storage::FileSystemContext> file_system_context_;
@@ -113,6 +113,9 @@ class STORAGE_EXPORT BlobURLRequestJob
 
   bool byte_range_set_;
   net::HttpByteRange byte_range_;
+
+  // Used to create unique id's for tracing.
+  int current_file_chunk_number_;
 
   scoped_ptr<net::HttpResponseInfo> response_info_;
 

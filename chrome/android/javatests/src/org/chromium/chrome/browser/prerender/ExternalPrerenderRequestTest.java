@@ -10,12 +10,10 @@ import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ContentViewUtil;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.shell.ChromeShellTestBase;
 import org.chromium.chrome.test.util.TestHttpServerClient;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.WebContents;
 
 import java.util.concurrent.Callable;
 
@@ -23,14 +21,11 @@ import java.util.concurrent.Callable;
  * Tests for adding and removing prerenders using the {@link ExternalPrerenderHandler}
  */
 public class ExternalPrerenderRequestTest extends ChromeShellTestBase {
-    private static final String HOMEPAGE_URL =
-            TestHttpServerClient.getUrl("chrome/test/data/android/prerender/homepage.html");
     private static final String GOOGLE_URL =
             TestHttpServerClient.getUrl("chrome/test/data/android/prerender/google.html");
     private static final String YOUTUBE_URL =
             TestHttpServerClient.getUrl("chrome/test/data/android/prerender/youtube.html");
     private static final int PRERENDER_DELAY_MS = 500;
-    private static final int CHECK_COOKIE_STORE_FREQUENCY_MS = 200;
 
     private ExternalPrerenderHandler mHandler;
     private Profile mProfile;
@@ -39,8 +34,7 @@ public class ExternalPrerenderRequestTest extends ChromeShellTestBase {
     public void setUp() throws Exception {
         super.setUp();
         clearAppData();
-        // Launch with a non-blank homepage, to trigger cookie store loading.
-        launchChromeShellWithUrl(HOMEPAGE_URL);
+        launchChromeShellWithBlankPage();
         assertTrue(waitForActiveShellToBeDoneLoading());
         mHandler = new ExternalPrerenderHandler();
         final Callable<Profile> profileCallable = new Callable<Profile>() {
@@ -50,18 +44,6 @@ public class ExternalPrerenderRequestTest extends ChromeShellTestBase {
             }
         };
         mProfile = ThreadUtils.runOnUiThreadBlocking(profileCallable);
-        final Callable<Boolean> cookieStoreCallable = new Callable<Boolean>() {
-            @Override
-            public Boolean call() throws Exception {
-                return ExternalPrerenderHandler.checkCookieStoreLoadedForTesting(mProfile);
-            }
-        };
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return ThreadUtils.runOnUiThreadBlockingNoException(cookieStoreCallable);
-            }
-        }, CHECK_COOKIE_STORE_FREQUENCY_MS, 5000));
     }
 
     @MediumTest
@@ -71,18 +53,18 @@ public class ExternalPrerenderRequestTest extends ChromeShellTestBase {
      * Test adding a prerender and canceling that to add a new one.
      */
     public void testAddPrerenderAndCancel() throws InterruptedException {
-        long webContentsPtr = mHandler.addPrerender(mProfile, GOOGLE_URL, "", 0, 0);
+        WebContents webContents = mHandler.addPrerender(mProfile, GOOGLE_URL, "", 0, 0);
         assertTrue(ExternalPrerenderHandler.hasPrerenderedUrl(
-                mProfile, GOOGLE_URL, webContentsPtr));
+                mProfile, GOOGLE_URL, webContents));
 
         mHandler.cancelCurrentPrerender();
         assertFalse(ExternalPrerenderHandler.hasPrerenderedUrl(
-                mProfile, GOOGLE_URL, webContentsPtr));
-        ContentViewUtil.destroyNativeWebContents(webContentsPtr);
+                mProfile, GOOGLE_URL, webContents));
+        webContents.destroy();
         Thread.sleep(PRERENDER_DELAY_MS);
-        webContentsPtr = mHandler.addPrerender(mProfile, YOUTUBE_URL, "", 0, 0);
+        webContents = mHandler.addPrerender(mProfile, YOUTUBE_URL, "", 0, 0);
         assertTrue(ExternalPrerenderHandler.hasPrerenderedUrl(
-                mProfile, YOUTUBE_URL, webContentsPtr));
+                mProfile, YOUTUBE_URL, webContents));
 
     }
 
@@ -94,9 +76,9 @@ public class ExternalPrerenderRequestTest extends ChromeShellTestBase {
      */
     public void testCancelPrerender() {
         mHandler.cancelCurrentPrerender();
-        long webContentsPtr = mHandler.addPrerender(mProfile, GOOGLE_URL, "", 0, 0);
+        WebContents webContents = mHandler.addPrerender(mProfile, GOOGLE_URL, "", 0, 0);
         assertTrue(ExternalPrerenderHandler.hasPrerenderedUrl(
-                mProfile, GOOGLE_URL, webContentsPtr));
+                mProfile, GOOGLE_URL, webContents));
     }
 
     @MediumTest
@@ -106,12 +88,12 @@ public class ExternalPrerenderRequestTest extends ChromeShellTestBase {
      * Test adding two prerenders without canceling the first one.
      */
     public void testAddingPrerendersInaRow() throws InterruptedException {
-        long webContentsPtr = mHandler.addPrerender(mProfile, GOOGLE_URL, "", 0, 0);
+        WebContents webContents = mHandler.addPrerender(mProfile, GOOGLE_URL, "", 0, 0);
         assertTrue(ExternalPrerenderHandler.hasPrerenderedUrl(
-                mProfile, GOOGLE_URL, webContentsPtr));
+                mProfile, GOOGLE_URL, webContents));
         Thread.sleep(PRERENDER_DELAY_MS);
-        long newWebContentsPtr = mHandler.addPrerender(mProfile, YOUTUBE_URL, "", 0, 0);
+        WebContents newWebContents = mHandler.addPrerender(mProfile, YOUTUBE_URL, "", 0, 0);
         assertTrue(ExternalPrerenderHandler.hasPrerenderedUrl(
-                mProfile, YOUTUBE_URL, newWebContentsPtr));
+                mProfile, YOUTUBE_URL, newWebContents));
     }
 }

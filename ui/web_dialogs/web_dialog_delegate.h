@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/strings/string16.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/web_dialogs/web_dialogs_export.h"
@@ -119,14 +120,18 @@ class WEB_DIALOGS_EXPORT WebDialogDelegate {
 
   // A callback to create a new tab with |new_contents|. |source| is the
   // WebContent where the operation originated. |disposition| controls how the
-  // new tab should be opened. |initial_pos| is the position of the window if a
-  // new window is created. |user_gesture| is true if the operation was started
-  // by a user gesture. Return false to use the default handler.
+  // new tab should be opened. |initial_rect| is the position and size of the
+  // window if a new window is created. |user_gesture| is true if the operation
+  // was started by a user gesture. Return false to use the default handler.
   virtual bool HandleAddNewContents(content::WebContents* source,
                                     content::WebContents* new_contents,
                                     WindowOpenDisposition disposition,
-                                    const gfx::Rect& initial_pos,
+                                    const gfx::Rect& initial_rect,
                                     bool user_gesture);
+
+  // A callback to control whether a WebContents will be created. Returns
+  // false to disallow the creation. Return true to use the default handler.
+  virtual bool HandleShouldCreateWebContents();
 
   // Stores the dialog bounds.
   virtual void StoreDialogSize(const gfx::Size& dialog_size) {}

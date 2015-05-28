@@ -11,6 +11,7 @@ import sys
 import webbrowser
 
 from profile_chrome import chrome_controller
+from profile_chrome import flags
 from profile_chrome import perf_controller
 from profile_chrome import profiler
 from profile_chrome import systrace_controller
@@ -119,15 +120,7 @@ def _CreateOptionParser():
                          action='store_true')
   parser.add_option_group(chrome_opts)
 
-  systrace_opts = optparse.OptionGroup(parser, 'Systrace tracing options')
-  systrace_opts.add_option('-s', '--systrace', help='Capture a systrace with '
-                        'the chosen comma-delimited systrace categories. You '
-                        'can also capture a combined Chrome + systrace by '
-                        'enable both types of categories. Use "list" to see '
-                        'the available categories. Systrace is disabled by '
-                        'default.', metavar='SYS_CATEGORIES',
-                        dest='systrace_categories', default='')
-  parser.add_option_group(systrace_opts)
+  parser.add_option_group(flags.SystraceOptions(parser))
 
   if perf_controller.PerfProfilerController.IsSupported():
     perf_opts = optparse.OptionGroup(parser, 'Perf profiling options')
@@ -139,13 +132,7 @@ def _CreateOptionParser():
                          metavar='PERF_CATEGORIES', dest='perf_categories')
     parser.add_option_group(perf_opts)
 
-  output_options = optparse.OptionGroup(parser, 'Output options')
-  output_options.add_option('-o', '--output', help='Save trace output to file.')
-  output_options.add_option('--json', help='Save trace as raw JSON instead of '
-                            'HTML.', action='store_true')
-  output_options.add_option('--view', help='Open resulting trace file in a '
-                            'browser.', action='store_true')
-  parser.add_option_group(output_options)
+  parser.add_option_group(flags.OutputOptions(parser))
 
   browsers = sorted(profiler.GetSupportedBrowsers().keys())
   parser.add_option('-b', '--browser', help='Select among installed browsers. '
@@ -156,6 +143,9 @@ def _CreateOptionParser():
                     action='store_true')
   parser.add_option('-z', '--compress', help='Compress the resulting trace '
                     'with gzip. ', action='store_true')
+  parser.add_option('-d', '--device', help='The Android device ID to use.'
+                    'If not specified, only 0 or 1 connected devices are '
+                    'supported.', default=None)
   return parser
 
 
@@ -175,9 +165,14 @@ When in doubt, just try out --trace-frame-viewer.
     logging.getLogger().setLevel(logging.DEBUG)
 
   devices = android_commands.GetAttachedDevices()
-  if len(devices) != 1:
-    parser.error('Exactly 1 device must be attached.')
-  device = device_utils.DeviceUtils(devices[0])
+  device = None
+  if options.device in devices:
+    device = options.device
+  elif not options.device and len(devices) == 1:
+    device = devices[0]
+  if not device:
+    parser.error('Use -d/--device to select a device:\n' + '\n'.join(devices))
+  device = device_utils.DeviceUtils(device)
   package_info = profiler.GetSupportedBrowsers()[options.browser]
 
   if options.chrome_categories in ['list', 'help']:

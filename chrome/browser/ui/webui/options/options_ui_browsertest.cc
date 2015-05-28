@@ -186,9 +186,8 @@ IN_PROC_BROWSER_TEST_F(OptionsUIBrowserTest, LoadOptionsByURL) {
   VerifyNavbar();
 }
 
-// Flaky on win_rel when the profile is deleted crbug.com/103355
-// Also related to crbug.com/104851
-#if defined(OS_WIN)
+// Flaky on Linux, Mac and Win: http://crbug.com/469113
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
 #define MAYBE_VerifyManagedSignout DISABLED_VerifyManagedSignout
 #else
 #define MAYBE_VerifyManagedSignout VerifyManagedSignout
@@ -230,10 +229,6 @@ IN_PROC_BROWSER_TEST_F(OptionsUIBrowserTest, MAYBE_VerifyManagedSignout) {
   EXPECT_TRUE(profile_info_cache.GetIndexOfProfileWithPath(profile_dir) !=
               std::string::npos);
 
-  content::WindowedNotificationObserver wait_for_profile_deletion(
-      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-      content::NotificationService::AllSources());
-
   // TODO(kaliamoorthi): Get the macos problem fixed and remove this code.
   // Deleting the Profile also destroys all browser windows of that Profile.
   // Wait for the current browser to close before resuming, otherwise
@@ -245,8 +240,6 @@ IN_PROC_BROWSER_TEST_F(OptionsUIBrowserTest, MAYBE_VerifyManagedSignout) {
   ASSERT_TRUE(content::ExecuteScript(
       browser()->tab_strip_model()->GetActiveWebContents(),
       "$('disconnect-managed-profile-ok').click();"));
-
-  wait_for_profile_deletion.Wait();
 
   EXPECT_TRUE(profile_info_cache.GetIndexOfProfileWithPath(profile_dir) ==
               std::string::npos);
@@ -284,7 +277,7 @@ IN_PROC_BROWSER_TEST_F(OptionsUIBrowserTest, VerifyUnmanagedSignout) {
 
   sign_out_waiter.Wait();
 
-  EXPECT_TRUE(browser()->profile()->GetProfileName() != user);
+  EXPECT_TRUE(browser()->profile()->GetProfileUserName() != user);
   EXPECT_FALSE(signin->IsAuthenticated());
 }
 

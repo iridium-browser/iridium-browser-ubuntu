@@ -2,7 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//mojo/public/tools/bindings/mojom.gni")
+import("//testing/test.gni")
+import("//third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
 
 mojom("client_channel") {
   sources = [
@@ -12,17 +13,25 @@ mojom("client_channel") {
 
 component("mojo") {
   sources = [
-    "client_channel.mojom",
     "async_handle_waiter.cc",
     "async_handle_waiter.h",
+    "client_channel.mojom",
     "ipc_channel_mojo.cc",
     "ipc_channel_mojo.h",
     "ipc_channel_mojo_host.cc",
     "ipc_channel_mojo_host.h",
-    "ipc_mojo_bootstrap.cc",
-    "ipc_mojo_bootstrap.h",
     "ipc_message_pipe_reader.cc",
     "ipc_message_pipe_reader.h",
+    "ipc_mojo_bootstrap.cc",
+    "ipc_mojo_bootstrap.h",
+    "ipc_mojo_handle_attachment.cc",
+    "ipc_mojo_handle_attachment.h",
+    "ipc_mojo_message_helper.cc",
+    "ipc_mojo_message_helper.h",
+    "ipc_mojo_param_traits.cc",
+    "ipc_mojo_param_traits.h",
+    "scoped_ipc_support.cc",
+    "scoped_ipc_support.h",
   ]
 
   defines = [ "IPC_MOJO_IMPLEMENTATION" ]
@@ -32,8 +41,9 @@ component("mojo") {
     "//base/third_party/dynamic_annotations",
     "//ipc",
     "//mojo/environment:chromium",
-    "//mojo/public/cpp/bindings",
-    "//mojo/edk/system",
+    "//third_party/mojo/src/mojo/edk/system",
+    "//third_party/mojo/src/mojo/public/c/environment:environment",
+    "//third_party/mojo/src/mojo/public/cpp/bindings",
     ":client_channel",
   ]
 }
@@ -53,8 +63,9 @@ test("ipc_mojo_unittests") {
     "//ipc",
     "//ipc:test_support",
     "//ipc/mojo",
-    "//mojo/edk/system",
     "//mojo/environment:chromium",
+    "//testing/gtest",
+    "//third_party/mojo/src/mojo/edk/system",
     "//url",
   ]
 }
@@ -72,8 +83,8 @@ test("ipc_mojo_perftests") {
     "//ipc",
     "//ipc:test_support",
     "//ipc/mojo",
-    "//mojo/edk/system",
     "//mojo/environment:chromium",
+    "//third_party/mojo/src/mojo/edk/system",
     "//url",
   ]
 }

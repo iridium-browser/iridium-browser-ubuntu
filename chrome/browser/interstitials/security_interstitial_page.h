@@ -18,17 +18,48 @@ class InterstitialPage;
 class WebContents;
 }
 
+namespace interstitials {
+// Constants used to communicate with the JavaScript.
+extern const char kBoxChecked[];
+extern const char kDisplayCheckBox[];
+extern const char kOptInLink[];
+extern const char kPrivacyLinkHtml[];
+}
+
+class SecurityInterstitialMetricsHelper;
+
 class SecurityInterstitialPage : public content::InterstitialPageDelegate {
  public:
+  // These represent the commands sent from the interstitial JavaScript.
+  // DO NOT reorder or change these without also changing the JavaScript!
+  // See chrome/browser/resources/security_warnings/interstitial_v2.js
+  enum SecurityInterstitialCommands {
+    // Used by tests
+    CMD_TEXT_FOUND = -2,
+    CMD_TEXT_NOT_FOUND = -1,
+    // Decisions
+    CMD_DONT_PROCEED = 0,
+    CMD_PROCEED = 1,
+    // Ways for user to get more information
+    CMD_SHOW_MORE_SECTION = 2,
+    CMD_OPEN_HELP_CENTER = 3,
+    CMD_OPEN_DIAGNOSTIC = 4,
+    // Primary button actions
+    CMD_RELOAD = 5,
+    CMD_OPEN_DATE_SETTINGS = 6,
+    CMD_OPEN_LOGIN = 7,
+    // Safe Browsing Extended Reporting
+    CMD_DO_REPORT = 8,
+    CMD_DONT_REPORT = 9,
+    CMD_OPEN_REPORTING_PRIVACY = 10,
+  };
+
   SecurityInterstitialPage(content::WebContents* web_contents,
                            const GURL& url);
   ~SecurityInterstitialPage() override;
 
   // Creates an interstitial and shows it.
   virtual void Show();
-
-  // Returns interstitial type for testing.
-  virtual const void* GetTypeForTesting() const = 0;
 
   // Prevents creating the actual interstitial view for testing.
   void DontCreateViewForTesting();
@@ -51,7 +82,21 @@ class SecurityInterstitialPage : public content::InterstitialPageDelegate {
   content::WebContents* web_contents() const;
   GURL request_url() const;
 
+  // Record the user's preference for reporting information about
+  // malware and SSL errors.
+  void SetReportingPreference(bool report);
+
+  // Returns the boolean value of the given |pref| from the PrefService of the
+  // Profile associated with |web_contents_|.
+  bool IsPrefEnabled(const char* pref);
+
+  void OpenExtendedReportingPrivacyPolicy();
+
+  SecurityInterstitialMetricsHelper* metrics_helper();
+  void set_metrics_helper(SecurityInterstitialMetricsHelper* metrics_helper);
+
  private:
+  scoped_ptr<SecurityInterstitialMetricsHelper> metrics_helper_;
   content::WebContents* web_contents_;
   const GURL request_url_;
   // Once shown, |interstitial_page| takes ownership of this

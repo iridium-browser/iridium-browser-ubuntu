@@ -4,7 +4,7 @@
 
 #include "ppapi/tests/mojo/test_mojo.h"
 
-#include "mojo/public/cpp/system/message_pipe.h"
+#include "third_party/mojo/src/mojo/public/cpp/system/message_pipe.h"
 
 REGISTER_TEST_CASE(Mojo);
 
@@ -18,6 +18,8 @@ void TestMojo::RunTests(const std::string& filter) {
 }
 
 std::string TestMojo::TestCreateMessagePipe() {
-  mojo::MessagePipe pipe;
+  MojoHandle h0;
+  MojoHandle h1;
+  ASSERT_EQ(MOJO_RESULT_OK, MojoCreateMessagePipe(NULL, &h0, &h1));
   PASS();
 }

@@ -49,6 +49,7 @@
 
 using blink::WebAutofillClient;
 using blink::WebConsoleMessage;
+using blink::WebDocument;
 using blink::WebElement;
 using blink::WebElementCollection;
 using blink::WebFormControlElement;
@@ -118,6 +119,15 @@ void TrimStringVectorForIPC(std::vector<base::string16>* strings) {
   }
 }
 
+// Extract FormData from the form element and return whether the operation was
+// successful.
+bool ExtractFormDataOnSave(const WebFormElement& form_element, FormData* data) {
+  return WebFormElementToFormData(
+      form_element, WebFormControlElement(), REQUIRE_NONE,
+      static_cast<ExtractMask>(EXTRACT_VALUE | EXTRACT_OPTION_TEXT), data,
+      NULL);
+}
+
 }  // namespace
 
 AutofillAgent::ShowSuggestionsOptions::ShowSuggestionsOptions()
@@ -137,7 +147,6 @@ AutofillAgent::AutofillAgent(content::RenderFrame* render_frame,
       password_autofill_agent_(password_autofill_agent),
       password_generation_agent_(password_generation_agent),
       legacy_(render_frame->GetRenderView(), this),
-      page_click_tracker_(render_frame->GetRenderView(), this),
       autofill_query_id_(0),
       display_warning_if_disabled_(false),
       was_query_node_autofilled_(false),
@@ -147,9 +156,26 @@ AutofillAgent::AutofillAgent(content::RenderFrame* render_frame,
       is_popup_possibly_visible_(false),
       weak_ptr_factory_(this) {
   render_frame->GetWebFrame()->setAutofillClient(this);
+
+  // This owns itself, and will delete itself when |render_frame| is destructed
+  // (same as AutofillAgent).
+  new PageClickTracker(render_frame, this);
 }
 
 AutofillAgent::~AutofillAgent() {}
+
+bool AutofillAgent::FormDataCompare::operator()(const FormData& lhs,
+                                                const FormData& rhs) const {
+  if (lhs.name != rhs.name)
+    return lhs.name < rhs.name;
+  if (lhs.origin != rhs.origin)
+    return lhs.origin < rhs.origin;
+  if (lhs.action != rhs.action)
+    return lhs.action < rhs.action;
+  if (lhs.is_form_tag != rhs.is_form_tag)
+    return lhs.is_form_tag < rhs.is_form_tag;
+  return lhs.fields < rhs.fields;
+}
 
 bool AutofillAgent::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
@@ -179,26 +205,45 @@ bool AutofillAgent::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void AutofillAgent::DidCommitProvisionalLoad(bool is_new_navigation) {
+void AutofillAgent::DidCommitProvisionalLoad(bool is_new_navigation,
+                                             bool is_same_page_navigation) {
   form_cache_.Reset();
+  submitted_forms_.clear();
 }
 
 void AutofillAgent::DidFinishDocumentLoad() {
   ProcessForms();
 }
 
+void AutofillAgent::WillSendSubmitEvent(const WebFormElement& form) {
+  FormData form_data;
+  if (!ExtractFormDataOnSave(form, &form_data))
+    return;
+
+  // The WillSendSubmitEvent function is called when there is a submit handler
+  // on the form, such as in the case of (but not restricted to)
+  // JavaScript-submitted forms. Sends a WillSubmitForm message to the browser
+  // and remembers for which form it did that in the current frame load, so that
+  // no additional message is sent if AutofillAgent::WillSubmitForm() is called
+  // (which is itself not guaranteed if the submit event is prevented by
+  // JavaScript).
+  Send(new AutofillHostMsg_WillSubmitForm(routing_id(), form_data,
+                                          base::TimeTicks::Now()));
+  submitted_forms_.insert(form_data);
+}
+
 void AutofillAgent::WillSubmitForm(const WebFormElement& form) {
   FormData form_data;
-  if (WebFormElementToFormData(form,
-                               WebFormControlElement(),
-                               REQUIRE_NONE,
-                               static_cast<ExtractMask>(
-                                   EXTRACT_VALUE | EXTRACT_OPTION_TEXT),
-                               &form_data,
-                               NULL)) {
-    Send(new AutofillHostMsg_FormSubmitted(routing_id(), form_data,
-                                           base::TimeTicks::Now()));
+  if (!ExtractFormDataOnSave(form, &form_data))
+    return;
+
+  // If WillSubmitForm message had not been sent for this form, send it.
+  if (!submitted_forms_.count(form_data)) {
+    Send(new AutofillHostMsg_WillSubmitForm(routing_id(), form_data,
+                                            base::TimeTicks::Now()));
   }
+
+  Send(new AutofillHostMsg_FormSubmitted(routing_id(), form_data));
 }
 
 void AutofillAgent::DidChangeScrollOffset() {
@@ -211,31 +256,26 @@ void AutofillAgent::FocusedNodeChanged(const WebNode& node) {
   if (node.isNull() || !node.isElementNode())
     return;
 
-  if (node.document().frame() != render_frame()->GetWebFrame())
-    return;
-
-  if (password_generation_agent_ &&
-      password_generation_agent_->FocusedNodeHasChanged(node)) {
-    is_popup_possibly_visible_ = true;
-    return;
-  }
-
   WebElement web_element = node.toConst<WebElement>();
-
-  if (!web_element.document().frame())
-    return;
-
   const WebInputElement* element = toWebInputElement(&web_element);
 
   if (!element || !element->isEnabled() || element->isReadOnly() ||
-      !element->isTextField() || element->isPasswordField())
+      !element->isTextField())
     return;
 
   element_ = *element;
 }
 
-void AutofillAgent::Resized() {
-  HidePopup();
+void AutofillAgent::FocusChangeComplete() {
+  WebDocument doc = render_frame()->GetWebFrame()->document();
+  WebElement focused_element;
+  if (!doc.isNull())
+    focused_element = doc.focusedElement();
+
+  if (!focused_element.isNull() && password_generation_agent_ &&
+      password_generation_agent_->FocusedNodeHasChanged(focused_element)) {
+    is_popup_possibly_visible_ = true;
+  }
 }
 
 void AutofillAgent::didRequestAutocomplete(
@@ -312,16 +352,22 @@ void AutofillAgent::FormControlElementClicked(
   options.display_warning_if_disabled = true;
   options.show_full_suggestion_list = element.isAutofilled();
 
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableSingleClickAutofill)) {
-    // Show full suggestions when clicking on an already-focused form field. On
-    // the initial click (not focused yet), only show password suggestions.
+  // On Android, default to showing the dropdown on field focus.
+  // On desktop, require an extra click after field focus.
+  // See http://crbug.com/427660
 #if defined(OS_ANDROID)
-    // TODO(gcasto): Remove after crbug.com/430318 has been fixed.
-    if (!was_focused)
-      return;
+  bool single_click_autofill =
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableSingleClickAutofill);
+#else
+  bool single_click_autofill =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableSingleClickAutofill);
 #endif
 
+  if (!single_click_autofill) {
+    // Show full suggestions when clicking on an already-focused form field. On
+    // the initial click (not focused yet), only show password suggestions.
     options.show_full_suggestion_list =
         options.show_full_suggestion_list || was_focused;
     options.show_password_suggestions_only = !was_focused;
@@ -373,6 +419,7 @@ void AutofillAgent::TextFieldDidChangeImpl(
     }
 
     if (password_autofill_agent_->TextDidChangeInTextField(*input_element)) {
+      is_popup_possibly_visible_ = true;
       element_ = element;
       return;
     }
@@ -740,10 +787,6 @@ void AutofillAgent::ProcessForms() {
 void AutofillAgent::HidePopup() {
   if (!is_popup_possibly_visible_)
     return;
-
-  if (!element_.isNull())
-    OnClearPreviewedForm();
-
   is_popup_possibly_visible_ = false;
   Send(new AutofillHostMsg_HidePopup(routing_id()));
 }
@@ -765,6 +808,10 @@ void AutofillAgent::didAssociateFormControls(const WebVector<WebNode>& nodes) {
   }
 }
 
+void AutofillAgent::xhrSucceeded() {
+  password_autofill_agent_->XHRSucceeded();
+}
+
 // LegacyAutofillAgent ---------------------------------------------------------
 
 AutofillAgent::LegacyAutofillAgent::LegacyAutofillAgent(
@@ -780,13 +827,8 @@ void AutofillAgent::LegacyAutofillAgent::OnDestruct() {
   // No-op. Don't delete |this|.
 }
 
-void AutofillAgent::LegacyAutofillAgent::FocusedNodeChanged(
-    const WebNode& node) {
-  agent_->FocusedNodeChanged(node);
-}
-
-void AutofillAgent::LegacyAutofillAgent::Resized() {
-  agent_->Resized();
+void AutofillAgent::LegacyAutofillAgent::FocusChangeComplete() {
+  agent_->FocusChangeComplete();
 }
 
 }  // namespace autofill

@@ -7,10 +7,10 @@
 #include <set>
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/tracked_objects.h"
+#include "base/trace_event/trace_event.h"
 #include "content/browser/gpu/browser_gpu_memory_buffer_manager.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_process_host.h"
@@ -21,6 +21,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/content_client.h"
+#include "gpu/GLES2/gl2extchromium.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_forwarding_message_filter.h"
 #include "ipc/message_filter.h"
@@ -194,12 +195,10 @@ void BrowserGpuChannelHostFactory::EstablishRequest::FinishOnMain() {
 void BrowserGpuChannelHostFactory::EstablishRequest::Wait() {
   DCHECK(main_loop_->BelongsToCurrentThread());
   {
-    // Since the current task synchronously waits for establishing a GPU
-    // channel, it shouldn't be tallied because its execution time has nothing
-    // to do with its efficiency. Using task stopwatch to exclude the waiting
-    // time from the current task run time.
-    tracked_objects::TaskStopwatch stopwatch;
-    stopwatch.Start();
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/125248 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "125248 BrowserGpuChannelHostFactory::EstablishRequest::Wait"));
 
     // We're blocking the UI thread, which is generally undesirable.
     // In this case we need to wait for this before we can show any UI
@@ -209,8 +208,6 @@ void BrowserGpuChannelHostFactory::EstablishRequest::Wait() {
                  "BrowserGpuChannelHostFactory::EstablishGpuChannelSync");
     base::ThreadRestrictions::ScopedAllowWait allow_wait;
     event_.Wait();
-
-    stopwatch.Stop();
   }
   FinishOnMain();
 }
@@ -249,6 +246,31 @@ void BrowserGpuChannelHostFactory::EnableGpuMemoryBufferFactoryUsage(
 bool BrowserGpuChannelHostFactory::IsGpuMemoryBufferFactoryUsageEnabled(
     gfx::GpuMemoryBuffer::Usage usage) {
   return g_enabled_gpu_memory_buffer_usages.Get().count(usage) != 0;
+}
+
+// static
+uint32 BrowserGpuChannelHostFactory::GetImageTextureTarget() {
+  if (!IsGpuMemoryBufferFactoryUsageEnabled(gfx::GpuMemoryBuffer::MAP))
+    return GL_TEXTURE_2D;
+
+  std::vector<gfx::GpuMemoryBufferType> supported_types;
+  GpuMemoryBufferFactory::GetSupportedTypes(&supported_types);
+  DCHECK(!supported_types.empty());
+
+  // The GPU service will always use the preferred type.
+  gfx::GpuMemoryBufferType type = supported_types[0];
+
+  switch (type) {
+    case gfx::SURFACE_TEXTURE_BUFFER:
+      // Surface texture backed GPU memory buffers require
+      // TEXTURE_EXTERNAL_OES.
+      return GL_TEXTURE_EXTERNAL_OES;
+    case gfx::IO_SURFACE_BUFFER:
+      // IOSurface backed images require GL_TEXTURE_RECTANGLE_ARB.
+      return GL_TEXTURE_RECTANGLE_ARB;
+    default:
+      return GL_TEXTURE_2D;
+  }
 }
 
 BrowserGpuChannelHostFactory::BrowserGpuChannelHostFactory()
@@ -331,6 +353,11 @@ CreateCommandBufferResult BrowserGpuChannelHostFactory::CreateViewCommandBuffer(
         &request,
         surface_id,
         init_params));
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/125248 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "125248 BrowserGpuChannelHostFactory::CreateViewCommandBuffer"));
+
   // We're blocking the UI thread, which is generally undesirable.
   // In this case we need to wait for this before we can show any UI /anyway/,
   // so it won't cause additional jank.
@@ -393,6 +420,11 @@ void BrowserGpuChannelHostFactory::GpuChannelEstablished() {
   if (pending_request_->channel_handle().name.empty()) {
     DCHECK(!gpu_channel_.get());
   } else {
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/466866
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile1(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "466866 BrowserGpuChannelHostFactory::GpuChannelEstablished1"));
     GetContentClient()->SetGpuInfo(pending_request_->gpu_info());
     gpu_channel_ =
         GpuChannelHost::Create(this,
@@ -404,6 +436,12 @@ void BrowserGpuChannelHostFactory::GpuChannelEstablished() {
   gpu_host_id_ = pending_request_->gpu_host_id();
   pending_request_ = NULL;
 
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/466866 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466866 BrowserGpuChannelHostFactory::GpuChannelEstablished2"));
+
   for (size_t n = 0; n < established_callbacks_.size(); n++)
     established_callbacks_[n].Run();
 
@@ -414,34 +452,11 @@ void BrowserGpuChannelHostFactory::GpuChannelEstablished() {
 void BrowserGpuChannelHostFactory::AddFilterOnIO(
     int host_id,
     scoped_refptr<IPC::MessageFilter> filter) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   GpuProcessHost* host = GpuProcessHost::FromID(host_id);
   if (host)
     host->AddFilter(filter.get());
-}
-
-void BrowserGpuChannelHostFactory::SetHandlerForControlMessages(
-      const uint32* message_ids,
-      size_t num_messages,
-      const base::Callback<void(const IPC::Message&)>& handler,
-      base::TaskRunner* target_task_runner) {
-  DCHECK(gpu_host_id_)
-      << "Do not call"
-      << " BrowserGpuChannelHostFactory::SetHandlerForControlMessages()"
-      << " until the GpuProcessHost has been set up.";
-
-  scoped_refptr<IPC::ForwardingMessageFilter> filter =
-      new IPC::ForwardingMessageFilter(message_ids,
-                                       num_messages,
-                                       target_task_runner);
-  filter->AddRoute(MSG_ROUTING_CONTROL, handler);
-
-  GetIOLoopProxy()->PostTask(
-      FROM_HERE,
-      base::Bind(&BrowserGpuChannelHostFactory::AddFilterOnIO,
-                 gpu_host_id_,
-                 filter));
 }
 
 bool BrowserGpuChannelHostFactory::IsGpuMemoryBufferConfigurationSupported(
@@ -488,7 +503,7 @@ void BrowserGpuChannelHostFactory::CreateGpuMemoryBuffer(
     int client_id,
     int32 surface_id,
     const CreateGpuMemoryBufferCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   GpuProcessHost* host = GpuProcessHost::FromID(gpu_host_id_);
   if (!host) {
@@ -523,7 +538,7 @@ void BrowserGpuChannelHostFactory::DestroyGpuMemoryBufferOnIO(
     gfx::GpuMemoryBufferId id,
     int client_id,
     int32 sync_point) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   GpuProcessHost* host = GpuProcessHost::FromID(gpu_host_id_);
   if (!host)
@@ -535,7 +550,7 @@ void BrowserGpuChannelHostFactory::DestroyGpuMemoryBufferOnIO(
 void BrowserGpuChannelHostFactory::OnGpuMemoryBufferCreated(
     uint32 request_id,
     const gfx::GpuMemoryBufferHandle& handle) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   CreateGpuMemoryBufferCallbackMap::iterator iter =
       create_gpu_memory_buffer_requests_.find(request_id);

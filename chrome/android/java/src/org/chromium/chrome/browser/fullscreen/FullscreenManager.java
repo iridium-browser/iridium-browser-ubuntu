@@ -10,7 +10,6 @@ import android.view.Window;
 import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.fullscreen.FullscreenHtmlApiHandler.FullscreenHtmlApiDelegate;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.content.browser.ContentVideoView;
 
 /**
  * Manages the basic fullscreen functionality required by a Tab.
@@ -29,15 +28,10 @@ public abstract class FullscreenManager {
      *
      * @param window Top-level window to turn to fullscreen.
      * @param modelSelector The model selector providing access to the current tab.
-     * @param enabled Whether fullscreen is globally enabled.
-     * @param persistentFullscreenSupported Whether persistent fullscreen via the HTML5 API is
-     *                                      enabled.
      */
-    public FullscreenManager(Window window, TabModelSelector modelSelector, boolean enabled,
-            boolean persistentFullscreenSupported) {
+    public FullscreenManager(Window window, TabModelSelector modelSelector) {
         mModelSelector = modelSelector;
-        mHtmlApiHandler = new FullscreenHtmlApiHandler(
-                window, createApiDelegate(), enabled && persistentFullscreenSupported);
+        mHtmlApiHandler = new FullscreenHtmlApiHandler(window, createApiDelegate());
         mOverlayVideoMode = false;
     }
 
@@ -142,10 +136,6 @@ public abstract class FullscreenManager {
         mHtmlApiHandler.setPersistentFullscreenMode(enabled);
 
         Tab tab = mModelSelector.getCurrentTab();
-        if (!enabled && mOverlayVideoMode) {
-            ContentVideoView videoView = ContentVideoView.getContentVideoView();
-            if (videoView != null) videoView.exitFullscreen(false);
-        }
         if (tab != null) {
             tab.updateFullscreenEnabledState();
         }

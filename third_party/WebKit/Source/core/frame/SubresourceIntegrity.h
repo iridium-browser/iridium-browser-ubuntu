@@ -16,10 +16,17 @@ namespace blink {
 class Document;
 class Element;
 class KURL;
+class Resource;
 
 class SubresourceIntegrity {
 public:
-    static bool CheckSubresourceIntegrity(const Element&, const WTF::String& content, const KURL& resourceUrl, const WTF::String& mimeType);
+    enum IntegrityParseResult {
+        IntegrityParseErrorNone,
+        IntegrityParseErrorFatal,
+        IntegrityParseErrorNonfatal,
+    };
+
+    static bool CheckSubresourceIntegrity(const Element&, const WTF::String& content, const KURL& resourceUrl, const WTF::String& mimeType, const Resource&);
 
 private:
     // FIXME: After the merge with the Chromium repo, this should be refactored
@@ -30,7 +37,7 @@ private:
     static bool parseDigest(const UChar*& begin, const UChar* end, String& digest);
     static bool parseMimeType(const UChar*& begin, const UChar* end, String& type);
 
-    static bool parseIntegrityAttribute(const WTF::String& attribute, WTF::String& integrity, HashAlgorithm&, WTF::String& type, Document&);
+    static IntegrityParseResult parseIntegrityAttribute(const WTF::String& attribute, WTF::String& integrity, HashAlgorithm&, WTF::String& type, Document&);
 };
 
 } // namespace blink

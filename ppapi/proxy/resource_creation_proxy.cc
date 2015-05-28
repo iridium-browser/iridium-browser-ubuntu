@@ -7,6 +7,7 @@
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_size.h"
 #include "ppapi/proxy/audio_input_resource.h"
+#include "ppapi/proxy/camera_device_resource.h"
 #include "ppapi/proxy/compositor_resource.h"
 #include "ppapi/proxy/connection.h"
 #include "ppapi/proxy/file_chooser_resource.h"
@@ -50,6 +51,7 @@
 #include "ppapi/proxy/video_capture_resource.h"
 #include "ppapi/proxy/video_decoder_resource.h"
 #include "ppapi/proxy/video_destination_resource.h"
+#include "ppapi/proxy/video_encoder_resource.h"
 #include "ppapi/proxy/video_source_resource.h"
 #include "ppapi/proxy/websocket_resource.h"
 #include "ppapi/shared_impl/api_id.h"
@@ -220,6 +222,11 @@ PP_Resource ResourceCreationProxy::CreateAudioConfig(
       OBJECT_IS_PROXY, instance, sample_rate, sample_frame_count);
 }
 
+PP_Resource ResourceCreationProxy::CreateCameraDevicePrivate(
+    PP_Instance instance) {
+  return (new CameraDeviceResource(GetConnection(), instance))->GetReference();
+}
+
 PP_Resource ResourceCreationProxy::CreateCompositor(PP_Instance instance) {
   return (new CompositorResource(GetConnection(), instance))->GetReference();
 }
@@ -385,6 +392,10 @@ PP_Resource ResourceCreationProxy::CreateVideoDestination(
     PP_Instance instance) {
   return (new VideoDestinationResource(GetConnection(),
                                        instance))->GetReference();
+}
+
+PP_Resource ResourceCreationProxy::CreateVideoEncoder(PP_Instance instance) {
+  return (new VideoEncoderResource(GetConnection(), instance))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateVideoSource(

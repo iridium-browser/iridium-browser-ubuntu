@@ -4,11 +4,12 @@
 
 #include "chrome/browser/guest_view/mime_handler_view/chrome_mime_handler_view_guest_delegate.h"
 
-#include "chrome/browser/chrome_page_zoom.h"
+#include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "chrome/browser/ui/pdf/chrome_pdf_web_contents_helper_client.h"
 #include "components/pdf/browser/pdf_web_contents_helper.h"
 #include "components/renderer_context_menu/context_menu_delegate.h"
+#include "components/ui/zoom/page_zoom.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
 
 #if defined(ENABLE_PRINTING)
@@ -45,6 +46,8 @@ void ChromeMimeHandlerViewGuestDelegate::AttachHelpers() {
       web_contents,
       scoped_ptr<pdf::PDFWebContentsHelperClient>(
           new ChromePDFWebContentsHelperClient()));
+  extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
+      web_contents);
 }
 
 bool ChromeMimeHandlerViewGuestDelegate::HandleContextMenu(

@@ -31,12 +31,12 @@
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/base/test_data_directory.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/cert/x509_certificate.h"
 #include "net/http/transport_security_state.h"
+#include "net/log/net_log.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket/ssl_client_socket.h"
@@ -535,8 +535,8 @@ TEST_F(SSLServerSocketTest, ExportKeyingMaterial) {
   }
 
   const int kKeyingMaterialSize = 32;
-  const char* kKeyingLabel = "EXPERIMENTAL-server-socket-test";
-  const char* kKeyingContext = "";
+  const char kKeyingLabel[] = "EXPERIMENTAL-server-socket-test";
+  const char kKeyingContext[] = "";
   unsigned char server_out[kKeyingMaterialSize];
   int rv = server_socket_->ExportKeyingMaterial(kKeyingLabel,
                                                 false, kKeyingContext,
@@ -550,7 +550,7 @@ TEST_F(SSLServerSocketTest, ExportKeyingMaterial) {
   ASSERT_EQ(OK, rv);
   EXPECT_EQ(0, memcmp(server_out, client_out, sizeof(server_out)));
 
-  const char* kKeyingLabelBad = "EXPERIMENTAL-server-socket-test-bad";
+  const char kKeyingLabelBad[] = "EXPERIMENTAL-server-socket-test-bad";
   unsigned char client_bad[kKeyingMaterialSize];
   rv = client_socket_->ExportKeyingMaterial(kKeyingLabelBad,
                                             false, kKeyingContext,

@@ -8,26 +8,23 @@
       'targets': [
         {
           'target_name': 'chromoting_integration_tests_run',
-          'type': 'none',
-          'dependencies': [
-            '../../chrome/chrome.gyp:browser_tests',
-            '../../remoting/remoting.gyp:remoting_webapp_v1',
-            '../../remoting/remoting.gyp:remoting_webapp_v2',
-          ],
           'includes': [
-            '../../build/isolate.gypi',
+            './dependencies.gypi',
           ],
           'sources': [
             'chromoting_integration_tests.isolate',
           ],
-          'conditions': [
-            ['OS=="linux"', {
-              'dependencies': [
-                '../../remoting/remoting.gyp:remoting_me2me_host_archive',
-              ],
-            }],  # OS=="linux"
+        },  # target_name: 'chromoting_integration_tests_run'
+        {
+          'target_name': 'chromoting_multi_machine_example_test',
+          'includes': [
+            './dependencies.gypi',
           ],
-        },
+          'sources': [
+            'multi_machine_example/example_test_controller.isolate',
+            'multi_machine_example/example_task.isolate',
+          ],
+        },  # target_name: 'chromoting_multi_machine_example_test'
       ],
     }],
   ],

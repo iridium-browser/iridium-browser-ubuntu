@@ -19,10 +19,14 @@ class FakeCIDBConnection(object):
   This class is a partial re-implementation of CIDBConnection, using
   in-memory lists rather than a backing database.
   """
+
+  NUM_RESULTS_NO_LIMIT = -1
+
   def __init__(self):
     self.buildTable = []
     self.clActionTable = []
     self.buildStageTable = {}
+    self.failureTable = {}
     self.fake_time = None
 
   def SetTime(self, fake_time):
@@ -39,13 +43,20 @@ class FakeCIDBConnection(object):
 
   def InsertBuild(self, builder_name, waterfall, build_number,
                   build_config, bot_hostname, master_build_id=None,
-                  deadline=None, status=constants.BUILDER_STATUS_PASSED):
+                  timeout_seconds=None, status=constants.BUILDER_STATUS_PASSED):
     """Insert a build row.
 
     Note this API slightly differs from cidb as we pass status to avoid having
     to have a later FinishBuild call in testing.
     """
-    row = {'builder_name': builder_name,
+    deadline = None
+    if timeout_seconds is not None:
+      timediff = datetime.timedelta(seconds=timeout_seconds)
+      deadline = datetime.datetime.now() + timediff
+
+    build_id = len(self.buildTable)
+    row = {'id': build_id,
+           'builder_name': builder_name,
            'buildbot_generation': constants.BUILDBOT_GENERATION,
            'waterfall': waterfall,
            'build_number': build_number,
@@ -55,9 +66,22 @@ class FakeCIDBConnection(object):
            'master_build_id' : master_build_id,
            'deadline': deadline,
            'status': status}
-    build_id = len(self.buildTable)
     self.buildTable.append(row)
     return build_id
+
+  def UpdateMetadata(self, build_id, metadata):
+    """See cidb.UpdateMetadata."""
+    d = metadata.GetDict()
+    versions = d.get('version') or {}
+    self.buildTable[build_id - 1].update(
+        {'chrome_version': versions.get('chrome'),
+         'milestone_version': versions.get('milestone'),
+         'platform_version': versions.get('platform'),
+         'full_version': versions.get('full'),
+         'sdk_version': d.get('sdk-versions'),
+         'toolchain_url': d.get('toolchain-url'),
+         'build_type': d.get('build_type')})
+    return 1
 
   def InsertCLActions(self, build_id, cl_actions, timestamp=None):
     """Insert a list of |cl_actions|."""
@@ -93,6 +117,24 @@ class FakeCIDBConnection(object):
     self.buildStageTable[build_stage_id] = row
     return build_stage_id
 
+  def InsertBoardPerBuild(self, build_id, board):
+    # TODO(akeshet): Fill this placeholder.
+    pass
+
+  def InsertFailure(self, build_stage_id, exception_type, exception_message,
+                    exception_category=constants.EXCEPTION_CATEGORY_UNKNOWN,
+                    outer_failure_id=None,
+                    extra_info=None):
+    failure_id = len(self.failureTable)
+    values = {'build_stage_id': build_stage_id,
+              'exception_type': exception_type,
+              'exception_message': exception_message,
+              'exception_category': exception_category,
+              'outer_failure_id': outer_failure_id,
+              'extra_info': extra_info}
+    self.failureTable[failure_id] = values
+    return failure_id
+
   def StartBuildStage(self, build_stage_id):
     if build_stage_id > len(self.buildStageTable):
       return
@@ -102,7 +144,9 @@ class FakeCIDBConnection(object):
 
   def ExtendDeadline(self, build_id, timeout):
     # No sanity checking in fake object.
-    self.buildStageTable[build_id]['deadline'] = timeout
+    now = datetime.datetime.now()
+    timediff = datetime.timedelta(seconds=timeout)
+    self.buildStageTable[build_id]['deadline'] = now + timediff
 
   def FinishBuildStage(self, build_stage_id, status):
     if build_stage_id > len(self.buildStageTable):
@@ -149,8 +193,10 @@ class FakeCIDBConnection(object):
     """Gets the status of the builds."""
     return [self.buildTable[x -1] for x in build_ids]
 
-  def GetLastBuildStatuses(self, build_config, number):
-    """Returns the last |number| builds for the given |build_config|."""
+  def GetBuildHistory(self, build_config, num_results,
+                      ignore_build_id=None, start_date=None, end_date=None,
+                      starting_build_number=None):
+    """Returns the build history for the given |build_config|."""
     def ReduceToBuildConfig(new_list, current_build):
       """Filters a build list to only those of a given config."""
       if current_build['build_config'] == build_config:
@@ -160,4 +206,26 @@ class FakeCIDBConnection(object):
 
     build_configs = reduce(ReduceToBuildConfig, self.buildTable, [])
     # Reverse sort as that's what's expected.
-    return sorted(build_configs[-number:], reverse=True)
+    build_configs = sorted(build_configs[-num_results:], reverse=True)
+
+    # Filter results.
+    if ignore_build_id is not None:
+      build_configs = [b for b in build_configs if b['id'] != ignore_build_id]
+    if start_date is not None:
+      build_configs = [b for b in build_configs
+                       if b['start_time'].date() >= start_date]
+    if end_date is not None:
+      build_configs = [b for b in build_configs
+                       if 'finish_time' in b and
+                       b['finish_time'].date() <= end_date]
+    if starting_build_number is not None:
+      build_configs = [b for b in build_configs
+                       if b['build_number'] >= starting_build_number]
+
+    return build_configs
+
+  def GetTimeToDeadline(self, build_id):
+    """Gets the time remaining until deadline."""
+    now = datetime.datetime.now()
+    deadline = self.buildTable[build_id]['deadline']
+    return max(0, (deadline - now).total_seconds())

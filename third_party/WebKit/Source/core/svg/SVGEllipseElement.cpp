@@ -21,17 +21,17 @@
 #include "config.h"
 #include "core/svg/SVGEllipseElement.h"
 
-#include "core/rendering/svg/RenderSVGEllipse.h"
+#include "core/layout/svg/LayoutSVGEllipse.h"
 #include "core/svg/SVGLength.h"
 
 namespace blink {
 
 inline SVGEllipseElement::SVGEllipseElement(Document& document)
     : SVGGeometryElement(SVGNames::ellipseTag, document)
-    , m_cx(SVGAnimatedLength::create(this, SVGNames::cxAttr, SVGLength::create(LengthModeWidth), AllowNegativeLengths))
-    , m_cy(SVGAnimatedLength::create(this, SVGNames::cyAttr, SVGLength::create(LengthModeHeight), AllowNegativeLengths))
-    , m_rx(SVGAnimatedLength::create(this, SVGNames::rxAttr, SVGLength::create(LengthModeWidth), ForbidNegativeLengths))
-    , m_ry(SVGAnimatedLength::create(this, SVGNames::ryAttr, SVGLength::create(LengthModeHeight), ForbidNegativeLengths))
+    , m_cx(SVGAnimatedLength::create(this, SVGNames::cxAttr, SVGLength::create(SVGLengthMode::Width), AllowNegativeLengths))
+    , m_cy(SVGAnimatedLength::create(this, SVGNames::cyAttr, SVGLength::create(SVGLengthMode::Height), AllowNegativeLengths))
+    , m_rx(SVGAnimatedLength::create(this, SVGNames::rxAttr, SVGLength::create(SVGLengthMode::Width), ForbidNegativeLengths))
+    , m_ry(SVGAnimatedLength::create(this, SVGNames::ryAttr, SVGLength::create(SVGLengthMode::Height), ForbidNegativeLengths))
 {
     addToPropertyMap(m_cx);
     addToPropertyMap(m_cy);
@@ -39,7 +39,7 @@ inline SVGEllipseElement::SVGEllipseElement(Document& document)
     addToPropertyMap(m_ry);
 }
 
-void SVGEllipseElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGEllipseElement)
 {
     visitor->trace(m_cx);
     visitor->trace(m_cy);
@@ -62,10 +62,37 @@ bool SVGEllipseElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGEllipseElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+bool SVGEllipseElement::isPresentationAttribute(const QualifiedName& attrName) const
 {
-    parseAttributeNew(name, value);
+    if (attrName == SVGNames::cxAttr || attrName == SVGNames::cyAttr
+        || attrName == SVGNames::rxAttr || attrName == SVGNames::ryAttr)
+        return true;
+    return SVGGeometryElement::isPresentationAttribute(attrName);
 }
+
+bool SVGEllipseElement::isPresentationAttributeWithSVGDOM(const QualifiedName& attrName) const
+{
+    if (attrName == SVGNames::cxAttr || attrName == SVGNames::cyAttr
+        || attrName == SVGNames::rxAttr || attrName == SVGNames::ryAttr)
+        return true;
+    return SVGGeometryElement::isPresentationAttributeWithSVGDOM(attrName);
+}
+
+void SVGEllipseElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStylePropertySet* style)
+{
+    RefPtrWillBeRawPtr<SVGAnimatedPropertyBase> property = propertyFromAttribute(name);
+    if (property == m_cx)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyCx, *m_cx->currentValue());
+    else if (property == m_cy)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyCy, *m_cy->currentValue());
+    else if (property == m_rx)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyRx, *m_rx->currentValue());
+    else if (property == m_ry)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyRy, *m_ry->currentValue());
+    else
+        SVGGeometryElement::collectStyleForPresentationAttribute(name, value, style);
+}
+
 
 void SVGEllipseElement::svgAttributeChanged(const QualifiedName& attrName)
 {
@@ -76,25 +103,17 @@ void SVGEllipseElement::svgAttributeChanged(const QualifiedName& attrName)
 
     SVGElement::InvalidationGuard invalidationGuard(this);
 
-    bool isLengthAttribute = attrName == SVGNames::cxAttr
-                          || attrName == SVGNames::cyAttr
-                          || attrName == SVGNames::rxAttr
-                          || attrName == SVGNames::ryAttr;
+    invalidateSVGPresentationAttributeStyle();
+    setNeedsStyleRecalc(LocalStyleChange,
+        StyleChangeReasonForTracing::fromAttribute(attrName));
+    updateRelativeLengthsInformation();
 
-    if (isLengthAttribute)
-        updateRelativeLengthsInformation();
-
-    RenderSVGShape* renderer = toRenderSVGShape(this->renderer());
+    LayoutSVGShape* renderer = toLayoutSVGShape(this->layoutObject());
     if (!renderer)
         return;
 
-    if (isLengthAttribute) {
-        renderer->setNeedsShapeUpdate();
-        markForLayoutAndParentResourceInvalidation(renderer);
-        return;
-    }
-
-    ASSERT_NOT_REACHED();
+    renderer->setNeedsShapeUpdate();
+    markForLayoutAndParentResourceInvalidation(renderer);
 }
 
 bool SVGEllipseElement::selfHasRelativeLengths() const
@@ -105,9 +124,9 @@ bool SVGEllipseElement::selfHasRelativeLengths() const
         || m_ry->currentValue()->isRelative();
 }
 
-RenderObject* SVGEllipseElement::createRenderer(RenderStyle*)
+LayoutObject* SVGEllipseElement::createLayoutObject(const ComputedStyle&)
 {
-    return new RenderSVGEllipse(this);
+    return new LayoutSVGEllipse(this);
 }
 
 } // namespace blink

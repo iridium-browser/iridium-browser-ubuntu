@@ -215,7 +215,10 @@ void FileStream::Context::OnOpenCompleted(const CompletionCallback& callback,
 }
 
 void FileStream::Context::CloseAndDelete() {
-  DCHECK(!async_in_progress_);
+  // TODO(ananta)
+  // Replace this CHECK with a DCHECK once we figure out the root cause of
+  // http://crbug.com/455066
+  CHECK(!async_in_progress_);
 
   if (file_.IsValid()) {
     bool posted = task_runner_.get()->PostTask(

@@ -25,15 +25,12 @@ public:
     }
 
 protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("filltypes");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(835, 840);
     }
 
@@ -64,7 +61,7 @@ protected:
                  scale, paint);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         this->makePath();
 
         canvas->translate(SkIntToScalar(20), SkIntToScalar(20));

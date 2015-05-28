@@ -56,7 +56,7 @@ public:
 
     int repeat() const { return m_repeat; }
 
-    virtual void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         Event::trace(visitor);
     }
@@ -177,6 +177,7 @@ SVGSMILElement::SVGSMILElement(const QualifiedName& tagName, Document& doc)
     , m_syncBaseConditionsConnected(false)
     , m_hasEndEventConditions(false)
     , m_isWaitingForFirstInterval(true)
+    , m_isScheduled(false)
     , m_interval(SMILInterval(SMILTime::unresolved(), SMILTime::unresolved()))
     , m_previousIntervalBegin(SMILTime::unresolved())
     , m_activeState(Inactive)
@@ -205,8 +206,7 @@ SVGSMILElement::~SVGSMILElement()
 #if !ENABLE(OILPAN)
     clearConditions();
 
-    if (m_timeContainer && m_targetElement && hasValidAttributeName())
-        m_timeContainer->unschedule(this, m_targetElement, m_attributeName);
+    unscheduleIfScheduled();
 #endif
 }
 
@@ -228,7 +228,7 @@ void SVGSMILElement::buildPendingResource()
 
     if (!inDocument()) {
         // Reset the target element if we are no longer in the document.
-        setTargetElement(0);
+        setTargetElement(nullptr);
         return;
     }
 
@@ -294,7 +294,7 @@ static inline void clearTimesWithDynamicOrigins(Vector<SMILTimeWithOrigin>& time
 
 void SVGSMILElement::reset()
 {
-    clearAnimatedType(m_targetElement);
+    clearAnimatedType();
 
     m_activeState = Inactive;
     m_isWaitingForFirstInterval = true;
@@ -345,7 +345,7 @@ void SVGSMILElement::removedFrom(ContainerNode* rootParent)
     if (rootParent->inDocument()) {
         clearResourceAndEventBaseReferences();
         clearConditions();
-        setTargetElement(0);
+        setTargetElement(nullptr);
         setAttributeName(anyQName());
         animationAttributeChanged();
         m_timeContainer = nullptr;
@@ -550,7 +550,7 @@ void SVGSMILElement::parseAttribute(const QualifiedName& name, const AtomicStrin
     } else if (name == SVGNames::onrepeatAttr) {
         setAttributeEventListener(EventTypeNames::repeatEvent, createAttributeEventListener(this, name, value, eventParameterName()));
     } else {
-        SVGElement::parseAttributeNew(name, value);
+        SVGElement::parseAttribute(name, value);
     }
 }
 
@@ -577,7 +577,7 @@ void SVGSMILElement::svgAttributeChanged(const QualifiedName& attrName)
         SVGElement::InvalidationGuard invalidationGuard(this);
         buildPendingResource();
         if (m_targetElement)
-            clearAnimatedType(m_targetElement);
+            clearAnimatedType();
     } else if (inDocument()) {
         if (attrName == SVGNames::beginAttr)
             beginListChanged(elapsed());
@@ -677,32 +677,20 @@ void SVGSMILElement::disconnectEventBaseConditions()
 
 void SVGSMILElement::setAttributeName(const QualifiedName& attributeName)
 {
-    if (m_timeContainer && m_targetElement && m_attributeName != attributeName) {
-        if (hasValidAttributeName())
-            m_timeContainer->unschedule(this, m_targetElement, m_attributeName);
-        m_attributeName = attributeName;
-        if (hasValidAttributeName())
-            m_timeContainer->schedule(this, m_targetElement, m_attributeName);
-    } else
-        m_attributeName = attributeName;
-
-    // Only clear the animated type, if we had a target before.
+    unscheduleIfScheduled();
     if (m_targetElement)
-        clearAnimatedType(m_targetElement);
+        clearAnimatedType();
+    m_attributeName = attributeName;
+    schedule();
 }
 
 void SVGSMILElement::setTargetElement(SVGElement* target)
 {
-    if (m_timeContainer && hasValidAttributeName()) {
-        if (m_targetElement)
-            m_timeContainer->unschedule(this, m_targetElement, m_attributeName);
-        if (target)
-            m_timeContainer->schedule(this, target, m_attributeName);
-    }
+    unscheduleIfScheduled();
 
     if (m_targetElement) {
         // Clear values that may depend on the previous target.
-        clearAnimatedType(m_targetElement);
+        clearAnimatedType();
         disconnectSyncBaseConditions();
     }
 
@@ -711,6 +699,7 @@ void SVGSMILElement::setTargetElement(SVGElement* target)
         endedActiveInterval();
 
     m_targetElement = target;
+    schedule();
 }
 
 SMILTime SVGSMILElement::elapsed() const
@@ -1219,7 +1208,7 @@ bool SVGSMILElement::progress(SMILTime elapsed, SVGSMILElement* resultElement, b
         smilEndEventSender().dispatchEventSoon(this);
         endedActiveInterval();
         if (!animationIsContributing && this == resultElement)
-            clearAnimatedType(m_targetElement);
+            clearAnimatedType();
     }
 
     // Triggering all the pending events if the animation timeline is changed.
@@ -1247,7 +1236,7 @@ void SVGSMILElement::notifyDependentsIntervalChanged()
     ASSERT(m_interval.begin.isFinite());
     // |loopBreaker| is used to avoid infinite recursions which may be caused from:
     // |notifyDependentsIntervalChanged| -> |createInstanceTimesFromSyncbase| -> |add{Begin,End}Time| -> |{begin,end}TimeChanged| -> |notifyDependentsIntervalChanged|
-    // |loopBreaker| is defined as a Persistent<HeapHashSet<Member<SVGSMILElement> > >. This won't cause leaks because it is guaranteed to be empty after the root |notifyDependentsIntervalChanged| has exited.
+    // |loopBreaker| is defined as a Persistent<HeapHashSet<Member<SVGSMILElement>>>. This won't cause leaks because it is guaranteed to be empty after the root |notifyDependentsIntervalChanged| has exited.
     DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<WillBeHeapHashSet<RawPtrWillBeMember<SVGSMILElement>>>, loopBreaker, (adoptPtrWillBeNoop(new WillBeHeapHashSet<RawPtrWillBeMember<SVGSMILElement>>())));
     if (!loopBreaker->add(this).isNewEntry)
         return;
@@ -1345,16 +1334,38 @@ void SVGSMILElement::dispatchPendingEvent(SMILEventSender* eventSender)
     }
 }
 
+void SVGSMILElement::schedule()
+{
+    ASSERT(!m_isScheduled);
+
+    if (!m_timeContainer || !m_targetElement || !hasValidAttributeName() || !hasValidAttributeType() || !m_targetElement->inActiveDocument())
+        return;
+
+    m_timeContainer->schedule(this, m_targetElement, m_attributeName);
+    m_isScheduled = true;
+}
+
+void SVGSMILElement::unscheduleIfScheduled()
+{
+    if (!m_isScheduled)
+        return;
+
+    ASSERT(m_timeContainer);
+    ASSERT(m_targetElement);
+    m_timeContainer->unschedule(this, m_targetElement, m_attributeName);
+    m_isScheduled = false;
+}
+
 SVGSMILElement::Condition::~Condition()
 {
 }
 
-void SVGSMILElement::Condition::trace(Visitor* visitor)
+DEFINE_TRACE(SVGSMILElement::Condition)
 {
     visitor->trace(m_syncBase);
 }
 
-void SVGSMILElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGSMILElement)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_targetElement);

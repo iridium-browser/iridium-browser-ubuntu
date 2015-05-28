@@ -33,6 +33,8 @@
 #include "ui/views/widget/widget.h"
 
 using base::UserMetricsAction;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using views::ColumnSet;
 using views::GridLayout;
 
@@ -106,10 +108,6 @@ BookmarkBubbleView::~BookmarkBubbleView() {
   // |parent_combobox_| needs to be destroyed before |parent_model_| as it
   // uses |parent_model_| in its destructor.
   delete parent_combobox_;
-}
-
-views::View* BookmarkBubbleView::GetInitiallyFocusedView() {
-  return title_tf_;
 }
 
 void BookmarkBubbleView::WindowClosing() {
@@ -259,6 +257,14 @@ void BookmarkBubbleView::Init() {
   AddAccelerator(ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE));
   AddAccelerator(ui::Accelerator(ui::VKEY_E, ui::EF_ALT_DOWN));
   AddAccelerator(ui::Accelerator(ui::VKEY_R, ui::EF_ALT_DOWN));
+}
+
+const char* BookmarkBubbleView::GetClassName() const {
+  return "BookmarkBubbleView";
+}
+
+views::View* BookmarkBubbleView::GetInitiallyFocusedView() {
+  return title_tf_;
 }
 
 BookmarkBubbleView::BookmarkBubbleView(

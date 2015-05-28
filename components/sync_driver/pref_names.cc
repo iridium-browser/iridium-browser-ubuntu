@@ -8,12 +8,6 @@ namespace sync_driver {
 
 namespace prefs {
 
-// Set to true when enhanced bookmarks experiment is enabled via Chrome sync.
-const char kEnhancedBookmarksExperimentEnabled[] = "enhanced_bookmarks_enabled";
-
-// Enhanced bookmarks extension id passed via Chrome sync.
-const char kEnhancedBookmarksExtensionId[] = "enhanced_bookmarks_extension_id";
-
 // 64-bit integer serialization of the base::Time when the last sync occurred.
 const char kSyncLastSyncedTime[] = "sync.last_synced_time";
 
@@ -36,6 +30,7 @@ const char kSyncAppSettings[] = "sync.app_settings";
 const char kSyncApps[] = "sync.apps";
 const char kSyncArticles[] = "sync.articles";
 const char kSyncAutofillProfile[] = "sync.autofill_profile";
+const char kSyncAutofillWallet[] = "sync.autofill_wallet";
 const char kSyncAutofill[] = "sync.autofill";
 const char kSyncBookmarks[] = "sync.bookmarks";
 const char kSyncDeviceInfo[] = "sync.device_info";
@@ -84,10 +79,6 @@ const char kSyncKeystoreEncryptionBootstrapToken[] =
 // Boolean tracking whether the user chose to specify a secondary encryption
 // passphrase.
 const char kSyncUsingSecondaryPassphrase[] = "sync.using_secondary_passphrase";
-
-// List of the currently acknowledged set of sync types, used to figure out
-// if a new sync type has rolled out so we can notify the user.
-const char kSyncAcknowledgedSyncTypes[] = "sync.acknowledged_types";
 
 // The GUID session sync will use to identify this client, even across sync
 // disable/enable events.

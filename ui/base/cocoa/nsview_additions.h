@@ -29,13 +29,16 @@
 // Return best color for keyboard focus ring.
 - (NSColor*)cr_keyboardFocusIndicatorColor;
 
+// Invoke |block| on this view and all descendants.
+- (void)cr_recursivelyInvokeBlock:(void (^)(id view))block;
+
 // Set needsDisplay for this view and all descendants.
 - (void)cr_recursivelySetNeedsDisplay:(BOOL)flag;
 
 // Draw using ancestorView's drawRect function into this view's rect. Do any
 // required translating or flipping to transform between the two coordinate
 // systems.
-- (void)cr_drawUsingAncestor:(NSView*)ancestorView inRect:(NSRect)rect;
+- (void)cr_drawUsingAncestor:(NSView*)ancestorView inRect:(NSRect)dirtyRect;
 
 // Used by ancestorView in the above draw call, to look up the child view that
 // it is actually drawing to.

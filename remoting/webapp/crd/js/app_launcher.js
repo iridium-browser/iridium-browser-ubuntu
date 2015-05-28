@@ -19,10 +19,12 @@
  *   appLauncher.close(appId);
  */
 
-'use strict';
-
 /** @suppress {duplicate} */
 var remoting = remoting || {};
+
+(function() {
+
+'use strict';
 
 /** @interface */
 remoting.AppLauncher = function() {};
@@ -78,7 +80,7 @@ remoting.V1AppLauncher.prototype.close = function(id) {
       if (!tab) {
         reject(new Error(chrome.runtime.lastError.message));
       } else {
-        chrome.tabs.remove(tab.id, resolve);
+        chrome.tabs.remove(tab.id, /** @type {function(*=):void} */ (resolve));
       }
     });
   });
@@ -91,42 +93,83 @@ remoting.V1AppLauncher.prototype.close = function(id) {
  */
 remoting.V2AppLauncher = function() {};
 
+var APP_MAIN_URL = 'main.html';
+
 /**
- * @type {number}
- * @private
+ * @param {string} id
  */
-remoting.V2AppLauncher.nextWindowId_ = 0;
+remoting.V2AppLauncher.prototype.restart = function(id) {
+  this.close(id).then(function() {
+    // Not using the launch() method because we want to launch a new window with
+    // the same id, such that the size and positioning of the original window
+    // can be preserved.
+    return chrome.app.window.create(APP_MAIN_URL, {'id' : id, 'frame': 'none'});
+  });
+};
 
 remoting.V2AppLauncher.prototype.launch = function(opt_launchArgs) {
-  var url = base.urlJoin('main.html', opt_launchArgs);
+  var url = base.urlJoin(APP_MAIN_URL, opt_launchArgs);
 
   /**
    * @param {function(*=):void} resolve
    * @param {function(*=):void} reject
    */
   return new Promise(function(resolve, reject) {
-    chrome.app.window.create(url, {
-        'width': 800,
-        'height': 600,
-        'frame': 'none',
-        'id': String(remoting.V2AppLauncher.nextWindowId_++)
-      },
-      /** @param {AppWindow} appWindow */
-      function(appWindow) {
-        if (!appWindow) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          resolve(appWindow.id);
-        }
-      });
+    var START_FULLSCREEN = 'start-fullscreen';
+    /** @param {Object} values */
+    var onValues = function(values) {
+      /** @type {string} */
+      var state = values[START_FULLSCREEN] ? 'fullscreen' : 'normal';
+      chrome.app.window.create(url, {
+          'width': 800,
+          'height': 600,
+          'frame': 'none',
+          'id': String(getNextWindowId()),
+          'state': state
+        },
+        /** @param {AppWindow=} appWindow */
+        function(appWindow) {
+          if (!appWindow) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(appWindow.id);
+          }
+        });
+    };
+    chrome.storage.local.get(START_FULLSCREEN, onValues);
   });
 };
 
 remoting.V2AppLauncher.prototype.close = function(id) {
-  var appWindow = chrome.app.window.get(id);
-  if (!appWindow) {
-    return Promise.reject(new Error(chrome.runtime.lastError.message));
-  }
-  appWindow.close();
-  return Promise.resolve();
+  /**
+   * @param {function(*=):void} resolve
+   * @param {function(*=):void} reject
+   */
+  return new Promise(function(resolve, reject) {
+    var appWindow = chrome.app.window.get(id);
+    if (!appWindow) {
+      return Promise.reject(new Error(chrome.runtime.lastError.message));
+    }
+    appWindow.onClosed.addListener(resolve);
+    appWindow.close();
+  });
 };
+
+/**
+ * @return {number} the next available window id.
+ */
+function getNextWindowId() {
+  var appWindows = chrome.app.window.getAll();
+  var lastId = /** @type(number) */ (0);
+  appWindows.forEach(function(appWindow) {
+    base.debug.assert(Number.isInteger(appWindow.id),
+                      "Window Id should be an integer");
+    var id = parseInt(appWindow.id, 10);
+    if (lastId <= id) {
+      lastId = id;
+    }
+  });
+  return ++lastId;
+}
+
+})();

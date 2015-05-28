@@ -3,119 +3,233 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import commands
-import os
+"""Patch an orderfile.
+
+Starting with a list of symbols in a binary and an orderfile (ordered list of
+symbols), matches the symbols in the orderfile and augments each symbol with the
+symbols residing at the same address (due to having identical code).
+
+Note: It is possible to have.
+- Several symbols mapping to the same offset in the binary.
+- Several offsets for a given symbol (because we strip the ".clone." suffix)
+
+TODO(lizeb): Since the suffix ".clone." is only used with -O3 that we don't
+currently use, simplify the logic by removing the suffix handling.
+
+The general pipeline is:
+1. Get the symbol infos (name, offset, size, section) from the binary
+2. Get the symbol names from the orderfile
+3. Find the orderfile symbol names in the symbols coming from the binary
+4. For each symbol found, get all the symbols at the same address
+5. Output them to an updated orderfile, with several different prefixes
+"""
+
+import collections
+import logging
+import optparse
 import sys
 
-orderfile = sys.argv[1]
-uninstrumented_shlib = sys.argv[2]
+import symbol_extractor
 
-nmlines_uninstrumented = commands.getoutput ('nm -S -n ' +
-   uninstrumented_shlib + '  | egrep "( t )|( W )|( T )"').split('\n')
+# Prefixes for the symbols. We strip them from the incoming symbols, and add
+# them back in the output file.
+_PREFIXES = ('.text.startup.', '.text.hot.', '.text.unlikely.', '.text.')
 
-nmlines = []
-for nmline in nmlines_uninstrumented:
-  if (len(nmline.split()) == 4):
-    nmlines.append(nmline)
 
-# Map addresses to list of functions at that address.  There are multiple
-# functions at an address because of aliasing.
-nm_index = 0
-uniqueAddrs = []
-addressMap = {}
-while nm_index < len(nmlines):
-  if (len(nmlines[nm_index].split()) == 4):
-    nm_int = int (nmlines[nm_index].split()[0], 16)
-    size = int (nmlines[nm_index].split()[1], 16)
-    fnames = [nmlines[nm_index].split()[3]]
-    nm_index = nm_index + 1
-    while nm_index < len(nmlines) and nm_int == int (
-        nmlines[nm_index].split()[0], 16):
-      fnames.append(nmlines[nm_index].split()[3])
-      nm_index = nm_index + 1
-    addressMap[nm_int] = fnames
-    uniqueAddrs.append((nm_int, size))
-  else:
-    nm_index = nm_index + 1
+def _RemoveClone(name):
+  """Return name up to the ".clone." marker."""
+  clone_index = name.find('.clone.')
+  if clone_index != -1:
+    return name[:clone_index]
+  return name
 
-def binary_search (search_addr, start, end):
-  if start >= end or start == end - 1:
-    (nm_addr, sym_size) = uniqueAddrs[start]
-    if not (search_addr >= nm_addr and search_addr < nm_addr + sym_size):
-      error_message = ('ERROR: did not find function in binary: addr: ' +
-                       hex(addr) + ' nm_addr: ' + str(nm_addr) + ' start: ' +
-                       str(start) + ' end: ' + str(end))
-      sys.stderr.write(error_message + "\n")
-      raise Exception(error_message)
-    return (addressMap[nm_addr], sym_size)
-  else:
-    halfway = start + ((end - start) / 2)
-    nm_addr = uniqueAddrs[halfway][0]
-    if (addr >= nm_addr and addr < nm_addr + sym_size):
-      return (addressMap[nm_addr], sym_size)
-    elif (addr < nm_addr):
-      return binary_search (addr, start, halfway)
-    elif (addr >= nm_addr + sym_size):
-      return binary_search (addr, halfway, end)
+
+def _GroupSymbolInfos(symbol_infos):
+  """Group the symbol infos by name and offset.
+
+  Args:
+    symbol_infos: an iterable of SymbolInfo
+
+  Returns:
+    The same output as _GroupSymbolInfosFromBinary.
+  """
+  # Map the addresses to symbols.
+  offset_to_symbol_infos = collections.defaultdict(list)
+  name_to_symbol_infos = collections.defaultdict(list)
+  for symbol in symbol_infos:
+    symbol = symbol_extractor.SymbolInfo(name=_RemoveClone(symbol.name),
+                                         offset=symbol.offset,
+                                         size=symbol.size,
+                                         section=symbol.section)
+    offset_to_symbol_infos[symbol.offset].append(symbol)
+    name_to_symbol_infos[symbol.name].append(symbol)
+  return (dict(offset_to_symbol_infos), dict(name_to_symbol_infos))
+
+
+def _GroupSymbolInfosFromBinary(binary_filename):
+  """Group all the symbols from a binary by name and offset.
+
+  Args:
+    binary_filename: path to the binary.
+
+  Returns:
+    A tuple of dict:
+    (offset_to_symbol_infos, name_to_symbol_infos):
+    - offset_to_symbol_infos: {offset: [symbol_info1, ...]}
+    - name_to_symbol_infos: {name: [symbol_info1, ...]}
+  """
+  symbol_infos = symbol_extractor.SymbolInfosFromBinary(binary_filename)
+  return _GroupSymbolInfos(symbol_infos)
+
+
+def _StripPrefix(line):
+  """Get the symbol from a line with a linker section name.
+
+  Args:
+    line: a line from an orderfile, usually in the form:
+          .text.SymbolName
+
+  Returns:
+    The symbol, SymbolName in the example above.
+  """
+  line = line.rstrip('\n')
+  for prefix in _PREFIXES:
+    if line.startswith(prefix):
+      return line[len(prefix):]
+  return line  # Unprefixed case
+
+
+def _GetSymbolsFromStream(lines):
+  """Get the symbols from an iterable of lines.
+     Filters out wildcards and lines which do not correspond to symbols.
+
+  Args:
+    lines: iterable of lines from an orderfile.
+
+  Returns:
+    Same as GetSymbolsFromOrderfile
+  """
+  # TODO(lizeb): Retain the prefixes later in the processing stages.
+  symbols = []
+  unique_symbols = set()
+  for line in lines:
+    line = _StripPrefix(line)
+    name = _RemoveClone(line)
+    if name == '' or name == '*' or name == '.text':
+      continue
+    if not line in unique_symbols:
+      symbols.append(line)
+      unique_symbols.add(line)
+  return symbols
+
+
+def GetSymbolsFromOrderfile(filename):
+  """Return the symbols from an orderfile.
+
+  Args:
+    filename: The name of the orderfile.
+
+  Returns:
+    A list of symbol names.
+  """
+  with open(filename, 'r') as f:
+    return _GetSymbolsFromStream(f.xreadlines())
+
+def _SymbolsWithSameOffset(profiled_symbol, name_to_symbol_info,
+                           offset_to_symbol_info):
+  """Expand a profiled symbol to include all symbols which share an offset
+     with that symbol.
+  Args:
+    profiled_symbol: the string symbol name to be expanded.
+    name_to_symbol_info: {name: [symbol_info1], ...}, as returned by
+        GetSymbolInfosFromBinary
+    offset_to_symbol_info: {offset: [symbol_info1, ...], ...}
+
+  Returns:
+    A list of symbol names, or an empty list if profiled_symbol was not in
+    name_to_symbol_info.
+  """
+  if not profiled_symbol in name_to_symbol_info:
+    return []
+  symbol_infos = name_to_symbol_info[profiled_symbol]
+  expanded = []
+  for symbol_info in symbol_infos:
+    expanded += (s.name for s in offset_to_symbol_info[symbol_info.offset])
+  return expanded
+
+def _ExpandSymbols(profiled_symbols, name_to_symbol_infos,
+                   offset_to_symbol_infos):
+  """Expand all of the symbols in profiled_symbols to include any symbols which
+     share the same address.
+
+  Args:
+    profiled_symbols: Symbols to match
+    name_to_symbol_infos: {name: [symbol_info1], ...}, as returned by
+        GetSymbolInfosFromBinary
+    offset_to_symbol_infos: {offset: [symbol_info1, ...], ...}
+
+  Returns:
+    A list of the symbol names.
+  """
+  found_symbols = 0
+  missing_symbols = []
+  all_symbols = []
+  for name in profiled_symbols:
+    expansion = _SymbolsWithSameOffset(name,
+        name_to_symbol_infos, offset_to_symbol_infos)
+    if expansion:
+      found_symbols += 1
+      all_symbols += expansion
     else:
-      raise Exception("ERROR: did not expect this case")
+      all_symbols.append(name)
+      missing_symbols.append(name)
+  logging.info('symbols found: %d\n' % found_symbols)
+  if missing_symbols > 0:
+    logging.warning('%d missing symbols.' % len(missing_symbols))
+    missing_symbols_to_show = min(100, len(missing_symbols))
+    logging.warning('First %d missing symbols:\n%s' % (
+        missing_symbols_to_show,
+        '\n'.join(missing_symbols[:missing_symbols_to_show])))
+  return all_symbols
 
-f = open (orderfile)
-lines = f.readlines()
-profiled_list = []
-prefixes = ['.text.', '.text.startup.', '.text.hot.', '.text.unlikely.']
-for line in lines:
-  for prefix in prefixes:
-    line = line.replace(prefix, '')
-  functionName = line.split('.clone.')[0].strip()
-  if (functionName == ''):
-    continue
-  profiled_list.append(functionName)
 
-# Symbol names are not unique.  Since the order file uses symbol names, the
-# patched order file pulls in all symbols with the same name.  Multiple function
-# addresses for the same function name may also be due to ".clone" symbols,
-# since the substring is stripped.
-functions = []
-functionAddressMap = {}
-for line in nmlines:
-  try:
-    functionName = line.split()[3]
-  except Exception:
-    functionName = line.split()[2]
-  functionName = functionName.split('.clone.')[0]
-  functionAddress = int (line.split()[0].strip(), 16)
-  try:
-    functionAddressMap[functionName].append(functionAddress)
-  except Exception:
-    functionAddressMap[functionName] = [functionAddress]
-    functions.append(functionName)
+def _PrintSymbolsWithPrefixes(symbol_names, output_file):
+  """For each symbol, outputs it to output_file with the prefixes."""
+  unique_outputs = set()
+  for name in symbol_names:
+    for prefix in _PREFIXES:
+      linker_section = prefix + name
+      if not linker_section in unique_outputs:
+        output_file.write(linker_section + '\n')
+        unique_outputs.add(linker_section)
 
-sys.stderr.write ("profiled list size: " + str(len(profiled_list)) + "\n")
-addresses = []
-symbols_found = 0
-for function in profiled_list:
-   try:
-     addrs = functionAddressMap[function]
-     symbols_found = symbols_found + 1
-   except Exception:
-     addrs = []
-     # sys.stderr.write ("WARNING: could not find symbol " + function + "\n")
-   for addr in addrs:
-     if not (addr in addresses):
-       addresses.append(addr)
-sys.stderr.write ("symbols found: " + str(symbols_found) + "\n")
 
-sys.stderr.write ("number of addresses: " + str(len(addresses)) + "\n")
-total_size = 0
-for addr in addresses:
-  (functions, size) = binary_search (addr, 0, len(uniqueAddrs))
-  total_size = total_size + size
-  for function in functions:
-    for prefix in prefixes:
-      print prefix + function
+def main(argv):
+  parser = optparse.OptionParser(usage=
+      'usage: %prog [options] <unpatched_orderfile> <library>')
+  parser.add_option('--target-arch', action='store', dest='arch',
+                    default='arm',
+                    choices=['arm', 'arm64', 'x86', 'x86_64', 'x64', 'mips'],
+                    help='The target architecture for the library.')
+  options, argv = parser.parse_args(argv)
+  if len(argv) != 3:
+    parser.print_help()
+    return 1
+  orderfile_filename = argv[1]
+  binary_filename = argv[2]
+  symbol_extractor.SetArchitecture(options.arch)
+  (offset_to_symbol_infos, name_to_symbol_infos) = _GroupSymbolInfosFromBinary(
+      binary_filename)
+  profiled_symbols = GetSymbolsFromOrderfile(orderfile_filename)
+  expanded_symbols = _ExpandSymbols(
+      profiled_symbols, name_to_symbol_infos, offset_to_symbol_infos)
+  _PrintSymbolsWithPrefixes(expanded_symbols, sys.stdout)
+  # The following is needed otherwise Gold only applies a partial sort.
+  print '.text'    # gets methods not in a section, such as assembly
+  print '.text.*'  # gets everything else
+  return 0
 
-# The following is needed otherwise Gold only applies a partial sort.
-print '.text'    # gets methods not in a section, such as assembly
-print '.text.*'  # gets everything else
-sys.stderr.write ("total_size: " + str(total_size) + "\n")
+
+if __name__ == '__main__':
+  logging.basicConfig(level=logging.INFO)
+  sys.exit(main(sys.argv))

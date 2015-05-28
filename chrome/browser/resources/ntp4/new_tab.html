@@ -1,10 +1,9 @@
 <!doctype html>
-<html i18n-values="
-    dir:textdirection;
-    hasattribution:hasattribution;
-    themegravity:themegravity;
-    bookmarkbarattached:bookmarkbarattached;"
-  class="starting-up">
+<html class="starting-up" i18n-values="dir:textdirection;
+                                       hasattribution:hasattribution;
+                                       themegravity:themegravity;
+                                       bookmarkbarattached:bookmarkbarattached;
+                                       lang:language">
 <head>
 <meta charset="utf-8">
 <title i18n-content="title"></title>
@@ -144,12 +143,12 @@
     </div>
   </div>
 
-  <button id="login-container" class="custom-appearance" hidden>
+  <div id="login-container" hidden>
     <div id="login-status-header-container" class="login-status-row">
       <div id="login-status-header"></div>
     </div>
     <div id="login-status-sub-header"></div>
-  </button>
+  </div>
 </body>
 
 <!-- A div to hold all the templates, and in the darkness bind them. -->

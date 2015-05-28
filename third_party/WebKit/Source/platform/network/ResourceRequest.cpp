@@ -61,9 +61,12 @@ PassOwnPtr<ResourceRequest> ResourceRequest::adopt(PassOwnPtr<CrossThreadResourc
     request->setFetchRequestMode(data->m_fetchRequestMode);
     request->setFetchCredentialsMode(data->m_fetchCredentialsMode);
     request->m_referrerPolicy = data->m_referrerPolicy;
+    request->m_didSetHTTPReferrer = data->m_didSetHTTPReferrer;
     request->m_checkForBrowserSideNavigation = data->m_checkForBrowserSideNavigation;
     request->m_uiStartTime = data->m_uiStartTime;
+    request->m_originatesFromReservedIPRange = data->m_originatesFromReservedIPRange;
     request->m_inputPerfMetricReportPolicy = data->m_inputPerfMetricReportPolicy;
+    request->m_followedRedirect = data->m_followedRedirect;
     return request.release();
 }
 
@@ -96,9 +99,12 @@ PassOwnPtr<CrossThreadResourceRequestData> ResourceRequest::copyData() const
     data->m_fetchRequestMode = m_fetchRequestMode;
     data->m_fetchCredentialsMode = m_fetchCredentialsMode;
     data->m_referrerPolicy = m_referrerPolicy;
+    data->m_didSetHTTPReferrer = m_didSetHTTPReferrer;
     data->m_checkForBrowserSideNavigation = m_checkForBrowserSideNavigation;
     data->m_uiStartTime = m_uiStartTime;
+    data->m_originatesFromReservedIPRange = m_originatesFromReservedIPRange;
     data->m_inputPerfMetricReportPolicy = m_inputPerfMetricReportPolicy;
+    data->m_followedRedirect = m_followedRedirect;
     return data.release();
 }
 
@@ -203,6 +209,7 @@ void ResourceRequest::setHTTPReferrer(const Referrer& referrer)
     else
         setHTTPHeaderField("Referer", referrer.referrer);
     m_referrerPolicy = referrer.referrerPolicy;
+    m_didSetHTTPReferrer = true;
 }
 
 void ResourceRequest::clearHTTPAuthorization()
@@ -214,6 +221,7 @@ void ResourceRequest::clearHTTPReferrer()
 {
     m_httpHeaderFields.remove("Referer");
     m_referrerPolicy = ReferrerPolicyDefault;
+    m_didSetHTTPReferrer = false;
 }
 
 void ResourceRequest::clearHTTPOrigin()
@@ -362,6 +370,10 @@ bool ResourceRequest::isConditional() const
         || m_httpHeaderFields.contains("If-Unmodified-Since"));
 }
 
+void ResourceRequest::setHasUserGesture(bool hasUserGesture)
+{
+    m_hasUserGesture |= hasUserGesture;
+}
 
 static const AtomicString& cacheControlHeaderString()
 {
@@ -436,9 +448,12 @@ void ResourceRequest::initialize(const KURL& url)
     // context which requires it.
     m_fetchCredentialsMode = WebURLRequest::FetchCredentialsModeSameOrigin;
     m_referrerPolicy = ReferrerPolicyDefault;
+    m_didSetHTTPReferrer = false;
     m_checkForBrowserSideNavigation = true;
     m_uiStartTime = 0;
+    m_originatesFromReservedIPRange = false;
     m_inputPerfMetricReportPolicy = InputToLoadPerfMetricReportPolicy::NoReport;
+    m_followedRedirect = false;
 }
 
 // This is used by the loader to control the number of issued parallel load requests.

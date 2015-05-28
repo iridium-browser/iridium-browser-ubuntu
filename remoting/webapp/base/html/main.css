@@ -360,16 +360,15 @@ section {
   display: flex;
   -webkit-align-items: center;
   padding: 10px 0;
-  border-top: 1px solid #EBEBEB;
+  border-bottom: 1px solid #EBEBEB;
 }
 
 .section-row button {
   margin-__MSG_@@bidi_start_edge__: 20px;
 }
 
-.section-row:first-child,
-.section-row.no-non-local-hosts {
-  border-top: none;
+.daemon-control .section-row {
+  border-bottom: none;
 }
 
 .editbox-label {
@@ -442,6 +441,7 @@ thead {
   font-weight: bold;
 }
 
+#this-host-connect:hover,
 .host-online.clickable:hover,
 .host-online.clickable.child-focused {
   background-color: #f2f2f2;
@@ -474,7 +474,7 @@ thead {
   padding: 0 5px;
 }
 
-.host-list-label, .host-list-label:visited, .host-list-label:active {
+.host-name-label, .host-name-label:visited, .host-name-label:active {
   color: inherit;
   cursor: inherit;
 }
@@ -495,9 +495,19 @@ thead {
   right: -10px;
 }
 
-.host-offline .host-list-label,
+.host-offline .host-name-label,
 .host-offline .host-list-main-icon {
   opacity: 0.5;
+}
+
+#this-host-connect,
+.host-enabled-other-account {
+  -webkit-align-items: center;
+  display: flex;
+}
+
+#this-host-connect .host-entry {
+  flex: 1;
 }
 
 button {
@@ -707,11 +717,29 @@ body:not(.connected) #session-mode {
   height: auto;
 }
 
-.mouse-cursor-overlay {
+.debug-region-container {
   position: absolute;
+  top: 0px;
+  left: 0px;
   pointer-events: none;
 }
 
-body.hangout-remote-desktop .home-screen {
-  display: none;
+.debug-region-rect {
+  position: absolute;
+  background-color: rgba(255, 0, 255, 0.5);
+  border-color: #000000;
+  border-style: solid;
+  border-width: 2px;
+  box-sizing: border-box;
+}
+
+#client-container {
+  /* The mouse-cursor-overlay is positioned relative to the client plugin,
+   * which is contained within this element. */
+  position: relative;
+}
+
+.mouse-cursor-overlay {
+  position: absolute;
+  pointer-events: none;
 }

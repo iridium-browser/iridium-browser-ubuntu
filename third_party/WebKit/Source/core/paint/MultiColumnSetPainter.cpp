@@ -5,11 +5,11 @@
 #include "config.h"
 #include "core/paint/MultiColumnSetPainter.h"
 
+#include "core/layout/LayoutMultiColumnSet.h"
+#include "core/layout/PaintInfo.h"
 #include "core/paint/BlockPainter.h"
 #include "core/paint/BoxPainter.h"
-#include "core/paint/RenderDrawingRecorder.h"
-#include "core/rendering/PaintInfo.h"
-#include "core/rendering/RenderMultiColumnSet.h"
+#include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "platform/geometry/LayoutPoint.h"
 
 namespace blink {
@@ -23,7 +23,7 @@ void MultiColumnSetPainter::paintObject(const PaintInfo& paintInfo, const Layout
 
     // FIXME: Right now we're only painting in the foreground phase.
     // Columns should technically respect phases and allow for background/float/foreground overlap etc., just like
-    // RenderBlocks do. Note this is a pretty minor issue, since the old column implementation clipped columns
+    // LayoutBlocks do. Note this is a pretty minor issue, since the old column implementation clipped columns
     // anyway, thus making it impossible for them to overlap one another. It's also really unlikely that the columns
     // would overlap another block.
     if (!m_renderMultiColumnSet.flowThread() || !m_renderMultiColumnSet.isValid() || (paintInfo.phase != PaintPhaseForeground && paintInfo.phase != PaintPhaseSelection))
@@ -34,14 +34,14 @@ void MultiColumnSetPainter::paintObject(const PaintInfo& paintInfo, const Layout
 
 void MultiColumnSetPainter::paintColumnRules(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    if (m_renderMultiColumnSet.flowThread()->isRenderPagedFlowThread())
+    if (m_renderMultiColumnSet.flowThread()->isLayoutPagedFlowThread())
         return;
 
-    RenderStyle* blockStyle = m_renderMultiColumnSet.multiColumnBlockFlow()->style();
+    const ComputedStyle& blockStyle = m_renderMultiColumnSet.multiColumnBlockFlow()->styleRef();
     const Color& ruleColor = m_renderMultiColumnSet.resolveColor(blockStyle, CSSPropertyWebkitColumnRuleColor);
-    bool ruleTransparent = blockStyle->columnRuleIsTransparent();
-    EBorderStyle ruleStyle = blockStyle->columnRuleStyle();
-    LayoutUnit ruleThickness = blockStyle->columnRuleWidth();
+    bool ruleTransparent = blockStyle.columnRuleIsTransparent();
+    EBorderStyle ruleStyle = blockStyle.columnRuleStyle();
+    LayoutUnit ruleThickness = blockStyle.columnRuleWidth();
     LayoutUnit colGap = m_renderMultiColumnSet.columnGap();
     bool renderRule = ruleStyle > BHIDDEN && !ruleTransparent;
     if (!renderRule)
@@ -51,7 +51,12 @@ void MultiColumnSetPainter::paintColumnRules(const PaintInfo& paintInfo, const L
     if (colCount <= 1)
         return;
 
-    DrawingRecorder drawingRecorder(paintInfo.context, m_renderMultiColumnSet.displayItemClient(), DisplayItem::ColumnRules, m_renderMultiColumnSet.visualOverflowRect());
+    LayoutRect paintRect = m_renderMultiColumnSet.visualOverflowRect();
+    paintRect.moveBy(paintOffset);
+    LayoutObjectDrawingRecorder drawingRecorder(*paintInfo.context, m_renderMultiColumnSet, DisplayItem::ColumnRules, paintRect);
+    if (drawingRecorder.canUseCachedDrawing())
+        return;
+
     bool antialias = BoxPainter::shouldAntialiasLines(paintInfo.context);
     bool leftToRight = m_renderMultiColumnSet.style()->isLeftToRightDirection();
     LayoutUnit currLogicalLeftOffset = leftToRight ? LayoutUnit() : m_renderMultiColumnSet.contentLogicalWidth();

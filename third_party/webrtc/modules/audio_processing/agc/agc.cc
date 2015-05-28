@@ -23,7 +23,6 @@
 #include "webrtc/modules/audio_processing/agc/standalone_vad.h"
 #include "webrtc/modules/audio_processing/agc/utility.h"
 #include "webrtc/modules/interface/module_common_types.h"
-#include "webrtc/system_wrappers/interface/compile_assert.h"
 
 namespace webrtc {
 namespace {
@@ -46,7 +45,7 @@ Agc::Agc()
       pitch_based_vad_(new PitchBasedVad()),
       standalone_vad_(StandaloneVad::Create()),
       // Initialize to the most common resampling situation.
-      resampler_(new Resampler(32000, kSampleRateHz, kResamplerSynchronous)) {
+      resampler_(new Resampler(32000, kSampleRateHz, 1)) {
   }
 
 Agc::~Agc() {}
@@ -70,9 +69,7 @@ int Agc::Process(const int16_t* audio, int length, int sample_rate_hz) {
   int16_t resampled[kLength10Ms];
   const int16_t* resampled_ptr = audio;
   if (sample_rate_hz != kSampleRateHz) {
-    if (resampler_->ResetIfNeeded(sample_rate_hz,
-                                  kSampleRateHz,
-                                  kResamplerSynchronous) != 0) {
+    if (resampler_->ResetIfNeeded(sample_rate_hz, kSampleRateHz, 1) != 0) {
       return -1;
     }
     resampler_->Push(audio, length, resampled, kLength10Ms, length);
@@ -99,8 +96,8 @@ int Agc::Process(const int16_t* audio, int length, int sample_rate_hz) {
     // Initialize to 0.5 which is a neutral value for combining probabilities,
     // in case the standalone-VAD is not enabled.
     double p_combined[] = {0.5, 0.5, 0.5, 0.5};
-    COMPILE_ASSERT(sizeof(p_combined) / sizeof(p_combined[0]) == kMaxNumFrames,
-                   combined_probability_incorrect_size);
+    static_assert(sizeof(p_combined) / sizeof(p_combined[0]) == kMaxNumFrames,
+                  "combined probability incorrect size");
     if (standalone_vad_enabled_) {
       if (standalone_vad_->GetActivity(p_combined, kMaxNumFrames) < 0)
         return -1;

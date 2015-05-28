@@ -40,7 +40,7 @@ class Predicate;
 
 class Step final : public ParseNode {
     WTF_MAKE_NONCOPYABLE(Step);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(Step);
 public:
     enum Axis {
         AncestorAxis, AncestorOrSelfAxis, AttributeAxis,
@@ -51,7 +51,7 @@ public:
     };
 
     class NodeTest : public NoBaseWillBeGarbageCollectedFinalized<NodeTest> {
-        WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+        WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(NodeTest);
     public:
         enum Kind {
             TextNodeTest, CommentNodeTest, ProcessingInstructionNodeTest, AnyNodeTest, NameTest
@@ -76,13 +76,13 @@ public:
             ASSERT(o.m_mergedPredicates.isEmpty());
             return *this;
         }
-        void trace(Visitor* visitor) { visitor->trace(m_mergedPredicates); }
+        DEFINE_INLINE_TRACE() { visitor->trace(m_mergedPredicates); }
 
         Kind kind() const { return m_kind; }
         const AtomicString& data() const { return m_data; }
         const AtomicString& namespaceURI() const { return m_namespaceURI; }
-        WillBeHeapVector<OwnPtrWillBeMember<Predicate> >& mergedPredicates() { return m_mergedPredicates; }
-        const WillBeHeapVector<OwnPtrWillBeMember<Predicate> >& mergedPredicates() const { return m_mergedPredicates; }
+        WillBeHeapVector<OwnPtrWillBeMember<Predicate>>& mergedPredicates() { return m_mergedPredicates; }
+        const WillBeHeapVector<OwnPtrWillBeMember<Predicate>>& mergedPredicates() const { return m_mergedPredicates; }
 
     private:
         Kind m_kind;
@@ -90,13 +90,13 @@ public:
         AtomicString m_namespaceURI;
 
         // When possible, we merge some or all predicates with node test for better performance.
-        WillBeHeapVector<OwnPtrWillBeMember<Predicate> > m_mergedPredicates;
+        WillBeHeapVector<OwnPtrWillBeMember<Predicate>> m_mergedPredicates;
     };
 
     Step(Axis, const NodeTest&);
-    Step(Axis, const NodeTest&, WillBeHeapVector<OwnPtrWillBeMember<Predicate> >&);
+    Step(Axis, const NodeTest&, WillBeHeapVector<OwnPtrWillBeMember<Predicate>>&);
     virtual ~Step();
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     void optimize();
 
@@ -116,7 +116,7 @@ private:
 
     Axis m_axis;
     OwnPtrWillBeMember<NodeTest> m_nodeTest;
-    WillBeHeapVector<OwnPtrWillBeMember<Predicate> > m_predicates;
+    WillBeHeapVector<OwnPtrWillBeMember<Predicate>> m_predicates;
 };
 
 void optimizeStepPair(Step*, Step*, bool& dropSecondStep);

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef  CONTENT_RENDERER_BROWSER_PLUGIN_BROWSER_PLUGIN_H_
-#define  CONTENT_RENDERER_BROWSER_PLUGIN_BROWSER_PLUGIN_H_
+#ifndef CONTENT_RENDERER_BROWSER_PLUGIN_BROWSER_PLUGIN_H_
+#define CONTENT_RENDERER_BROWSER_PLUGIN_BROWSER_PLUGIN_H_
 
 #include "third_party/WebKit/public/web/WebPlugin.h"
 
@@ -32,7 +32,7 @@ class CONTENT_EXPORT BrowserPlugin :
  public:
   static BrowserPlugin* GetFromNode(blink::WebNode& node);
 
-  int render_view_routing_id() const { return render_view_routing_id_; }
+  int render_frame_routing_id() const { return render_frame_routing_id_; }
   int browser_plugin_instance_id() const { return browser_plugin_instance_id_; }
   bool attached() const { return attached_; }
 
@@ -47,17 +47,15 @@ class CONTENT_EXPORT BrowserPlugin :
   bool guest_crashed() const { return guest_crashed_; }
 
   // Informs the guest of an updated focus state.
-  void UpdateGuestFocusState();
+  void UpdateGuestFocusState(blink::WebFocusType focus_type);
 
   // Indicates whether the guest should be focused.
   bool ShouldGuestBeFocused() const;
 
-  // Embedder's device scale factor changed, we need to update the guest
-  // renderer.
-  void UpdateDeviceScaleFactor();
-
   // A request to enable hardware compositing.
   void EnableCompositing(bool enable);
+
+  void UpdateInternalInstanceId();
 
   // Provided that a guest instance ID has been allocated, this method attaches
   // this BrowserPlugin instance to that guest.
@@ -88,11 +86,13 @@ class CONTENT_EXPORT BrowserPlugin :
       blink::WebCanvas* canvas,
       const blink::WebRect& rect) override;
   virtual void updateGeometry(
-      const blink::WebRect& frame_rect,
+      const blink::WebRect& window_rect,
       const blink::WebRect& clip_rect,
+      const blink::WebRect& unobscured_rect,
       const blink::WebVector<blink::WebRect>& cut_outs_rects,
       bool is_visible) override;
-  virtual void updateFocus(bool focused) override;
+  virtual void updateFocus(bool focused,
+                           blink::WebFocusType focus_type) override;
   virtual void updateVisibility(bool visible) override;
   virtual bool acceptsInputEvents() override;
   virtual bool handleInputEvent(
@@ -149,19 +149,9 @@ class CONTENT_EXPORT BrowserPlugin :
 
   ~BrowserPlugin() override;
 
-  int width() const { return plugin_rect_.width(); }
-  int height() const { return plugin_rect_.height(); }
-  gfx::Size plugin_size() const { return plugin_rect_.size(); }
-  gfx::Rect plugin_rect() const { return plugin_rect_; }
-
-  float GetDeviceScaleFactor() const;
+  gfx::Rect view_rect() const { return view_rect_; }
 
   void ShowSadGraphic();
-
-  // Populates BrowserPluginHostMsg_ResizeGuest_Params with resize state.
-  void PopulateResizeGuestParameters(
-      const gfx::Size& view_size,
-      BrowserPluginHostMsg_ResizeGuest_Params* params);
 
   // IPC message handlers.
   // Please keep in alphabetical order.
@@ -178,13 +168,12 @@ class CONTENT_EXPORT BrowserPlugin :
   // This indicates whether this BrowserPlugin has been attached to a
   // WebContents and is ready to receive IPCs.
   bool attached_;
-  // We cache the |render_view_|'s routing ID because we need it on destruction.
-  // If the |render_view_| is destroyed before the BrowserPlugin is destroyed
-  // then we will attempt to access a NULL pointer.
-  const int render_view_routing_id_;
+  // We cache the |render_frame_routing_id| because we need it on destruction.
+  // If the RenderFrame is destroyed before the BrowserPlugin is destroyed
+  // then we will attempt to access a nullptr.
+  const int render_frame_routing_id_;
   blink::WebPluginContainer* container_;
-  gfx::Rect plugin_rect_;
-  float last_device_scale_factor_;
+  gfx::Rect view_rect_;
   // Bitmap for crashed plugin. Lazily initialized, non-owning pointer.
   SkBitmap* sad_guest_;
   bool guest_crashed_;

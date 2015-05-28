@@ -44,14 +44,16 @@ SignedInDevicesChangeObserver::SignedInDevicesChangeObserver(
     Profile* profile) : extension_id_(extension_id),
                         profile_(profile) {
   ProfileSyncService* pss = ProfileSyncServiceFactory::GetForProfile(profile_);
-  if (pss && pss->GetDeviceInfoTracker()) {
+  if (pss) {
+    DCHECK(pss->GetDeviceInfoTracker());
     pss->GetDeviceInfoTracker()->AddObserver(this);
   }
 }
 
 SignedInDevicesChangeObserver::~SignedInDevicesChangeObserver() {
   ProfileSyncService* pss = ProfileSyncServiceFactory::GetForProfile(profile_);
-  if (pss && pss->GetDeviceInfoTracker()) {
+  if (pss) {
+    DCHECK(pss->GetDeviceInfoTracker());
     pss->GetDeviceInfoTracker()->RemoveObserver(this);
   }
 }
@@ -102,7 +104,7 @@ SignedInDevicesManager::SignedInDevicesManager()
 SignedInDevicesManager::SignedInDevicesManager(content::BrowserContext* context)
     : profile_(Profile::FromBrowserContext(context)),
       extension_registry_observer_(this) {
-  extensions::EventRouter* router = extensions::EventRouter::Get(profile_);
+  EventRouter* router = EventRouter::Get(profile_);
   if (router) {
     router->RegisterObserver(
         this, api::signed_in_devices::OnDeviceInfoChange::kEventName);
@@ -113,7 +115,13 @@ SignedInDevicesManager::SignedInDevicesManager(content::BrowserContext* context)
   extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
 }
 
-SignedInDevicesManager::~SignedInDevicesManager() {}
+SignedInDevicesManager::~SignedInDevicesManager() {
+  if (profile_) {
+    EventRouter* router = EventRouter::Get(profile_);
+    if (router)
+      router->UnregisterObserver(this);
+  }
+}
 
 void SignedInDevicesManager::OnListenerAdded(
     const EventListenerInfo& details) {

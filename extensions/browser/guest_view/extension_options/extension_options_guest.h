@@ -23,23 +23,19 @@ class ExtensionOptionsGuest
  public:
   static const char Type[];
   static extensions::GuestViewBase* Create(
-      content::BrowserContext* browser_context,
-      content::WebContents* owner_web_contents,
-      int guest_instance_id);
+      content::WebContents* owner_web_contents);
 
   // GuestViewBase implementation.
+  bool CanRunInDetachedState() const override;
   void CreateWebContents(const base::DictionaryValue& create_params,
                          const WebContentsCreatedCallback& callback) override;
-  void DidAttachToEmbedder() override;
-  void DidInitialize() override;
-  void DidStopLoading() override;
+  void DidInitialize(const base::DictionaryValue& create_params) override;
+  void GuestViewDidStopLoading() override;
   const char* GetAPINamespace() const override;
   int GetTaskPrefix() const override;
-  void GuestSizeChangedDueToAutoSize(const gfx::Size& old_size,
-                                     const gfx::Size& new_size) override;
-  bool IsAutoSizeSupported() const override;
-  void OnPreferredSizeChanged(const gfx::Size& pref_size) override;
   bool IsPreferredSizeModeEnabled() const override;
+  bool IsDragAndDropEnabled() const override;
+  void OnPreferredSizeChanged(const gfx::Size& pref_size) override;
 
   // ExtensionFunctionDispatcher::Delegate implementation.
   content::WebContents* GetAssociatedWebContents() const override;
@@ -67,9 +63,7 @@ class ExtensionOptionsGuest
   bool OnMessageReceived(const IPC::Message& message) override;
 
  private:
-  ExtensionOptionsGuest(content::BrowserContext* browser_context,
-                        content::WebContents* owner_web_contents,
-                        int guest_instance_id);
+  explicit ExtensionOptionsGuest(content::WebContents* owner_web_contents);
   ~ExtensionOptionsGuest() override;
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
 
@@ -78,7 +72,6 @@ class ExtensionOptionsGuest
   scoped_ptr<extensions::ExtensionOptionsGuestDelegate>
       extension_options_guest_delegate_;
   GURL options_page_;
-  bool has_navigated_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionOptionsGuest);
 };

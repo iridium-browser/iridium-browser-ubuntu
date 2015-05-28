@@ -11,10 +11,11 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 #include "components/sync_driver/data_type_controller.h"
 #include "components/sync_driver/data_type_encryption_handler.h"
 #include "components/sync_driver/data_type_manager_observer.h"
@@ -259,12 +260,17 @@ void DataTypeManagerImpl::Restart(syncer::ConfigureReason reason) {
 
   DCHECK(state_ == STOPPED || state_ == CONFIGURED || state_ == RETRYING);
 
+  const State old_state = state_;
+  state_ = DOWNLOAD_PENDING;
+
   // Starting from a "steady state" (stopped or configured) state
   // should send a start notification.
-  if (state_ == STOPPED || state_ == CONFIGURED)
+  // Note: NotifyStart() must be called with the updated (non-idle) state,
+  // otherwise logic listening for the configuration start might not be aware
+  // of the fact that the DTM is in a configuration state.
+  if (old_state == STOPPED || old_state == CONFIGURED)
     NotifyStart();
 
-  state_ = DOWNLOAD_PENDING;
   download_types_queue_ = PrioritizeTypes(enabled_types);
   association_types_queue_ = std::queue<AssociationTypesInfo>();
 
@@ -349,12 +355,23 @@ void DataTypeManagerImpl::DownloadReady(
     syncer::ModelTypeSet high_priority_types_before,
     syncer::ModelTypeSet first_sync_types,
     syncer::ModelTypeSet failed_configuration_types) {
+  // TODO(erikchen): Remove ScopedTracker below once https://crbug.com/458406
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "458406 DataTypeManagerImpl::DownloadReady"));
+
   DCHECK(state_ == DOWNLOAD_PENDING || state_ == CONFIGURING);
 
   // Persistence errors are reset after each backend configuration attempt
   // during which they would have been purged.
   data_type_status_table_.ResetPersistenceErrorsFrom(types_to_download);
 
+  // TODO(erikchen): Remove ScopedTracker below once https://crbug.com/458406
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "458406 DataTypeManagerImpl::DownloadReady::NeedsReconfigure"));
   // Ignore |failed_configuration_types| if we need to reconfigure
   // anyway.
   if (needs_reconfigure_) {
@@ -363,6 +380,11 @@ void DataTypeManagerImpl::DownloadReady(
     return;
   }
 
+  // TODO(erikchen): Remove ScopedTracker below once https://crbug.com/458406
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "458406 DataTypeManagerImpl::DownloadReady::UnrecoverableError"));
   if (!failed_configuration_types.Empty()) {
     if (!unrecoverable_error_method_.is_null())
       unrecoverable_error_method_.Run();
@@ -383,6 +405,11 @@ void DataTypeManagerImpl::DownloadReady(
 
   state_ = CONFIGURING;
 
+  // TODO(erikchen): Remove ScopedTracker below once https://crbug.com/458406
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "458406 DataTypeManagerImpl::DownloadReady::Associate"));
   // Pop and associate download-ready types.
   syncer::ModelTypeSet ready_types = types_to_download;
   CHECK(!download_types_queue_.empty());
@@ -401,6 +428,11 @@ void DataTypeManagerImpl::DownloadReady(
   if (association_types_queue_.size() == 1u)
     StartNextAssociation();
 
+  // TODO(erikchen): Remove ScopedTracker below once https://crbug.com/458406
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile5(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "458406 DataTypeManagerImpl::DownloadReady::ConfigureDataTypes"));
   // Download types of low priority while configuring types of high priority.
   if (!new_types_to_download.Empty()) {
     configurer_->ConfigureDataTypes(

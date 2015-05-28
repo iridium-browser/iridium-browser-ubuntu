@@ -15,8 +15,8 @@ import logging
 import smtplib
 import socket
 import sys
-import traceback
 
+from chromite.lib import cros_build_lib
 from chromite.lib import retry_util
 
 
@@ -70,7 +70,7 @@ def SendEmail(subject, recipients, smtp_server=None, message='',
     message: (optional) Message to put in the e-mail body.
     attachment: (optional) text to attach.
     extra_fields: (optional) A dictionary of additional message header fields
-                  to be added to the message. Custom fields names should begin
+                  to be added to the message. Custom field names should begin
                   with the prefix 'X-'.
   """
   # Ignore if the list of recipients is empty.
@@ -126,7 +126,7 @@ def SendEmailLog(subject, recipients, smtp_server=None, message='',
 
   if inc_trace:
     if sys.exc_info() != (None, None, None):
-      trace = traceback.format_exc()
+      trace = cros_build_lib.FormatDetailedTraceback()
       message += '\n\n' + trace
 
   attachment = None

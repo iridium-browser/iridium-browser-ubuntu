@@ -41,7 +41,7 @@ base::TimeTicks RenderingStatsInstrumentation::StartRecording() const {
   if (record_rendering_stats_) {
     if (base::TimeTicks::IsThreadNowSupported())
       return base::TimeTicks::ThreadNow();
-    return base::TimeTicks::HighResNow();
+    return base::TimeTicks::Now();
   }
   return base::TimeTicks();
 }
@@ -51,7 +51,7 @@ base::TimeDelta RenderingStatsInstrumentation::EndRecording(
   if (!start_time.is_null()) {
     if (base::TimeTicks::IsThreadNowSupported())
       return base::TimeTicks::ThreadNow() - start_time;
-    return base::TimeTicks::HighResNow() - start_time;
+    return base::TimeTicks::Now() - start_time;
   }
   return base::TimeDelta();
 }
@@ -79,6 +79,15 @@ void RenderingStatsInstrumentation::AddApproximatedVisibleContentArea(
 
   base::AutoLock scoped_lock(lock_);
   impl_thread_rendering_stats_.approximated_visible_content_area += area;
+}
+
+void RenderingStatsInstrumentation::AddCheckerboardedVisibleContentArea(
+    int64 area) {
+  if (!record_rendering_stats_)
+    return;
+
+  base::AutoLock scoped_lock(lock_);
+  impl_thread_rendering_stats_.checkerboarded_visible_content_area += area;
 }
 
 void RenderingStatsInstrumentation::AddDrawDuration(

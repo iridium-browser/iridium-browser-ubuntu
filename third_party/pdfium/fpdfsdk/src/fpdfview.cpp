@@ -10,7 +10,8 @@
 #include "../include/fsdk_rendercontext.h"
 #include "../include/fpdf_progressive.h"
 #include "../include/fpdf_ext.h"
-#include "../../third_party/numerics/safe_conversions_impl.h"
+#include "../../../core/src/fxcrt/fx_safe_types.h"
+#include "../../third_party/base/numerics/safe_conversions_impl.h"
 
 CPDF_CustomAccess::CPDF_CustomAccess(FPDF_FILEACCESS* pFileAccess)
 {
@@ -23,7 +24,7 @@ FX_BOOL CPDF_CustomAccess::ReadBlock(void* buffer, FX_FILESIZE offset, size_t si
     if (offset < 0) {
         return FALSE;
     }
-    FX_SAFE_FILESIZE newPos = base::checked_cast<FX_FILESIZE, size_t>(size);
+    FX_SAFE_FILESIZE newPos = pdfium::base::checked_cast<FX_FILESIZE, size_t>(size);
     newPos += offset;
     if (!newPos.IsValid() || newPos.ValueOrDie() > m_FileAccess.m_FileLen) {
         return FALSE;
@@ -209,7 +210,7 @@ public:
             if (offset < 0) {
                 return FALSE;
             }
-            FX_SAFE_FILESIZE newPos = base::checked_cast<FX_FILESIZE, size_t>(size);
+            FX_SAFE_FILESIZE newPos = pdfium::base::checked_cast<FX_FILESIZE, size_t>(size);
             newPos += offset;
             if (!newPos.IsValid() || newPos.ValueOrDie() > (FX_DWORD)m_size) {
                 return FALSE;
@@ -410,7 +411,8 @@ DLLEXPORT void STDCALL FPDF_RenderPage(HDC dc, FPDF_PAGE page, int start_x, int 
 #ifdef DEBUG_TRACE
 	{
 		char str[128];
-		sprintf(str, "Rendering DIB %d x %d", width, height);
+		memset(str, 0, sizeof(str));
+		FXSYS_snprintf(str, sizeof(str) - 1, "Rendering DIB %d x %d", width, height);
 		CPDF_ModuleMgr::Get()->ReportError(999, str);
 	}
 #endif
@@ -428,7 +430,8 @@ DLLEXPORT void STDCALL FPDF_RenderPage(HDC dc, FPDF_PAGE page, int start_x, int 
 	if (pContext->m_hBitmap == NULL) {
 #if defined(DEBUG) || defined(_DEBUG)
 		char str[128];
-		sprintf(str, "Error CreateDIBSection: %d x %d, error code = %d", width, height, GetLastError());
+		memset(str, 0, sizeof(str));
+		FXSYS_snprintf(str, sizeof(str) - 1, "Error CreateDIBSection: %d x %d, error code = %d", width, height, GetLastError());
 		CPDF_ModuleMgr::Get()->ReportError(FPDFERR_OUT_OF_MEMORY, str);
 #else
 		CPDF_ModuleMgr::Get()->ReportError(FPDFERR_OUT_OF_MEMORY, NULL);
@@ -464,7 +467,8 @@ DLLEXPORT void STDCALL FPDF_RenderPage(HDC dc, FPDF_PAGE page, int start_x, int 
 	if (hMemDC == NULL) {
 #if defined(DEBUG) || defined(_DEBUG)
 		char str[128];
-		sprintf(str, "Error CreateCompatibleDC. Error code = %d", GetLastError());
+		memset(str, 0, sizeof(str));
+		FXSYS_snprintf(str, sizeof(str) - 1, "Error CreateCompatibleDC. Error code = %d", GetLastError());
 		CPDF_ModuleMgr::Get()->ReportError(FPDFERR_OUT_OF_MEMORY, str);
 #else
 		CPDF_ModuleMgr::Get()->ReportError(FPDFERR_OUT_OF_MEMORY, NULL);
@@ -789,14 +793,80 @@ DLLEXPORT FPDF_DUPLEXTYPE STDCALL FPDF_VIEWERREF_GetDuplex(FPDF_DOCUMENT documen
     return DuplexUndefined;
 }
 
+DLLEXPORT FPDF_DWORD STDCALL FPDF_CountNamedDests(FPDF_DOCUMENT document)
+{
+    if (!document) return 0;
+    CPDF_Document* pDoc = (CPDF_Document*)document;
+
+    CPDF_Dictionary* pRoot = pDoc->GetRoot();
+    if (!pRoot) return 0;
+
+    CPDF_NameTree nameTree(pDoc, FX_BSTRC("Dests"));
+    int count = nameTree.GetCount();
+    CPDF_Dictionary* pDest = pRoot->GetDict(FX_BSTRC("Dests"));
+    if (pDest)
+        count += pDest->GetCount();
+    return count;
+}
+
 DLLEXPORT FPDF_DEST STDCALL FPDF_GetNamedDestByName(FPDF_DOCUMENT document,FPDF_BYTESTRING name)
 {
-	if (document == NULL)
+	if (!document)
 		return NULL;
-	if (name == NULL || name[0] == 0) 
+	if (!name || name[0] == 0) 
 		return NULL;
 
 	CPDF_Document* pDoc = (CPDF_Document*)document;
 	CPDF_NameTree name_tree(pDoc, FX_BSTRC("Dests"));
 	return name_tree.LookupNamedDest(pDoc, name);
+}
+
+DLLEXPORT FPDF_DEST STDCALL FPDF_GetNamedDest(FPDF_DOCUMENT document, int index, void* buffer, long& buflen)
+{
+    if (!buffer)
+        buflen = 0;
+    if (!document || index < 0) return NULL;
+    CPDF_Document* pDoc = (CPDF_Document*)document;
+
+    CPDF_Dictionary* pRoot = pDoc->GetRoot();
+    if (!pRoot) return NULL;
+
+    CPDF_Object* pDestObj = NULL;
+    CFX_ByteString bsName;
+    CPDF_NameTree nameTree(pDoc, FX_BSTRC("Dests"));
+    int count = nameTree.GetCount();
+    if (index >= count) {
+        CPDF_Dictionary* pDest = pRoot->GetDict(FX_BSTRC("Dests"));
+        if (!pDest) return NULL;
+        if (index >= count + pDest->GetCount()) return NULL;
+        index -= count;
+        FX_POSITION pos = pDest->GetStartPos();
+        int i = 0;
+        while (pos) {
+            pDestObj = pDest->GetNextElement(pos, bsName);
+            if (!pDestObj) continue;
+            if (i == index) break;
+            i++;
+        }
+    } else {
+        pDestObj = nameTree.LookupValue(index, bsName);
+    }
+    if (!pDestObj) return NULL;
+    if (pDestObj->GetType() == PDFOBJ_DICTIONARY) {
+        pDestObj = ((CPDF_Dictionary*)pDestObj)->GetArray(FX_BSTRC("D"));
+        if (!pDestObj) return NULL;
+    }
+    if (pDestObj->GetType() != PDFOBJ_ARRAY) return NULL;
+    CFX_WideString wsName = PDF_DecodeText(bsName);
+    CFX_ByteString utf16Name = wsName.UTF16LE_Encode();
+    unsigned int len = utf16Name.GetLength();
+    if (!buffer) {
+        buflen = len;
+    } else if (buflen >= len) {
+        memcpy(buffer, utf16Name.c_str(), len);
+        buflen = len;
+    } else {
+        buflen = -1;
+    }
+    return (FPDF_DEST)pDestObj;
 }

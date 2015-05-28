@@ -26,6 +26,7 @@
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/test/context_factories_for_test.h"
 #include "ui/compositor/test/layer_animator_test_controller.h"
+#include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
@@ -95,7 +96,7 @@ class TestKeyboardControllerProxy : public KeyboardControllerProxy {
   aura::Window* GetKeyboardWindow() override {
     if (!window_) {
       window_.reset(new aura::Window(&delegate_));
-      window_->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+      window_->Init(ui::LAYER_NOT_DRAWN);
       window_->set_owned_by_parent(false);
     }
     return window_.get();
@@ -269,7 +270,7 @@ TEST_F(KeyboardControllerTest, ClickDoesNotFocusKeyboard) {
   const gfx::Rect& root_bounds = root_window()->bounds();
   aura::test::EventCountDelegate delegate;
   scoped_ptr<aura::Window> window(new aura::Window(&delegate));
-  window->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+  window->Init(ui::LAYER_NOT_DRAWN);
   window->SetBounds(root_bounds);
   root_window()->AddChild(window.get());
   window->Show();
@@ -313,7 +314,7 @@ TEST_F(KeyboardControllerTest, EventHitTestingInContainer) {
   const gfx::Rect& root_bounds = root_window()->bounds();
   aura::test::EventCountDelegate delegate;
   scoped_ptr<aura::Window> window(new aura::Window(&delegate));
-  window->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+  window->Init(ui::LAYER_NOT_DRAWN);
   window->SetBounds(root_bounds);
   root_window()->AddChild(window.get());
   window->Show();
@@ -337,13 +338,13 @@ TEST_F(KeyboardControllerTest, EventHitTestingInContainer) {
   ui::EventTarget* root = root_window();
   ui::EventTargeter* targeter = root->GetEventTargeter();
   gfx::Point location = keyboard_window->bounds().CenterPoint();
-  ui::MouseEvent mouse1(ui::ET_MOUSE_MOVED, location, location, ui::EF_NONE,
-                        ui::EF_NONE);
+  ui::MouseEvent mouse1(ui::ET_MOUSE_MOVED, location, location,
+                        ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
   EXPECT_EQ(keyboard_window, targeter->FindTargetForEvent(root, &mouse1));
 
   location.set_y(keyboard_window->bounds().y() - 5);
-  ui::MouseEvent mouse2(ui::ET_MOUSE_MOVED, location, location, ui::EF_NONE,
-                        ui::EF_NONE);
+  ui::MouseEvent mouse2(ui::ET_MOUSE_MOVED, location, location,
+                        ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
   EXPECT_EQ(window.get(), targeter->FindTargetForEvent(root, &mouse2));
 }
 
@@ -351,7 +352,7 @@ TEST_F(KeyboardControllerTest, KeyboardWindowCreation) {
   const gfx::Rect& root_bounds = root_window()->bounds();
   aura::test::EventCountDelegate delegate;
   scoped_ptr<aura::Window> window(new aura::Window(&delegate));
-  window->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+  window->Init(ui::LAYER_NOT_DRAWN);
   window->SetBounds(root_bounds);
   root_window()->AddChild(window.get());
   window->Show();
@@ -369,8 +370,8 @@ TEST_F(KeyboardControllerTest, KeyboardWindowCreation) {
   ui::EventTargeter* targeter = root->GetEventTargeter();
   gfx::Point location(root_window()->bounds().width() / 2,
                       root_window()->bounds().height() - 10);
-  ui::MouseEvent mouse(
-      ui::ET_MOUSE_MOVED, location, location, ui::EF_NONE, ui::EF_NONE);
+  ui::MouseEvent mouse(ui::ET_MOUSE_MOVED, location, location,
+                       ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
   EXPECT_EQ(window.get(), targeter->FindTargetForEvent(root, &mouse));
   EXPECT_FALSE(proxy()->HasKeyboardWindow());
 

@@ -15,6 +15,68 @@ namespace blink {
 
 namespace {
 
+class BranchCanceller : public BodyStreamBuffer::Canceller {
+public:
+    static void create(BodyStreamBuffer* buffer, BranchCanceller** canceller1, BranchCanceller** canceller2)
+    {
+        auto context = new Context(buffer);
+        *canceller1 = new BranchCanceller(context, First);
+        *canceller2 = new BranchCanceller(context, Second);
+    }
+
+    void setBuffer(BodyStreamBuffer* buffer) { m_buffer = buffer; }
+
+    void cancel() override
+    {
+        if (m_tag == First) {
+            m_context->isFirstCancelled = true;
+        } else {
+            ASSERT(m_tag == Second);
+            m_context->isSecondCancelled = true;
+        }
+        ASSERT(m_buffer);
+        ASSERT(!m_buffer->isClosed());
+        ASSERT(!m_buffer->hasError());
+        m_buffer->close();
+        if (m_context->isFirstCancelled && m_context->isSecondCancelled)
+            m_context->buffer->cancel();
+    }
+
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        visitor->trace(m_context);
+        visitor->trace(m_buffer);
+        BodyStreamBuffer::Canceller::trace(visitor);
+    }
+
+private:
+    enum Tag {
+        First,
+        Second,
+    };
+    class Context : public GarbageCollected<Context> {
+    public:
+        explicit Context(BodyStreamBuffer* buffer)
+            : buffer(buffer)
+            , isFirstCancelled(false)
+            , isSecondCancelled(false) { }
+
+        DEFINE_INLINE_VIRTUAL_TRACE()
+        {
+            visitor->trace(buffer);
+        }
+
+        Member<BodyStreamBuffer> buffer;
+        bool isFirstCancelled;
+        bool isSecondCancelled;
+    };
+
+    BranchCanceller(Context* context, Tag tag) : m_context(context), m_tag(tag) { }
+    Member<Context> m_context;
+    Member<BodyStreamBuffer> m_buffer;
+    Tag m_tag;
+};
+
 WebServiceWorkerResponseType fetchTypeToWebType(FetchResponseData::Type fetchType)
 {
     WebServiceWorkerResponseType webType = WebServiceWorkerResponseTypeDefault;
@@ -37,63 +99,6 @@ WebServiceWorkerResponseType fetchTypeToWebType(FetchResponseData::Type fetchTyp
     }
     return webType;
 }
-
-class StreamTeePump : public BodyStreamBuffer::Observer {
-public:
-    StreamTeePump(BodyStreamBuffer* inBuffer, BodyStreamBuffer* outBuffer1, BodyStreamBuffer* outBuffer2)
-        : m_inBuffer(inBuffer)
-        , m_outBuffer1(outBuffer1)
-        , m_outBuffer2(outBuffer2)
-    {
-    }
-    void onWrite() override
-    {
-        while (RefPtr<DOMArrayBuffer> buf = m_inBuffer->read()) {
-            m_outBuffer1->write(buf);
-            m_outBuffer2->write(buf);
-        }
-    }
-    void onClose() override
-    {
-        m_outBuffer1->close();
-        m_outBuffer2->close();
-        cleanup();
-    }
-    void onError() override
-    {
-        m_outBuffer1->error(m_inBuffer->exception());
-        m_outBuffer2->error(m_inBuffer->exception());
-        cleanup();
-    }
-    void trace(Visitor* visitor) override
-    {
-        BodyStreamBuffer::Observer::trace(visitor);
-        visitor->trace(m_inBuffer);
-        visitor->trace(m_outBuffer1);
-        visitor->trace(m_outBuffer2);
-    }
-    void start()
-    {
-        m_inBuffer->registerObserver(this);
-        onWrite();
-        if (m_inBuffer->hasError())
-            return onError();
-        if (m_inBuffer->isClosed())
-            return onClose();
-    }
-
-private:
-    void cleanup()
-    {
-        m_inBuffer->unregisterObserver();
-        m_inBuffer.clear();
-        m_outBuffer1.clear();
-        m_outBuffer2.clear();
-    }
-    Member<BodyStreamBuffer> m_inBuffer;
-    Member<BodyStreamBuffer> m_outBuffer1;
-    Member<BodyStreamBuffer> m_outBuffer2;
-};
 
 } // namespace
 
@@ -134,7 +139,7 @@ FetchResponseData* FetchResponseData::createBasicFilteredResponse()
     }
     response->m_blobDataHandle = m_blobDataHandle;
     response->m_buffer = m_buffer;
-    response->m_contentTypeForBuffer = m_contentTypeForBuffer;
+    response->m_mimeType = m_mimeType;
     response->m_internalResponse = this;
     return response;
 }
@@ -162,7 +167,7 @@ FetchResponseData* FetchResponseData::createCORSFilteredResponse()
     }
     response->m_blobDataHandle = m_blobDataHandle;
     response->m_buffer = m_buffer;
-    response->m_contentTypeForBuffer = m_contentTypeForBuffer;
+    response->m_mimeType = m_mimeType;
     response->m_internalResponse = this;
     return response;
 }
@@ -177,9 +182,9 @@ FetchResponseData* FetchResponseData::createOpaqueFilteredResponse()
     return response;
 }
 
-String FetchResponseData::contentTypeForBuffer() const
+String FetchResponseData::mimeType() const
 {
-    return m_contentTypeForBuffer;
+    return m_mimeType;
 }
 
 PassRefPtr<BlobDataHandle> FetchResponseData::internalBlobDataHandle() const
@@ -198,12 +203,12 @@ BodyStreamBuffer* FetchResponseData::internalBuffer() const
     return m_buffer;
 }
 
-String FetchResponseData::internalContentTypeForBuffer() const
+String FetchResponseData::internalMIMEType() const
 {
     if (m_internalResponse) {
-        return m_internalResponse->contentTypeForBuffer();
+        return m_internalResponse->mimeType();
     }
-    return m_contentTypeForBuffer;
+    return m_mimeType;
 }
 
 FetchResponseData* FetchResponseData::clone()
@@ -217,25 +222,48 @@ FetchResponseData* FetchResponseData::clone()
     newResponse->m_url = m_url;
     newResponse->m_status = m_status;
     newResponse->m_statusMessage = m_statusMessage;
-    newResponse->m_headerList = m_headerList->createCopy();
+    newResponse->m_headerList = m_headerList->clone();
     newResponse->m_blobDataHandle = m_blobDataHandle;
-    newResponse->m_contentTypeForBuffer = m_contentTypeForBuffer;
-    if (!m_internalResponse) {
+    newResponse->m_mimeType = m_mimeType;
+
+    switch (m_type) {
+    case BasicType:
+    case CORSType:
+        ASSERT(m_internalResponse);
+        ASSERT(m_blobDataHandle == m_internalResponse->m_blobDataHandle);
+        ASSERT(m_buffer == m_internalResponse->m_buffer);
+        ASSERT(m_internalResponse->m_type == DefaultType);
+        newResponse->m_internalResponse = m_internalResponse->clone();
+        m_buffer = m_internalResponse->m_buffer;
+        newResponse->m_buffer = newResponse->m_internalResponse->m_buffer;
+        break;
+    case DefaultType: {
+        ASSERT(!m_internalResponse);
         if (!m_buffer)
             return newResponse;
         BodyStreamBuffer* original = m_buffer;
-        m_buffer = new BodyStreamBuffer();
-        newResponse->m_buffer = new BodyStreamBuffer();
-        StreamTeePump* teePump = new StreamTeePump(original, m_buffer, newResponse->m_buffer);
-        teePump->start();
-        return newResponse;
+        BranchCanceller* canceller1 = nullptr;
+        BranchCanceller* canceller2 = nullptr;
+        BranchCanceller::create(original, &canceller1, &canceller2);
+        m_buffer = new BodyStreamBuffer(canceller1);
+        newResponse->m_buffer = new BodyStreamBuffer(canceller2);
+        canceller1->setBuffer(m_buffer);
+        canceller2->setBuffer(newResponse->m_buffer);
+        original->startTee(m_buffer, newResponse->m_buffer);
+        break;
     }
-
-    ASSERT(!m_buffer || m_buffer == m_internalResponse->m_buffer);
-    newResponse->m_internalResponse = m_internalResponse->clone();
-    if (m_buffer) {
-        m_buffer = m_internalResponse->m_buffer;
-        newResponse->m_buffer = newResponse->m_internalResponse->m_buffer;
+    case ErrorType:
+        ASSERT(!m_internalResponse);
+        ASSERT(!m_blobDataHandle);
+        ASSERT(!m_buffer);
+        break;
+    case OpaqueType:
+        ASSERT(m_internalResponse);
+        ASSERT(!m_blobDataHandle);
+        ASSERT(!m_buffer);
+        ASSERT(m_internalResponse->m_type == DefaultType);
+        newResponse->m_internalResponse = m_internalResponse->clone();
+        break;
     }
     return newResponse;
 }
@@ -273,7 +301,22 @@ void FetchResponseData::setBlobDataHandle(PassRefPtr<BlobDataHandle> blobDataHan
     m_blobDataHandle = blobDataHandle;
 }
 
-void FetchResponseData::trace(Visitor* visitor)
+void FetchResponseData::replaceBodyStreamBuffer(BodyStreamBuffer* buffer)
+{
+    if (m_type == BasicType || m_type == CORSType) {
+        ASSERT(m_internalResponse);
+        m_internalResponse->m_blobDataHandle = nullptr;
+        m_internalResponse->m_buffer = buffer;
+        m_blobDataHandle = nullptr;
+        m_buffer = buffer;
+    } else if (m_type == DefaultType) {
+        ASSERT(!m_internalResponse);
+        m_blobDataHandle = nullptr;
+        m_buffer = buffer;
+    }
+}
+
+DEFINE_TRACE(FetchResponseData)
 {
     visitor->trace(m_headerList);
     visitor->trace(m_internalResponse);

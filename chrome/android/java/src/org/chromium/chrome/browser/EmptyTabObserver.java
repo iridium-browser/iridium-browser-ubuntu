@@ -6,6 +6,10 @@ package org.chromium.chrome.browser;
 
 import android.view.ContextMenu;
 
+import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.WebContents;
+
 /**
  * An implementation of the {@link TabObserver} which has empty implementations of all methods.
  */
@@ -27,7 +31,13 @@ public class EmptyTabObserver implements TabObserver {
     public void onContentChanged(Tab tab) { }
 
     @Override
-    public void onLoadUrl(Tab tab, String url, int loadType) { }
+    public void onOverlayContentViewCoreAdded(Tab tab, ContentViewCore content) { }
+
+    @Override
+    public void onOverlayContentViewCoreRemoved(Tab tab, ContentViewCore content) { }
+
+    @Override
+    public void onLoadUrl(Tab tab, LoadUrlParams params, int loadType) { }
 
     @Override
     public void onPageLoadStarted(Tab tab) { }
@@ -113,6 +123,6 @@ public class EmptyTabObserver implements TabObserver {
     public void onBackgroundColorChanged(Tab tab, int color) { }
 
     @Override
-    public void webContentsCreated(Tab tab, long sourceWebContents, long openerRenderFrameId,
-            String frameName, String targetUrl, long newWebContents) { }
+    public void webContentsCreated(Tab tab, WebContents sourceWebContents, long openerRenderFrameId,
+            String frameName, String targetUrl, WebContents newWebContents) { }
 }

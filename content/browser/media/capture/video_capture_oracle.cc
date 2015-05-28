@@ -6,9 +6,9 @@
 
 #include <algorithm>
 
-#include "base/debug/trace_event.h"
 #include "base/format_macros.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 
 namespace content {
 
@@ -64,12 +64,10 @@ double FractionFromExpectedFrameRate(base::TimeDelta delta, int frame_rate) {
 
 }  // anonymous namespace
 
-VideoCaptureOracle::VideoCaptureOracle(base::TimeDelta min_capture_period,
-                                       bool events_are_reliable)
+VideoCaptureOracle::VideoCaptureOracle(base::TimeDelta min_capture_period)
     : frame_number_(0),
       last_delivered_frame_number_(-1),
       smoothing_sampler_(min_capture_period,
-                         events_are_reliable,
                          kNumRedundantCapturesOfStaticContent),
       content_sampler_(min_capture_period) {
 }
@@ -92,7 +90,6 @@ bool VideoCaptureOracle::ObserveEventAndDecideCapture(
   bool should_sample;
   switch (event) {
     case kCompositorUpdate:
-    case kSoftwarePaint:
       smoothing_sampler_.ConsiderPresentationEvent(event_time);
       content_sampler_.ConsiderPresentationEvent(damage_rect, event_time);
       if (content_sampler_.HasProposal()) {
@@ -122,7 +119,9 @@ bool VideoCaptureOracle::CompleteCapture(int frame_number,
                                          base::TimeTicks* frame_timestamp) {
   // Drop frame if previous frame number is higher.
   if (last_delivered_frame_number_ > frame_number) {
-    LOG(WARNING) << "Out of order frame delivery detected.  Dropping frame.";
+    LOG(WARNING) << "Out of order frame delivery detected (have #"
+                 << frame_number << ", last was #"
+                 << last_delivered_frame_number_ << ").  Dropping frame.";
     return false;
   }
   last_delivered_frame_number_ = frame_number;
@@ -174,10 +173,8 @@ void VideoCaptureOracle::SetFrameTimestamp(int frame_number,
 }
 
 SmoothEventSampler::SmoothEventSampler(base::TimeDelta min_capture_period,
-                                       bool events_are_reliable,
                                        int redundant_capture_goal)
-    :  events_are_reliable_(events_are_reliable),
-       min_capture_period_(min_capture_period),
+    :  min_capture_period_(min_capture_period),
        redundant_capture_goal_(redundant_capture_goal),
        token_bucket_capacity_(min_capture_period + min_capture_period / 2),
        overdue_sample_count_(0),
@@ -200,7 +197,7 @@ void SmoothEventSampler::ConsiderPresentationEvent(base::TimeTicks event_time) {
       if (token_bucket_ > token_bucket_capacity_)
         token_bucket_ = token_bucket_capacity_;
     }
-    TRACE_COUNTER1("mirroring",
+    TRACE_COUNTER1("gpu.capture",
                    "MirroringTokenBucketUsec",
                    std::max<int64>(0, token_bucket_.InMicroseconds()));
   }
@@ -215,7 +212,7 @@ void SmoothEventSampler::RecordSample() {
   token_bucket_ -= min_capture_period_;
   if (token_bucket_ < base::TimeDelta())
     token_bucket_ = base::TimeDelta();
-  TRACE_COUNTER1("mirroring",
+  TRACE_COUNTER1("gpu.capture",
                  "MirroringTokenBucketUsec",
                  std::max<int64>(0, token_bucket_.InMicroseconds()));
 
@@ -231,14 +228,8 @@ bool SmoothEventSampler::IsOverdueForSamplingAt(base::TimeTicks event_time)
     const {
   DCHECK(!event_time.is_null());
 
-  // If we don't get events on compositor updates on this platform, then we
-  // don't reliably know whether we're dirty.
-  if (events_are_reliable_) {
-    if (!HasUnrecordedEvent() &&
-        overdue_sample_count_ >= redundant_capture_goal_) {
-      return false;  // Not dirty.
-    }
-  }
+  if (!HasUnrecordedEvent() && overdue_sample_count_ >= redundant_capture_goal_)
+    return false;  // Not dirty.
 
   if (last_sample_.is_null())
     return true;

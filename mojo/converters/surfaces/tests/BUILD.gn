@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//testing/test.gni")
+
 # GYP version: mojo/mojo_converters.gypi:mojo_surfaces_lib_unittests
 test("mojo_surfaces_lib_unittests") {
   deps = [
@@ -12,12 +14,13 @@ test("mojo_surfaces_lib_unittests") {
     "//gpu",
     "//mojo/converters/geometry",
     "//mojo/converters/surfaces",
-    "//mojo/edk/test:run_all_unittests",
+    "//mojo/converters/transform",
     "//mojo/environment:chromium",
-    "//mojo/services/geometry/public/interfaces",
-    "//mojo/services/surfaces/public/interfaces",
     "//skia",
     "//testing/gtest",
+    "//third_party/mojo/src/mojo/edk/test:run_all_unittests",
+    "//third_party/mojo_services/src/geometry/public/interfaces",
+    "//third_party/mojo_services/src/surfaces/public/interfaces",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/gfx:test_support",

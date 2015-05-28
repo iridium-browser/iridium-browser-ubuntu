@@ -329,7 +329,6 @@ SetupPnaclTranslatorFastX8664Opt() {
   SUFFIX=pnacl_translator_fast.opt.x8664
 }
 
-
 #@
 #@ SetupPnaclTranslator1ThreadX8664Opt
 #@    use pnacl x8664 translator (with lto). Compile w/ 1 thread.
@@ -345,7 +344,6 @@ SetupPnaclTranslatorFast1ThreadX8664Opt() {
   SetupPnaclX8664Common
   SUFFIX=pnacl_translator_fast_1thread.opt.x8664
 }
-
 
 SetupPnaclX8632Common() {
   SetupSelLdr x86-32
@@ -367,6 +365,13 @@ SetupPnaclX8632Opt() {
   SUFFIX=pnacl.opt.x8632
 }
 
+#@
+#@ SetupPnaclX8632OptSz
+#@    use pnacl x86-32 compiler (with lto) plus Subzero
+SetupPnaclX8632OptSz() {
+  SetupPnaclX8632Common
+  SUFFIX=pnacl.opt.sz.x8632
+}
 
 #@
 #@ SetupPnaclTranslatorX8632
@@ -393,6 +398,14 @@ SetupPnaclTranslatorFastX8632Opt() {
 }
 
 #@
+#@ SetupPnaclTranslatorFastX8632OptSz
+#@    use pnacl x8632 Subzero translator (with lto)
+SetupPnaclTranslatorFastX8632OptSz() {
+  SetupPnaclX8632Common
+  SUFFIX=pnacl_translator_fast.opt.sz.x8632
+}
+
+#@
 #@ SetupPnaclTranslator1ThreadX8632Opt
 #@    use pnacl x8632 translator (with lto). Compile w/ 1 thread.
 SetupPnaclTranslator1ThreadX8632Opt() {
@@ -408,6 +421,13 @@ SetupPnaclTranslatorFast1ThreadX8632Opt() {
   SUFFIX=pnacl_translator_fast_1thread.opt.x8632
 }
 
+#@
+#@ SetupPnaclTranslatorFast1ThreadX8632OptSz
+#@    use pnacl x8632 Subzero translator (with lto). Compile w/ 1 thread.
+SetupPnaclTranslatorFast1ThreadX8632OptSz() {
+  SetupPnaclX8632Common
+  SUFFIX=pnacl_translator_fast_1thread.opt.sz.x8632
+}
 
 #@
 #@ SetupGccArm
@@ -424,7 +444,6 @@ SetupGccArmOpt() {
   PREFIX="${QEMU_TOOL}"
   SUFFIX=gcc.opt.arm
 }
-
 
 SetupPnaclArmCommon() {
   SetupSelLdr arm "${QEMU_TOOL}" "-Q"
@@ -469,8 +488,6 @@ SetupPnaclTranslatorFastArmOpt() {
   SetupPnaclArmCommon
   SUFFIX=pnacl_translator_fast.opt.arm
 }
-
-
 
 SetupPnaclArmCommonHW() {
   SetupSelLdr arm

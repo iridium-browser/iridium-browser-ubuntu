@@ -65,7 +65,7 @@ public:
     const HTTPHeaderMap& headers() const { return m_headers; }
     bool includeCredentials() const { return m_includeCredentials; }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     XHRReplayData(ExecutionContext*, const AtomicString& method, const KURL&, bool async, PassRefPtr<FormData>, bool includeCredentials);
@@ -79,10 +79,10 @@ private:
 };
 
 class NetworkResourcesData {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(NetworkResourcesData);
 public:
     class ResourceData {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_FAST_ALLOCATED(ResourceData);
         friend class NetworkResourcesData;
     public:
         ResourceData(const String& requestId, const String& loaderId);

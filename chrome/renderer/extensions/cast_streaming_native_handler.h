@@ -10,7 +10,6 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "extensions/renderer/object_backed_native_handler.h"
-#include "extensions/renderer/scoped_persistent.h"
 #include "v8/include/v8.h"
 
 class CastRtpStream;
@@ -19,6 +18,23 @@ class CastUdpTransport;
 namespace base {
 class BinaryValue;
 class DictionaryValue;
+}
+
+namespace blink {
+class WebMediaStream;
+}
+
+namespace net {
+class IPEndPoint;
+}
+
+namespace media {
+class AudioCapturerSource;
+class AudioParameters;
+class VideoCapturerSource;
+namespace cast {
+struct FrameReceiverConfig;
+}
 }
 
 namespace extensions {
@@ -52,6 +68,8 @@ class CastStreamingNativeHandler : public ObjectBackedNativeHandler {
       const v8::FunctionCallbackInfo<v8::Value>& args);
   void StopCastUdpTransport(
       const v8::FunctionCallbackInfo<v8::Value>& args);
+  void StartCastRtpReceiver(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
 
   void ToggleLogging(const v8::FunctionCallbackInfo<v8::Value>& args);
   void GetRawEvents(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -67,6 +85,20 @@ class CastStreamingNativeHandler : public ObjectBackedNativeHandler {
   void CallStopCallback(int stream_id);
   void CallErrorCallback(int stream_id, const std::string& message);
 
+  // Callback called after a cast receiver has been started. Adds the
+  // output audio/video streams to the MediaStream specified by |url|.
+  void AddTracksToMediaStream(
+      const std::string& url,
+      const media::AudioParameters& params,
+      scoped_refptr<media::AudioCapturerSource> audio,
+      scoped_ptr<media::VideoCapturerSource> video);
+
+  // |function| is a javascript function that will take |error_message| as
+  // an argument. Called when something goes wrong in a cast receiver.
+  void CallReceiverErrorCallback(
+      v8::CopyablePersistentTraits<v8::Function>::CopyablePersistent function,
+      const std::string& error_message);
+
   void CallGetRawEventsCallback(int transport_id,
                                 scoped_ptr<base::BinaryValue> raw_events);
   void CallGetStatsCallback(int transport_id,
@@ -77,6 +109,19 @@ class CastStreamingNativeHandler : public ObjectBackedNativeHandler {
   CastRtpStream* GetRtpStreamOrThrow(int stream_id) const;
   CastUdpTransport* GetUdpTransportOrThrow(int transport_id) const;
 
+  // Fills out a media::cast::FrameReceiverConfig from the v8
+  // equivialent. (cast.streaming.receiverSession.RtpReceiverParams)
+  // Returns true if everything was ok, raises a v8 exception and
+  // returns false if anything went wrong.
+  bool FrameReceiverConfigFromArg(
+      v8::Isolate* isolate,
+      const v8::Handle<v8::Value>& arg,
+      media::cast::FrameReceiverConfig* config);
+
+  bool IPEndPointFromArg(v8::Isolate* isolate,
+                         const v8::Handle<v8::Value>& arg,
+                         net::IPEndPoint* ip_endpoint);
+
   int last_transport_id_;
 
   typedef std::map<int, linked_ptr<CastRtpStream> > RtpStreamMap;
@@ -85,10 +130,9 @@ class CastStreamingNativeHandler : public ObjectBackedNativeHandler {
   typedef std::map<int, linked_ptr<CastUdpTransport> > UdpTransportMap;
   UdpTransportMap udp_transport_map_;
 
-  extensions::ScopedPersistent<v8::Function> create_callback_;
+  v8::Global<v8::Function> create_callback_;
 
-  typedef std::map<int,
-                   linked_ptr<extensions::ScopedPersistent<v8::Function> > >
+  typedef std::map<int, linked_ptr<v8::Global<v8::Function>>>
       RtpStreamCallbackMap;
   RtpStreamCallbackMap get_raw_events_callbacks_;
   RtpStreamCallbackMap get_stats_callbacks_;

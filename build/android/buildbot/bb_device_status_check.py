@@ -336,6 +336,17 @@ def main():
     types, builds, batteries, reports, errors, fail_step_lst, json_data = (
         zip(*[DeviceInfo(dev, options) for dev in devices]))
 
+  # Write device info to file for buildbot info display.
+  if os.path.exists('/home/chrome-bot'):
+    with open('/home/chrome-bot/.adb_device_info', 'w') as f:
+      for device in json_data:
+        try:
+          f.write('%s %s %s %.1fC %s%%\n' % (device['serial'], device['type'],
+              device['build'], float(device['battery']['temperature']) / 10,
+              device['battery']['level']))
+        except Exception:
+          pass
+
   err_msg = CheckForMissingDevices(options, devices) or []
 
   unique_types = list(set(types))

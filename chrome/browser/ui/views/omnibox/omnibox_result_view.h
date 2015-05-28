@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
+#include "chrome/browser/bitmap_fetcher/bitmap_fetcher_service.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/animation/animation_delegate.h"
@@ -46,6 +47,10 @@ class OmniboxResultView : public views::View,
     NUM_KINDS
   };
 
+  // The minimum distance between the top and bottom of the text and the
+  // top or bottom of the row.
+  static const int kMinimumTextVerticalPadding = 3;
+
   OmniboxResultView(OmniboxPopupContentsView* model,
                     int model_index,
                     LocationBarView* location_bar_view,
@@ -74,6 +79,9 @@ class OmniboxResultView : public views::View,
 
   // Returns the display width required for the match contents.
   int GetMatchContentsWidth() const;
+
+  // Stores the image in a local data member and schedules a repaint.
+  void SetAnswerImage(const gfx::ImageSkia& image);
 
  protected:
   // Paints the given |match| using the RenderText instances |contents| and
@@ -113,11 +121,11 @@ class OmniboxResultView : public views::View,
 
   void set_edge_item_padding(int value) { edge_item_padding_ = value; }
   void set_item_padding(int value) { item_padding_ = value; }
-  void set_minimum_text_vertical_padding(int value) {
-    minimum_text_vertical_padding_ = value;
-  }
 
  private:
+  // views::View:
+  const char* GetClassName() const override;
+
   gfx::ImageSkia GetIcon() const;
   const gfx::ImageSkia* GetKeywordIcon() const;
 
@@ -148,18 +156,28 @@ class OmniboxResultView : public views::View,
                        bool is_ui_rtl,
                        bool is_match_contents_rtl) const;
 
+  int GetAnswerLineHeight() const;
+  int GetContentLineHeight() const;
+
+  // Adds |text| to |description_rendertext_|.  |text_type| is an index into the
+  // kTextStyles constant defined in the .cc file and is used to style the text,
+  // including setting the font size, color, and baseline style.  See the
+  // TextStyle struct in the .cc file for more.
+  void AppendAnswerText(const base::string16& text, int text_type);
+
   static int default_icon_size_;
 
   // Default values cached here, may be overridden using the setters above.
   int edge_item_padding_;
   int item_padding_;
-  int minimum_text_vertical_padding_;
 
   // This row's model and model index.
   OmniboxPopupContentsView* model_;
   size_t model_index_;
 
   LocationBarView* location_bar_view_;
+  // Note: image_service_ may be null in some unit tests.
+  BitmapFetcherService* image_service_;
 
   const gfx::FontList font_list_;
   int font_height_;
@@ -178,6 +196,11 @@ class OmniboxResultView : public views::View,
 
   scoped_ptr<gfx::SlideAnimation> animation_;
 
+  // If the answer has an icon, these control the fetching and updating
+  // of the icon.
+  BitmapFetcherService::RequestId request_id_;
+  gfx::ImageSkia answer_image_;
+
   // We preserve these RenderTexts so that we won't recreate them on every call
   // to GetMatchContentsWidth() or OnPaint().
   mutable scoped_ptr<gfx::RenderText> contents_rendertext_;
@@ -187,6 +210,8 @@ class OmniboxResultView : public views::View,
   mutable scoped_ptr<gfx::RenderText> keyword_description_rendertext_;
 
   mutable int separator_width_;
+
+  base::WeakPtrFactory<OmniboxResultView> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxResultView);
 };

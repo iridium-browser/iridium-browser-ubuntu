@@ -12,6 +12,7 @@
 #include "base/basictypes.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
+#include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -57,59 +58,120 @@ enum VolumeType {
   NUM_VOLUME_TYPE,
 };
 
-struct VolumeInfo {
-  VolumeInfo();
-  ~VolumeInfo();
+// Says how was the mount performed, whether due to user interaction, or
+// automatic. User interaction includes both hardware (pluggins a USB stick)
+// or software (mounting a ZIP archive) interaction.
+enum MountContext {
+  MOUNT_CONTEXT_USER,
+  MOUNT_CONTEXT_AUTO,
+  MOUNT_CONTEXT_UNKNOWN
+};
+
+// Represents a volume (mount point) in the volume manager. Validity of the data
+// is guaranteed by the weak pointer. Simply saying, the weak pointer should be
+// valid as long as the volume is mounted.
+class Volume : public base::SupportsWeakPtr<Volume> {
+ public:
+  ~Volume();
+
+  // Factory static methods for different volume types.
+  static Volume* CreateForDrive(Profile* profile);
+  static Volume* CreateForDownloads(const base::FilePath& downloads_path);
+  static Volume* CreateForRemovable(
+      const chromeos::disks::DiskMountManager::MountPointInfo& mount_point,
+      const chromeos::disks::DiskMountManager::Disk* disk);
+  static Volume* CreateForProvidedFileSystem(
+      const chromeos::file_system_provider::ProvidedFileSystemInfo&
+          file_system_info,
+      MountContext mount_context);
+  static Volume* CreateForMTP(const base::FilePath& mount_path,
+                              const std::string& label,
+                              bool read_only);
+  static Volume* CreateForTesting(const base::FilePath& path,
+                                  VolumeType volume_type,
+                                  chromeos::DeviceType device_type,
+                                  bool read_only);
+  static Volume* CreateForTesting(const base::FilePath& device_path,
+                                  const base::FilePath& mount_path);
+
+  // Getters for all members. See below for details.
+  const std::string& volume_id() const { return volume_id_; }
+  const std::string& file_system_id() const { return file_system_id_; }
+  const std::string& extension_id() const { return extension_id_; }
+  VolumeType type() const { return type_; }
+  chromeos::DeviceType device_type() const { return device_type_; }
+  const base::FilePath& source_path() const { return source_path_; }
+  const base::FilePath& mount_path() const { return mount_path_; }
+  chromeos::disks::MountCondition mount_condition() const {
+    return mount_condition_;
+  }
+  MountContext mount_context() const { return mount_context_; }
+  const base::FilePath& system_path_prefix() const {
+    return system_path_prefix_;
+  }
+  const std::string& volume_label() const { return volume_label_; }
+  bool is_parent() const { return is_parent_; }
+  bool is_read_only() const { return is_read_only_; }
+  bool has_media() const { return has_media_; }
+
+ private:
+  Volume();
 
   // The ID of the volume.
-  std::string volume_id;
+  std::string volume_id_;
 
   // The ID for provided file systems. If other type, then empty string. Unique
   // per providing extension.
-  std::string file_system_id;
+  std::string file_system_id_;
 
   // The ID of an extension providing the file system. If other type, then equal
   // to an empty string.
-  std::string extension_id;
+  std::string extension_id_;
 
   // The type of mounted volume.
-  VolumeType type;
+  VolumeType type_;
 
   // The type of device. (e.g. USB, SD card, DVD etc.)
-  chromeos::DeviceType device_type;
+  chromeos::DeviceType device_type_;
 
   // The source path of the volume.
   // E.g.:
   // - /home/chronos/user/Downloads/zipfile_path.zip
-  base::FilePath source_path;
+  base::FilePath source_path_;
 
   // The mount path of the volume.
   // E.g.:
   // - /home/chronos/user/Downloads
   // - /media/removable/usb1
   // - /media/archive/zip1
-  base::FilePath mount_path;
+  base::FilePath mount_path_;
 
   // The mounting condition. See the enum for the details.
-  chromeos::disks::MountCondition mount_condition;
+  chromeos::disks::MountCondition mount_condition_;
+
+  // The context of the mount. Whether mounting was performed due to a user
+  // interaction or not.
+  MountContext mount_context_;
 
   // Path of the system device this device's block is a part of.
   // (e.g. /sys/devices/pci0000:00/.../8:0:0:0/)
-  base::FilePath system_path_prefix;
+  base::FilePath system_path_prefix_;
 
   // Label for the volume if the volume is either removable or a provided
   // file system. In case of removables, if disk is a parent, then its label,
   // else parents label (e.g. "TransMemory").
-  std::string volume_label;
+  std::string volume_label_;
 
   // Is the device is a parent device (i.e. sdb rather than sdb1).
-  bool is_parent;
+  bool is_parent_;
 
   // True if the volume is read only.
-  bool is_read_only;
+  bool is_read_only_;
 
   // True if the volume contains media.
-  bool has_media;
+  bool has_media_;
+
+  DISALLOW_COPY_AND_ASSIGN(Volume);
 };
 
 // Manages "Volume"s for file manager. Here are "Volume"s.
@@ -130,7 +192,7 @@ class VolumeManager : public KeyedService,
       chromeos::PowerManagerClient* power_manager_client,
       chromeos::disks::DiskMountManager* disk_mount_manager,
       chromeos::file_system_provider::Service* file_system_provider_service);
-  virtual ~VolumeManager();
+  ~VolumeManager() override;
 
   // Returns the instance corresponding to the |context|.
   static VolumeManager* Get(content::BrowserContext* context);
@@ -139,7 +201,7 @@ class VolumeManager : public KeyedService,
   void Initialize();
 
   // Disposes this instance.
-  virtual void Shutdown() override;
+  void Shutdown() override;
 
   // Adds an observer.
   void AddObserver(VolumeManagerObserver* observer);
@@ -147,13 +209,14 @@ class VolumeManager : public KeyedService,
   // Removes the observer.
   void RemoveObserver(VolumeManagerObserver* observer);
 
-  // Returns the information about all volumes currently mounted.
-  std::vector<VolumeInfo> GetVolumeInfoList() const;
+  // Returns the information about all volumes currently mounted. The returned
+  // weak pointers are valid as long as the volumes are mounted.
+  std::vector<base::WeakPtr<Volume>> GetVolumeList();
 
-  // Finds VolumeInfo for the given volume ID. If found, returns true and the
-  // result is written into |result|. Returns false otherwise.
-  bool FindVolumeInfoById(const std::string& volume_id,
-                          VolumeInfo* result) const;
+  // Finds Volume for the given volume ID. If found, then the returned weak
+  // pointer is valid. It is invalidated as soon as the volume is removed from
+  // the volume manager.
+  base::WeakPtr<Volume> FindVolumeById(const std::string& volume_id);
 
   // For testing purpose, registers a native local file system pointing to
   // |path| with DOWNLOADS type, and adds its volume info.
@@ -161,37 +224,36 @@ class VolumeManager : public KeyedService,
 
   // For testing purpose, adds a volume info pointing to |path|, with TESTING
   // type. Assumes that the mount point is already registered.
-  void AddVolumeInfoForTesting(const base::FilePath& path,
-                               VolumeType volume_type,
-                               chromeos::DeviceType device_type);
+  void AddVolumeForTesting(const base::FilePath& path,
+                           VolumeType volume_type,
+                           chromeos::DeviceType device_type,
+                           bool read_only);
 
   // drive::DriveIntegrationServiceObserver overrides.
-  virtual void OnFileSystemMounted() override;
-  virtual void OnFileSystemBeingUnmounted() override;
+  void OnFileSystemMounted() override;
+  void OnFileSystemBeingUnmounted() override;
 
   // chromeos::disks::DiskMountManager::Observer overrides.
-  virtual void OnDiskEvent(
+  void OnDiskEvent(
       chromeos::disks::DiskMountManager::DiskEvent event,
       const chromeos::disks::DiskMountManager::Disk* disk) override;
-  virtual void OnDeviceEvent(
-      chromeos::disks::DiskMountManager::DeviceEvent event,
-      const std::string& device_path) override;
-  virtual void OnMountEvent(
-      chromeos::disks::DiskMountManager::MountEvent event,
-      chromeos::MountError error_code,
-      const chromeos::disks::DiskMountManager::MountPointInfo& mount_info)
-      override;
-  virtual void OnFormatEvent(
-      chromeos::disks::DiskMountManager::FormatEvent event,
-      chromeos::FormatError error_code,
-      const std::string& device_path) override;
+  void OnDeviceEvent(chromeos::disks::DiskMountManager::DeviceEvent event,
+                     const std::string& device_path) override;
+  void OnMountEvent(chromeos::disks::DiskMountManager::MountEvent event,
+                    chromeos::MountError error_code,
+                    const chromeos::disks::DiskMountManager::MountPointInfo&
+                        mount_info) override;
+  void OnFormatEvent(chromeos::disks::DiskMountManager::FormatEvent event,
+                     chromeos::FormatError error_code,
+                     const std::string& device_path) override;
 
   // chromeos::file_system_provider::Observer overrides.
-  virtual void OnProvidedFileSystemMount(
+  void OnProvidedFileSystemMount(
       const chromeos::file_system_provider::ProvidedFileSystemInfo&
           file_system_info,
+      chromeos::file_system_provider::MountContext context,
       base::File::Error error) override;
-  virtual void OnProvidedFileSystemUnmount(
+  void OnProvidedFileSystemUnmount(
       const chromeos::file_system_provider::ProvidedFileSystemInfo&
           file_system_info,
       base::File::Error error) override;
@@ -200,9 +262,9 @@ class VolumeManager : public KeyedService,
   void OnExternalStorageDisabledChanged();
 
   // RemovableStorageObserver overrides.
-  virtual void OnRemovableStorageAttached(
+  void OnRemovableStorageAttached(
       const storage_monitor::StorageInfo& info) override;
-  virtual void OnRemovableStorageDetached(
+  void OnRemovableStorageDetached(
       const storage_monitor::StorageInfo& info) override;
 
   SnapshotManager* snapshot_manager() { return snapshot_manager_.get(); }
@@ -210,10 +272,9 @@ class VolumeManager : public KeyedService,
  private:
   void OnDiskMountManagerRefreshed(bool success);
   void OnStorageMonitorInitialized();
-  void DoMountEvent(chromeos::MountError error_code,
-                    const VolumeInfo& volume_info);
+  void DoMountEvent(chromeos::MountError error_code, linked_ptr<Volume> volume);
   void DoUnmountEvent(chromeos::MountError error_code,
-                      const VolumeInfo& volume_info);
+                      linked_ptr<Volume> volume);
 
   Profile* profile_;
   drive::DriveIntegrationService* drive_integration_service_;  // Not owned.
@@ -222,7 +283,7 @@ class VolumeManager : public KeyedService,
   ObserverList<VolumeManagerObserver> observers_;
   chromeos::file_system_provider::Service*
       file_system_provider_service_;  // Not owned by this class.
-  std::map<std::string, VolumeInfo> mounted_volumes_;
+  std::map<std::string, linked_ptr<Volume>> mounted_volumes_;
   scoped_ptr<SnapshotManager> snapshot_manager_;
 
   // Note: This should remain the last member so it'll be destroyed and

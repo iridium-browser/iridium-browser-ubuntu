@@ -7,9 +7,9 @@
 #include <algorithm>
 
 #include "base/containers/stack_container.h"
-#include "base/debug/trace_event.h"
-#include "base/debug/trace_event_argument.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "cc/debug/traced_value.h"
 #include "cc/resources/raster_buffer.h"
 #include "cc/resources/resource.h"
@@ -307,6 +307,10 @@ void PixelBufferTileTaskWorkerPool::CheckForCompletedTasks() {
   completed_raster_tasks_.clear();
 }
 
+ResourceFormat PixelBufferTileTaskWorkerPool::GetResourceFormat() {
+  return resource_provider_->memory_efficient_texture_format();
+}
+
 scoped_ptr<RasterBuffer> PixelBufferTileTaskWorkerPool::AcquireBufferForRaster(
     const Resource* resource) {
   return make_scoped_ptr<RasterBuffer>(
@@ -584,7 +588,7 @@ void PixelBufferTileTaskWorkerPool::ScheduleMoreTasks() {
                      task_set));
       task_set_finished_tasks_pending_[task_set] = true;
       InsertNodeForTask(&graph_, new_task_set_finished_tasks[task_set].get(),
-                        kTaskSetFinishedTaskPriority,
+                        kTaskSetFinishedTaskPriorityBase + task_set,
                         scheduled_task_counts[task_set]);
       for (RasterTaskVector::ContainerType::const_iterator it =
                tasks[task_set].container().begin();
@@ -697,10 +701,10 @@ void PixelBufferTileTaskWorkerPool::CheckForCompletedRasterizerTasks() {
   completed_tasks_.clear();
 }
 
-scoped_refptr<base::debug::ConvertableToTraceFormat>
+scoped_refptr<base::trace_event::ConvertableToTraceFormat>
 PixelBufferTileTaskWorkerPool::StateAsValue() const {
-  scoped_refptr<base::debug::TracedValue> state =
-      new base::debug::TracedValue();
+  scoped_refptr<base::trace_event::TracedValue> state =
+      new base::trace_event::TracedValue();
   state->SetInteger("completed_count", completed_raster_tasks_.size());
   state->BeginArray("pending_count");
   for (TaskSet task_set = 0; task_set < kNumberOfTaskSets; ++task_set)
@@ -715,7 +719,7 @@ PixelBufferTileTaskWorkerPool::StateAsValue() const {
 }
 
 void PixelBufferTileTaskWorkerPool::ThrottleStateAsValueInto(
-    base::debug::TracedValue* throttle_state) const {
+    base::trace_event::TracedValue* throttle_state) const {
   throttle_state->SetInteger("bytes_available_for_upload",
                              max_bytes_pending_upload_ - bytes_pending_upload_);
   throttle_state->SetInteger("bytes_pending_upload", bytes_pending_upload_);

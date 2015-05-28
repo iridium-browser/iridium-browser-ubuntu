@@ -26,6 +26,12 @@ class AudioService {
     // Called when anything changes to the audio device configuration.
     virtual void OnDeviceChanged() = 0;
 
+    // Called when the sound level of an active audio node changes.
+    virtual void OnLevelChanged(const std::string& id, int level) = 0;
+
+    // Called when the mute state of audio input/output changes.
+    virtual void OnMuteChanged(bool is_input, bool is_muted) = 0;
+
    protected:
     virtual ~Observer() {}
   };

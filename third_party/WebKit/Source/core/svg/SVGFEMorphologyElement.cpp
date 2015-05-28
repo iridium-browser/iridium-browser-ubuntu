@@ -49,7 +49,7 @@ inline SVGFEMorphologyElement::SVGFEMorphologyElement(Document& document)
     addToPropertyMap(m_svgOperator);
 }
 
-void SVGFEMorphologyElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFEMorphologyElement)
 {
     visitor->trace(m_radius);
     visitor->trace(m_in1);
@@ -68,11 +68,6 @@ bool SVGFEMorphologyElement::isSupportedAttribute(const QualifiedName& attrName)
         supportedAttributes.add(SVGNames::radiusAttr);
     }
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGFEMorphologyElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
 }
 
 bool SVGFEMorphologyElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)

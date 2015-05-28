@@ -33,8 +33,8 @@
 #ifndef InputTypeView_h
 #define InputTypeView_h
 
-#include "core/page/FocusType.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebFocusType.h"
 #include "wtf/FastAllocBase.h"
 #include "wtf/Forward.h"
 #include "wtf/Noncopyable.h"
@@ -51,15 +51,15 @@ class HTMLFormElement;
 class HTMLInputElement;
 class KeyboardEvent;
 class MouseEvent;
-class RenderObject;
-class RenderStyle;
+class LayoutObject;
+class ComputedStyle;
 class TouchEvent;
 
 struct ClickHandlingState final : public NoBaseWillBeGarbageCollected<ClickHandlingState> {
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(ClickHandlingState);
 
 public:
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     bool checked;
     bool indeterminate;
@@ -71,12 +71,12 @@ public:
 // derived from it to classes other than HTMLInputElement.
 class InputTypeView : public RefCountedWillBeGarbageCollectedFinalized<InputTypeView> {
     WTF_MAKE_NONCOPYABLE(InputTypeView);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(InputTypeView);
 
 public:
     static PassRefPtrWillBeRawPtr<InputTypeView> create(HTMLInputElement&);
     virtual ~InputTypeView();
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
     virtual bool sizeShouldIncludeDecoration(int defaultSize, int& preferredSize) const;
     virtual void handleClickEvent(MouseEvent*);
@@ -92,14 +92,14 @@ public:
     virtual bool shouldSubmitImplicitly(Event*);
     virtual PassRefPtrWillBeRawPtr<HTMLFormElement> formForSubmission() const;
     virtual bool hasCustomFocusLogic() const;
-    virtual void handleFocusEvent(Element* oldFocusedElement, FocusType);
-    virtual void handleFocusInEvent(Element* oldFocusedElement, FocusType);
+    virtual void handleFocusEvent(Element* oldFocusedElement, WebFocusType);
+    virtual void handleFocusInEvent(Element* oldFocusedElement, WebFocusType);
     virtual void handleBlurEvent();
     virtual void subtreeHasChanged();
     virtual bool hasTouchEventHandler() const;
     virtual void blur();
-    virtual RenderObject* createRenderer(RenderStyle*) const;
-    virtual PassRefPtr<RenderStyle> customStyleForRenderer(PassRefPtr<RenderStyle>);
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) const;
+    virtual PassRefPtr<ComputedStyle> customStyleForLayoutObject(PassRefPtr<ComputedStyle>);
     virtual void startResourceLoading();
     virtual void closePopupView();
     virtual void createShadowSubtree();

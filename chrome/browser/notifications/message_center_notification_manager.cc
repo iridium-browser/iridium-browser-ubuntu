@@ -73,11 +73,8 @@ MessageCenterNotificationManager::MessageCenterNotificationManager(
   message_center_->SetNotifierSettingsProvider(settings_provider_.get());
 
 #if defined(OS_CHROMEOS)
-#if !defined(USE_ATHENA)
-  // TODO(oshima|hashimoto): Support notification on athena. crbug.com/408755.
   blockers_.push_back(
       new LoginStateNotificationBlockerChromeOS(message_center));
-#endif
 #else
   blockers_.push_back(new ScreenLockNotificationBlocker(message_center));
 #endif
@@ -146,20 +143,20 @@ void MessageCenterNotificationManager::Add(const Notification& notification,
 
 bool MessageCenterNotificationManager::Update(const Notification& notification,
                                               Profile* profile) {
-  const base::string16& replace_id = notification.replace_id();
-  if (replace_id.empty())
+  const std::string& tag = notification.tag();
+  if (tag.empty())
     return false;
 
   const GURL origin_url = notification.origin_url();
   DCHECK(origin_url.is_valid());
 
-  // Since replace_id is provided by arbitrary JS, we need to use origin_url
-  // (which is an app url in case of app/extension) to scope the replace ids
+  // Since tag is provided by arbitrary JS, we need to use origin_url
+  // (which is an app url in case of app/extension) to scope the tags
   // in the given profile.
   for (NotificationMap::iterator iter = profile_notifications_.begin();
        iter != profile_notifications_.end(); ++iter) {
     ProfileNotification* old_notification = (*iter).second;
-    if (old_notification->notification().replace_id() == replace_id &&
+    if (old_notification->notification().tag() == tag &&
         old_notification->notification().origin_url() == origin_url &&
         old_notification->profile() == profile) {
       // Changing the type from non-progress to progress does not count towards

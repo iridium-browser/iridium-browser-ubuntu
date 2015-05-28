@@ -7,11 +7,12 @@
 #ifndef COMPILER_TRANSLATOR_DIAGNOSTICS_H_
 #define COMPILER_TRANSLATOR_DIAGNOSTICS_H_
 
+#include "common/angleutils.h"
 #include "compiler/preprocessor/DiagnosticsBase.h"
 
 class TInfoSink;
 
-class TDiagnostics : public pp::Diagnostics
+class TDiagnostics : public pp::Diagnostics, angle::NonCopyable
 {
   public:
     TDiagnostics(TInfoSink& infoSink);

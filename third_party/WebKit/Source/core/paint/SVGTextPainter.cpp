@@ -5,11 +5,10 @@
 #include "config.h"
 #include "core/paint/SVGTextPainter.h"
 
+#include "core/layout/PaintInfo.h"
+#include "core/layout/svg/LayoutSVGText.h"
 #include "core/paint/BlockPainter.h"
 #include "core/paint/TransformRecorder.h"
-#include "core/rendering/PaintInfo.h"
-#include "core/rendering/svg/RenderSVGText.h"
-#include "platform/graphics/GraphicsContextStateSaver.h"
 
 namespace blink {
 
@@ -19,7 +18,7 @@ void SVGTextPainter::paint(const PaintInfo& paintInfo)
         return;
 
     PaintInfo blockInfo(paintInfo);
-    TransformRecorder transformRecorder(*blockInfo.context, m_renderSVGText.displayItemClient(), m_renderSVGText.localToParentTransform());
+    TransformRecorder transformRecorder(*blockInfo.context, m_renderSVGText, m_renderSVGText.localToParentTransform());
 
     // When transitioning from SVG to block painters we need to keep the PaintInfo rect up-to-date
     // because it can be used for clipping.

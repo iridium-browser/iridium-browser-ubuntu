@@ -288,6 +288,10 @@ AutofillProfile::~AutofillProfile() {
 }
 
 AutofillProfile& AutofillProfile::operator=(const AutofillProfile& profile) {
+  set_use_count(profile.use_count());
+  set_use_date(profile.use_date());
+  set_modification_date(profile.modification_date());
+
   if (this == &profile)
     return *this;
 
@@ -539,10 +543,11 @@ bool AutofillProfile::EqualsSansOrigin(const AutofillProfile& profile) const {
          Compare(profile) == 0;
 }
 
-bool AutofillProfile::EqualsSansGuid(const AutofillProfile& profile) const {
-  return origin() == profile.origin() &&
-         language_code() == profile.language_code() &&
-         Compare(profile) == 0;
+bool AutofillProfile::EqualsForSyncPurposes(const AutofillProfile& profile)
+    const {
+  return use_count() == profile.use_count() &&
+         use_date() == profile.use_date() &&
+         EqualsSansGuid(profile);
 }
 
 bool AutofillProfile::operator==(const AutofillProfile& profile) const {
@@ -560,30 +565,38 @@ const base::string16 AutofillProfile::PrimaryValue() const {
 bool AutofillProfile::IsSubsetOf(const AutofillProfile& profile,
                                  const std::string& app_locale) const {
   ServerFieldTypeSet types;
-  GetNonEmptyTypes(app_locale, &types);
+  GetSupportedTypes(&types);
+  return IsSubsetOfForFieldSet(profile, app_locale, types);
+}
 
-  for (ServerFieldTypeSet::const_iterator it = types.begin(); it != types.end();
-       ++it) {
-    if (*it == NAME_FULL || *it == ADDRESS_HOME_STREET_ADDRESS) {
+bool AutofillProfile::IsSubsetOfForFieldSet(
+    const AutofillProfile& profile,
+    const std::string& app_locale,
+    const ServerFieldTypeSet& types) const {
+  for (ServerFieldType type : types) {
+    base::string16 value = GetRawInfo(type);
+    if (value.empty())
+      continue;
+
+    if (type == NAME_FULL || type == ADDRESS_HOME_STREET_ADDRESS) {
       // Ignore the compound "full name" field type.  We are only interested in
       // comparing the constituent parts.  For example, if |this| has a middle
       // name saved, but |profile| lacks one, |profile| could still be a subset
       // of |this|.  Likewise, ignore the compound "street address" type, as we
       // are only interested in matching line-by-line.
       continue;
-    } else if (AutofillType(*it).group() == PHONE_HOME) {
+    } else if (AutofillType(type).group() == PHONE_HOME) {
       // Phone numbers should be canonicalized prior to being compared.
-      if (*it != PHONE_HOME_WHOLE_NUMBER) {
+      if (type != PHONE_HOME_WHOLE_NUMBER) {
         continue;
       } else if (!i18n::PhoneNumbersMatch(
-            GetRawInfo(*it),
-            profile.GetRawInfo(*it),
-            base::UTF16ToASCII(GetRawInfo(ADDRESS_HOME_COUNTRY)),
-            app_locale)) {
+                     value, profile.GetRawInfo(type),
+                     base::UTF16ToASCII(GetRawInfo(ADDRESS_HOME_COUNTRY)),
+                     app_locale)) {
         return false;
       }
-    } else if (base::StringToLowerASCII(GetRawInfo(*it)) !=
-                   base::StringToLowerASCII(profile.GetRawInfo(*it))) {
+    } else if (base::StringToLowerASCII(value) !=
+               base::StringToLowerASCII(profile.GetRawInfo(type))) {
       return false;
     }
   }
@@ -673,6 +686,9 @@ void AutofillProfile::OverwriteWithOrAddTo(const AutofillProfile& profile,
   DCHECK(!IsVerified() || profile.IsVerified());
   set_origin(profile.origin());
   set_language_code(profile.language_code());
+  set_use_count(profile.use_count() + use_count());
+  if (profile.use_date() > use_date())
+    set_use_date(profile.use_date());
 
   ServerFieldTypeSet field_types;
   profile.GetNonEmptyTypes(app_locale, &field_types);
@@ -907,6 +923,7 @@ base::string16 AutofillProfile::ConstructInferredLabel(
     const std::vector<ServerFieldType>& included_fields,
     size_t num_fields_to_use,
     const std::string& app_locale) const {
+  // TODO(estade): use libaddressinput?
   base::string16 separator =
       l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_SUMMARY_SEPARATOR);
 
@@ -1091,12 +1108,19 @@ FormGroup* AutofillProfile::MutableFormGroupForType(const AutofillType& type) {
     case NO_GROUP:
     case CREDIT_CARD:
     case PASSWORD_FIELD:
+    case USERNAME_FIELD:
     case TRANSACTION:
         return NULL;
   }
 
   NOTREACHED();
   return NULL;
+}
+
+bool AutofillProfile::EqualsSansGuid(const AutofillProfile& profile) const {
+  return origin() == profile.origin() &&
+         language_code() == profile.language_code() &&
+         Compare(profile) == 0;
 }
 
 // So we can compare AutofillProfiles with EXPECT_EQ().

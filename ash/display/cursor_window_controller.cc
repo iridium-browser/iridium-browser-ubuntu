@@ -16,6 +16,7 @@
 #include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/dip_util.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/image/image_skia.h"
@@ -33,6 +34,7 @@ class CursorWindowDelegate : public aura::WindowDelegate {
   gfx::Size GetMaximumSize() const override { return size_; }
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override {}
+  ui::TextInputClient* GetFocusedTextInputClient() override { return nullptr; }
   gfx::NativeCursor GetCursor(const gfx::Point& point) override {
     return gfx::kNullCursor;
   }
@@ -46,8 +48,8 @@ class CursorWindowDelegate : public aura::WindowDelegate {
   }
   bool CanFocus() override { return false; }
   void OnCaptureLost() override {}
-  void OnPaint(gfx::Canvas* canvas) override {
-    canvas->DrawImageInt(cursor_image_, 0, 0);
+  void OnPaint(const ui::PaintContext& context) override {
+    context.canvas()->DrawImageInt(cursor_image_, 0, 0);
   }
   void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
   void OnWindowDestroying(aura::Window* window) override {}
@@ -92,8 +94,8 @@ CursorWindowController::CursorWindowController()
     : is_cursor_compositing_enabled_(false),
       container_(NULL),
       cursor_type_(ui::kCursorNone),
+      visible_(true),
       cursor_set_(ui::CURSOR_SET_NORMAL),
-      cursor_rotation_(gfx::Display::ROTATE_0),
       delegate_(new CursorWindowDelegate()) {
 }
 
@@ -127,7 +129,7 @@ void CursorWindowController::UpdateContainer() {
       display_ = Shell::GetScreen()->GetPrimaryDisplay();
     SetContainer(mirror_window);
   }
-  // Updates the hot point based on the current display/container.
+  // Updates the hot point based on the current display.
   UpdateCursorImage();
 }
 
@@ -144,6 +146,8 @@ void CursorWindowController::SetDisplay(const gfx::Display& display) {
   SetContainer(GetRootWindowController(root_window)->GetContainer(
       kShellWindowId_MouseCursorContainer));
   SetBoundsInScreen(display.bounds());
+  // Updates the hot point based on the current display.
+  UpdateCursorImage();
 }
 
 void CursorWindowController::UpdateLocation() {
@@ -162,12 +166,11 @@ void CursorWindowController::UpdateLocation() {
 }
 
 void CursorWindowController::SetCursor(gfx::NativeCursor cursor) {
-  if (cursor_type_ == cursor.native_type() &&
-      cursor_rotation_ == display_.rotation())
+  if (cursor_type_ == cursor.native_type())
     return;
   cursor_type_ = cursor.native_type();
-  cursor_rotation_ = display_.rotation();
   UpdateCursorImage();
+  UpdateCursorVisibility();
 }
 
 void CursorWindowController::SetCursorSet(ui::CursorSetType cursor_set) {
@@ -176,12 +179,8 @@ void CursorWindowController::SetCursorSet(ui::CursorSetType cursor_set) {
 }
 
 void CursorWindowController::SetVisibility(bool visible) {
-  if (!cursor_window_)
-    return;
-  if (visible)
-    cursor_window_->Show();
-  else
-    cursor_window_->Hide();
+  visible_ = visible;
+  UpdateCursorVisibility();
 }
 
 void CursorWindowController::SetContainer(aura::Window* container) {
@@ -197,13 +196,14 @@ void CursorWindowController::SetContainer(aura::Window* container) {
   // Just creates a new one instead. crbug.com/384218.
   cursor_window_.reset(new aura::Window(delegate_.get()));
   cursor_window_->SetTransparent(true);
-  cursor_window_->Init(aura::WINDOW_LAYER_TEXTURED);
+  cursor_window_->Init(ui::LAYER_TEXTURED);
   cursor_window_->set_ignore_events(true);
   cursor_window_->set_owned_by_parent(false);
+  // Call UpdateCursorImage() to figure out |cursor_window_|'s desired size.
   UpdateCursorImage();
 
   container->AddChild(cursor_window_.get());
-  cursor_window_->Show();
+  UpdateCursorVisibility();
   SetBoundsInScreen(container->bounds());
 }
 
@@ -226,7 +226,7 @@ void CursorWindowController::UpdateCursorImage() {
       ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
   gfx::ImageSkia rotated = *image;
   if (!is_cursor_compositing_enabled_) {
-    switch (cursor_rotation_) {
+    switch (display_.rotation()) {
       case gfx::Display::ROTATE_0:
         break;
       case gfx::Display::ROTATE_90:
@@ -262,6 +262,16 @@ void CursorWindowController::UpdateCursorImage() {
         gfx::Rect(cursor_window_->bounds().size()));
     UpdateLocation();
   }
+}
+
+void CursorWindowController::UpdateCursorVisibility() {
+  if (!cursor_window_)
+    return;
+  bool visible = (visible_ && cursor_type_ != ui::kCursorNone);
+  if (visible)
+    cursor_window_->Show();
+  else
+    cursor_window_->Hide();
 }
 
 }  // namespace ash

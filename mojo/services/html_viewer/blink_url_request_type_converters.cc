@@ -5,9 +5,9 @@
 #include "mojo/services/html_viewer/blink_url_request_type_converters.h"
 
 #include "base/strings/string_util.h"
-#include "mojo/public/cpp/system/data_pipe.h"
 #include "third_party/WebKit/public/platform/WebHTTPHeaderVisitor.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/mojo/src/mojo/public/cpp/system/data_pipe.h"
 
 namespace mojo {
 namespace {
@@ -17,8 +17,8 @@ class HeaderFlattener : public blink::WebHTTPHeaderVisitor {
  public:
   HeaderFlattener() : has_accept_header_(false) {}
 
-  virtual void visitHeader(const blink::WebString& name,
-                           const blink::WebString& value) {
+  void visitHeader(const blink::WebString& name,
+                   const blink::WebString& value) override {
     // Headers are latin1.
     const std::string& name_latin1 = name.latin1();
     const std::string& value_latin1 = value.latin1();

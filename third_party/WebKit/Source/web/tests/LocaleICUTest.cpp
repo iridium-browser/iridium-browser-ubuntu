@@ -34,6 +34,7 @@
 #include "wtf/PassOwnPtr.h"
 #include "wtf/text/StringBuilder.h"
 #include <gtest/gtest.h>
+#include <unicode/uvernum.h>
 
 using namespace blink;
 
@@ -179,9 +180,15 @@ TEST_F(LocaleICUTest, standAloneMonthLabels)
     EXPECT_STREQ("June", standAloneMonthLabel("en_US", 5).utf8().data());
     EXPECT_STREQ("December", standAloneMonthLabel("en_US", 11).utf8().data());
 
+#if U_ICU_VERSION_MAJOR_NUM >= 54
+    EXPECT_STREQ("Janvier", standAloneMonthLabel("fr_FR", 0).utf8().data());
+    EXPECT_STREQ("Juin", standAloneMonthLabel("fr_FR", 5).utf8().data());
+    EXPECT_STREQ("D\xC3\xA9" "cembre", standAloneMonthLabel("fr_FR", 11).utf8().data());
+#else
     EXPECT_STREQ("janvier", standAloneMonthLabel("fr_FR", 0).utf8().data());
     EXPECT_STREQ("juin", standAloneMonthLabel("fr_FR", 5).utf8().data());
     EXPECT_STREQ("d\xC3\xA9" "cembre", standAloneMonthLabel("fr_FR", 11).utf8().data());
+#endif
 
     EXPECT_STREQ("1\xE6\x9C\x88", standAloneMonthLabel("ja_JP", 0).utf8().data());
     EXPECT_STREQ("6\xE6\x9C\x88", standAloneMonthLabel("ja_JP", 5).utf8().data());
@@ -198,10 +205,17 @@ TEST_F(LocaleICUTest, shortMonthLabels)
     EXPECT_STREQ("Dec", shortMonthLabel("en_US", 11).utf8().data());
     EXPECT_STREQ("Dec", shortStandAloneMonthLabel("en_US", 11).utf8().data());
 
+#if U_ICU_VERSION_MAJOR_NUM >= 54
+    EXPECT_STREQ("janv.", shortMonthLabel("fr_FR", 0).utf8().data());
+    EXPECT_STREQ("Janv.", shortStandAloneMonthLabel("fr_FR", 0).utf8().data());
+    EXPECT_STREQ("d\xC3\xA9" "c.", shortMonthLabel("fr_FR", 11).utf8().data());
+    EXPECT_STREQ("D\xC3\xA9" "c.", shortStandAloneMonthLabel("fr_FR", 11).utf8().data());
+#else
     EXPECT_STREQ("janv.", shortMonthLabel("fr_FR", 0).utf8().data());
     EXPECT_STREQ("janv.", shortStandAloneMonthLabel("fr_FR", 0).utf8().data());
     EXPECT_STREQ("d\xC3\xA9" "c.", shortMonthLabel("fr_FR", 11).utf8().data());
     EXPECT_STREQ("d\xC3\xA9" "c.", shortStandAloneMonthLabel("fr_FR", 11).utf8().data());
+#endif
 
     EXPECT_STREQ("1\xE6\x9C\x88", shortMonthLabel("ja_JP", 0).utf8().data());
     EXPECT_STREQ("1\xE6\x9C\x88", shortStandAloneMonthLabel("ja_JP", 0).utf8().data());

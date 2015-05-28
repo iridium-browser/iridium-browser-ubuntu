@@ -47,52 +47,84 @@ BaseDownloadsWebUITest.prototype = {
    * @override
    */
   setUp: function() {
+    this.createdDownloads = [];
+
     // The entries will begin at 1:00 AM on Sept 2, 2008, and will be spaced
     // two minutes apart.
     var timestamp = new Date(2008, 9, 2, 1, 0).getTime();
     for (var i = 0; i < TOTAL_RESULT_COUNT; ++i) {
-      downloads.updated(this.createDownload_(i, timestamp));
+      this.createDownload(i, timestamp);
       timestamp += 2 * 60 * 1000;  // Next visit is two minutes later.
     }
-    expectEquals(downloads.size(), TOTAL_RESULT_COUNT);
+    downloads.Manager.updateAll(this.createdDownloads);
+    expectEquals(downloads.Manager.size(), TOTAL_RESULT_COUNT);
   },
 
   /**
    * Creates a download object to be passed to the page, following the expected
    * backend format (see downloads_dom_handler.cc).
-   * @param {number} A unique ID for the download.
-   * @param {number} The time the download purportedly started.
+   * @param {number} id A unique ID for the download.
+   * @param {number} timestamp The time the download purportedly started.
    * @return {!Object} A fake download object.
-   * @private
    */
-  createDownload_: function(id, timestamp) {
-    return {
+  createDownload: function(id, timestamp) {
+    this.createdDownloads.unshift({
       id: id,
       started: timestamp,
       otr: false,
-      state: Download.States.COMPLETE,
+      state: downloads.Item.States.COMPLETE,
       retry: false,
       file_path: '/path/to/file',
       file_url: 'http://google.com/' + timestamp,
       file_name: 'download_' + timestamp,
       url: 'http://google.com/' + timestamp,
       file_externally_removed: false,
-      danger_type: Download.DangerType.NOT_DANGEROUS,
+      danger_type: downloads.Item.DangerType.NOT_DANGEROUS,
       last_reason_text: '',
       since_string: 'today',
       date_string: 'today',
       percent: 100,
       progress_status_text: 'done',
       received: 128,
-    };
+    });
+    return this.createdDownloads[0];
+  },
+
+  /**
+   * Creates a dangerous download object. See downloads_dom_handler.cc.
+   * @param {number} id The ID of the download.
+   * @param {number} timestamp The time this download started.
+   * @return {!Object} A fake, dangerous download object.
+   */
+  createDangerousDownload: function(id, timestamp) {
+    this.createdDownloads.unshift({
+      id: id,
+      started: timestamp,
+      otr: false,
+      state: downloads.Item.States.DANGEROUS,
+      retry: false,
+      file_path: '/oh/noes.jpg.exe',
+      file_url: 'http://evil.com/cute/kittens' + timestamp,
+      file_name: 'evil.' + timestamp + '.jar',
+      file_url: 'http://evil.com/cute/kittens' + timestamp,
+      file_externally_removed: false,
+      danger_type: downloads.Item.DangerType.DANGEROUS_FILE,
+      last_reason_text: '',
+      since_string: 'today',
+      date_string: 'today',
+      percent: 0,
+      progress_status_text: '',
+      received: 128,
+    });
+    return this.createdDownloads[0];
   },
 
   /**
    * Simulates getting no results from C++.
    */
   sendEmptyList: function() {
-    downloadsList([]);
-    assertEquals(0, downloads.size());
+    downloads.Manager.updateAll([]);
+    assertEquals(0, downloads.Manager.size());
   },
 
   /**
@@ -115,7 +147,9 @@ BaseDownloadsWebUITest.prototype = {
     expectEquals(!visible, $('clear-all').hidden);
 
     // "Remove from list" links should only exist when deletions are allowed.
-    expectEquals(visible ? TOTAL_RESULT_COUNT : 0,
-        document.querySelectorAll('.control-remove-link').length);
+    var query = '#downloads-display .safe .remove';
+    if (!visible)
+      query += '[hidden]';
+    expectEquals(TOTAL_RESULT_COUNT, document.querySelectorAll(query).length);
   },
 };

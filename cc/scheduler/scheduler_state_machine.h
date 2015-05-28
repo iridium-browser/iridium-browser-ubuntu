@@ -9,7 +9,6 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time/time.h"
 #include "cc/base/cc_export.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/scheduler/commit_earlyout_reason.h"
@@ -17,7 +16,7 @@
 #include "cc/scheduler/scheduler_settings.h"
 
 namespace base {
-namespace debug {
+namespace trace_event {
 class ConvertableToTraceFormat;
 class TracedValue;
 }
@@ -51,10 +50,10 @@ class CC_EXPORT SchedulerStateMachine {
   };
   static const char* OutputSurfaceStateToString(OutputSurfaceState state);
 
-  // Note: BeginImplFrameState will always cycle through all the states in
-  // order. Whether or not it actually waits or draws, it will at least try to
-  // wait in BEGIN_IMPL_FRAME_STATE_INSIDE_BEGIN_FRAME and try to draw in
-  // BEGIN_IMPL_FRAME_STATE_INSIDE_DEADLINE
+  // Note: BeginImplFrameState does not cycle through these states in a fixed
+  // order on all platforms. It's up to the scheduler to set these correctly.
+  // TODO(sunnyps): Rename the states to IDLE, ANIMATE, WAITING_FOR_DEADLINE and
+  // DRAW.
   enum BeginImplFrameState {
     BEGIN_IMPL_FRAME_STATE_IDLE,
     BEGIN_IMPL_FRAME_STATE_BEGIN_FRAME_STARTING,
@@ -64,9 +63,11 @@ class CC_EXPORT SchedulerStateMachine {
   static const char* BeginImplFrameStateToString(BeginImplFrameState state);
 
   enum BeginImplFrameDeadlineMode {
+    BEGIN_IMPL_FRAME_DEADLINE_MODE_NONE,
     BEGIN_IMPL_FRAME_DEADLINE_MODE_IMMEDIATE,
     BEGIN_IMPL_FRAME_DEADLINE_MODE_REGULAR,
     BEGIN_IMPL_FRAME_DEADLINE_MODE_LATE,
+    BEGIN_IMPL_FRAME_DEADLINE_MODE_BLOCKED_ON_READY_TO_DRAW,
   };
   static const char* BeginImplFrameDeadlineModeToString(
       BeginImplFrameDeadlineMode mode);
@@ -111,11 +112,12 @@ class CC_EXPORT SchedulerStateMachine {
     ACTION_DRAW_AND_SWAP_ABORT,
     ACTION_BEGIN_OUTPUT_SURFACE_CREATION,
     ACTION_PREPARE_TILES,
+    ACTION_INVALIDATE_OUTPUT_SURFACE,
   };
   static const char* ActionToString(Action action);
 
-  scoped_refptr<base::debug::ConvertableToTraceFormat> AsValue() const;
-  void AsValueInto(base::debug::TracedValue* dict, base::TimeTicks now) const;
+  scoped_refptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
+  void AsValueInto(base::trace_event::TracedValue* dict) const;
 
   Action NextAction() const;
   void UpdateState(Action action);
@@ -124,21 +126,14 @@ class CC_EXPORT SchedulerStateMachine {
   // to make progress.
   bool BeginFrameNeeded() const;
 
-  // Indicates whether the scheduler should call
-  // SetNeedsBeginFrames(BeginFrameNeeded()) on the frame source.
-  bool ShouldSetNeedsBeginFrames(bool frame_source_needs_begin_frames) const;
-
-  // Indicates that we need to independently poll for new state and actions
-  // because we can't expect a BeginImplFrame. This is mostly used to avoid
-  // drawing repeat frames with the synchronous compositor without dropping
-  // necessary actions on the floor.
-  bool ShouldPollForAnticipatedDrawTriggers() const;
-
   // Indicates that the system has entered and left a BeginImplFrame callback.
   // The scheduler will not draw more than once in a given BeginImplFrame
   // callback nor send more than one BeginMainFrame message.
-  void OnBeginImplFrame(const BeginFrameArgs& args);
+  void OnBeginImplFrame();
   void OnBeginImplFrameDeadlinePending();
+  // Indicates that the scheduler has entered the draw phase. The scheduler
+  // will not draw more than once in a single draw phase.
+  // TODO(sunnyps): Rename OnBeginImplFrameDeadline to OnDraw or similar.
   void OnBeginImplFrameDeadline();
   void OnBeginImplFrameIdle();
   BeginImplFrameState begin_impl_frame_state() const {
@@ -149,15 +144,6 @@ class CC_EXPORT SchedulerStateMachine {
   // If the main thread didn't manage to produce a new frame in time for the
   // impl thread to draw, it is in a high latency mode.
   bool MainThreadIsInHighLatencyMode() const;
-
-  // PollForAnticipatedDrawTriggers is used by the synchronous compositor to
-  // avoid requesting BeginImplFrames when we won't actually draw but still
-  // need to advance our state at vsync intervals.
-  void DidEnterPollForAnticipatedDrawTriggers();
-  void DidLeavePollForAnticipatedDrawTriggers();
-  bool inside_poll_for_anticipated_draw_triggers() const {
-    return inside_poll_for_anticipated_draw_triggers_;
-  }
 
   // Indicates whether the LayerTreeHostImpl is visible.
   void SetVisible(bool visible);
@@ -174,6 +160,9 @@ class CC_EXPORT SchedulerStateMachine {
   // Indicates that prepare-tiles is required. This guarantees another
   // PrepareTiles will occur shortly (even if no redraw is required).
   void SetNeedsPrepareTiles();
+
+  // Make deadline wait for ReadyToDraw signal.
+  void SetWaitForReadyToDraw();
 
   // Sets how many swaps can be pending to the OutputSurface.
   void SetMaxSwapsPending(int max);
@@ -232,6 +221,9 @@ class CC_EXPORT SchedulerStateMachine {
   // Indicates that the pending tree is ready for activation.
   void NotifyReadyToActivate();
 
+  // Indicates the active tree's visible tiles are ready to be drawn.
+  void NotifyReadyToDraw();
+
   bool has_pending_tree() const { return has_pending_tree_; }
   bool active_tree_needs_first_draw() const {
     return active_tree_needs_first_draw_;
@@ -245,19 +237,13 @@ class CC_EXPORT SchedulerStateMachine {
   // True if we need to abort draws to make forward progress.
   bool PendingDrawsShouldBeAborted() const;
 
-  bool SupportsProactiveBeginFrame() const;
-
   void SetContinuousPainting(bool continuous_painting) {
     continuous_painting_ = continuous_painting;
   }
 
   bool CouldSendBeginMainFrame() const;
 
-  void SetImplLatencyTakesPriorityOnBattery(
-      bool impl_latency_takes_priority_on_battery) {
-    impl_latency_takes_priority_on_battery_ =
-        impl_latency_takes_priority_on_battery;
-  }
+  void SetDeferCommits(bool defer_commits);
 
   // TODO(zmo): This is temporary for debugging crbug.com/393331.
   // We should remove it afterwards.
@@ -280,23 +266,21 @@ class CC_EXPORT SchedulerStateMachine {
 
   bool ShouldAnimate() const;
   bool ShouldBeginOutputSurfaceCreation() const;
-  bool ShouldDrawForced() const;
   bool ShouldDraw() const;
   bool ShouldActivatePendingTree() const;
   bool ShouldSendBeginMainFrame() const;
   bool ShouldCommit() const;
   bool ShouldPrepareTiles() const;
+  bool ShouldInvalidateOutputSurface() const;
 
-  void AdvanceCurrentFrameNumber();
-  bool HasAnimatedThisFrame() const;
-  bool HasSentBeginMainFrameThisFrame() const;
-  bool HasRequestedSwapThisFrame() const;
-  bool HasSwappedThisFrame() const;
-
+  void UpdateStateOnAnimate();
+  void UpdateStateOnSendBeginMainFrame();
   void UpdateStateOnCommit(bool commit_had_no_updates);
   void UpdateStateOnActivation();
   void UpdateStateOnDraw(bool did_request_swap);
+  void UpdateStateOnBeginOutputSurfaceCreation();
   void UpdateStateOnPrepareTiles();
+  void UpdateStateOnInvalidateOutputSurface();
 
   const SchedulerSettings settings_;
 
@@ -305,20 +289,27 @@ class CC_EXPORT SchedulerStateMachine {
   CommitState commit_state_;
   ForcedRedrawOnTimeoutState forced_redraw_state_;
 
-  BeginFrameArgs begin_impl_frame_args_;
-
+  // These are used for tracing only.
   int commit_count_;
   int current_frame_number_;
   int last_frame_number_animate_performed_;
   int last_frame_number_swap_performed_;
   int last_frame_number_swap_requested_;
   int last_frame_number_begin_main_frame_sent_;
+  int last_frame_number_invalidate_output_surface_performed_;
 
+  // These are used to ensure that an action only happens once per frame,
+  // deadline, etc.
+  bool animate_funnel_;
+  bool request_swap_funnel_;
+  bool send_begin_main_frame_funnel_;
+  bool invalidate_output_surface_funnel_;
   // prepare_tiles_funnel_ is "filled" each time PrepareTiles is called
   // and "drained" on each BeginImplFrame. If the funnel gets too full,
   // we start throttling ACTION_PREPARE_TILES such that we average one
   // PrepareTiles per BeginImplFrame.
   int prepare_tiles_funnel_;
+
   int consecutive_checkerboard_animations_;
   int max_pending_swaps_;
   int pending_swaps_;
@@ -326,21 +317,23 @@ class CC_EXPORT SchedulerStateMachine {
   bool needs_animate_;
   bool needs_prepare_tiles_;
   bool needs_commit_;
-  bool inside_poll_for_anticipated_draw_triggers_;
   bool visible_;
   bool can_start_;
   bool can_draw_;
   bool has_pending_tree_;
   bool pending_tree_is_ready_for_activation_;
   bool active_tree_needs_first_draw_;
-  bool did_commit_after_animating_;
   bool did_create_and_initialize_first_output_surface_;
   bool impl_latency_takes_priority_;
   bool skip_next_begin_main_frame_to_reduce_latency_;
   bool skip_begin_main_frame_to_reduce_latency_;
   bool continuous_painting_;
-  bool impl_latency_takes_priority_on_battery_;
   bool children_need_begin_frames_;
+  bool defer_commits_;
+  bool last_commit_had_no_updates_;
+  bool wait_for_active_tree_ready_to_draw_;
+  bool did_request_swap_in_last_frame_;
+  bool did_perform_swap_in_last_draw_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SchedulerStateMachine);

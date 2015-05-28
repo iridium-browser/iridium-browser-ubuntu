@@ -18,6 +18,12 @@ def GenericRetry(handler, max_retry, functor, *args, **kwargs):
 
   To retry based on the return value of |functor| see the timeout_util module.
 
+  Keep in mind that the total sleep time will be the triangular value of
+  max_retry multiplied by the sleep value.  e.g. max_retry=5 and sleep=10
+  will be T5 (i.e. 5+4+3+2+1) times 10, or 150 seconds total.  Rather than
+  use a large sleep value, you should lean more towards large retries and
+  lower sleep intervals, or by utilizing backoff_factor.
+
   Args:
     handler: A functor invoked w/ the exception instance that
       functor(*args, **kwargs) threw.  If it returns True, then a
@@ -139,7 +145,8 @@ def ShouldRetryCommandCommon(exc):
   if not isinstance(exc, cros_build_lib.RunCommandError):
     return False
   if exc.result.returncode is None:
-    logging.info('Child process failed to launch; not retrying.')
+    logging.error('Child process failed to launch; not retrying:\n'
+                  'command: %s', exc.result.cmdstr)
     return False
   return True
 

@@ -185,11 +185,14 @@ void AutofillExternalDelegate::SetCurrentDataListValues(
 
 void AutofillExternalDelegate::OnPopupShown() {
   manager_->DidShowSuggestions(
-      has_suggestion_ && !has_shown_popup_for_current_edit_);
+      has_suggestion_ && !has_shown_popup_for_current_edit_,
+      query_form_,
+      query_field_);
   has_shown_popup_for_current_edit_ |= has_suggestion_;
 }
 
 void AutofillExternalDelegate::OnPopupHidden() {
+  driver_->PopupHidden();
 }
 
 void AutofillExternalDelegate::DidSelectSuggestion(

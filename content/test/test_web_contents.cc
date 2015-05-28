@@ -38,6 +38,7 @@ TestWebContents* TestWebContents::Create(BrowserContext* browser_context,
                                          SiteInstance* instance) {
   TestWebContents* test_web_contents = new TestWebContents(browser_context);
   test_web_contents->Init(WebContents::CreateParams(browser_context, instance));
+  test_web_contents->RenderFrameCreated(test_web_contents->GetMainFrame());
   return test_web_contents;
 }
 
@@ -55,6 +56,11 @@ TestRenderViewHost* TestWebContents::GetRenderViewHost() const {
 }
 
 TestRenderFrameHost* TestWebContents::GetPendingMainFrame() const {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBrowserSideNavigation)) {
+    return static_cast<TestRenderFrameHost*>(
+        GetRenderManager()->speculative_render_frame_host_.get());
+  }
   return static_cast<TestRenderFrameHost*>(
       GetRenderManager()->pending_frame_host());
 }
@@ -97,10 +103,6 @@ void TestWebContents::TestDidNavigateWithReferrer(
   rfhi->frame_tree_node()->navigator()->DidNavigate(rfhi, params);
 }
 
-WebPreferences TestWebContents::TestComputeWebkitPrefs() {
-  return ComputeWebkitPrefs();
-}
-
 bool TestWebContents::CreateRenderViewForRenderManager(
     RenderViewHost* render_view_host,
     int opener_route_id,
@@ -137,23 +139,28 @@ void TestWebContents::NavigateAndCommit(const GURL& url) {
 }
 
 void TestWebContents::TestSetIsLoading(bool value) {
-  SetIsLoading(GetRenderViewHost(), value, true, NULL);
+  SetIsLoading(value, true, nullptr);
 }
 
 void TestWebContents::CommitPendingNavigation() {
-  // If we are doing a cross-site navigation, this simulates the current RFH
-  // notifying that it has unloaded so the pending RFH is resumed and can
-  // navigate.
-  TestRenderFrameHost* old_rfh = GetMainFrame();
   const NavigationEntry* entry = GetController().GetPendingEntry();
   DCHECK(entry);
 
-  // Simulate the BeforeUnload ACK if necessary.
+  // If we are doing a cross-site navigation, this simulates the current RFH
+  // notifying that it has unloaded so the pending RFH is resumed and can
+  // navigate.
   // PlzNavigate: the pending RFH is not created before the navigation commit,
   // so it is necessary to simulate the IO thread response here to commit in the
-  // proper renderer.
-  old_rfh->PrepareForCommit(entry->GetURL());
+  // proper renderer. It is necessary to call PrepareForCommit before getting
+  // the main and the pending frame because when we are trying to navigate to a
+  // webui from a new tab, a RenderFrameHost is created to display it that is
+  // committed immediately (since it is a new tab). Therefore the main frame is
+  // replaced without a pending frame being created, and we don't get the right
+  // values for the RFH to navigate: we try to use the old one that has been
+  // deleted in the meantime.
+  GetMainFrame()->PrepareForCommit();
 
+  TestRenderFrameHost* old_rfh = GetMainFrame();
   TestRenderFrameHost* rfh = GetPendingMainFrame();
   if (!rfh)
     rfh = old_rfh;
@@ -246,12 +253,12 @@ void TestWebContents::CreateNewFullscreenWidget(int render_process_id,
 
 void TestWebContents::ShowCreatedWindow(int route_id,
                                         WindowOpenDisposition disposition,
-                                        const gfx::Rect& initial_pos,
+                                        const gfx::Rect& initial_rect,
                                         bool user_gesture) {
 }
 
 void TestWebContents::ShowCreatedWidget(int route_id,
-                                        const gfx::Rect& initial_pos) {
+                                        const gfx::Rect& initial_rect) {
 }
 
 void TestWebContents::ShowCreatedFullscreenWidget(int route_id) {

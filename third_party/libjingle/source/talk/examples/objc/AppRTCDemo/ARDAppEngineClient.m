@@ -1,6 +1,6 @@
 /*
  * libjingle
- * Copyright 2014, Google Inc.
+ * Copyright 2014 Google Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,37 +27,37 @@
 
 #import "ARDAppEngineClient.h"
 
+#import "ARDJoinResponse.h"
 #import "ARDMessageResponse.h"
-#import "ARDRegisterResponse.h"
 #import "ARDSignalingMessage.h"
 #import "ARDUtilities.h"
 
 // TODO(tkchin): move these to a configuration object.
-static NSString *kARDRoomServerHostUrl =
+static NSString * const kARDRoomServerHostUrl =
     @"https://apprtc.appspot.com";
-static NSString *kARDRoomServerRegisterFormat =
-    @"https://apprtc.appspot.com/register/%@";
-static NSString *kARDRoomServerMessageFormat =
+static NSString * const kARDRoomServerJoinFormat =
+    @"https://apprtc.appspot.com/join/%@";
+static NSString * const kARDRoomServerMessageFormat =
     @"https://apprtc.appspot.com/message/%@/%@";
-static NSString *kARDRoomServerByeFormat =
-    @"https://apprtc.appspot.com/bye/%@/%@";
+static NSString * const kARDRoomServerLeaveFormat =
+    @"https://apprtc.appspot.com/leave/%@/%@";
 
-static NSString *kARDAppEngineClientErrorDomain = @"ARDAppEngineClient";
-static NSInteger kARDAppEngineClientErrorBadResponse = -1;
+static NSString * const kARDAppEngineClientErrorDomain = @"ARDAppEngineClient";
+static NSInteger const kARDAppEngineClientErrorBadResponse = -1;
 
 @implementation ARDAppEngineClient
 
 #pragma mark - ARDRoomServerClient
 
-- (void)registerForRoomId:(NSString *)roomId
-    completionHandler:(void (^)(ARDRegisterResponse *response,
-                                NSError *error))completionHandler {
+- (void)joinRoomWithRoomId:(NSString *)roomId
+         completionHandler:(void (^)(ARDJoinResponse *response,
+                                     NSError *error))completionHandler {
   NSParameterAssert(roomId.length);
 
   NSString *urlString =
-      [NSString stringWithFormat:kARDRoomServerRegisterFormat, roomId];
+      [NSString stringWithFormat:kARDRoomServerJoinFormat, roomId];
   NSURL *roomURL = [NSURL URLWithString:urlString];
-  NSLog(@"Registering with room server.");
+  NSLog(@"Joining room:%@ on room server.", roomId);
   NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:roomURL];
   request.HTTPMethod = @"POST";
   __weak ARDAppEngineClient *weakSelf = self;
@@ -72,9 +72,9 @@ static NSInteger kARDAppEngineClientErrorBadResponse = -1;
       }
       return;
     }
-    ARDRegisterResponse *registerResponse =
-        [ARDRegisterResponse responseFromJSONData:data];
-    if (!registerResponse) {
+    ARDJoinResponse *joinResponse =
+        [ARDJoinResponse responseFromJSONData:data];
+    if (!joinResponse) {
       if (completionHandler) {
         NSError *error = [[self class] badResponseError];
         completionHandler(nil, error);
@@ -82,7 +82,7 @@ static NSInteger kARDAppEngineClientErrorBadResponse = -1;
       return;
     }
     if (completionHandler) {
-      completionHandler(registerResponse, nil);
+      completionHandler(joinResponse, nil);
     }
   }];
 }
@@ -132,32 +132,34 @@ static NSInteger kARDAppEngineClientErrorBadResponse = -1;
   }];
 }
 
-- (void)deregisterForRoomId:(NSString *)roomId
+- (void)leaveRoomWithRoomId:(NSString *)roomId
                    clientId:(NSString *)clientId
           completionHandler:(void (^)(NSError *error))completionHandler {
   NSParameterAssert(roomId.length);
   NSParameterAssert(clientId.length);
 
   NSString *urlString =
-      [NSString stringWithFormat:kARDRoomServerByeFormat, roomId, clientId];
+      [NSString stringWithFormat:kARDRoomServerLeaveFormat, roomId, clientId];
   NSURL *url = [NSURL URLWithString:urlString];
-  NSURLRequest *request = [NSURLRequest requestWithURL:url];
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+  request.HTTPMethod = @"POST";
   NSURLResponse *response = nil;
   NSError *error = nil;
-  // We want a synchronous request so that we know that we're unregistered from
-  // room server before we do any further unregistration.
+  // We want a synchronous request so that we know that we've left the room on
+  // room server before we do any further work.
   NSLog(@"C->RS: BYE");
   [NSURLConnection sendSynchronousRequest:request
                         returningResponse:&response
                                     error:&error];
   if (error) {
-    NSLog(@"Error unregistering from room server: %@", error);
+    NSLog(@"Error leaving room %@ on room server: %@",
+          roomId, error.localizedDescription);
     if (completionHandler) {
       completionHandler(error);
     }
     return;
   }
-  NSLog(@"Unregistered from room server.");
+  NSLog(@"Left room:%@ on room server.", roomId);
   if (completionHandler) {
     completionHandler(nil);
   }

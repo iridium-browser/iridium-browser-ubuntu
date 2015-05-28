@@ -38,6 +38,7 @@ enum {
   PORTALLOCATOR_ENABLE_SHARED_UFRAG = 0x80,
   PORTALLOCATOR_ENABLE_SHARED_SOCKET = 0x100,
   PORTALLOCATOR_ENABLE_STUN_RETRANSMIT_ATTRIBUTE = 0x200,
+  PORTALLOCATOR_DISABLE_ADAPTER_ENUMERATION = 0x400,
 };
 
 const uint32 kDefaultPortAllocatorFlags = 0;
@@ -167,6 +168,10 @@ class PortAllocator : public sigslot::has_slots<> {
     return true;
   }
 
+  // Gets/Sets the Origin value used for WebRTC STUN requests.
+  const std::string& origin() const { return origin_; }
+  void set_origin(const std::string& origin) { origin_ = origin; }
+
  protected:
   virtual PortAllocatorSession* CreateSessionInternal(
       const std::string& content_name,
@@ -185,6 +190,7 @@ class PortAllocator : public sigslot::has_slots<> {
   SessionMuxerMap muxers_;
   bool allow_tcp_listen_;
   uint32 candidate_filter_;
+  std::string origin_;
 };
 
 }  // namespace cricket

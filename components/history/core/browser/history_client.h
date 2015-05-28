@@ -13,7 +13,15 @@
 #include "sql/init_status.h"
 #include "url/gurl.h"
 
+namespace base {
+class FilePath;
+}
+
 namespace history {
+
+class HistoryBackend;
+class HistoryDatabase;
+class ThumbnailDatabase;
 
 struct URLAndTitle {
   GURL url;
@@ -44,6 +52,10 @@ class HistoryClient : public KeyedService {
   // If not on the main thread, then BlockUntilBookmarksLoaded must be called.
   virtual void GetBookmarks(std::vector<URLAndTitle>* bookmarks);
 
+  // Returns true if this look like the type of URL that should be added to the
+  // history.
+  virtual bool CanAddURL(const GURL& url);
+
   // Notifies the embedder that there was a problem reading the database.
   //
   // Must be called from the main thread.
@@ -51,6 +63,17 @@ class HistoryClient : public KeyedService {
 
   // Returns whether database errors should be reported to the crash server.
   virtual bool ShouldReportDatabaseError();
+
+  // Called upon initialization of the HistoryBackend.
+  virtual void OnHistoryBackendInitialized(
+      HistoryBackend* history_backend,
+      HistoryDatabase* history_database,
+      ThumbnailDatabase* thumbnail_database,
+      const base::FilePath& history_dir);
+
+  // Called upon destruction of the HistoryBackend.
+  virtual void OnHistoryBackendDestroyed(HistoryBackend* history_backend,
+                                         const base::FilePath& history_dir);
 
  protected:
   DISALLOW_COPY_AND_ASSIGN(HistoryClient);

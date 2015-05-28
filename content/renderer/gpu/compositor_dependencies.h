@@ -16,6 +16,7 @@ namespace cc {
 class BeginFrameSource;
 class ContextProvider;
 class SharedBitmapManager;
+class TaskGraphRunner;
 }
 
 namespace gpu {
@@ -30,6 +31,7 @@ class CompositorDependencies {
   virtual bool IsImplSidePaintingEnabled() = 0;
   virtual bool IsGpuRasterizationForced() = 0;
   virtual bool IsGpuRasterizationEnabled() = 0;
+  virtual int GetGpuRasterizationMSAASampleCount() = 0;
   virtual bool IsLcdTextEnabled() = 0;
   virtual bool IsDistanceFieldTextEnabled() = 0;
   virtual bool IsZeroCopyEnabled() = 0;
@@ -50,6 +52,8 @@ class CompositorDependencies {
   virtual cc::ContextProvider* GetSharedMainThreadContextProvider() = 0;
   virtual scoped_ptr<cc::BeginFrameSource> CreateExternalBeginFrameSource(
       int routing_id) = 0;
+  virtual cc::TaskGraphRunner* GetTaskGraphRunner() = 0;
+  virtual bool IsGatherPixelRefsEnabled() = 0;
 
   virtual ~CompositorDependencies() {}
 };

@@ -19,6 +19,7 @@
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/process_manager.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "ui/base/ime/chromeos/component_extension_ime_manager.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
@@ -81,6 +82,29 @@ static void DispatchEventToExtension(const std::string& extension_id,
                                      const std::string& event_name,
                                      scoped_ptr<base::ListValue> args) {
   Profile* profile = ProfileManager::GetActiveUserProfile();
+  if (event_name != input_ime::OnActivate::kEventName) {
+    // For suspended IME extension (e.g. XKB extension), don't awake it by IME
+    // events except onActivate. The IME extension should be awake by other
+    // events (e.g. runtime.onMessage) from its other pages.
+    // This is to save memory for steady state Chrome OS on which the users
+    // don't want any IME features.
+    extensions::ExtensionSystem* extension_system =
+        extensions::ExtensionSystem::Get(profile);
+    if (extension_system) {
+      const extensions::Extension* extension =
+          extension_system->extension_service()->GetExtensionById(
+              extension_id, false /* include_disabled */);
+      if (!extension)
+        return;
+      extensions::ProcessManager* process_manager =
+          extensions::ProcessManager::Get(profile);
+      if (extensions::BackgroundInfo::HasBackgroundPage(extension) &&
+          !process_manager->GetBackgroundHostForExtension(extension_id)) {
+        return;
+      }
+    }
+  }
+
   scoped_ptr<extensions::Event> event(new extensions::Event(
       event_name, args.Pass()));
   event->restrict_to_browser_context = profile;
@@ -104,9 +128,9 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
   explicit ImeObserver(const std::string& extension_id)
       : extension_id_(extension_id) {}
 
-  virtual ~ImeObserver() {}
+  ~ImeObserver() override {}
 
-  virtual void OnActivate(const std::string& component_id) override {
+  void OnActivate(const std::string& component_id) override {
     if (extension_id_.empty() ||
         !HasListener(input_ime::OnActivate::kEventName))
       return;
@@ -119,7 +143,7 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnActivate::kEventName, args.Pass());
   }
 
-  virtual void OnDeactivated(const std::string& component_id) override {
+  void OnDeactivated(const std::string& component_id) override {
     if (extension_id_.empty() ||
         !HasListener(input_ime::OnDeactivated::kEventName))
       return;
@@ -131,7 +155,7 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnDeactivated::kEventName, args.Pass());
   }
 
-  virtual void OnFocus(
+  void OnFocus(
       const InputMethodEngineInterface::InputContext& context) override {
     if (extension_id_.empty() || !HasListener(input_ime::OnFocus::kEventName))
       return;
@@ -149,7 +173,7 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnFocus::kEventName, args.Pass());
   }
 
-  virtual void OnBlur(int context_id) override {
+  void OnBlur(int context_id) override {
     if (extension_id_.empty() || !HasListener(input_ime::OnBlur::kEventName))
       return;
 
@@ -159,7 +183,7 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnBlur::kEventName, args.Pass());
   }
 
-  virtual void OnInputContextUpdate(
+  void OnInputContextUpdate(
       const InputMethodEngineInterface::InputContext& context) override {
     if (extension_id_.empty() ||
         !HasListener(input_ime::OnInputContextUpdate::kEventName))
@@ -177,10 +201,9 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
                              args.Pass());
   }
 
-  virtual void OnKeyEvent(
-      const std::string& component_id,
-      const InputMethodEngineInterface::KeyboardEvent& event,
-      chromeos::input_method::KeyEventHandle* key_data) override {
+  void OnKeyEvent(const std::string& component_id,
+                  const InputMethodEngineInterface::KeyboardEvent& event,
+                  chromeos::input_method::KeyEventHandle* key_data) override {
     if (extension_id_.empty())
       return;
 
@@ -218,7 +241,7 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnKeyEvent::kEventName, args.Pass());
   }
 
-  virtual void OnCandidateClicked(
+  void OnCandidateClicked(
       const std::string& component_id,
       int candidate_id,
       InputMethodEngineInterface::MouseButtonEvent button) override {
@@ -251,8 +274,8 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnCandidateClicked::kEventName, args.Pass());
   }
 
-  virtual void OnMenuItemActivated(const std::string& component_id,
-                                   const std::string& menu_id) override {
+  void OnMenuItemActivated(const std::string& component_id,
+                           const std::string& menu_id) override {
     if (extension_id_.empty() ||
         !HasListener(input_ime::OnMenuItemActivated::kEventName))
       return;
@@ -264,10 +287,10 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnMenuItemActivated::kEventName, args.Pass());
   }
 
-  virtual void OnSurroundingTextChanged(const std::string& component_id,
-                                        const std::string& text,
-                                        int cursor_pos,
-                                        int anchor_pos) override {
+  void OnSurroundingTextChanged(const std::string& component_id,
+                                const std::string& text,
+                                int cursor_pos,
+                                int anchor_pos) override {
     if (extension_id_.empty() ||
         !HasListener(input_ime::OnSurroundingTextChanged::kEventName))
       return;
@@ -284,26 +307,40 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
                              args.Pass());
   }
 
-  virtual void OnCompositionBoundsChanged(const gfx::Rect& bounds) override {
+  void OnCompositionBoundsChanged(
+      const std::vector<gfx::Rect>& bounds) override {
     if (extension_id_.empty() ||
         !HasListener(kOnCompositionBoundsChangedEventName))
       return;
 
     // Note: this is a private API event.
+    base::ListValue* bounds_list = new base::ListValue();
+    for (size_t i = 0; i < bounds.size(); ++i) {
+      base::DictionaryValue* bounds_value = new base::DictionaryValue();
+      bounds_value->SetInteger("x", bounds[i].x());
+      bounds_value->SetInteger("y", bounds[i].y());
+      bounds_value->SetInteger("w", bounds[i].width());
+      bounds_value->SetInteger("h", bounds[i].height());
+      bounds_list->Append(bounds_value);
+    }
+
+    if (bounds_list->GetSize() <= 0)
+      return;
     scoped_ptr<base::ListValue> args(new base::ListValue());
-    base::DictionaryValue* bounds_value = new base::DictionaryValue();
-    bounds_value->SetInteger("x", bounds.x());
-    bounds_value->SetInteger("y", bounds.y());
-    bounds_value->SetInteger("w", bounds.width());
-    bounds_value->SetInteger("h", bounds.height());
-    args->Append(bounds_value);
+
+    // The old extension code uses the first parameter to get the bounds of the
+    // first composition character, so for backward compatibility, add it here.
+    base::Value* first_value = NULL;
+    if (bounds_list->Get(0, &first_value))
+      args->Append(first_value->DeepCopy());
+    args->Append(bounds_list);
 
     DispatchEventToExtension(extension_id_,
                              kOnCompositionBoundsChangedEventName,
                              args.Pass());
   }
 
-  virtual void OnReset(const std::string& component_id) override {
+  void OnReset(const std::string& component_id) override {
     if (extension_id_.empty() || !HasListener(input_ime::OnReset::kEventName))
       return;
 

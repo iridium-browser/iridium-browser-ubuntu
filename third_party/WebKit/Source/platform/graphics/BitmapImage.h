@@ -35,11 +35,11 @@
 #include "platform/graphics/ImageAnimationPolicy.h"
 #include "platform/graphics/ImageOrientation.h"
 #include "platform/graphics/ImageSource.h"
+#include "platform/image-decoders/ImageAnimation.h"
 #include "wtf/Forward.h"
 
 namespace blink {
 
-class NativeImageSkia;
 template <typename T> class Timer;
 
 class PLATFORM_EXPORT BitmapImage : public Image {
@@ -48,12 +48,15 @@ class PLATFORM_EXPORT BitmapImage : public Image {
     friend class GradientGeneratedImage;
     friend class GraphicsContext;
 public:
-    static PassRefPtr<BitmapImage> create(PassRefPtr<NativeImageSkia>, ImageObserver* = 0);
+    static PassRefPtr<BitmapImage> create(const SkBitmap&, ImageObserver* = 0);
 
     static PassRefPtr<BitmapImage> create(ImageObserver* observer = 0)
     {
         return adoptRef(new BitmapImage(observer));
     }
+
+    // This allows constructing a BitmapImage with a forced non-default orientation.
+    static PassRefPtr<BitmapImage> createWithOrientationForTesting(const SkBitmap&, ImageOrientation);
 
     virtual ~BitmapImage();
 
@@ -69,7 +72,6 @@ public:
 
     bool isAllDataReceived() const { return m_allDataReceived; }
     bool hasColorProfile() const;
-    void resetDecoder();
 
     // It may look unusual that there's no start animation call as public API.
     // This because we start and stop animating lazily. Animation starts when
@@ -82,7 +84,7 @@ public:
     virtual void setAnimationPolicy(ImageAnimationPolicy policy) override { m_animationPolicy = policy; }
     virtual ImageAnimationPolicy animationPolicy() override { return m_animationPolicy; }
 
-    virtual PassRefPtr<NativeImageSkia> nativeImageForCurrentFrame() override;
+    virtual bool bitmapForCurrentFrame(SkBitmap*) override;
     virtual PassRefPtr<Image> imageForDefaultFrame() override;
     virtual bool currentFrameKnownToBeOpaque() override;
     ImageOrientation currentFrameOrientation();
@@ -96,23 +98,22 @@ private:
 
     void updateSize() const;
 
-protected:
+private:
     enum RepetitionCountStatus {
       Unknown,    // We haven't checked the source's repetition count.
       Uncertain,  // We have a repetition count, but it might be wrong (some GIFs have a count after the image data, and will report "loop once" until all data has been decoded).
       Certain     // The repetition count is known to be correct.
     };
 
-    BitmapImage(PassRefPtr<NativeImageSkia>, ImageObserver* = 0);
+    BitmapImage(const SkBitmap &, ImageObserver* = 0);
     BitmapImage(ImageObserver* = 0);
 
-    virtual void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, CompositeOperator, WebBlendMode) override;
-    virtual void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, CompositeOperator, WebBlendMode, RespectImageOrientationEnum) override;
+    void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, SkXfermode::Mode, RespectImageOrientationEnum) override;
 
     size_t currentFrame() const { return m_currentFrame; }
     size_t frameCount();
 
-    PassRefPtr<NativeImageSkia> frameAtIndex(size_t);
+    bool frameAtIndex(size_t, SkBitmap*) WARN_UNUSED_RETURN;
 
     bool frameIsCompleteAtIndex(size_t);
     float frameDurationAtIndex(size_t);
@@ -166,7 +167,6 @@ protected:
     virtual bool mayFillWithSolidColor() override;
     virtual Color solidColor() const override;
 
-private:
     ImageSource m_source;
     mutable IntSize m_size; // The size to use for the overall image (will just be the size of the first image).
     mutable IntSize m_sizeRespectingOrientation;

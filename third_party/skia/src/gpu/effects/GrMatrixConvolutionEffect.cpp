@@ -18,18 +18,17 @@ public:
                           const char* outputColor,
                           const char* inputColor,
                           const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
+                          const TextureSamplerArray&) override;
 
     static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*);
 
-    virtual void setData(const GrGLProgramDataManager&, const GrProcessor&) SK_OVERRIDE;
+    void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
 private:
     typedef GrGLProgramDataManager::UniformHandle UniformHandle;
     SkISize                     fKernelSize;
     bool                        fConvolveAlpha;
 
-    UniformHandle               fBoundsUni;
     UniformHandle               fKernelUni;
     UniformHandle               fImageIncrementUni;
     UniformHandle               fKernelOffsetUni;
@@ -53,9 +52,6 @@ void GrGLMatrixConvolutionEffect::emitCode(GrGLFPBuilder* builder,
                                            const TransformedCoordsArray& coords,
                                            const TextureSamplerArray& samplers) {
     const GrTextureDomain& domain = fp.cast<GrMatrixConvolutionEffect>().domain();
-
-    fBoundsUni = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
-                                     kVec4f_GrSLType, kDefault_GrSLPrecision, "Bounds");
     fImageIncrementUni = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
                                              kVec2f_GrSLType, kDefault_GrSLPrecision,
                                              "ImageIncrement");
@@ -94,6 +90,7 @@ void GrGLMatrixConvolutionEffect::emitCode(GrGLFPBuilder* builder,
             fDomain.sampleTexture(fsBuilder, domain, "c", coord, samplers[0]);
             if (!fConvolveAlpha) {
                 fsBuilder->codeAppend("c.rgb /= c.a;");
+                fsBuilder->codeAppend("c.rgb = clamp(c.rgb, 0.0, 1.0);");
             }
             fsBuilder->codeAppend("sum += c * k;");
         }
@@ -156,7 +153,7 @@ GrMatrixConvolutionEffect::GrMatrixConvolutionEffect(GrTexture* texture,
     fGain(SkScalarToFloat(gain)),
     fBias(SkScalarToFloat(bias) / 255.0f),
     fConvolveAlpha(convolveAlpha),
-    fDomain(GrTextureDomain::MakeTexelDomain(texture, bounds), tileMode) {
+    fDomain(GrTextureDomain::MakeTexelDomainForMode(texture, bounds, tileMode), tileMode) {
     this->initClassID<GrMatrixConvolutionEffect>();
     for (int i = 0; i < kernelSize.width() * kernelSize.height(); i++) {
         fKernel[i] = SkScalarToFloat(kernel[i]);

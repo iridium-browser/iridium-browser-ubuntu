@@ -46,18 +46,26 @@ void UpdateFromSystemSettings(content::RendererPreferences* prefs,
   prefs->enable_referrers = pref_service->GetBoolean(prefs::kEnableReferrers);
   prefs->enable_do_not_track =
       pref_service->GetBoolean(prefs::kEnableDoNotTrack);
+#if defined(ENABLE_WEBRTC)
+  prefs->enable_webrtc_multiple_routes =
+      pref_service->GetBoolean(prefs::kWebRTCMultipleRoutesEnabled);
+#endif
 
-  double default_zoom_level = -1;
+  double default_zoom_level = 0;
+  bool default_zoom_level_set = false;
 #if !defined(OS_ANDROID)
   ui_zoom::ZoomController* zoom_controller =
       ui_zoom::ZoomController::FromWebContents(web_contents);
-  if (zoom_controller)
+  if (zoom_controller) {
     default_zoom_level = zoom_controller->GetDefaultZoomLevel();
+    default_zoom_level_set = true;
+  }
 #endif
 
-  if (default_zoom_level < 0) {
-    default_zoom_level = content::HostZoomMap::GetDefaultForBrowserContext(
-        web_contents->GetBrowserContext())->GetDefaultZoomLevel();
+  if (!default_zoom_level_set) {
+    default_zoom_level =
+        content::HostZoomMap::Get(web_contents->GetSiteInstance())
+            ->GetDefaultZoomLevel();
   }
   prefs->default_zoom_level = default_zoom_level;
 
@@ -98,7 +106,7 @@ void UpdateFromSystemSettings(content::RendererPreferences* prefs,
   }
 #endif
 
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+#if defined(OS_LINUX) || defined(OS_ANDROID) || defined(OS_WIN)
   CR_DEFINE_STATIC_LOCAL(const gfx::FontRenderParams, params,
       (gfx::GetFontRenderParams(gfx::FontRenderParamsQuery(true), NULL)));
   prefs->should_antialias_text = params.antialiasing;

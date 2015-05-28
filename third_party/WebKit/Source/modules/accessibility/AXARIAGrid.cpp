@@ -29,7 +29,7 @@
 #include "config.h"
 #include "modules/accessibility/AXARIAGrid.h"
 
-#include "core/rendering/RenderObject.h"
+#include "core/layout/LayoutObject.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "modules/accessibility/AXTableColumn.h"
 #include "modules/accessibility/AXTableRow.h"
@@ -37,8 +37,8 @@
 
 namespace blink {
 
-AXARIAGrid::AXARIAGrid(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
-    : AXTable(renderer, axObjectCache)
+AXARIAGrid::AXARIAGrid(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
+    : AXTable(layoutObject, axObjectCache)
 {
 }
 
@@ -46,9 +46,9 @@ AXARIAGrid::~AXARIAGrid()
 {
 }
 
-PassRefPtr<AXARIAGrid> AXARIAGrid::create(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
+PassRefPtr<AXARIAGrid> AXARIAGrid::create(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
 {
-    return adoptRef(new AXARIAGrid(renderer, axObjectCache));
+    return adoptRef(new AXARIAGrid(layoutObject, axObjectCache));
 }
 
 bool AXARIAGrid::addTableCellChild(AXObject* child, HashSet<AXObject*>& appendedRows, unsigned& columnCount)
@@ -84,12 +84,12 @@ void AXARIAGrid::addChildren()
     ASSERT(!m_haveChildren);
 
     if (!isAXTable()) {
-        AXRenderObject::addChildren();
+        AXLayoutObject::addChildren();
         return;
     }
 
     m_haveChildren = true;
-    if (!m_renderer)
+    if (!m_layoutObject)
         return;
 
     AXObjectCacheImpl* axCache = axObjectCache();
@@ -101,16 +101,14 @@ void AXARIAGrid::addChildren()
 
         if (!addTableCellChild(child.get(), appendedRows, columnCount)) {
 
-            // in case the render tree doesn't match the expected ARIA hierarchy, look at the children
+            // in case the layout tree doesn't match the expected ARIA hierarchy, look at the children
             if (!child->hasChildren())
                 child->addChildren();
 
             // The children of this non-row will contain all non-ignored elements (recursing to find them).
             // This allows the table to dive arbitrarily deep to find the rows.
-            AccessibilityChildrenVector children = child->children();
-            size_t length = children.size();
-            for (size_t i = 0; i < length; ++i)
-                addTableCellChild(children[i].get(), appendedRows, columnCount);
+            for (const auto& childObject : child->children())
+                addTableCellChild(childObject.get(), appendedRows, columnCount);
         }
     }
 

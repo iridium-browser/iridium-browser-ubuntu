@@ -50,7 +50,7 @@ class HTMLVideoElement final : public HTMLMediaElement, public CanvasImageSource
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLVideoElement> create(Document&);
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     unsigned videoWidth() const;
     unsigned videoHeight() const;
@@ -69,10 +69,9 @@ public:
     void paintCurrentFrameInContext(GraphicsContext*, const IntRect&) const;
 
     // Used by WebGL to do GPU-GPU textures copy if possible.
-    // See more details at MediaPlayer::copyVideoTextureToPlatformTexture() defined in Source/WebCore/platform/graphics/MediaPlayer.h.
     bool copyVideoTextureToPlatformTexture(WebGraphicsContext3D*, Platform3DObject texture, GC3Dint level, GLenum internalFormat, GLenum type, bool premultiplyAlpha, bool flipY);
 
-    bool shouldDisplayPosterImage() const { return displayMode() == Poster || displayMode() == PosterWaitingForVideo; }
+    bool shouldDisplayPosterImage() const { return displayMode() == Poster; }
 
     KURL posterImageURL() const;
 
@@ -91,8 +90,8 @@ public:
 private:
     HTMLVideoElement(Document&);
 
-    virtual bool rendererIsNeeded(const RenderStyle&) override;
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
     virtual void attach(const AttachContext& = AttachContext()) override;
     virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual bool isPresentationAttribute(const QualifiedName&) const override;

@@ -28,9 +28,9 @@
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/seccomp-bpf-helpers/syscall_parameters_restrictions.h"
 #include "sandbox/linux/seccomp-bpf-helpers/syscall_sets.h"
-#include "sandbox/linux/services/linux_syscalls.h"
 #include "sandbox/linux/syscall_broker/broker_file_permission.h"
 #include "sandbox/linux/syscall_broker/broker_process.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 
 using sandbox::arch_seccomp_data;
 using sandbox::bpf_dsl::Allow;
@@ -321,6 +321,7 @@ void GpuProcessPolicy::InitGpuBrokerProcess(
     const std::vector<BrokerFilePermission>& permissions_extra) {
   static const char kDriRcPath[] = "/etc/drirc";
   static const char kDriCard0Path[] = "/dev/dri/card0";
+  static const char kDriRenderNode0Path[] = "/dev/dri/renderD128";
   static const char kDevShm[] = "/dev/shm/";
 
   CHECK(broker_process_ == NULL);
@@ -328,6 +329,7 @@ void GpuProcessPolicy::InitGpuBrokerProcess(
   // All GPU process policies need these files brokered out.
   std::vector<BrokerFilePermission> permissions;
   permissions.push_back(BrokerFilePermission::ReadWrite(kDriCard0Path));
+  permissions.push_back(BrokerFilePermission::ReadWrite(kDriRenderNode0Path));
   permissions.push_back(BrokerFilePermission::ReadOnly(kDriRcPath));
   if (!IsChromeOS()) {
     permissions.push_back(

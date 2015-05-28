@@ -118,8 +118,14 @@ class ValidatorBase(page_test.PageTest):
       self.device_string = device.device_string
     else:
       raise Exception('GPU device information was incomplete')
+    # TODO(senorblanco): This should probably be checking
+    # for the presence of the extensions in system_info.gpu_aux_attributes
+    # in order to check for MSAA, rather than sniffing the blacklist.
     self.msaa = not (
-        'disable_multisampling' in system_info.gpu.driver_bug_workarounds)
+        ('disable_chromium_framebuffer_multisample' in
+          system_info.gpu.driver_bug_workarounds) or
+        ('disable_multisample_render_to_texture' in
+          system_info.gpu.driver_bug_workarounds))
 
   def _FormatGpuInfo(self, tab):
     self._ComputeGpuInfo(tab)
@@ -143,7 +149,7 @@ class ValidatorBase(page_test.PageTest):
     # PNG to disk, following the pattern in bitmap_unittest.py. The key to
     # avoiding PermissionErrors seems to be to not actually try to write to
     # the temporary file object, but to re-open its name for all operations.
-    temp_file = tempfile.NamedTemporaryFile().name
+    temp_file = tempfile.NamedTemporaryFile(suffix='.png').name
     image_util.WritePngFile(bitmap, temp_file)
     cloud_storage.Insert(bucket, name, temp_file, publicly_readable=public)
 
@@ -169,7 +175,7 @@ class ValidatorBase(page_test.PageTest):
     # temporary file and gsutil's overwriting it.
     if not self.options.refimg_cloud_storage_bucket:
       raise Exception('--refimg-cloud-storage-bucket argument is required')
-    temp_file = tempfile.NamedTemporaryFile().name
+    temp_file = tempfile.NamedTemporaryFile(suffix='.png').name
     cloud_storage.Get(self.options.refimg_cloud_storage_bucket,
                       self._FormatReferenceImageName(img_name, page, tab),
                       temp_file)

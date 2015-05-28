@@ -213,18 +213,6 @@ base::DictionaryValue* GpuInfoAsDictionaryValue() {
   info->Set("basic_info", basic_info);
 
 #if defined(OS_WIN)
-  base::ListValue* perf_info = new base::ListValue();
-  perf_info->Append(NewDescriptionValuePair(
-      "Graphics",
-      base::StringPrintf("%.1f", gpu_info.performance_stats.graphics)));
-  perf_info->Append(NewDescriptionValuePair(
-      "Gaming",
-      base::StringPrintf("%.1f", gpu_info.performance_stats.gaming)));
-  perf_info->Append(NewDescriptionValuePair(
-      "Overall",
-      base::StringPrintf("%.1f", gpu_info.performance_stats.overall)));
-  info->Set("performance_info", perf_info);
-
   base::Value* dx_info = gpu_info.dx_diagnostics.children.size() ?
     DxDiagNodeToList(gpu_info.dx_diagnostics) :
     base::Value::CreateNullValue();
@@ -288,7 +276,7 @@ GpuMessageHandler::~GpuMessageHandler() {
 
 /* BrowserBridge.callAsync prepends a requestID to these messages. */
 void GpuMessageHandler::RegisterMessages() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   web_ui()->RegisterMessageCallback("browserBridgeInitialized",
       base::Bind(&GpuMessageHandler::OnBrowserBridgeInitialized,
@@ -347,7 +335,7 @@ void GpuMessageHandler::OnCallAsync(const base::ListValue* args) {
 
 void GpuMessageHandler::OnBrowserBridgeInitialized(
     const base::ListValue* args) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Watch for changes in GPUInfo
   if (!observing_) {
@@ -367,7 +355,7 @@ void GpuMessageHandler::OnBrowserBridgeInitialized(
 
 base::Value* GpuMessageHandler::OnRequestClientInfo(
     const base::ListValue* list) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   base::DictionaryValue* dict = new base::DictionaryValue();
 
@@ -388,7 +376,7 @@ base::Value* GpuMessageHandler::OnRequestClientInfo(
 }
 
 base::Value* GpuMessageHandler::OnRequestLogMessages(const base::ListValue*) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   return GpuDataManagerImpl::GetInstance()->GetLogMessages();
 }

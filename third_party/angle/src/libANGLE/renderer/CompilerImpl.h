@@ -7,6 +7,7 @@
 // CompilerImpl.h: Defines the rx::CompilerImpl class, an implementation interface
 //                 for the gl::Compiler object.
 
+#include "common/angleutils.h"
 #include "libANGLE/Error.h"
 
 #ifndef LIBANGLE_RENDERER_COMPILERIMPL_H_
@@ -15,7 +16,7 @@
 namespace rx
 {
 
-class CompilerImpl
+class CompilerImpl : angle::NonCopyable
 {
   public:
     CompilerImpl() {}

@@ -4,7 +4,7 @@
 
 #include "sync/engine/commit.h"
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "sync/engine/commit_contribution.h"
 #include "sync/engine/commit_processor.h"
 #include "sync/engine/commit_util.h"
@@ -83,6 +83,7 @@ Commit* Commit::Init(
 }
 
 SyncerError Commit::PostAndProcessResponse(
+    sessions::NudgeTracker* nudge_tracker,
     sessions::SyncSession* session,
     sessions::StatusController* status,
     ExtensionsActivity* extensions_activity) {
@@ -109,7 +110,7 @@ SyncerError Commit::PostAndProcessResponse(
 
   TRACE_EVENT_BEGIN0("sync", "PostCommit");
   const SyncerError post_result = SyncerProtoUtil::PostClientToServerMessage(
-      &message_, &response_, session);
+      &message_, &response_, session, NULL);
   TRACE_EVENT_END0("sync", "PostCommit");
 
   // TODO(rlarocque): Use result that includes errors captured later?
@@ -153,6 +154,9 @@ SyncerError Commit::PostAndProcessResponse(
                  "type", ModelTypeToString(it->first));
     SyncerError type_result =
         it->second->ProcessCommitResponse(response_, status);
+    if (type_result == SERVER_RETURN_CONFLICT) {
+      nudge_tracker->RecordCommitConflict(it->first);
+    }
     if (processing_result == SYNCER_OK && type_result != SYNCER_OK) {
       processing_result = type_result;
     }

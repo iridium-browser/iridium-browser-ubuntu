@@ -10,12 +10,12 @@
 #include "base/strings/string16.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/gfx/color_utils.h"
@@ -29,6 +29,8 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #endif
+
+using bookmarks::BookmarkModel;
 
 namespace {
 
@@ -128,7 +130,7 @@ void ProfileSigninConfirmationHelper::OnHistoryQueryResults(
 }
 
 void ProfileSigninConfirmationHelper::CheckHasHistory(int max_entries) {
-  HistoryService* service =
+  history::HistoryService* service =
       HistoryServiceFactory::GetForProfileWithoutCreating(profile_);
   pending_requests_++;
   if (!service) {
@@ -147,7 +149,7 @@ void ProfileSigninConfirmationHelper::CheckHasHistory(int max_entries) {
 }
 
 void ProfileSigninConfirmationHelper::CheckHasTypedURLs() {
-  HistoryService* service =
+  history::HistoryService* service =
       HistoryServiceFactory::GetForProfileWithoutCreating(profile_);
   pending_requests_++;
   if (!service) {

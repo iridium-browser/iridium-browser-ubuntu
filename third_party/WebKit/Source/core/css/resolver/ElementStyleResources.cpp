@@ -25,9 +25,9 @@
 
 #include "core/css/CSSGradientValue.h"
 #include "core/css/CSSSVGDocumentValue.h"
-#include "core/rendering/style/StyleGeneratedImage.h"
-#include "core/rendering/style/StyleImage.h"
-#include "core/rendering/style/StylePendingImage.h"
+#include "core/style/StyleGeneratedImage.h"
+#include "core/style/StyleImage.h"
+#include "core/style/StylePendingImage.h"
 #include "platform/graphics/filters/FilterOperation.h"
 
 namespace blink {

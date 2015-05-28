@@ -4,9 +4,7 @@
 // found in the LICENSE file.
 //
 
-// Texture.h: Defines the abstract gl::Texture class and its concrete derived
-// classes Texture2D and TextureCubeMap. Implements GL texture objects and
-// related functionality. [OpenGL ES 2.0.24] section 3.7 page 63.
+// Texture.h: Defines the gl::Texture class [OpenGL ES 2.0.24] section 3.7 page 63.
 
 #ifndef LIBANGLE_TEXTURE_H_
 #define LIBANGLE_TEXTURE_H_
@@ -21,28 +19,21 @@
 #include "angle_gl.h"
 
 #include <vector>
+#include <map>
 
 namespace egl
 {
 class Surface;
 }
 
-namespace rx
-{
-class TextureStorageInterface;
-class Image;
-}
-
 namespace gl
 {
 class Framebuffer;
-class FramebufferAttachment;
-struct ImageIndex;
 struct Data;
 
 bool IsMipmapFiltered(const gl::SamplerState &samplerState);
 
-class Texture : public RefCountObject
+class Texture final : public RefCountObject
 {
   public:
     Texture(rx::TextureImpl *impl, GLuint id, GLenum target);
@@ -57,16 +48,13 @@ class Texture : public RefCountObject
     void setUsage(GLenum usage);
     GLenum getUsage() const;
 
-    GLint getBaseLevelWidth() const;
-    GLint getBaseLevelHeight() const;
-    GLint getBaseLevelDepth() const;
-    GLenum getBaseLevelInternalFormat() const;
+    size_t getWidth(GLenum target, size_t level) const;
+    size_t getHeight(GLenum target, size_t level) const;
+    size_t getDepth(GLenum target, size_t level) const;
+    GLenum getInternalFormat(GLenum target, size_t level) const;
 
-    GLsizei getWidth(const ImageIndex &index) const;
-    GLsizei getHeight(const ImageIndex &index) const;
-    GLenum getInternalFormat(const ImageIndex &index) const;
-
-    virtual bool isSamplerComplete(const SamplerState &samplerState, const Data &data) const = 0;
+    bool isSamplerComplete(const SamplerState &samplerState, const Data &data) const;
+    bool isCubeComplete() const;
 
     virtual Error setImage(GLenum target, size_t level, GLenum internalFormat, const Extents &size, GLenum format, GLenum type,
                            const PixelUnpackState &unpack, const uint8_t *pixels);
@@ -94,14 +82,15 @@ class Texture : public RefCountObject
     bool isImmutable() const;
     GLsizei immutableLevelCount();
 
+    void bindTexImage(egl::Surface *surface);
+    void releaseTexImage();
+
     rx::TextureImpl *getImplementation() { return mTexture; }
     const rx::TextureImpl *getImplementation() const { return mTexture; }
 
     static const GLuint INCOMPLETE_TEXTURE_ID = static_cast<GLuint>(-1);   // Every texture takes an id at creation time. The value is arbitrary because it is never registered with the resource manager.
 
-  protected:
-    int mipLevels() const;
-    const rx::Image *getBaseLevelImage() const;
+  private:
     static unsigned int issueTextureSerial();
 
     rx::TextureImpl *mTexture;
@@ -113,123 +102,53 @@ class Texture : public RefCountObject
 
     GLenum mTarget;
 
+
+    struct ImageDesc
+    {
+        Extents size;
+        GLenum internalFormat;
+
+        ImageDesc();
+        ImageDesc(const Extents &size, GLenum internalFormat);
+    };
+
     const unsigned int mTextureSerial;
     static unsigned int mCurrentTextureSerial;
 
-  private:
-    DISALLOW_COPY_AND_ASSIGN(Texture);
-};
+    GLenum getBaseImageTarget() const;
+    size_t getExpectedMipLevels() const;
 
-class Texture2D : public Texture
-{
-  public:
-    Texture2D(rx::TextureImpl *impl, GLuint id);
+    bool computeSamplerCompleteness(const SamplerState &samplerState, const Data &data) const;
+    bool computeMipmapCompleteness(const gl::SamplerState &samplerState) const;
+    bool computeLevelCompleteness(GLenum target, size_t level, const gl::SamplerState &samplerState) const;
 
-    virtual ~Texture2D();
+    const ImageDesc &getImageDesc(GLenum target, size_t level) const;
+    void setImageDesc(GLenum target, size_t level, const ImageDesc &desc);
+    void setImageDescChain(size_t levels, Extents baseSize, GLenum sizedInternalFormat);
+    void clearImageDesc(GLenum target, size_t level);
+    void clearImageDescs();
 
-    GLsizei getWidth(GLint level) const;
-    GLsizei getHeight(GLint level) const;
-    GLenum getInternalFormat(GLint level) const;
-    bool isCompressed(GLint level) const;
-    bool isDepth(GLint level) const;
+    std::vector<ImageDesc> mImageDescs;
 
-    Error setImage(GLenum target, size_t level, GLenum internalFormat, const Extents &size, GLenum format, GLenum type,
-                   const PixelUnpackState &unpack, const uint8_t *pixels) override;
+    struct SamplerCompletenessCache
+    {
+        SamplerCompletenessCache();
 
-    Error setCompressedImage(GLenum target, size_t level, GLenum internalFormat, const Extents &size,
-                             const PixelUnpackState &unpack, const uint8_t *pixels) override;
+        bool cacheValid;
 
-    Error copyImage(GLenum target, size_t level, const Rectangle &sourceArea, GLenum internalFormat,
-                    const Framebuffer *source) override;
+        // All values that affect sampler completeness that are not stored within
+        // the texture itself
+        SamplerState samplerState;
+        bool filterable;
+        GLint clientVersion;
+        bool supportsNPOT;
 
-    Error setStorage(GLenum target, size_t levels, GLenum internalFormat, const Extents &size) override;
+        // Result of the sampler completeness with the above parameters
+        bool samplerComplete;
+    };
+    mutable SamplerCompletenessCache mCompletenessCache;
 
-    Error generateMipmaps() override;
-
-    virtual bool isSamplerComplete(const SamplerState &samplerState, const Data &data) const;
-    virtual void bindTexImage(egl::Surface *surface);
-    virtual void releaseTexImage();
-
-  private:
-    DISALLOW_COPY_AND_ASSIGN(Texture2D);
-
-    bool isMipmapComplete() const;
-    bool isLevelComplete(int level) const;
-
-    egl::Surface *mSurface;
-};
-
-class TextureCubeMap : public Texture
-{
-  public:
-    TextureCubeMap(rx::TextureImpl *impl, GLuint id);
-
-    virtual ~TextureCubeMap();
-
-    GLsizei getWidth(GLenum target, GLint level) const;
-    GLsizei getHeight(GLenum target, GLint level) const;
-    GLenum getInternalFormat(GLenum target, GLint level) const;
-    bool isCompressed(GLenum target, GLint level) const;
-    bool isDepth(GLenum target, GLint level) const;
-
-    virtual bool isSamplerComplete(const SamplerState &samplerState, const Data &data) const;
-
-    bool isCubeComplete() const;
-
-    static int targetToLayerIndex(GLenum target);
-    static GLenum layerIndexToTarget(GLint layer);
-
-  private:
-    DISALLOW_COPY_AND_ASSIGN(TextureCubeMap);
-
-    bool isMipmapComplete() const;
-    bool isFaceLevelComplete(int faceIndex, int level) const;
-};
-
-class Texture3D : public Texture
-{
-  public:
-    Texture3D(rx::TextureImpl *impl, GLuint id);
-
-    virtual ~Texture3D();
-
-    GLsizei getWidth(GLint level) const;
-    GLsizei getHeight(GLint level) const;
-    GLsizei getDepth(GLint level) const;
-    GLenum getInternalFormat(GLint level) const;
-    bool isCompressed(GLint level) const;
-    bool isDepth(GLint level) const;
-
-    virtual bool isSamplerComplete(const SamplerState &samplerState, const Data &data) const;
-
-  private:
-    DISALLOW_COPY_AND_ASSIGN(Texture3D);
-
-    bool isMipmapComplete() const;
-    bool isLevelComplete(int level) const;
-};
-
-class Texture2DArray : public Texture
-{
-  public:
-    Texture2DArray(rx::TextureImpl *impl, GLuint id);
-
-    virtual ~Texture2DArray();
-
-    GLsizei getWidth(GLint level) const;
-    GLsizei getHeight(GLint level) const;
-    GLsizei getLayers(GLint level) const;
-    GLenum getInternalFormat(GLint level) const;
-    bool isCompressed(GLint level) const;
-    bool isDepth(GLint level) const;
-
-    virtual bool isSamplerComplete(const SamplerState &samplerState, const Data &data) const;
-
-  private:
-    DISALLOW_COPY_AND_ASSIGN(Texture2DArray);
-
-    bool isMipmapComplete() const;
-    bool isLevelComplete(int level) const;
+    egl::Surface *mBoundSurface;
 };
 
 }

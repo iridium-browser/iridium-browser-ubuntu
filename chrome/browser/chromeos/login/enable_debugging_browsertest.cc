@@ -4,6 +4,7 @@
 
 #include <string>
 
+#include "base/command_line.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
@@ -25,6 +26,7 @@
 #include "chromeos/dbus/fake_update_engine_client.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
+#include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
 
@@ -246,7 +248,7 @@ class EnableDebuggingTest : public LoginManagerTest {
 
   void ShowSetupScreen() {
     debug_daemon_client_->SetDebuggingFeaturesStatus(
-        DebugDaemonClient::DEV_FEATURE_ROOTFS_VERIFICATION_REMOVED);
+        debugd::DevFeatureFlag::DEV_FEATURE_ROOTFS_VERIFICATION_REMOVED);
     WaitUntilJSIsReady();
     JSExpect("!!document.querySelector('#debugging.hidden')");
     InvokeEnableDebuggingScreen();
@@ -306,8 +308,8 @@ IN_PROC_BROWSER_TEST_F(EnableDebuggingTest, ShowSetup) {
 // Invoking debug screen should show remove protection screen.
 IN_PROC_BROWSER_TEST_F(EnableDebuggingTest, ShowOnTestImages) {
   debug_daemon_client_->SetDebuggingFeaturesStatus(
-      DebugDaemonClient::DEV_FEATURE_SSH_SERVER_CONFIGURED |
-      DebugDaemonClient::DEV_FEATURE_SYSTEM_ROOT_PASSWORD_SET);
+      debugd::DevFeatureFlag::DEV_FEATURE_SSH_SERVER_CONFIGURED |
+      debugd::DevFeatureFlag::DEV_FEATURE_SYSTEM_ROOT_PASSWORD_SET);
   WaitUntilJSIsReady();
   JSExpect("!!document.querySelector('#debugging.hidden')");
   InvokeEnableDebuggingScreen();
@@ -397,7 +399,7 @@ class EnableDebuggingRequestedTest : public EnableDebuggingTest {
     EnableDebuggingTest::SetUpInProcessBrowserTestFixture();
 
     debug_daemon_client_->SetDebuggingFeaturesStatus(
-        DebugDaemonClient::DEV_FEATURE_ROOTFS_VERIFICATION_REMOVED);
+        debugd::DevFeatureFlag::DEV_FEATURE_ROOTFS_VERIFICATION_REMOVED);
   }
 };
 

@@ -4,6 +4,7 @@
 
 package org.chromium.media;
 
+import android.annotation.TargetApi;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothManager;
 import android.content.BroadcastReceiver;
@@ -68,18 +69,6 @@ class AudioManagerAndroid {
             }
             return true;
         }
-    }
-
-    private static boolean runningOnJellyBeanOrHigher() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN;
-    }
-
-    private static boolean runningOnJellyBeanMR1OrHigher() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1;
-    }
-
-    private static boolean runningOnJellyBeanMR2OrHigher() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2;
     }
 
     /** Simple container for device information. */
@@ -245,8 +234,7 @@ class AudioManagerAndroid {
         checkIfCalledOnValidThread();
         if (DEBUG) logd("init");
         if (DEBUG) logDeviceInfo();
-        if (mIsInitialized)
-            return;
+        if (mIsInitialized) return;
 
         // Check if process has MODIFY_AUDIO_SETTINGS and RECORD_AUDIO
         // permissions. Both are required for full functionality.
@@ -287,8 +275,7 @@ class AudioManagerAndroid {
     private void close() {
         checkIfCalledOnValidThread();
         if (DEBUG) logd("close");
-        if (!mIsInitialized)
-            return;
+        if (!mIsInitialized) return;
 
         stopObservingVolumeChanges();
         unregisterForWiredHeadsetIntentBroadcast();
@@ -384,8 +371,7 @@ class AudioManagerAndroid {
     @CalledByNative
     private boolean setDevice(String deviceId) {
         if (DEBUG) logd("setDevice: " + deviceId);
-        if (!mIsInitialized)
-            return false;
+        if (!mIsInitialized) return false;
         if (!mHasModifyAudioSettingsPermission || !mHasRecordAudioPermission) {
             Log.w(TAG, "Requires MODIFY_AUDIO_SETTINGS and RECORD_AUDIO");
             Log.w(TAG, "Selected device will not be available for recording");
@@ -428,8 +414,7 @@ class AudioManagerAndroid {
     @CalledByNative
     private AudioDeviceName[] getAudioInputDeviceNames() {
         if (DEBUG) logd("getAudioInputDeviceNames");
-        if (!mIsInitialized)
-            return null;
+        if (!mIsInitialized) return null;
         if (!mHasModifyAudioSettingsPermission || !mHasRecordAudioPermission) {
             Log.w(TAG, "Requires MODIFY_AUDIO_SETTINGS and RECORD_AUDIO");
             Log.w(TAG, "No audio device will be available for recording");
@@ -455,9 +440,10 @@ class AudioManagerAndroid {
         return array;
     }
 
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR1)
     @CalledByNative
     private int getNativeOutputSampleRate() {
-        if (runningOnJellyBeanMR1OrHigher()) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
             String sampleRateString = mAudioManager.getProperty(
                     AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
             return sampleRateString == null
@@ -513,18 +499,23 @@ class AudioManagerAndroid {
                 PackageManager.FEATURE_AUDIO_LOW_LATENCY);
     }
 
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR1)
     @CalledByNative
     private int getAudioLowLatencyOutputFrameSize() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            return DEFAULT_FRAME_PER_BUFFER;
+        }
         String framesPerBuffer =
                 mAudioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
         return framesPerBuffer == null
                 ? DEFAULT_FRAME_PER_BUFFER : Integer.parseInt(framesPerBuffer);
     }
 
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
     @CalledByNative
     private static boolean shouldUseAcousticEchoCanceler() {
         // AcousticEchoCanceler was added in API level 16 (Jelly Bean).
-        if (!runningOnJellyBeanOrHigher()) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
             return false;
         }
 
@@ -642,6 +633,7 @@ class AudioManagerAndroid {
      * android.bluetooth.BluetoothAdapter.getProfileConnectionState() requires
      * the BLUETOOTH permission.
      */
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR2)
     private boolean hasBluetoothHeadset() {
         if (!mHasBluetoothPermission) {
             Log.w(TAG, "hasBluetoothHeadset() requires BLUETOOTH permission");
@@ -654,7 +646,7 @@ class AudioManagerAndroid {
         // higher, retrieve it through getSystemService(String) with
         // BLUETOOTH_SERVICE.
         BluetoothAdapter btAdapter = null;
-        if (runningOnJellyBeanMR2OrHigher()) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
             // Use BluetoothManager to get the BluetoothAdapter for
             // Android 4.3 and above.
             BluetoothManager btManager =
@@ -1025,8 +1017,7 @@ class AudioManagerAndroid {
         synchronized (mLock) {
             List<String> devices = new ArrayList<String>();
             for (int i = 0; i < DEVICE_COUNT; ++i) {
-                if (mAudioDevices[i])
-                    devices.add(DEVICE_NAMES[i]);
+                if (mAudioDevices[i]) devices.add(DEVICE_NAMES[i]);
             }
             if (DEBUG) {
                 logd("reportUpdate: requested=" + mRequestedAudioDevice
@@ -1062,8 +1053,7 @@ class AudioManagerAndroid {
     /** Start thread which observes volume changes on the voice stream. */
     private void startObservingVolumeChanges() {
         if (DEBUG) logd("startObservingVolumeChanges");
-        if (mSettingsObserverThread != null)
-            return;
+        if (mSettingsObserverThread != null) return;
         mSettingsObserverThread = new HandlerThread("SettingsObserver");
         mSettingsObserverThread.start();
 
@@ -1098,8 +1088,7 @@ class AudioManagerAndroid {
     /** Quit observer thread and stop listening for volume changes. */
     private void stopObservingVolumeChanges() {
         if (DEBUG) logd("stopObservingVolumeChanges");
-        if (mSettingsObserverThread == null)
-            return;
+        if (mSettingsObserverThread == null) return;
 
         mContentResolver.unregisterContentObserver(mSettingsObserver);
         mSettingsObserver = null;

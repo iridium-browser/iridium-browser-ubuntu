@@ -11,10 +11,12 @@
 #include "base/time/time.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/safe_browsing/zip_analyzer.h"
+#include "chrome/common/safe_browsing/zip_analyzer_results.h"
 #include "chrome/utility/chrome_content_utility_ipc_whitelist.h"
 #include "chrome/utility/utility_message_handler.h"
 #include "content/public/child/image_decoder_utils.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/service_registry.h"
 #include "content/public/utility/utility_thread.h"
 #include "courgette/courgette.h"
 #include "courgette/third_party/bsdiff.h"
@@ -27,6 +29,7 @@
 
 #if !defined(OS_ANDROID)
 #include "chrome/utility/profile_import_handler.h"
+#include "net/proxy/mojo_proxy_resolver_factory_impl.h"
 #endif
 
 #if defined(OS_WIN)
@@ -71,6 +74,17 @@ void FinishParseMediaMetadata(
 }
 #endif
 
+#if !defined(OS_ANDROID)
+void CreateProxyResolverFactory(
+    mojo::InterfaceRequest<net::interfaces::ProxyResolverFactory> request) {
+  // MojoProxyResolverFactoryImpl is strongly bound to the Mojo message pipe it
+  // is connected to. When that message pipe is closed, either explicitly on the
+  // other end (in the browser process), or by a connection error, this object
+  // will be destroyed.
+  new net::MojoProxyResolverFactoryImpl(request.Pass());
+}
+#endif  // OS_ANDROID
+
 }  // namespace
 
 int64_t ChromeContentUtilityClient::max_ipc_message_size_ =
@@ -109,7 +123,7 @@ ChromeContentUtilityClient::~ChromeContentUtilityClient() {
 
 void ChromeContentUtilityClient::UtilityThreadStarted() {
 #if defined(ENABLE_EXTENSIONS)
-  extensions::ExtensionsHandler::UtilityThreadStarted();
+  extensions::UtilityHandler::UtilityThreadStarted();
 #endif
 
   if (kMessageWhitelistSize > 0) {
@@ -160,14 +174,18 @@ bool ChromeContentUtilityClient::OnMessageReceived(
   return handled;
 }
 
+void ChromeContentUtilityClient::RegisterMojoServices(
+    content::ServiceRegistry* registry) {
+#if !defined(OS_ANDROID)
+  registry->AddService<net::interfaces::ProxyResolverFactory>(
+      base::Bind(CreateProxyResolverFactory));
+#endif
+}
+
 // static
 void ChromeContentUtilityClient::PreSandboxStartup() {
 #if defined(ENABLE_EXTENSIONS)
   extensions::ExtensionsHandler::PreSandboxStartup();
-#endif
-
-#if defined(ENABLE_PRINT_PREVIEW) || defined(OS_WIN)
-  PrintingHandler::PreSandboxStartup();
 #endif
 
 #if defined(ENABLE_MDNS)
@@ -181,9 +199,13 @@ void ChromeContentUtilityClient::PreSandboxStartup() {
 // static
 SkBitmap ChromeContentUtilityClient::DecodeImage(
     const std::vector<unsigned char>& encoded_data, bool shrink_to_fit) {
-  SkBitmap decoded_image = content::DecodeImage(&encoded_data[0],
-                                                gfx::Size(),
-                                                encoded_data.size());
+  SkBitmap decoded_image;
+  if (encoded_data.empty())
+    return decoded_image;
+
+  decoded_image = content::DecodeImage(&encoded_data[0],
+                                       gfx::Size(),
+                                       encoded_data.size());
 
   int64_t struct_size = sizeof(ChromeUtilityHostMsg_DecodeImage_Succeeded);
   int64_t image_size = decoded_image.computeSize64();
@@ -212,20 +234,25 @@ SkBitmap ChromeContentUtilityClient::DecodeImage(
 
 // static
 void ChromeContentUtilityClient::DecodeImageAndSend(
-    const std::vector<unsigned char>& encoded_data, bool shrink_to_fit){
+    const std::vector<unsigned char>& encoded_data,
+    bool shrink_to_fit,
+    int request_id) {
   SkBitmap decoded_image = DecodeImage(encoded_data, shrink_to_fit);
 
   if (decoded_image.empty()) {
-    Send(new ChromeUtilityHostMsg_DecodeImage_Failed());
+    Send(new ChromeUtilityHostMsg_DecodeImage_Failed(request_id));
   } else {
-    Send(new ChromeUtilityHostMsg_DecodeImage_Succeeded(decoded_image));
+    Send(new ChromeUtilityHostMsg_DecodeImage_Succeeded(decoded_image,
+                                                        request_id));
   }
   ReleaseProcessIfNeeded();
 }
 
 void ChromeContentUtilityClient::OnDecodeImage(
-    const std::vector<unsigned char>& encoded_data, bool shrink_to_fit) {
-  DecodeImageAndSend(encoded_data, shrink_to_fit);
+    const std::vector<unsigned char>& encoded_data,
+    bool shrink_to_fit,
+    int request_id) {
+  DecodeImageAndSend(encoded_data, shrink_to_fit, request_id);
 }
 
 #if defined(OS_CHROMEOS)
@@ -261,19 +288,21 @@ void ChromeContentUtilityClient::OnCreateZipFile(
 #endif  // defined(OS_CHROMEOS)
 
 void ChromeContentUtilityClient::OnRobustJPEGDecodeImage(
-    const std::vector<unsigned char>& encoded_data) {
+    const std::vector<unsigned char>& encoded_data,
+    int request_id) {
   // Our robust jpeg decoding is using IJG libjpeg.
   if (gfx::JPEGCodec::JpegLibraryVariant() == gfx::JPEGCodec::IJG_LIBJPEG &&
       !encoded_data.empty()) {
     scoped_ptr<SkBitmap> decoded_image(gfx::JPEGCodec::Decode(
         &encoded_data[0], encoded_data.size()));
     if (!decoded_image.get() || decoded_image->empty()) {
-      Send(new ChromeUtilityHostMsg_DecodeImage_Failed());
+      Send(new ChromeUtilityHostMsg_DecodeImage_Failed(request_id));
     } else {
-      Send(new ChromeUtilityHostMsg_DecodeImage_Succeeded(*decoded_image));
+      Send(new ChromeUtilityHostMsg_DecodeImage_Succeeded(*decoded_image,
+                                                          request_id));
     }
   } else {
-    Send(new ChromeUtilityHostMsg_DecodeImage_Failed());
+    Send(new ChromeUtilityHostMsg_DecodeImage_Failed(request_id));
   }
   ReleaseProcessIfNeeded();
 }
@@ -331,10 +360,12 @@ void ChromeContentUtilityClient::OnStartupPing() {
 
 #if defined(FULL_SAFE_BROWSING)
 void ChromeContentUtilityClient::OnAnalyzeZipFileForDownloadProtection(
-    const IPC::PlatformFileForTransit& zip_file) {
+    const IPC::PlatformFileForTransit& zip_file,
+    const IPC::PlatformFileForTransit& temp_file) {
   safe_browsing::zip_analyzer::Results results;
   safe_browsing::zip_analyzer::AnalyzeZipFile(
-      IPC::PlatformFileForTransitToFile(zip_file), &results);
+      IPC::PlatformFileForTransitToFile(zip_file),
+      IPC::PlatformFileForTransitToFile(temp_file), &results);
   Send(new ChromeUtilityHostMsg_AnalyzeZipFileForDownloadProtection_Finished(
       results));
   ReleaseProcessIfNeeded();

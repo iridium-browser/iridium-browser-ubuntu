@@ -664,6 +664,10 @@ class _BuilderRunBase(object):
             os.environ.get('BUILDBOT_MASTERNAME') or
             constants.WATERFALL_TRYBOT)
 
+  def GetBuilderName(self):
+    """Get the name of this builder on the current waterfall."""
+    return os.environ.get('BUILDBOT_BUILDERNAME', self.config.name)
+
   def ConstructDashboardURL(self, stage=None):
     """Return the dashboard URL
 
@@ -677,7 +681,7 @@ class _BuilderRunBase(object):
     """
     return tree_status.ConstructDashboardURL(
         self.GetWaterfall(),
-        os.environ.get('BUILDBOT_BUILDERNAME', self.config.name),
+        self.GetBuilderName(),
         self.options.buildnumber, stage=stage)
 
   def ShouldBuildAutotest(self):
@@ -721,6 +725,10 @@ class _BuilderRunBase(object):
   def ShouldPatchAfterSync(self):
     """Return True if this run should patch changes after sync stage."""
     return self.options.postsync_patch and self.config.postsync_patch
+
+  def InProduction(self):
+    """Return True if this is a production run."""
+    return cidb.CIDBConnectionFactory.GetCIDBConnectionType() == 'prod'
 
   @classmethod
   def GetVersionInfo(cls, buildroot):
@@ -869,6 +877,7 @@ class _RealBuilderRun(object):
       if config.name:
         bot_ids.append(config.name)
     return bot_ids
+
 
 class BuilderRun(_RealBuilderRun):
   """A standard BuilderRun for a top-level build config."""

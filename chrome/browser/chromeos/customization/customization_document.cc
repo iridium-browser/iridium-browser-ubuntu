@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/i18n/rtl.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
@@ -25,6 +26,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/customization/customization_wallpaper_downloader.h"
 #include "chrome/browser/chromeos/extensions/default_app_order.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/net/delay_network_call.h"
 #include "chrome/browser/extensions/external_loader.h"
@@ -42,11 +44,6 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_fetcher.h"
-#include "ui/base/l10n/l10n_util.h"
-
-#if !defined(USE_ATHENA)
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
-#endif
 
 using content::BrowserThread;
 
@@ -175,7 +172,7 @@ class ServicesCustomizationExternalLoader
   }
 
   // Implementation of extensions::ExternalLoader:
-  virtual void StartLoading() override {
+  void StartLoading() override {
     if (!is_apps_set_) {
       ServicesCustomizationDocument::GetInstance()->StartFetching();
       // In case of missing customization ID, SetCurrentApps will be called
@@ -195,7 +192,7 @@ class ServicesCustomizationExternalLoader
   }
 
  protected:
-  virtual ~ServicesCustomizationExternalLoader() {}
+  ~ServicesCustomizationExternalLoader() override {}
 
  private:
   bool is_apps_set_;
@@ -334,9 +331,8 @@ void StartupCustomizationDocument::Init(
   base::SplitString(initial_locale_, ',', &configured_locales_);
 
   // Convert ICU locale to chrome ("en_US" to "en-US", etc.).
-  std::for_each(configured_locales_.begin(),
-                configured_locales_.end(),
-                l10n_util::GetCanonicalLocale);
+  std::for_each(configured_locales_.begin(), configured_locales_.end(),
+                base::i18n::GetCanonicalLocale);
 
   // Let's always have configured_locales_.front() a valid entry.
   if (configured_locales_.size() == 0)
@@ -543,7 +539,7 @@ void ServicesCustomizationDocument::StartFetching() {
 void ServicesCustomizationDocument::ReadFileInBackground(
     base::WeakPtr<ServicesCustomizationDocument> self,
     const base::FilePath& file) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
 
   std::string manifest;
   if (!base::ReadFileToString(file, &manifest)) {
@@ -567,9 +563,9 @@ void ServicesCustomizationDocument::OnManifesteRead(
 }
 
 void ServicesCustomizationDocument::StartFileFetch() {
-  DelayNetworkCall(base::Bind(&ServicesCustomizationDocument::DoStartFileFetch,
-                              weak_ptr_factory_.GetWeakPtr()),
-      network_delay_);
+  DelayNetworkCall(network_delay_,
+                   base::Bind(&ServicesCustomizationDocument::DoStartFileFetch,
+                              weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ServicesCustomizationDocument::DoStartFileFetch() {
@@ -878,7 +874,7 @@ void ServicesCustomizationDocument::CheckAndApplyWallpaper() {
 void ServicesCustomizationDocument::OnCheckedWallpaperCacheExists(
     scoped_ptr<bool> exists,
     scoped_ptr<ServicesCustomizationDocument::ApplyingTask> applying) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(exists);
   DCHECK(applying);
 
@@ -941,12 +937,10 @@ void ServicesCustomizationDocument::OnOEMWallpaperDownloaded(
     VLOG(1) << "Setting default wallpaper to '"
             << GetCustomizedWallpaperDownloadedFileName().value() << "' ('"
             << wallpaper_url.spec() << "')";
-#if !defined(USE_ATHENA)
     WallpaperManager::Get()->SetCustomizedDefaultWallpaper(
         wallpaper_url,
         GetCustomizedWallpaperDownloadedFileName(),
         GetCustomizedWallpaperCacheDir());
-#endif
   }
   wallpaper_downloader_.reset();
   applying->Finished(success);

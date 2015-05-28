@@ -56,6 +56,8 @@
 
 #include <stdio.h>
 
+#include <string.h>
+
 #include <openssl/buf.h>
 #include <openssl/err.h>
 #include <openssl/digest.h>
@@ -198,7 +200,7 @@ int X509_PURPOSE_add(int id, int trust, int flags,
 	name_dup = BUF_strdup(name);
 	sname_dup = BUF_strdup(sname);
 	if (name_dup == NULL || sname_dup == NULL) {
-		OPENSSL_PUT_ERROR(X509, X509_TRUST_add, ERR_R_MALLOC_FAILURE);
+		OPENSSL_PUT_ERROR(X509V3, X509_PURPOSE_add, ERR_R_MALLOC_FAILURE);
 		if (name_dup != NULL)
 			OPENSSL_free(name_dup);
 		if (sname_dup != NULL)

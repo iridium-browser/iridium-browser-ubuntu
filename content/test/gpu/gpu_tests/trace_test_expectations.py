@@ -9,7 +9,14 @@ from gpu_test_expectations import GpuTestExpectations
 class TraceTestExpectations(GpuTestExpectations):
   def SetExpectations(self):
     # Sample Usage:
-    # self.Fail('Pixel.Canvas2DRedBox',
+    # self.Fail('TraceTest.Canvas2DRedBox',
     #     ['mac', 'amd', ('nvidia', 0x1234)], bug=123)
 
+    self.Skip('TraceTest.Canvas2DRedBox')
+    self.Skip('TraceTest.CSS3DBlueBox')
     pass
+
+class DeviceTraceTestExpectations(GpuTestExpectations):
+  def SetExpectations(self):
+    # Device traces are not supported on all machines.
+    self.Skip('*')

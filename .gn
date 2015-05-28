@@ -14,4 +14,64 @@ secondary_source = "//build/secondary/"
 # matching these patterns (see "gn help label_pattern" for format) will have
 # their includes checked for proper dependencies when you run either
 # "gn check" or "gn gen --check".
-check_targets = [ "//cc" ]
+check_targets = [
+  #"//apps/*",  # Medium-hard.
+  #"//ash/*",  # Medium-hard.
+  #"//base/*",  # Needs GN binary changes to work on Android.
+  "//blink/*",
+  "//breakpad/*",
+  "//build/*",
+  "//cc/*",
+
+  #"//chrome/*",  # Epic number of errors.
+  "//chromecast/*",
+
+  # TODO(brettw): Fix http://crbug.com/460828 and uncomment the following
+  # line.
+  #"//chrome_elf/*",
+  "//cloud_print/*",
+
+  #"//components/*",  # Lots of errors.
+  #"//content/*",  # A whole lot of errors.
+  "//courgette/*",
+  "//crypto/*",
+  "//data/*",
+  "//dbus/*",
+  "//device/*",
+
+  #"//extensions/*",  # Lots of errors.
+  #"//gin/*",  # Easy.
+  "//google_apis/*",
+  "//google_update/*",
+
+  #"//gpu/*",  # Lots of errors.
+  #"//ios/*",
+  "//ipc/*",
+
+  #"//jingle/*",
+  #"//media/*",  # Lots of errors.
+  #"//mojo/*",
+  #"//native_client/*",
+  #"//net/*",  # Needs GN binary changes to work on Android.
+
+  #"//pdf/*",  # Medium-hard.
+  #"//ppapi/*",  # Lots of errors.
+  "//printing/*",
+
+  #"//remoting/*",  # Medium-hard.
+  #"//rlz/*",  # Needs checking on Windows.
+  #"//sandbox/*",  # Medium-hard.
+  "//sdch/*",
+  "//skia/*",
+  "//sql/*",
+  "//storage/*",
+  "//sync/*",
+  "//testing/*",
+
+  #"//third_party/*",  # May not ever want this.
+  "//tools/*",
+
+  #"//ui/*",  # Just a few problems.
+  "//url/*",
+  "//v8/*",
+]

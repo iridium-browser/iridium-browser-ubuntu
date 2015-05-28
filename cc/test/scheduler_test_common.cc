@@ -37,7 +37,8 @@ TestDelayBasedTimeSource::~TestDelayBasedTimeSource() {
 void FakeBeginFrameSource::DidFinishFrame(size_t remaining_frames) {
   remaining_frames_ = remaining_frames;
 }
-void FakeBeginFrameSource::AsValueInto(base::debug::TracedValue* dict) const {
+void FakeBeginFrameSource::AsValueInto(
+    base::trace_event::TracedValue* dict) const {
   dict->SetString("type", "FakeBeginFrameSource");
   BeginFrameSourceMixIn::AsValueInto(dict);
 }
@@ -130,14 +131,12 @@ TestScheduler::TestScheduler(
     const SchedulerSettings& scheduler_settings,
     int layer_tree_host_id,
     const scoped_refptr<OrderedSimpleTaskRunner>& test_task_runner,
-    base::PowerMonitor* power_monitor,
     TestSchedulerFrameSourcesConstructor* frame_sources_constructor,
     scoped_ptr<BeginFrameSource> external_begin_frame_source)
     : Scheduler(client,
                 scheduler_settings,
                 layer_tree_host_id,
                 test_task_runner,
-                power_monitor,
                 external_begin_frame_source.Pass(),
                 frame_sources_constructor),
       now_src_(now_src) {

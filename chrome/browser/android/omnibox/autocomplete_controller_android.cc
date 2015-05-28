@@ -55,6 +55,7 @@ using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF16;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertUTF16ToJavaString;
+using bookmarks::BookmarkModel;
 using metrics::OmniboxEventProto;
 
 namespace {
@@ -72,11 +73,11 @@ class ZeroSuggestPrefetcher : public AutocompleteControllerDelegate {
   explicit ZeroSuggestPrefetcher(Profile* profile);
 
  private:
-  virtual ~ZeroSuggestPrefetcher();
+  ~ZeroSuggestPrefetcher() override;
   void SelfDestruct();
 
   // AutocompleteControllerDelegate:
-  virtual void OnResultChanged(bool default_match_changed) override;
+  void OnResultChanged(bool default_match_changed) override;
 
   scoped_ptr<AutocompleteController> controller_;
   base::OneShotTimer<ZeroSuggestPrefetcher> expire_timer_;
@@ -263,13 +264,6 @@ ScopedJavaLocalRef<jstring> AutocompleteControllerAndroid::
       base::TimeDelta::FromMilliseconds(elapsed_time_since_input_change),
       &match);
   return ConvertUTF8ToJavaString(env, match.destination_url.spec());
-}
-
-ScopedJavaLocalRef<jobject>
-AutocompleteControllerAndroid::GetTopSynchronousMatch(JNIEnv* env,
-                                                      jobject obj,
-                                                      jstring query) {
-  return GetTopSynchronousResult(env, obj, query, false);
 }
 
 void AutocompleteControllerAndroid::Shutdown() {

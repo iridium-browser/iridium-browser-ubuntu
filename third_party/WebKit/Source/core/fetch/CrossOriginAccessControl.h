@@ -27,6 +27,7 @@
 #ifndef CrossOriginAccessControl_h
 #define CrossOriginAccessControl_h
 
+#include "core/CoreExport.h"
 #include "core/fetch/ResourceLoaderOptions.h"
 #include "platform/network/ResourceRequest.h"
 #include "wtf/Forward.h"
@@ -36,32 +37,26 @@ namespace blink {
 
 typedef HashSet<String, CaseFoldingHash> HTTPHeaderSet;
 
-class ExecutionContext;
 class Resource;
 struct ResourceLoaderOptions;
 class ResourceRequest;
 class ResourceResponse;
 class SecurityOrigin;
 
-enum AccessControlStatus {
-    NotSharableCrossOrigin,
-    SharableCrossOrigin
-};
-
 class CrossOriginAccessControl {
 public:
     static bool isLegalRedirectLocation(const KURL&, String& errorDescription);
-    static bool handleRedirect(ExecutionContext*, Resource*, SecurityOrigin*, ResourceRequest&, const ResourceResponse&, ResourceLoaderOptions&, String&);
+    static bool handleRedirect(SecurityOrigin*, ResourceRequest&, const ResourceResponse&, StoredCredentials, ResourceLoaderOptions&, String&);
 };
 
-bool isOnAccessControlResponseHeaderWhitelist(const String&);
+CORE_EXPORT bool isOnAccessControlResponseHeaderWhitelist(const String&);
 
 void updateRequestForAccessControl(ResourceRequest&, SecurityOrigin*, StoredCredentials);
 ResourceRequest createAccessControlPreflightRequest(const ResourceRequest&, SecurityOrigin*);
 
-bool passesAccessControlCheck(ExecutionContext*, const ResourceResponse&, StoredCredentials, SecurityOrigin*, String& errorDescription);
+bool passesAccessControlCheck(const ResourceResponse&, StoredCredentials, SecurityOrigin*, String& errorDescription);
 bool passesPreflightStatusCheck(const ResourceResponse&, String& errorDescription);
-void parseAccessControlExposeHeadersAllowList(const String& headerValue, HTTPHeaderSet&);
+CORE_EXPORT void parseAccessControlExposeHeadersAllowList(const String& headerValue, HTTPHeaderSet&);
 
 } // namespace blink
 

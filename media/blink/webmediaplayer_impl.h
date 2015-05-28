@@ -22,9 +22,9 @@
 #include "media/blink/buffered_data_source.h"
 #include "media/blink/buffered_data_source_host_impl.h"
 #include "media/blink/encrypted_media_player_support.h"
+#include "media/blink/skcanvas_video_renderer.h"
 #include "media/blink/video_frame_compositor.h"
 #include "media/blink/webmediaplayer_params.h"
-#include "media/filters/skcanvas_video_renderer.h"
 #include "third_party/WebKit/public/platform/WebAudioSourceProvider.h"
 #include "third_party/WebKit/public/platform/WebContentDecryptionModuleResult.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayer.h"
@@ -71,7 +71,7 @@ class MEDIA_EXPORT WebMediaPlayerImpl
                      blink::WebMediaPlayerClient* client,
                      base::WeakPtr<WebMediaPlayerDelegate> delegate,
                      scoped_ptr<RendererFactory> renderer_factory,
-                     scoped_ptr<CdmFactory> cdm_factory,
+                     CdmFactory* cdm_factory,
                      const WebMediaPlayerParams& params);
   virtual ~WebMediaPlayerImpl();
 
@@ -128,10 +128,18 @@ class MEDIA_EXPORT WebMediaPlayerImpl
   virtual unsigned audioDecodedByteCount() const;
   virtual unsigned videoDecodedByteCount() const;
 
+  // TODO(dshwang): remove |level|. crbug.com/443151
   virtual bool copyVideoTextureToPlatformTexture(
       blink::WebGraphicsContext3D* web_graphics_context,
       unsigned int texture,
       unsigned int level,
+      unsigned int internal_format,
+      unsigned int type,
+      bool premultiply_alpha,
+      bool flip_y);
+  virtual bool copyVideoTextureToPlatformTexture(
+      blink::WebGraphicsContext3D* web_graphics_context,
+      unsigned int texture,
       unsigned int internal_format,
       unsigned int type,
       bool premultiply_alpha,
@@ -209,8 +217,12 @@ class MEDIA_EXPORT WebMediaPlayerImpl
   scoped_refptr<VideoFrame> GetCurrentFrameFromCompositor();
 
   // Called when the demuxer encounters encrypted streams.
-  void OnEncryptedMediaInitData(const std::string& init_data_type,
+  void OnEncryptedMediaInitData(EmeInitDataType init_data_type,
                                 const std::vector<uint8>& init_data);
+
+  // Called when a decoder detects that the key needed to decrypt the stream
+  // is not available.
+  void OnWaitingForDecryptionKey();
 
   void SetCdm(CdmContext* cdm_context, const CdmAttachedCB& cdm_attached_cb);
 

@@ -77,12 +77,6 @@ ui::Layer* GetLayer(views::Widget* widget) {
   return widget->GetNativeView()->layer();
 }
 
-bool IsDraggingTrayEnabled() {
-  static bool dragging_tray_allowed = base::CommandLine::ForCurrentProcess()->
-      HasSwitch(ash::switches::kAshEnableTrayDragging);
-  return dragging_tray_allowed;
-}
-
 }  // namespace
 
 // static
@@ -215,7 +209,6 @@ ShelfLayoutManager::~ShelfLayoutManager() {
   FOR_EACH_OBSERVER(ShelfLayoutManagerObserver, observers_, WillDeleteShelf());
   Shell::GetInstance()->RemoveShellObserver(this);
   Shell::GetInstance()->lock_state_controller()->RemoveObserver(this);
-  aura::client::GetActivationClient(root_window_)->RemoveObserver(this);
   Shell::GetInstance()->
       session_state_delegate()->RemoveSessionStateObserver(this);
 }
@@ -236,6 +229,9 @@ void ShelfLayoutManager::PrepareForShutdown() {
   set_workspace_controller(NULL);
   auto_hide_event_filter_.reset();
   bezel_event_filter_.reset();
+  // Stop observing window change, otherwise we can attempt to update a
+  // partially destructed shelf.
+  aura::client::GetActivationClient(root_window_)->RemoveObserver(this);
 }
 
 bool ShelfLayoutManager::IsVisible() const {
@@ -252,12 +248,11 @@ bool ShelfLayoutManager::SetAlignment(ShelfAlignment alignment) {
     return false;
 
   alignment_ = alignment;
-  if (state_.is_screen_locked || state_.is_adding_user_screen) {
-    // The shelf will itself move to the bottom while locked. If a request is
-    // sent to move while being locked, we postpone the move until the lock
-    // screen goes away.
+  // The shelf will itself move to the bottom while locked or obscured by user
+  // login. If a request is sent to move while being obscured, we postpone the
+  // move until the user session is resumed.
+  if (IsAlignmentLocked())
     return false;
-  }
 
   // This should not be called during the lock screen transitions.
   shelf_->SetAlignment(alignment);
@@ -267,10 +262,8 @@ bool ShelfLayoutManager::SetAlignment(ShelfAlignment alignment) {
 
 ShelfAlignment ShelfLayoutManager::GetAlignment() const {
   // When the screen is locked or a user gets added, the shelf is forced into
-  // bottom alignment. Note: We cannot use state_.is_screen_locked here since
-  // that flag gets set later than the SessionStateDelegate reports a locked
-  // screen which leads in
-  if (state_.is_screen_locked || state_.is_adding_user_screen)
+  // bottom alignment.
+  if (IsAlignmentLocked())
     return SHELF_ALIGNMENT_BOTTOM;
   return alignment_;
 }
@@ -413,29 +406,12 @@ void ShelfLayoutManager::StartGestureDrag(const ui::GestureEvent& gesture) {
   UpdateShelfBackground(BACKGROUND_CHANGE_ANIMATE);
 }
 
-ShelfLayoutManager::DragState ShelfLayoutManager::UpdateGestureDrag(
+void ShelfLayoutManager::UpdateGestureDrag(
     const ui::GestureEvent& gesture) {
   bool horizontal = IsHorizontalAlignment();
   gesture_drag_amount_ += horizontal ? gesture.details().scroll_y() :
                                        gesture.details().scroll_x();
   LayoutShelf();
-
-  // Start reveling the status menu when:
-  //   - dragging up on an already visible shelf
-  //   - dragging up on a hidden shelf, but it is currently completely visible.
-  if (horizontal && gesture.details().scroll_y() < 0) {
-    int min_height = 0;
-    if (gesture_drag_auto_hide_state_ == SHELF_AUTO_HIDE_HIDDEN && shelf_)
-      min_height = shelf_->GetContentsView()->GetPreferredSize().height();
-
-    if (min_height < shelf_->GetWindowBoundsInScreen().height() &&
-        gesture.root_location().x() >=
-        shelf_->status_area_widget()->GetWindowBoundsInScreen().x() &&
-        IsDraggingTrayEnabled())
-      return DRAG_TRAY;
-  }
-
-  return DRAG_SHELF;
 }
 
 void ShelfLayoutManager::CompleteGestureDrag(const ui::GestureEvent& gesture) {
@@ -1031,7 +1007,7 @@ ShelfAutoHideState ShelfLayoutManager::CalculateAutoHideState(
     return SHELF_AUTO_HIDE_SHOWN;
 
   const std::vector<aura::Window*> windows =
-      ash::MruWindowTracker::BuildWindowList();
+      shell->mru_window_tracker()->BuildWindowListIgnoreModal();
 
   // Process the window list and check if there are any visible windows.
   bool visible_window = false;
@@ -1180,10 +1156,28 @@ void ShelfLayoutManager::SessionStateChanged(
 }
 
 void ShelfLayoutManager::UpdateShelfVisibilityAfterLoginUIChange() {
-  shelf_->SetAlignment(state_.is_adding_user_screen || state_.is_screen_locked ?
-                           SHELF_ALIGNMENT_BOTTOM : alignment_);
+  shelf_->SetAlignment(GetAlignment());
   UpdateVisibilityState();
   LayoutShelf();
+}
+
+bool ShelfLayoutManager::IsAlignmentLocked() const {
+  SessionStateDelegate* session_state_delegate =
+      Shell::GetInstance()->session_state_delegate();
+  if (state_.is_screen_locked)
+    return true;
+  // The session state becomes active at the start of transitioning to a user
+  // session, however the session is considered blocked until the full UI is
+  // ready. Exit early to allow for proper layout.
+  if (session_state_delegate->GetSessionState() ==
+      SessionStateDelegate::SESSION_STATE_ACTIVE) {
+    return false;
+  }
+  if (session_state_delegate->IsUserSessionBlocked() ||
+      state_.is_adding_user_screen) {
+    return true;
+  }
+  return false;
 }
 
 }  // namespace ash

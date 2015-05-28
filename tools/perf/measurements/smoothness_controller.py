@@ -3,18 +3,19 @@
 # found in the LICENSE file.
 import sys
 
-from measurements import smooth_gesture_util
 from telemetry.core.platform import tracing_category_filter
 from telemetry.core.platform import tracing_options
-from telemetry.timeline import trace_data as trace_data_module
-from telemetry.timeline.model import TimelineModel
+from telemetry.page import action_runner
 from telemetry.page import page_test
-from telemetry.page.actions import action_runner
+from telemetry.timeline.model import TimelineModel
+from telemetry.timeline import trace_data as trace_data_module
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
 from telemetry.value import trace
-from telemetry.web_perf import timeline_interaction_record as tir_module
 from telemetry.web_perf.metrics import smoothness
+from telemetry.web_perf import timeline_interaction_record as tir_module
+
+from measurements import smooth_gesture_util
 
 
 RUN_SMOOTH_ACTIONS = 'RunSmoothAllActions'
@@ -37,15 +38,14 @@ class SmoothnessController(object):
       category_filter.AddIncludedCategory(c)
     options = tracing_options.TracingOptions()
     options.enable_chrome_trace = True
-    if tab.browser.platform.tracing_controller.IsDisplayTracingSupported():
-      options.enable_platform_display_trace = True
+    options.enable_platform_display_trace = True
     tab.browser.platform.tracing_controller.Start(options, category_filter, 60)
 
   def Start(self, tab):
     # Start the smooth marker for all smooth actions.
     runner = action_runner.ActionRunner(tab)
     self._interaction = runner.BeginInteraction(
-        RUN_SMOOTH_ACTIONS, is_smooth=True)
+        RUN_SMOOTH_ACTIONS)
 
   def Stop(self, tab):
     # End the smooth marker for  all smooth actions.
@@ -72,7 +72,7 @@ class SmoothnessController(object):
           'SmoothnessController cannot issue more than 1 %s record' %
           RUN_SMOOTH_ACTIONS)
         run_smooth_actions_record = r
-      elif r.is_smooth:
+      else:
         smooth_records.append(
           smooth_gesture_util.GetAdjustedInteractionIfContainGesture(
             self._timeline_model, r))

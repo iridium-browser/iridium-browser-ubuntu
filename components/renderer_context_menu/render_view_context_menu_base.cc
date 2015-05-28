@@ -15,6 +15,9 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/menu_item.h"
+#if defined(ENABLE_EXTENSIONS)
+#include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
+#endif
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
 
 using blink::WebContextMenuData;
@@ -126,6 +129,17 @@ void AddCustomItemsToMenu(const std::vector<content::MenuItem>& items,
   }
 }
 
+content::WebContents* GetWebContentsToUse(content::WebContents* web_contents) {
+// If we're viewing in a MimeHandlerViewGuest, use its embedder WebContents.
+#if defined(ENABLE_EXTENSIONS)
+  auto guest_view =
+      extensions::MimeHandlerViewGuest::FromWebContents(web_contents);
+  if (guest_view)
+    return guest_view->embedder_web_contents();
+#endif
+  return web_contents;
+}
+
 }  // namespace
 
 // static
@@ -155,6 +169,7 @@ RenderViewContextMenuBase::RenderViewContextMenuBase(
     const content::ContextMenuParams& params)
     : params_(params),
       source_web_contents_(WebContents::FromRenderFrameHost(render_frame_host)),
+      embedder_web_contents_(GetWebContentsToUse(source_web_contents_)),
       browser_context_(source_web_contents_->GetBrowserContext()),
       menu_model_(this),
       render_frame_id_(render_frame_host->GetRoutingID()),
@@ -251,7 +266,7 @@ bool RenderViewContextMenuBase::IsCommandIdKnown(
     bool* enabled) const {
   // If this command is is added by one of our observers, we dispatch
   // it to the observer.
-  ObserverListBase<RenderViewContextMenuObserver>::Iterator it(observers_);
+  ObserverListBase<RenderViewContextMenuObserver>::Iterator it(&observers_);
   RenderViewContextMenuObserver* observer;
   while ((observer = it.GetNext()) != NULL) {
     if (observer->IsCommandIdSupported(id)) {
@@ -274,7 +289,7 @@ bool RenderViewContextMenuBase::IsCommandIdKnown(
 bool RenderViewContextMenuBase::IsCommandIdChecked(int id) const {
   // If this command is is added by one of our observers, we dispatch it to the
   // observer.
-  ObserverListBase<RenderViewContextMenuObserver>::Iterator it(observers_);
+  ObserverListBase<RenderViewContextMenuObserver>::Iterator it(&observers_);
   RenderViewContextMenuObserver* observer;
   while ((observer = it.GetNext()) != NULL) {
     if (observer->IsCommandIdSupported(id))
@@ -294,7 +309,7 @@ void RenderViewContextMenuBase::ExecuteCommand(int id, int event_flags) {
 
   // If this command is is added by one of our observers, we dispatch
   // it to the observer.
-  ObserverListBase<RenderViewContextMenuObserver>::Iterator it(observers_);
+  ObserverListBase<RenderViewContextMenuObserver>::Iterator it(&observers_);
   RenderViewContextMenuObserver* observer;
   while ((observer = it.GetNext()) != NULL) {
     if (observer->IsCommandIdSupported(id))
@@ -363,6 +378,15 @@ void RenderViewContextMenuBase::OpenURL(
     const GURL& url, const GURL& referring_url,
     WindowOpenDisposition disposition,
     ui::PageTransition transition) {
+  OpenURLWithExtraHeaders(url, referring_url, disposition, transition, "");
+}
+
+void RenderViewContextMenuBase::OpenURLWithExtraHeaders(
+    const GURL& url,
+    const GURL& referring_url,
+    WindowOpenDisposition disposition,
+    ui::PageTransition transition,
+    const std::string& extra_headers) {
   content::Referrer referrer = content::Referrer::SanitizeForRequest(
       url,
       content::Referrer(referring_url.GetAsReferrer(),
@@ -371,8 +395,11 @@ void RenderViewContextMenuBase::OpenURL(
   if (params_.link_url == url && disposition != OFF_THE_RECORD)
     params_.custom_context.link_followed = url;
 
-  WebContents* new_contents = source_web_contents_->OpenURL(OpenURLParams(
-      url, referrer, disposition, transition, false));
+  OpenURLParams open_url_params(url, referrer, disposition, transition, false);
+  if (!extra_headers.empty())
+    open_url_params.extra_headers = extra_headers;
+
+  WebContents* new_contents = source_web_contents_->OpenURL(open_url_params);
   if (!new_contents)
     return;
 

@@ -37,7 +37,7 @@ class OffTheRecordProfileImpl : public Profile {
   void Init();
 
   // Profile implementation.
-  std::string GetProfileName() override;
+  std::string GetProfileUserName() const override;
   ProfileType GetProfileType() const override;
   Profile* GetOffTheRecordProfile() override;
   void DestroyOffTheRecordProfile() override;
@@ -48,6 +48,7 @@ class OffTheRecordProfileImpl : public Profile {
   bool IsLegacySupervised() override;
   ExtensionSpecialStoragePolicy* GetExtensionSpecialStoragePolicy() override;
   PrefService* GetPrefs() override;
+  const PrefService* GetPrefs() const override;
   PrefService* GetOffTheRecordPrefs() override;
   net::URLRequestContextGetter* GetRequestContextForExtensions() override;
   net::URLRequestContextGetter* CreateRequestContext(
@@ -62,8 +63,6 @@ class OffTheRecordProfileImpl : public Profile {
   HostContentSettingsMap* GetHostContentSettingsMap() override;
   bool IsSameProfile(Profile* profile) override;
   Time GetStartTime() const override;
-  history::TopSites* GetTopSitesWithoutCreating() override;
-  history::TopSites* GetTopSites() override;
   base::FilePath last_selected_directory() override;
   void set_last_selected_directory(const base::FilePath& path) override;
   bool WasCreatedByVersionOrLater(const std::string& version) override;
@@ -71,10 +70,9 @@ class OffTheRecordProfileImpl : public Profile {
   ExitType GetLastSessionExitType() override;
 
 #if defined(OS_CHROMEOS)
-  virtual void ChangeAppLocale(const std::string& locale,
-                               AppLocaleChangedVia) override;
-  virtual void OnLogin() override;
-  virtual void InitChromeOSPreferences() override;
+  void ChangeAppLocale(const std::string& locale, AppLocaleChangedVia) override;
+  void OnLogin() override;
+  void InitChromeOSPreferences() override;
 #endif  // defined(OS_CHROMEOS)
 
   PrefProxyConfigTracker* GetProxyConfigTracker() override;
@@ -106,6 +104,7 @@ class OffTheRecordProfileImpl : public Profile {
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
+  content::PermissionManager* GetPermissionManager() override;
 
  private:
   void InitIoData();

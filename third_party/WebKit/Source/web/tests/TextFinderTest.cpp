@@ -12,6 +12,7 @@
 #include "core/dom/Range.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/html/HTMLElement.h"
+#include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/web/WebDocument.h"
 #include "web/FindInPageCoordinates.h"
@@ -21,6 +22,7 @@
 #include <gtest/gtest.h>
 
 using namespace blink;
+using blink::testing::runPendingTasks;
 
 namespace {
 
@@ -44,6 +46,7 @@ void TextFinderTest::SetUp()
     m_webViewHelper.initialize();
     WebLocalFrameImpl& frameImpl = *m_webViewHelper.webViewImpl()->mainFrameImpl();
     frameImpl.viewImpl()->resize(WebSize(640, 480));
+    frameImpl.viewImpl()->layout();
     m_document = PassRefPtrWillBeRawPtr<Document>(frameImpl.document());
     m_textFinder = &frameImpl.ensureTextFinder();
 }
@@ -250,7 +253,7 @@ TEST_F(TextFinderTest, ScopeTextMatchesSimple)
     textFinder().resetMatchCount();
     textFinder().scopeStringMatches(identifier, searchText, findOptions, true);
     while (textFinder().scopingInProgress())
-        FrameTestHelpers::runPendingTasks();
+        runPendingTasks();
 
     EXPECT_EQ(2, textFinder().totalMatchCount());
     WebVector<WebFloatRect> matchRects;
@@ -276,7 +279,7 @@ TEST_F(TextFinderTest, ScopeTextMatchesWithShadowDOM)
     textFinder().resetMatchCount();
     textFinder().scopeStringMatches(identifier, searchText, findOptions, true);
     while (textFinder().scopingInProgress())
-        FrameTestHelpers::runPendingTasks();
+        runPendingTasks();
 
     // TextIterator currently returns the matches in the document order, instead of the visual order. It visits
     // the shadow roots first, so in this case the matches will be returned in the order of <u> -> <b> -> <i>.
@@ -301,7 +304,7 @@ TEST_F(TextFinderTest, ScopeRepeatPatternTextMatches)
     textFinder().resetMatchCount();
     textFinder().scopeStringMatches(identifier, searchText, findOptions, true);
     while (textFinder().scopingInProgress())
-        FrameTestHelpers::runPendingTasks();
+        runPendingTasks();
 
     EXPECT_EQ(2, textFinder().totalMatchCount());
     WebVector<WebFloatRect> matchRects;
@@ -323,7 +326,7 @@ TEST_F(TextFinderTest, OverlappingMatches)
     textFinder().resetMatchCount();
     textFinder().scopeStringMatches(identifier, searchText, findOptions, true);
     while (textFinder().scopingInProgress())
-        FrameTestHelpers::runPendingTasks();
+        runPendingTasks();
 
     // We shouldn't find overlapped matches.
     EXPECT_EQ(1, textFinder().totalMatchCount());
@@ -345,7 +348,7 @@ TEST_F(TextFinderTest, SequentialMatches)
     textFinder().resetMatchCount();
     textFinder().scopeStringMatches(identifier, searchText, findOptions, true);
     while (textFinder().scopingInProgress())
-        FrameTestHelpers::runPendingTasks();
+        runPendingTasks();
 
     EXPECT_EQ(3, textFinder().totalMatchCount());
     WebVector<WebFloatRect> matchRects;
@@ -470,7 +473,7 @@ TEST_F(TextFinderFakeTimerTest, ScopeWithTimeouts)
     // of the TimeProxyPlatform timer is greater than timeout threshold.
     textFinder().scopeStringMatches(identifier, searchPattern, findOptions, true);
     while (textFinder().scopingInProgress())
-        FrameTestHelpers::runPendingTasks();
+        runPendingTasks();
 
     EXPECT_EQ(4, textFinder().totalMatchCount());
 }

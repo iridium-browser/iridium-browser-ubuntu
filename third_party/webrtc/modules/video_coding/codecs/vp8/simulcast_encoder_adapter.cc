@@ -116,9 +116,8 @@ struct ScreenshareTemporalLayersFactory : webrtc::TemporalLayers::Factory {
 
 namespace webrtc {
 
-SimulcastEncoderAdapter::SimulcastEncoderAdapter(
-    scoped_ptr<VideoEncoderFactory> factory)
-    : factory_(factory.Pass()), encoded_complete_callback_(NULL) {
+SimulcastEncoderAdapter::SimulcastEncoderAdapter(VideoEncoderFactory* factory)
+    : factory_(factory), encoded_complete_callback_(NULL) {
   memset(&codec_, 0, sizeof(webrtc::VideoCodec));
 }
 
@@ -127,6 +126,11 @@ SimulcastEncoderAdapter::~SimulcastEncoderAdapter() {
 }
 
 int SimulcastEncoderAdapter::Release() {
+  // TODO(pbos): Keep the last encoder instance but call ::Release() on it, then
+  // re-use this instance in ::InitEncode(). This means that changing
+  // resolutions doesn't require reallocation of the first encoder, but only
+  // reinitialization, which makes sense. Then Destroy this instance instead in
+  // ~SimulcastEncoderAdapter().
   while (!streaminfos_.empty()) {
     VideoEncoder* encoder = streaminfos_.back().encoder;
     factory_->Destroy(encoder);
@@ -297,7 +301,7 @@ int SimulcastEncoderAdapter::RegisterEncodeCompleteCallback(
 }
 
 int SimulcastEncoderAdapter::SetChannelParameters(uint32_t packet_loss,
-                                                  int rtt) {
+                                                  int64_t rtt) {
   for (size_t stream_idx = 0; stream_idx < streaminfos_.size(); ++stream_idx) {
     streaminfos_[stream_idx].encoder->SetChannelParameters(packet_loss, rtt);
   }

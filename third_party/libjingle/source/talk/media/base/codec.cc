@@ -37,7 +37,6 @@
 
 namespace cricket {
 
-static const int kMaxStaticPayloadId = 95;
 const int kMaxPayloadId = 127;
 
 bool FeedbackParam::operator==(const FeedbackParam& other) const {
@@ -89,9 +88,38 @@ bool FeedbackParams::HasDuplicateEntries() const {
   return false;
 }
 
+Codec::Codec(int id, const std::string& name, int clockrate, int preference)
+    : id(id), name(name), clockrate(clockrate), preference(preference) {
+}
+
+Codec::Codec() : id(0), clockrate(0), preference(0) {
+}
+
+Codec::Codec(const Codec& c) = default;
+
+Codec::~Codec() = default;
+
+Codec& Codec::operator=(const Codec& c) {
+  this->id = c.id;  // id is reserved in objective-c
+  name = c.name;
+  clockrate = c.clockrate;
+  preference = c.preference;
+  params = c.params;
+  feedback_params = c.feedback_params;
+  return *this;
+}
+
+bool Codec::operator==(const Codec& c) const {
+  return this->id == c.id &&  // id is reserved in objective-c
+         name == c.name && clockrate == c.clockrate &&
+         preference == c.preference && params == c.params &&
+         feedback_params == c.feedback_params;
+}
+
 bool Codec::Matches(const Codec& codec) const {
   // Match the codec id/name based on the typical static/dynamic name rules.
   // Matching is case-insensitive.
+  const int kMaxStaticPayloadId = 95;
   return (codec.id <= kMaxStaticPayloadId) ?
       (id == codec.id) : (_stricmp(name.c_str(), codec.name.c_str()) == 0);
 }
@@ -135,6 +163,31 @@ void Codec::IntersectFeedbackParams(const Codec& other) {
   feedback_params.Intersect(other.feedback_params);
 }
 
+AudioCodec::AudioCodec(int pt,
+                       const std::string& nm,
+                       int cr,
+                       int br,
+                       int cs,
+                       int pr)
+    : Codec(pt, nm, cr, pr), bitrate(br), channels(cs) {
+}
+
+AudioCodec::AudioCodec() : Codec(), bitrate(0), channels(0) {
+}
+
+AudioCodec::AudioCodec(const AudioCodec& c) = default;
+
+AudioCodec& AudioCodec::operator=(const AudioCodec& c) {
+  Codec::operator=(c);
+  bitrate = c.bitrate;
+  channels = c.channels;
+  return *this;
+}
+
+bool AudioCodec::operator==(const AudioCodec& c) const {
+  return bitrate == c.bitrate && channels == c.channels && Codec::operator==(c);
+}
+
 bool AudioCodec::Matches(const AudioCodec& codec) const {
   // If a nonzero clockrate is specified, it must match the actual clockrate.
   // If a nonzero bitrate is specified, it must match the actual bitrate,
@@ -164,6 +217,37 @@ std::string VideoCodec::ToString() const {
   os << "VideoCodec[" << id << ":" << name << ":" << width << ":" << height
      << ":" << framerate << ":" << preference << "]";
   return os.str();
+}
+
+VideoCodec::VideoCodec(int pt,
+                       const std::string& nm,
+                       int w,
+                       int h,
+                       int fr,
+                       int pr)
+    : Codec(pt, nm, kVideoCodecClockrate, pr),
+      width(w),
+      height(h),
+      framerate(fr) {
+}
+
+VideoCodec::VideoCodec() : Codec(), width(0), height(0), framerate(0) {
+  clockrate = kVideoCodecClockrate;
+}
+
+VideoCodec::VideoCodec(const VideoCodec& c) = default;
+
+VideoCodec& VideoCodec::operator=(const VideoCodec& c) {
+  Codec::operator=(c);
+  width = c.width;
+  height = c.height;
+  framerate = c.framerate;
+  return *this;
+}
+
+bool VideoCodec::operator==(const VideoCodec& c) const {
+  return width == c.width && height == c.height && framerate == c.framerate &&
+         Codec::operator==(c);
 }
 
 VideoCodec VideoCodec::CreateRtxCodec(int rtx_payload_type,
@@ -214,6 +298,18 @@ bool VideoCodec::ValidateCodecFormat() const {
   }
   return true;
 }
+
+DataCodec::DataCodec(int id, const std::string& name, int preference)
+    : Codec(id, name, kDataCodecClockrate, preference) {
+}
+
+DataCodec::DataCodec() : Codec() {
+  clockrate = kDataCodecClockrate;
+}
+
+DataCodec::DataCodec(const DataCodec& c) = default;
+
+DataCodec& DataCodec::operator=(const DataCodec& c) = default;
 
 std::string DataCodec::ToString() const {
   std::ostringstream os;

@@ -33,7 +33,8 @@
 #include "core/frame/Settings.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/MediaController.h"
-#include "core/rendering/RenderTheme.h"
+#include "core/html/track/TextTrackContainer.h"
+#include "core/layout/LayoutTheme.h"
 
 namespace blink {
 
@@ -50,7 +51,6 @@ MediaControls::MediaControls(HTMLMediaElement& mediaElement)
     : HTMLDivElement(mediaElement.document())
     , m_mediaElement(&mediaElement)
     , m_panel(nullptr)
-    , m_textDisplayContainer(nullptr)
     , m_overlayPlayButton(nullptr)
     , m_overlayEnclosure(nullptr)
     , m_playButton(nullptr)
@@ -65,28 +65,24 @@ MediaControls::MediaControls(HTMLMediaElement& mediaElement)
     , m_durationDisplay(nullptr)
     , m_enclosure(nullptr)
     , m_hideMediaControlsTimer(this, &MediaControls::hideMediaControlsTimerFired)
+    , m_hideTimerBehaviorFlags(IgnoreNone)
     , m_isMouseOverControls(false)
     , m_isPausedForScrubbing(false)
-    , m_wasLastEventTouch(false)
 {
 }
 
 PassRefPtrWillBeRawPtr<MediaControls> MediaControls::create(HTMLMediaElement& mediaElement)
 {
     RefPtrWillBeRawPtr<MediaControls> controls = adoptRefWillBeNoop(new MediaControls(mediaElement));
-
-    if (controls->initializeControls())
-        return controls.release();
-
-    return nullptr;
+    controls->setShadowPseudoId(AtomicString("-webkit-media-controls", AtomicString::ConstructFromLiteral));
+    controls->initializeControls();
+    return controls.release();
 }
 
 // The media controls DOM structure looks like:
 //
 // MediaControls                                       (-webkit-media-controls)
 // +-MediaControlOverlayEnclosureElement               (-webkit-media-controls-overlay-enclosure)
-// | +-MediaControlTextTrackContainerElement           (-webkit-media-text-track-container)
-// | | {when text tracks are enabled}
 // | +-MediaControlOverlayPlayButtonElement            (-webkit-media-controls-overlay-play-button)
 // | | {if mediaControlsOverlayPlayButtonEnabled}
 // | \-MediaControlCastButtonElement                   (-internal-media-controls-overlay-cast-button)
@@ -101,34 +97,22 @@ PassRefPtrWillBeRawPtr<MediaControls> MediaControls::create(HTMLMediaElement& me
 //     +-MediaControlToggleClosedCaptionsButtonElement (-webkit-media-controls-toggle-closed-captions-button)
 //     +-MediaControlCastButtonElement                 (-internal-media-controls-cast-button)
 //     \-MediaControlFullscreenButtonElement           (-webkit-media-controls-fullscreen-button)
-//
-// Most of the structure is built by MediaControls::initializeControls() - the
-// exception being MediaControlTextTrackContainerElement which is added
-// on-demand by MediaControls::createTextTrackDisplay().
-bool MediaControls::initializeControls()
+void MediaControls::initializeControls()
 {
-    TrackExceptionState exceptionState;
-
     RefPtrWillBeRawPtr<MediaControlOverlayEnclosureElement> overlayEnclosure = MediaControlOverlayEnclosureElement::create(*this);
 
     if (document().settings() && document().settings()->mediaControlsOverlayPlayButtonEnabled()) {
         RefPtrWillBeRawPtr<MediaControlOverlayPlayButtonElement> overlayPlayButton = MediaControlOverlayPlayButtonElement::create(*this);
         m_overlayPlayButton = overlayPlayButton.get();
-        overlayEnclosure->appendChild(overlayPlayButton.release(), exceptionState);
-        if (exceptionState.hadException())
-            return false;
+        overlayEnclosure->appendChild(overlayPlayButton.release());
     }
 
     RefPtrWillBeRawPtr<MediaControlCastButtonElement> overlayCastButton = MediaControlCastButtonElement::create(*this, true);
     m_overlayCastButton = overlayCastButton.get();
-    overlayEnclosure->appendChild(overlayCastButton.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    overlayEnclosure->appendChild(overlayCastButton.release());
 
     m_overlayEnclosure = overlayEnclosure.get();
-    appendChild(overlayEnclosure.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    appendChild(overlayEnclosure.release());
 
     // Create an enclosing element for the panel so we can visually offset the controls correctly.
     RefPtrWillBeRawPtr<MediaControlPanelEnclosureElement> enclosure = MediaControlPanelEnclosureElement::create(*this);
@@ -137,76 +121,52 @@ bool MediaControls::initializeControls()
 
     RefPtrWillBeRawPtr<MediaControlPlayButtonElement> playButton = MediaControlPlayButtonElement::create(*this);
     m_playButton = playButton.get();
-    panel->appendChild(playButton.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    panel->appendChild(playButton.release());
 
     RefPtrWillBeRawPtr<MediaControlTimelineElement> timeline = MediaControlTimelineElement::create(*this);
     m_timeline = timeline.get();
-    panel->appendChild(timeline.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    panel->appendChild(timeline.release());
 
     RefPtrWillBeRawPtr<MediaControlCurrentTimeDisplayElement> currentTimeDisplay = MediaControlCurrentTimeDisplayElement::create(*this);
     m_currentTimeDisplay = currentTimeDisplay.get();
     m_currentTimeDisplay->hide();
-    panel->appendChild(currentTimeDisplay.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    panel->appendChild(currentTimeDisplay.release());
 
     RefPtrWillBeRawPtr<MediaControlTimeRemainingDisplayElement> durationDisplay = MediaControlTimeRemainingDisplayElement::create(*this);
     m_durationDisplay = durationDisplay.get();
-    panel->appendChild(durationDisplay.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    panel->appendChild(durationDisplay.release());
 
     RefPtrWillBeRawPtr<MediaControlMuteButtonElement> muteButton = MediaControlMuteButtonElement::create(*this);
     m_muteButton = muteButton.get();
-    panel->appendChild(muteButton.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    panel->appendChild(muteButton.release());
 
     RefPtrWillBeRawPtr<MediaControlVolumeSliderElement> slider = MediaControlVolumeSliderElement::create(*this);
     m_volumeSlider = slider.get();
-    panel->appendChild(slider.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    panel->appendChild(slider.release());
 
     RefPtrWillBeRawPtr<MediaControlToggleClosedCaptionsButtonElement> toggleClosedCaptionsButton = MediaControlToggleClosedCaptionsButtonElement::create(*this);
     m_toggleClosedCaptionsButton = toggleClosedCaptionsButton.get();
-    panel->appendChild(toggleClosedCaptionsButton.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    panel->appendChild(toggleClosedCaptionsButton.release());
 
     RefPtrWillBeRawPtr<MediaControlCastButtonElement> castButton = MediaControlCastButtonElement::create(*this, false);
     m_castButton = castButton.get();
-    panel->appendChild(castButton.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    panel->appendChild(castButton.release());
 
     RefPtrWillBeRawPtr<MediaControlFullscreenButtonElement> fullscreenButton = MediaControlFullscreenButtonElement::create(*this);
     m_fullScreenButton = fullscreenButton.get();
-    panel->appendChild(fullscreenButton.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    panel->appendChild(fullscreenButton.release());
 
     m_panel = panel.get();
-    enclosure->appendChild(panel.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
+    enclosure->appendChild(panel.release());
 
     m_enclosure = enclosure.get();
-    appendChild(enclosure.release(), exceptionState);
-    if (exceptionState.hadException())
-        return false;
-
-    return true;
+    appendChild(enclosure.release());
 }
 
 void MediaControls::reset()
 {
     double duration = mediaElement().duration();
-    m_durationDisplay->setInnerText(RenderTheme::theme().formatMediaControlsTime(duration), ASSERT_NO_EXCEPTION);
+    m_durationDisplay->setInnerText(LayoutTheme::theme().formatMediaControlsTime(duration), ASSERT_NO_EXCEPTION);
     m_durationDisplay->setCurrentValue(duration);
 
     updatePlayState();
@@ -233,11 +193,16 @@ void MediaControls::reset()
     makeOpaque();
 }
 
+LayoutObject* MediaControls::layoutObjectForTextTrackLayout()
+{
+    return m_panel->layoutObject();
+}
+
 void MediaControls::show()
 {
     makeOpaque();
-    m_panel->setIsDisplayed(true);
     m_panel->show();
+    m_panel->setIsDisplayed(true);
     if (m_overlayPlayButton)
         m_overlayPlayButton->updateDisplayType();
 }
@@ -252,8 +217,8 @@ void MediaControls::mediaElementFocused()
 
 void MediaControls::hide()
 {
-    m_panel->setIsDisplayed(false);
     m_panel->hide();
+    m_panel->setIsDisplayed(false);
     if (m_overlayPlayButton)
         m_overlayPlayButton->hide();
 }
@@ -360,15 +325,15 @@ void MediaControls::updateCurrentTimeDisplay()
     }
 
     // Allow the theme to format the time.
-    m_currentTimeDisplay->setInnerText(RenderTheme::theme().formatMediaControlsCurrentTime(now, duration), IGNORE_EXCEPTION);
+    m_currentTimeDisplay->setInnerText(LayoutTheme::theme().formatMediaControlsCurrentTime(now, duration), IGNORE_EXCEPTION);
     m_currentTimeDisplay->setCurrentValue(now);
 }
 
 void MediaControls::updateVolume()
 {
     m_muteButton->updateDisplayType();
-    if (m_muteButton->renderer())
-        m_muteButton->renderer()->setShouldDoFullPaintInvalidation();
+    if (m_muteButton->layoutObject())
+        m_muteButton->layoutObject()->setShouldDoFullPaintInvalidation();
 
     if (mediaElement().muted())
         m_volumeSlider->setVolume(0);
@@ -387,11 +352,6 @@ void MediaControls::refreshClosedCaptionsButtonVisibility()
         m_toggleClosedCaptionsButton->show();
     else
         m_toggleClosedCaptionsButton->hide();
-}
-
-void MediaControls::textTracksChanged()
-{
-    refreshClosedCaptionsButtonVisibility();
 }
 
 static Element* elementFromCenter(Element& element)
@@ -472,8 +432,14 @@ void MediaControls::stoppedCasting()
 void MediaControls::defaultEventHandler(Event* event)
 {
     HTMLDivElement::defaultEventHandler(event);
-    m_wasLastEventTouch = event->isTouchEvent() || event->isGestureEvent()
+
+    // Add IgnoreControlsHover to m_hideTimerBehaviorFlags when we see a touch event,
+    // to allow the hide-timer to do the right thing when it fires.
+    // FIXME: Preferably we would only do this when we're actually handling the event
+    // here ourselves.
+    bool wasLastEventTouch = event->isTouchEvent() || event->isGestureEvent()
         || (event->isMouseEvent() && toMouseEvent(event)->fromTouch());
+    m_hideTimerBehaviorFlags |= wasLastEventTouch ? IgnoreControlsHover : IgnoreNone;
 
     if (event->type() == EventTypeNames::mouseover) {
         if (!containsRelatedTarget(event)) {
@@ -508,13 +474,12 @@ void MediaControls::defaultEventHandler(Event* event)
 
 void MediaControls::hideMediaControlsTimerFired(Timer<MediaControls>*)
 {
+    unsigned behaviorFlags = m_hideTimerBehaviorFlags | IgnoreFocus | IgnoreVideoHover;
+    m_hideTimerBehaviorFlags = IgnoreNone;
+
     if (mediaElement().togglePlayStateWillPlay())
         return;
 
-    unsigned behaviorFlags = IgnoreFocus | IgnoreVideoHover;
-    if (m_wasLastEventTouch) {
-        behaviorFlags |= IgnoreControlsHover;
-    }
     if (!shouldHideMediaControls(behaviorFlags))
         return;
 
@@ -540,12 +505,6 @@ void MediaControls::resetHideMediaControlsTimer()
 }
 
 
-const AtomicString& MediaControls::shadowPseudoId() const
-{
-    DEFINE_STATIC_LOCAL(AtomicString, id, ("-webkit-media-controls", AtomicString::ConstructFromLiteral));
-    return id;
-}
-
 bool MediaControls::containsRelatedTarget(Event* event)
 {
     if (!event->isMouseEvent())
@@ -556,45 +515,10 @@ bool MediaControls::containsRelatedTarget(Event* event)
     return contains(relatedTarget->toNode());
 }
 
-void MediaControls::createTextTrackDisplay()
-{
-    if (m_textDisplayContainer)
-        return;
-
-    RefPtrWillBeRawPtr<MediaControlTextTrackContainerElement> textDisplayContainer = MediaControlTextTrackContainerElement::create(*this);
-    m_textDisplayContainer = textDisplayContainer.get();
-
-    // Insert it before (behind) all other control elements.
-    m_overlayEnclosure->insertBefore(textDisplayContainer.release(), m_overlayEnclosure->firstChild());
-}
-
-void MediaControls::showTextTrackDisplay()
-{
-    if (!m_textDisplayContainer)
-        createTextTrackDisplay();
-    m_textDisplayContainer->show();
-}
-
-void MediaControls::hideTextTrackDisplay()
-{
-    if (!m_textDisplayContainer)
-        createTextTrackDisplay();
-    m_textDisplayContainer->hide();
-}
-
-void MediaControls::updateTextTrackDisplay()
-{
-    if (!m_textDisplayContainer)
-        createTextTrackDisplay();
-
-    m_textDisplayContainer->updateDisplay();
-}
-
-void MediaControls::trace(Visitor* visitor)
+DEFINE_TRACE(MediaControls)
 {
     visitor->trace(m_mediaElement);
     visitor->trace(m_panel);
-    visitor->trace(m_textDisplayContainer);
     visitor->trace(m_overlayPlayButton);
     visitor->trace(m_overlayEnclosure);
     visitor->trace(m_playButton);

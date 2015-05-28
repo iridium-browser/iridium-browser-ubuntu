@@ -70,19 +70,16 @@ public:
     }
 
 protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("inverse_paths");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(800, 900);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         SkScalar cx = slideWidth / 2 + slideBoundary;
         SkScalar cy = slideHeight / 2 + slideBoundary;
         SkScalar dx = slideWidth + 2 * slideBoundary;

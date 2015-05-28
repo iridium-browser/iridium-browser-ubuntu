@@ -6,15 +6,14 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/debug/trace_event.h"
 #include "base/location.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/threading/thread_checker.h"
+#include "base/trace_event/trace_event.h"
 #include "content/renderer/media/native_handle_impl.h"
 #include "content/renderer/media/webrtc/track_observer.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/video_frame.h"
-#include "media/base/video_frame_pool.h"
 #include "media/base/video_util.h"
 #include "third_party/libjingle/source/talk/media/base/videoframe.h"
 
@@ -37,19 +36,16 @@ class MediaStreamRemoteVideoSource::RemoteVideoSourceDelegate
   // Implements webrtc::VideoRendererInterface used for receiving video frames
   // from the PeerConnection video track. May be called on a libjingle internal
   // thread.
-  void SetSize(int width, int height) override;
   void RenderFrame(const cricket::VideoFrame* frame) override;
 
-  void DoRenderFrameOnIOThread(scoped_refptr<media::VideoFrame> video_frame,
-                               const media::VideoCaptureFormat& format);
+  void DoRenderFrameOnIOThread(
+      const scoped_refptr<media::VideoFrame>& video_frame);
+
  private:
   // Bound to the render thread.
   base::ThreadChecker thread_checker_;
 
   scoped_refptr<base::MessageLoopProxy> io_message_loop_;
-  // |frame_pool_| is only accessed on whatever
-  // thread webrtc::VideoRendererInterface::RenderFrame is called on.
-  media::VideoFramePool frame_pool_;
 
   // |frame_callback_| is accessed on the IO thread.
   VideoCaptureDeliverFrameCB frame_callback_;
@@ -67,66 +63,55 @@ MediaStreamRemoteVideoSource::
 RemoteVideoSourceDelegate::~RemoteVideoSourceDelegate() {
 }
 
-void MediaStreamRemoteVideoSource::
-RemoteVideoSourceDelegate::SetSize(int width, int height) {
-}
-
-void MediaStreamRemoteVideoSource::
-RemoteVideoSourceDelegate::RenderFrame(
-    const cricket::VideoFrame* frame) {
+void MediaStreamRemoteVideoSource::RemoteVideoSourceDelegate::RenderFrame(
+    const cricket::VideoFrame* incoming_frame) {
   TRACE_EVENT0("webrtc", "RemoteVideoSourceDelegate::RenderFrame");
   base::TimeDelta timestamp = base::TimeDelta::FromMicroseconds(
-      frame->GetElapsedTime() / rtc::kNumNanosecsPerMicrosec);
+      incoming_frame->GetElapsedTime() / rtc::kNumNanosecsPerMicrosec);
 
   scoped_refptr<media::VideoFrame> video_frame;
-  if (frame->GetNativeHandle() != NULL) {
+  if (incoming_frame->GetNativeHandle() != NULL) {
     NativeHandleImpl* handle =
-        static_cast<NativeHandleImpl*>(frame->GetNativeHandle());
+        static_cast<NativeHandleImpl*>(incoming_frame->GetNativeHandle());
     video_frame = static_cast<media::VideoFrame*>(handle->GetHandle());
     video_frame->set_timestamp(timestamp);
   } else {
+    const cricket::VideoFrame* frame =
+        incoming_frame->GetCopyWithRotationApplied();
+
     gfx::Size size(frame->GetWidth(), frame->GetHeight());
-    video_frame = frame_pool_.CreateFrame(
-        media::VideoFrame::YV12, size, gfx::Rect(size), size, timestamp);
 
     // Non-square pixels are unsupported.
     DCHECK_EQ(frame->GetPixelWidth(), 1u);
     DCHECK_EQ(frame->GetPixelHeight(), 1u);
 
-    int y_rows = frame->GetHeight();
-    int uv_rows = frame->GetChromaHeight();
-    CopyYPlane(
-        frame->GetYPlane(), frame->GetYPitch(), y_rows, video_frame.get());
-    CopyUPlane(
-        frame->GetUPlane(), frame->GetUPitch(), uv_rows, video_frame.get());
-    CopyVPlane(
-        frame->GetVPlane(), frame->GetVPitch(), uv_rows, video_frame.get());
+    // Make a shallow copy. Both |frame| and |video_frame| will share a single
+    // reference counted frame buffer. Const cast and hope no one will overwrite
+    // the data.
+    // TODO(magjed): Update media::VideoFrame to support const data so we don't
+    // need to const cast here.
+    video_frame = media::VideoFrame::WrapExternalYuvData(
+        media::VideoFrame::YV12, size, gfx::Rect(size), size,
+        frame->GetYPitch(), frame->GetUPitch(), frame->GetVPitch(),
+        const_cast<uint8_t*>(frame->GetYPlane()),
+        const_cast<uint8_t*>(frame->GetUPlane()),
+        const_cast<uint8_t*>(frame->GetVPlane()), timestamp,
+        base::Bind(&base::DeletePointer<cricket::VideoFrame>, frame->Copy()));
   }
-
-  media::VideoPixelFormat pixel_format =
-      (video_frame->format() == media::VideoFrame::YV12) ?
-          media::PIXEL_FORMAT_YV12 : media::PIXEL_FORMAT_TEXTURE;
-
-  media::VideoCaptureFormat format(
-      gfx::Size(video_frame->natural_size().width(),
-                video_frame->natural_size().height()),
-                MediaStreamVideoSource::kUnknownFrameRate,
-                pixel_format);
 
   io_message_loop_->PostTask(
       FROM_HERE,
       base::Bind(&RemoteVideoSourceDelegate::DoRenderFrameOnIOThread,
-                 this, video_frame, format));
+                 this, video_frame));
 }
 
 void MediaStreamRemoteVideoSource::
 RemoteVideoSourceDelegate::DoRenderFrameOnIOThread(
-    scoped_refptr<media::VideoFrame> video_frame,
-    const media::VideoCaptureFormat& format) {
+    const scoped_refptr<media::VideoFrame>& video_frame) {
   DCHECK(io_message_loop_->BelongsToCurrentThread());
   TRACE_EVENT0("webrtc", "RemoteVideoSourceDelegate::DoRenderFrameOnIOThread");
   // TODO(hclam): Give the estimated capture time.
-  frame_callback_.Run(video_frame, format, base::TimeTicks());
+  frame_callback_.Run(video_frame, base::TimeTicks());
 }
 
 MediaStreamRemoteVideoSource::MediaStreamRemoteVideoSource(

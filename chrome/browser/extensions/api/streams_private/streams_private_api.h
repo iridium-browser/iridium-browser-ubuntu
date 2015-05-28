@@ -42,7 +42,9 @@ class StreamsPrivateAPI : public BrowserContextKeyedAPI,
                               scoped_ptr<content::StreamInfo> stream,
                               const std::string& view_id,
                               int64 expected_content_size,
-                              bool embedded);
+                              bool embedded,
+                              int render_process_id,
+                              int render_frame_id);
 
   void AbortStream(const std::string& extension_id,
                    const GURL& stream_url,

@@ -3,243 +3,120 @@
 // found in the LICENSE file.
 
 /**
- * @param {!Object.<string, string>} stringData String data.
- * @param {!VolumeManager} volumeManager Volume manager.
- * @constructor
- * @struct
+ * Configuration of the Gallery window.
+ * @const
+ * @type {Object}
  */
-function BackgroundComponents(stringData, volumeManager) {
-  /**
-   * String data.
-   * @type {!Object.<string, string>}
-   */
-  this.stringData = stringData;
-
-  /**
-   * Volume manager.
-   * @type {!VolumeManager}
-   */
-  this.volumeManager = volumeManager;
-}
-
-/**
- * Loads background component.
- * @return {!Promise} Promise fulfilled with BackgroundComponents.
- */
-BackgroundComponents.load = function() {
-  var stringDataPromise = new Promise(function(fulfill) {
-    chrome.fileManagerPrivate.getStrings(function(stringData) {
-      loadTimeData.data = stringData;
-      fulfill(stringData);
-    });
-  });
-
-  // VolumeManager should be obtained after stringData initialized.
-  var volumeManagerPromise = stringDataPromise.then(function() {
-    return new Promise(function(fulfill) {
-      VolumeManager.getInstance(fulfill);
-    });
-  });
-
-  return Promise.all([stringDataPromise, volumeManagerPromise]).then(
-      function(args) {
-        return new BackgroundComponents(args[0], args[1]);
-      });
+var windowCreateOptions = {
+  id: 'gallery',
+  innerBounds: {
+    minWidth: 820,
+    minHeight: 554
+  },
+  frame: 'none'
 };
 
 /**
- * Resolves file system names and obtains entries.
- * @param {!Array.<!FileEntry>} entries Names of isolated file system.
- * @return {!Promise} Promise to be fulfilled with an entry array.
+ * Backgound object. This is necessary for AppWindowWrapper.
+ * @type {!BackgroundBase}
  */
-function resolveEntries(entries) {
-  return new Promise(function(fulfill, reject) {
-    chrome.fileManagerPrivate.resolveIsolatedEntries(
-        entries, function(externalEntries) {
-          if (!chrome.runtime.lastError)
-            fulfill(externalEntries);
-          else
-            reject(chrome.runtime.lastError);
-        });
-  });
-}
+var background = new BackgroundBase();
 
 /**
- * Obtains the entry set from the entries passed from onLaunched events.
- * If an single entry is specified, the function returns all entries in the same
- * directory. Otherwise the function returns the passed entries.
+ * Wrapper of gallery window.
+ * @type {SingletonAppWindowWrapper}
+ */
+var gallery = new SingletonAppWindowWrapper('gallery.html',
+    windowCreateOptions);
+
+// Initializes the strings. This needs for the volume manager.
+var loadTimeDataPromise = new Promise(function(fulfill, reject) {
+  chrome.fileManagerPrivate.getStrings(function(stringData) {
+    loadTimeData.data = stringData;
+    fulfill(true);
+  });
+});
+
+// Initializes the volume manager. This needs for isolated entries.
+var volumeManagerPromise = new Promise(function(fulfill, reject) {
+  VolumeManager.getInstance(fulfill);
+});
+
+/**
+ * Queue to serialize initialization.
+ * @type {!Promise}
+ */
+window.initializePromise = Promise.all([loadTimeDataPromise,
+                                     volumeManagerPromise]);
+
+// Registers the handlers.
+chrome.app.runtime.onLaunched.addListener(onLaunched);
+
+/**
+ * Called when an app is launched.
  *
- * The function also filters non-image items and hidden items.
- *
- * @param {!Array.<!FileEntry>} originalEntries Entries passed from onLaunched
- *     events.
- * @return {!Promise} Promise to be fulfilled with entry array.
+ * @param {!Object} launchData Launch data. See the manual of chrome.app.runtime
+ *     .onLaunched for detail.
  */
-function createEntrySet(originalEntries) {
-  var entriesPromise;
-  if (originalEntries.length === 1) {
-    var parentPromise =
-        new Promise(originalEntries[0].getParent.bind(originalEntries[0]));
-    entriesPromise = parentPromise.then(function(parent) {
-      var reader = parent.createReader();
-      var readEntries = function() {
-        return new Promise(reader.readEntries.bind(reader)).then(
-            function(entries) {
-              if (entries.length === 0)
-                return [];
-              return readEntries().then(function(nextEntries) {
-                return entries.concat(nextEntries);
-              });
-            });
-      };
-      return readEntries();
-    }).then(function(entries) {
-      return entries.filter(function(entry) {
-        return originalEntries[0].toURL() === entry.toURL() ||
-            entry.name[0] !== '.';
-      });
+function onLaunched(launchData) {
+  // Skip if files are not selected.
+  if (!launchData || !launchData.items || launchData.items.length == 0)
+    return;
+
+  window.initializePromise.then(function() {
+    var isolatedEntries = launchData.items.map(function(item) {
+      return item.entry;
     });
-  } else {
-    entriesPromise = Promise.resolve(originalEntries);
-  }
-
-  return entriesPromise.then(function(entries) {
-    return entries.filter(FileType.isImage).sort(function(a, b) {
-      return a.name.localeCompare(b.name);
-    });
-  });
-}
-
-/**
- * Promise to be fulfilled with singleton instance of background components.
- * @type {Promise}
- */
-var backgroundComponentsPromise = null;
-
-/**
- * Promise to be fulfilled with single application window.
- * This can be null when the window is not opened.
- * @type {Promise}
- */
-var appWindowPromise = null;
-
-/**
- * Promise to be fulfilled with entries that are used for reopening the
- * application window.
- * @type {Promise}
- */
-var reopenEntriesPromsie = null;
-
-/**
- * Launches the application with entries.
- *
- * @param {!Promise} selectedEntriesPromise Promise to be fulfilled with the
- *     entries that are stored in the external file system (not in the isolated
- *     file system).
- * @return {!Promise} Promise to be fulfilled after the application is launched.
- */
-function launch(selectedEntriesPromise) {
-  // If there is the previous window, close the window.
-  if (appWindowPromise) {
-    reopenEntriesPromsie = selectedEntriesPromise;
-    appWindowPromise.then(function(appWindow) {
-      appWindow.close();
-    });
-    return Promise.reject('The window has already opened.');
-  }
-  reopenEntriesPromsie = null;
-
-  // Create a new window.
-  appWindowPromise = new Promise(function(fulfill) {
-    chrome.app.window.create(
-        'gallery.html',
-        {
-          id: 'gallery',
-          innerBounds: {
-            minWidth: 820,
-            minHeight: 544
-          },
-          frame: 'none'
-        },
-        function(appWindow) {
-          appWindow.contentWindow.addEventListener(
-              'load', fulfill.bind(null, appWindow));
-          appWindow.onClosed.addListener(function() {
-            appWindowPromise = null;
-            if (reopenEntriesPromsie) {
-              // TODO(hirono): This is workaround for crbug.com/442217. Remove
-              // this after fixing it.
-              setTimeout(function() {
-                launch(reopenEntriesPromsie);
-              }, 500);
-            }
-          });
-        });
-  });
-
-  // If only 1 entry is selected, retrieve entries in the same directory.
-  // Otherwise, just use the selectedEntries as an entry set.
-  var allEntriesPromise = selectedEntriesPromise.then(createEntrySet);
-
-  // Initialize the window document.
-  return Promise.all([
-    appWindowPromise,
-    backgroundComponentsPromise
-  ]).then(function(args) {
-    var appWindow = /** @type {!AppWindow} */ (args[0]);
-    var galleryWindow = /** @type {!GalleryWindow} */ (appWindow.contentWindow);
-    galleryWindow.initialize(args[1]);
-    return Promise.all([
-      allEntriesPromise,
-      selectedEntriesPromise
-    ]).then(function(entries) {
-      galleryWindow.loadEntries(entries[0], entries[1]);
-    });
-  });
-}
-
-// If the script is loaded from unit test, chrome.app.runtime is not defined.
-// In this case, does not run the initialization code for the application.
-if (chrome.app.runtime) {
-  backgroundComponentsPromise = BackgroundComponents.load();
-  chrome.app.runtime.onLaunched.addListener(function(launchData) {
-    // Skip if files are not selected.
-    if (!launchData || !launchData.items || launchData.items.length === 0)
-      return;
 
     // Obtains entries in non-isolated file systems.
     // The entries in launchData are stored in the isolated file system.
     // We need to map the isolated entries to the normal entries to retrieve
     // their parent directory.
-    var isolatedEntries = launchData.items.map(function(item) {
-      return item.entry;
-    });
-    var selectedEntriesPromise = backgroundComponentsPromise.then(function() {
-      return resolveEntries(isolatedEntries);
-    });
-
-    launch(selectedEntriesPromise).catch(function(error) {
-      console.error(error.stack || error);
-    });
+    chrome.fileManagerPrivate.resolveIsolatedEntries(
+        isolatedEntries,
+        function(externalEntries) {
+          var urls = util.entriesToURLs(externalEntries);
+          openGalleryWindow(urls, false);
+        });
   });
 }
 
-// If is is run in the browser test, wait for the test resources are installed
-// as a component extension, and then load the test resources.
-if (chrome.test) {
-  // Sets a global flag that we are in tests, so other components are aware of
-  // it.
-  window.IN_TEST = true;
+/**
+ * Opens gallery window.
+ * @param {!Array.<string>} urls List of URL to show.
+ * @param {boolean} reopen True if reopen, false otherwise.
+ * @return {!Promise} Promise to be fulfilled on success, or rejected on error.
+ */
+function openGalleryWindow(urls, reopen) {
+  return new Promise(function(fulfill, reject) {
+    util.URLsToEntries(urls).then(function(result) {
+      fulfill(util.entriesToURLs(result.entries));
+    }).catch(reject);
+  }).then(function(urls) {
+    if (urls.length === 0)
+      return Promise.reject('No file to open.');
 
-  /** @type {string} */
-  window.testExtensionId = 'ejhcmmdhhpdhhgmifplfmjobgegbibkn';
-  chrome.runtime.onMessageExternal.addListener(function(message) {
-    if (message.name !== 'testResourceLoaded')
-      return;
-    var script = document.createElement('script');
-    script.src =
-        'chrome-extension://' + window.testExtensionId +
-        '/common/test_loader.js';
-    document.documentElement.appendChild(script);
+    // Opens a window.
+    return new Promise(function(fulfill, reject) {
+      gallery.launch(
+          {urls: urls},
+          reopen,
+          fulfill.bind(null, gallery));
+    }).then(function(gallery) {
+      var galleryDocument = gallery.rawAppWindow.contentWindow.document;
+      if (galleryDocument.readyState == 'complete')
+        return gallery;
+
+      return new Promise(function(fulfill, reject) {
+        galleryDocument.addEventListener(
+            'DOMContentLoaded', fulfill.bind(null, gallery));
+      });
+    });
+  }).then(function(gallery) {
+    gallery.rawAppWindow.focus();
+    return gallery.rawAppWindow.contentWindow.appID;
+  }).catch(function(error) {
+    console.error('Launch failed' + error.stack || error);
+    return Promise.reject(error);
   });
 }

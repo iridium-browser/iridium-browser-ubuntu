@@ -122,8 +122,8 @@ public:
 
     bool propertyMatches(CSSPropertyID, const CSSValue*) const;
 
-    void trace(Visitor*);
-    void traceAfterDispatch(Visitor*) { }
+    DECLARE_TRACE();
+    DEFINE_INLINE_TRACE_AFTER_DISPATCH() { }
 
 protected:
 
@@ -159,7 +159,7 @@ public:
     const StylePropertyMetadata* metadataArray() const;
     int findPropertyIndex(CSSPropertyID) const;
 
-    void traceAfterDispatch(Visitor*);
+    DECLARE_TRACE_AFTER_DISPATCH();
 
     void* operator new(std::size_t, void* location)
     {
@@ -215,12 +215,12 @@ public:
     void mergeAndOverrideOnConflict(const StylePropertySet*);
 
     void clear();
-    void parseDeclaration(const String& styleDeclaration, StyleSheetContents* contextStyleSheet);
+    void parseDeclarationList(const String& styleDeclaration, StyleSheetContents* contextStyleSheet);
 
     CSSStyleDeclaration* ensureCSSStyleDeclaration();
     int findPropertyIndex(CSSPropertyID) const;
 
-    void traceAfterDispatch(Visitor*);
+    DECLARE_TRACE_AFTER_DISPATCH();
 
 private:
     explicit MutableStylePropertySet(CSSParserMode);

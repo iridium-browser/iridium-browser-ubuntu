@@ -9,11 +9,11 @@ source_set("gpu") {
   visibility = [ "//content/*" ]
 
   sources = [
+    "gpu_child_thread.cc",
+    "gpu_child_thread.h",
     "gpu_main.cc",
     "gpu_process.cc",
     "gpu_process.h",
-    "gpu_child_thread.cc",
-    "gpu_child_thread.h",
     "gpu_watchdog_thread.cc",
     "gpu_watchdog_thread.h",
     "in_process_gpu_thread.cc",
@@ -26,8 +26,8 @@ source_set("gpu") {
     "//base",
     "//content:export",
     "//content/public/child:child_sources",
-    "//mojo/public/interfaces/application",
     "//skia",
+    "//third_party/mojo/src/mojo/public/interfaces/application",
     "//ui/gl",
   ]
 
@@ -43,7 +43,7 @@ source_set("gpu") {
     ]
   }
 
-  if (is_chromeos && cpu_arch != "arm") {
+  if (is_chromeos && current_cpu != "arm") {
     configs += [ "//third_party/libva:libva_config" ]
   }
 

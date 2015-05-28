@@ -14,7 +14,7 @@ file. All content written to this directory will be uploaded upon termination
 and the .isolated file describing this directory will be printed to stdout.
 """
 
-__version__ = '0.4'
+__version__ = '0.4.1'
 
 import logging
 import optparse
@@ -147,8 +147,8 @@ def run_tha_test(isolated_hash, storage, cache, leak_temp_dir, extra_args):
     extra_args: optional arguments to add to the command stated in the .isolate
                 file.
   """
-  run_dir = make_temp_dir('run_tha_test', cache.cache_dir)
-  out_dir = unicode(make_temp_dir('isolated_out', cache.cache_dir))
+  run_dir = make_temp_dir(u'run_tha_test', cache.cache_dir)
+  out_dir = unicode(make_temp_dir(u'isolated_out', cache.cache_dir))
   result = 0
   try:
     try:
@@ -215,7 +215,7 @@ def run_tha_test(isolated_hash, storage, cache, leak_temp_dir, extra_args):
 
       # Upload out_dir and generate a .isolated file out of this directory.
       # It is only done if files were written in the directory.
-      if os.listdir(out_dir):
+      if os.path.isdir(out_dir) and os.listdir(out_dir):
         with tools.Profiler('ArchiveOutput'):
           results = isolateserver.archive_files_to_storage(
               storage, [out_dir], None)
@@ -235,8 +235,12 @@ def run_tha_test(isolated_hash, storage, cache, leak_temp_dir, extra_args):
         if os.path.isdir(out_dir) and not file_path.rmtree(out_dir):
           result = result or 1
       except OSError:
-        # The error was already printed out. Report it but that's it.
-        on_error.report(None)
+        # The error was already printed out. Report it but that's it. Only
+        # report on non-Windows or on Windows when the process had succeeded.
+        # Due to the way file sharing works on Windows, it's sadly expected that
+        # file deletion may fail when a test failed.
+        if sys.platform != 'win32' or not result:
+          on_error.report(None)
         result = 1
 
   return result
@@ -251,8 +255,10 @@ def main(args):
 
   data_group = optparse.OptionGroup(parser, 'Data source')
   data_group.add_option(
-      '-H', '--hash',
-      help='Hash of the .isolated to grab from the hash table')
+      '-s', '--isolated',
+      help='Hash of the .isolated to grab from the isolate server')
+  data_group.add_option(
+      '-H', dest='isolated', help=optparse.SUPPRESS_HELP)
   isolateserver.add_isolate_server_options(data_group)
   parser.add_option_group(data_group)
 
@@ -269,8 +275,8 @@ def main(args):
 
   auth.add_auth_options(parser)
   options, args = parser.parse_args(args)
-  if not options.hash:
-    parser.error('--hash is required.')
+  if not options.isolated:
+    parser.error('--isolated is required.')
   auth.process_auth_options(parser, options)
   isolateserver.process_isolate_server_options(parser, options, True)
 
@@ -280,7 +286,7 @@ def main(args):
     # Hashing schemes used by |storage| and |cache| MUST match.
     assert storage.hash_algo == cache.hash_algo
     return run_tha_test(
-        options.hash, storage, cache, options.leak_temp_dir, args)
+        options.isolated, storage, cache, options.leak_temp_dir, args)
 
 
 if __name__ == '__main__':

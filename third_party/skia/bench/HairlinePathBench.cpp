@@ -42,7 +42,7 @@ public:
     virtual void makePath(SkPath*) = 0;
 
 protected:
-    virtual const char* onGetName() SK_OVERRIDE {
+    const char* onGetName() override {
         fName.printf("path_hairline_%s_%s_",
                      fFlags & kBig_Flag ? "big" : "small",
                      fFlags & kAA_Flag ? "AA" : "noAA");
@@ -50,7 +50,7 @@ protected:
         return fName.c_str();
     }
 
-    virtual void onDraw(const int loops, SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(const int loops, SkCanvas* canvas) override {
         SkPaint paint(fPaint);
         this->setupPaint(&paint);
 
@@ -59,8 +59,7 @@ protected:
         SkPath path;
         this->makePath(&path);
         if (fFlags & kBig_Flag) {
-            SkMatrix m;
-            m.setScale(SkIntToScalar(3), SkIntToScalar(3));
+            const SkMatrix m = SkMatrix::MakeScale(SkIntToScalar(3), SkIntToScalar(3));
             path.transform(m);
         }
 
@@ -80,10 +79,10 @@ class LinePathBench : public HairlinePathBench {
 public:
     LinePathBench(Flags flags) : INHERITED(flags) {}
 
-    virtual void appendName(SkString* name) SK_OVERRIDE {
+    void appendName(SkString* name) override {
         name->append("line");
     }
-    virtual void makePath(SkPath* path) SK_OVERRIDE {
+    void makePath(SkPath* path) override {
         SkRandom rand;
         int size = SK_ARRAY_COUNT(points);
         int hSize = size / 2;
@@ -112,10 +111,10 @@ class QuadPathBench : public HairlinePathBench {
 public:
     QuadPathBench(Flags flags) : INHERITED(flags) {}
 
-    virtual void appendName(SkString* name) SK_OVERRIDE {
+    void appendName(SkString* name) override {
         name->append("quad");
     }
-    virtual void makePath(SkPath* path) SK_OVERRIDE {
+    void makePath(SkPath* path) override {
         SkRandom rand;
         int size = SK_ARRAY_COUNT(points);
         int hSize = size / 2;
@@ -144,10 +143,10 @@ class ConicPathBench : public HairlinePathBench {
 public:
     ConicPathBench(Flags flags) : INHERITED(flags) {}
 
-    virtual void appendName(SkString* name) SK_OVERRIDE {
+    void appendName(SkString* name) override {
         name->append("conic");
     }
-    virtual void makePath(SkPath* path) SK_OVERRIDE {
+    void makePath(SkPath* path) override {
         SkRandom rand;
         SkRandom randWeight;
         int size = SK_ARRAY_COUNT(points);
@@ -180,10 +179,10 @@ class CubicPathBench : public HairlinePathBench {
 public:
     CubicPathBench(Flags flags) : INHERITED(flags) {}
 
-    virtual void appendName(SkString* name) SK_OVERRIDE {
+    void appendName(SkString* name) override {
         name->append("cubic");
     }
-    virtual void makePath(SkPath* path) SK_OVERRIDE {
+    void makePath(SkPath* path) override {
         SkRandom rand;
         int size = SK_ARRAY_COUNT(points);
         int hSize = size / 2;

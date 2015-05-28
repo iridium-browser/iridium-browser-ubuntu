@@ -25,6 +25,9 @@ class ObjectPath;
 namespace chromeos {
 
 // Style Note: Clients are sorted by names.
+class AmplifierClient;
+class ApManagerClient;
+class AudioDspClient;
 class BluetoothAdapterClient;
 class BluetoothAgentManagerClient;
 class BluetoothDeviceClient;
@@ -45,7 +48,9 @@ class EasyUnlockClient;
 class GsmSMSClient;
 class ImageBurnerClient;
 class IntrospectableClient;
+class LeadershipDaemonManagerClient;
 class LorgnetteManagerClient;
+class MetronomeClient;
 class ModemMessagingClient;
 class NfcAdapterClient;
 class NfcDeviceClient;
@@ -55,7 +60,8 @@ class NfcTagClient;
 class PeerDaemonManagerClient;
 class PermissionBrokerClient;
 class PowerManagerClient;
-class PrivetDaemonClient;
+class PrivetDaemonManagerClient;
+class SMSClient;
 class SessionManagerClient;
 class ShillDeviceClient;
 class ShillIPConfigClient;
@@ -63,7 +69,6 @@ class ShillManagerClient;
 class ShillProfileClient;
 class ShillServiceClient;
 class ShillThirdPartyVpnDriverClient;
-class SMSClient;
 class SystemClockClient;
 class UpdateEngineClient;
 
@@ -117,6 +122,9 @@ class CHROMEOS_EXPORT DBusThreadManager {
 
   // All returned objects are owned by DBusThreadManager.  Do not use these
   // pointers after DBusThreadManager has been shut down.
+  AmplifierClient* GetAmplifierClient();
+  ApManagerClient* GetApManagerClient();
+  AudioDspClient* GetAudioDspClient();
   BluetoothAdapterClient* GetBluetoothAdapterClient();
   BluetoothAgentManagerClient* GetBluetoothAgentManagerClient();
   BluetoothDeviceClient* GetBluetoothDeviceClient();
@@ -136,7 +144,9 @@ class CHROMEOS_EXPORT DBusThreadManager {
   GsmSMSClient* GetGsmSMSClient();
   ImageBurnerClient* GetImageBurnerClient();
   IntrospectableClient* GetIntrospectableClient();
+  LeadershipDaemonManagerClient* GetLeadershipDaemonManagerClient();
   LorgnetteManagerClient* GetLorgnetteManagerClient();
+  MetronomeClient* GetMetronomeClient();
   ModemMessagingClient* GetModemMessagingClient();
   NfcAdapterClient* GetNfcAdapterClient();
   NfcDeviceClient* GetNfcDeviceClient();
@@ -145,8 +155,8 @@ class CHROMEOS_EXPORT DBusThreadManager {
   NfcTagClient* GetNfcTagClient();
   PeerDaemonManagerClient* GetPeerDaemonManagerClient();
   PermissionBrokerClient* GetPermissionBrokerClient();
+  PrivetDaemonManagerClient* GetPrivetDaemonManagerClient();
   PowerManagerClient* GetPowerManagerClient();
-  PrivetDaemonClient* GetPrivetDaemonClient();
   SessionManagerClient* GetSessionManagerClient();
   ShillDeviceClient* GetShillDeviceClient();
   ShillIPConfigClient* GetShillIPConfigClient();
@@ -200,6 +210,8 @@ class CHROMEOS_EXPORT DBusThreadManagerSetter {
  public:
   ~DBusThreadManagerSetter();
 
+  void SetAmplifierClient(scoped_ptr<AmplifierClient> client);
+  void SetAudioDspClient(scoped_ptr<AudioDspClient> client);
   void SetBluetoothAdapterClient(scoped_ptr<BluetoothAdapterClient> client);
   void SetBluetoothAgentManagerClient(
       scoped_ptr<BluetoothAgentManagerClient> client);
@@ -223,12 +235,17 @@ class CHROMEOS_EXPORT DBusThreadManagerSetter {
   void SetCryptohomeClient(scoped_ptr<CryptohomeClient> client);
   void SetDebugDaemonClient(scoped_ptr<DebugDaemonClient> client);
   void SetEasyUnlockClient(scoped_ptr<EasyUnlockClient> client);
+  void SetLeadershipDaemonManagerClient(
+      scoped_ptr<LeadershipDaemonManagerClient> client);
   void SetLorgnetteManagerClient(scoped_ptr<LorgnetteManagerClient> client);
+  void SetMetronomeClient(scoped_ptr<MetronomeClient> client);
   void SetShillDeviceClient(scoped_ptr<ShillDeviceClient> client);
   void SetShillIPConfigClient(scoped_ptr<ShillIPConfigClient> client);
   void SetShillManagerClient(scoped_ptr<ShillManagerClient> client);
   void SetShillServiceClient(scoped_ptr<ShillServiceClient> client);
   void SetShillProfileClient(scoped_ptr<ShillProfileClient> client);
+  void SetShillThirdPartyVpnDriverClient(
+      scoped_ptr<ShillThirdPartyVpnDriverClient> client);
   void SetGsmSMSClient(scoped_ptr<GsmSMSClient> client);
   void SetImageBurnerClient(scoped_ptr<ImageBurnerClient> client);
   void SetIntrospectableClient(scoped_ptr<IntrospectableClient> client);
@@ -240,8 +257,9 @@ class CHROMEOS_EXPORT DBusThreadManagerSetter {
   void SetNfcTagClient(scoped_ptr<NfcTagClient> client);
   void SetPeerDaemonManagerClient(scoped_ptr<PeerDaemonManagerClient> client);
   void SetPermissionBrokerClient(scoped_ptr<PermissionBrokerClient> client);
+  void SetPrivetDaemonManagerClient(
+      scoped_ptr<PrivetDaemonManagerClient> client);
   void SetPowerManagerClient(scoped_ptr<PowerManagerClient> client);
-  void SetPrivetDaemonClient(scoped_ptr<PrivetDaemonClient> client);
   void SetSessionManagerClient(scoped_ptr<SessionManagerClient> client);
   void SetSMSClient(scoped_ptr<SMSClient> client);
   void SetSystemClockClient(scoped_ptr<SystemClockClient> client);

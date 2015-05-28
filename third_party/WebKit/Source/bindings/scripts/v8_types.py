@@ -243,11 +243,8 @@ IdlArrayOrSequenceType.native_array_element_type = property(
 
 
 def cpp_template_type(template, inner_type):
-    """Returns C++ template specialized to type, with space added if needed."""
-    if inner_type.endswith('>'):
-        format_string = '{template}<{inner_type} >'
-    else:
-        format_string = '{template}<{inner_type}>'
+    """Returns C++ template specialized to type."""
+    format_string = '{template}<{inner_type}>'
     return format_string.format(template=template, inner_type=inner_type)
 
 
@@ -439,7 +436,8 @@ def impl_includes_for_type(idl_type, interfaces_info):
         includes_for_type.add('wtf/text/WTFString.h')
     if base_idl_type in interfaces_info:
         interface_info = interfaces_info[idl_type.base_type]
-        includes_for_type.add(interface_info['include_path'])
+        if interface_info['include_path']:
+            includes_for_type.add(interface_info['include_path'])
     if base_idl_type in INCLUDES_FOR_TYPE:
         includes_for_type.update(INCLUDES_FOR_TYPE[base_idl_type])
     if idl_type.is_typed_array:
@@ -470,23 +468,23 @@ def set_component_dirs(new_component_dirs):
 
 V8_VALUE_TO_CPP_VALUE = {
     # Basic
-    'Date': 'toCoreDate({v8_value})',
+    'Date': 'toCoreDate({isolate}, {v8_value})',
     'DOMString': '{v8_value}',
-    'ByteString': 'toByteString({arguments})',
-    'USVString': 'toUSVString({arguments})',
+    'ByteString': 'toByteString({isolate}, {arguments})',
+    'USVString': 'toUSVString({isolate}, {arguments})',
     'boolean': '{v8_value}->BooleanValue()',
-    'float': 'toFloat({arguments})',
-    'unrestricted float': 'toFloat({arguments})',
-    'double': 'toDouble({arguments})',
-    'unrestricted double': 'toDouble({arguments})',
-    'byte': 'toInt8({arguments})',
-    'octet': 'toUInt8({arguments})',
-    'short': 'toInt16({arguments})',
-    'unsigned short': 'toUInt16({arguments})',
-    'long': 'toInt32({arguments})',
-    'unsigned long': 'toUInt32({arguments})',
-    'long long': 'toInt64({arguments})',
-    'unsigned long long': 'toUInt64({arguments})',
+    'float': 'toRestrictedFloat({isolate}, {arguments})',
+    'unrestricted float': 'toFloat({isolate}, {arguments})',
+    'double': 'toRestrictedDouble({isolate}, {arguments})',
+    'unrestricted double': 'toDouble({isolate}, {arguments})',
+    'byte': 'toInt8({isolate}, {arguments})',
+    'octet': 'toUInt8({isolate}, {arguments})',
+    'short': 'toInt16({isolate}, {arguments})',
+    'unsigned short': 'toUInt16({isolate}, {arguments})',
+    'long': 'toInt32({isolate}, {arguments})',
+    'unsigned long': 'toUInt32({isolate}, {arguments})',
+    'long long': 'toInt64({isolate}, {arguments})',
+    'unsigned long long': 'toUInt64({isolate}, {arguments})',
     # Interface types
     'Dictionary': 'Dictionary({v8_value}, {isolate}, exceptionState)',
     'EventTarget': 'toEventTarget({isolate}, {v8_value})',
@@ -501,6 +499,7 @@ V8_VALUE_TO_CPP_VALUE = {
 
 def v8_conversion_needs_exception_state(idl_type):
     return (idl_type.is_numeric_type or
+            idl_type.is_enum or
             idl_type.is_dictionary or
             idl_type.name in ('ByteString', 'Dictionary', 'USVString', 'SerializedScriptValue'))
 
@@ -529,7 +528,7 @@ def v8_conversion_is_trivial(idl_type):
 IdlType.v8_conversion_is_trivial = property(v8_conversion_is_trivial)
 
 
-def v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name, index, isolate):
+def v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name, index, isolate, restricted_float=False):
     if idl_type.name == 'void':
         return ''
 
@@ -543,15 +542,17 @@ def v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name
     add_includes_for_type(idl_type)
     base_idl_type = idl_type.as_union_type.name if idl_type.is_union_type else idl_type.base_type
 
-    if 'EnforceRange' in extended_attributes:
-        arguments = ', '.join([v8_value, 'EnforceRange', 'exceptionState'])
-    elif 'Clamp' in extended_attributes:
-        arguments = ', '.join([v8_value, 'Clamp', 'exceptionState'])
+    if idl_type.is_integer_type:
+        configuration = 'NormalConversion'
+        if 'EnforceRange' in extended_attributes:
+            configuration = 'EnforceRange'
+        elif 'Clamp' in extended_attributes:
+            configuration = 'Clamp'
+        arguments = ', '.join([v8_value, configuration, 'exceptionState'])
     elif idl_type.v8_conversion_needs_exception_state:
         arguments = ', '.join([v8_value, 'exceptionState'])
     else:
         arguments = v8_value
-
     if base_idl_type in V8_VALUE_TO_CPP_VALUE:
         cpp_expression_format = V8_VALUE_TO_CPP_VALUE[base_idl_type]
     elif idl_type.is_array_buffer_or_view:
@@ -591,64 +592,67 @@ def v8_value_to_cpp_value_array_or_sequence(native_array_element_type, v8_value,
 
 
 # FIXME: this function should be refactored, as this takes too many flags.
-def v8_value_to_local_cpp_value(idl_type, extended_attributes, v8_value, variable_name=None, index=None, declare_variable=True, isolate='info.GetIsolate()', used_in_private_script=False, return_promise=False, needs_exception_state_for_string=False):
+def v8_value_to_local_cpp_value(idl_type, extended_attributes, v8_value, variable_name, index=None, declare_variable=True, isolate='info.GetIsolate()', bailout_return_value=None, use_exception_state=False, restricted_float=False):
     """Returns an expression that converts a V8 value to a C++ value and stores it as a local value."""
 
     this_cpp_type = idl_type.cpp_type_args(extended_attributes=extended_attributes, raw_type=True)
     idl_type = idl_type.preprocessed_type
 
     if idl_type.base_type in ('void', 'object', 'EventHandler', 'EventListener'):
-        return '/* no V8 -> C++ conversion for IDL type: %s */' % idl_type.name
+        return {
+            'error_message': 'no V8 -> C++ conversion for IDL type: %s' % idl_type.name
+        }
 
-    cpp_value = v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name, index, isolate)
+    cpp_value = v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name, index, isolate, restricted_float=restricted_float)
 
-    if idl_type.is_dictionary or idl_type.is_union_type:
-        return 'TONATIVE_VOID_EXCEPTIONSTATE_ARGINTERNAL(%s, exceptionState)' % cpp_value
+    # Optional expression that returns a value to be assigned to the local variable.
+    assign_expression = None
+    # Optional void expression executed unconditionally.
+    set_expression = None
+    # Optional expression that returns true if the conversion fails.
+    check_expression = None
+    # Optional expression used as the return value when returning. Only
+    # meaningful if 'check_expression' is not None.
+    return_expression = bailout_return_value
 
     if idl_type.is_string_type or idl_type.v8_conversion_needs_exception_state:
-        # Types that need error handling and use one of a group of (C++) macros
-        # to take care of this.
+        # Types for which conversion can fail and that need error handling.
 
-        args = [variable_name, cpp_value]
-
-        if idl_type.v8_conversion_needs_exception_state:
-            macro = 'TONATIVE_DEFAULT_EXCEPTIONSTATE' if used_in_private_script else 'TONATIVE_VOID_EXCEPTIONSTATE'
-        elif return_promise or needs_exception_state_for_string:
-            macro = 'TOSTRING_VOID_EXCEPTIONSTATE'
+        if use_exception_state:
+            check_expression = 'exceptionState.hadException()'
         else:
-            macro = 'TOSTRING_DEFAULT' if used_in_private_script else 'TOSTRING_VOID'
+            check_expression = 'exceptionState.throwIfNeeded()'
 
-        if macro.endswith('_EXCEPTIONSTATE'):
-            args.append('exceptionState')
-
-        if used_in_private_script:
-            args.append('false')
-
-        suffix = ''
-
-        if return_promise:
-            suffix += '_PROMISE'
-            args.append('info')
-            if macro.endswith('_EXCEPTIONSTATE'):
-                args.append('ScriptState::current(%s)' % isolate)
-
-        if declare_variable:
-            args.insert(0, this_cpp_type)
+        if idl_type.is_dictionary or idl_type.is_union_type:
+            set_expression = cpp_value
         else:
-            suffix += '_INTERNAL'
-
-        return '%s(%s)' % (macro + suffix, ', '.join(args))
+            assign_expression = cpp_value
+            # Note: 'not idl_type.v8_conversion_needs_exception_state' implies
+            # 'idl_type.is_string_type', but there are types for which both are
+            # true (ByteString and USVString), so using idl_type.is_string_type
+            # as the condition here would be wrong.
+            if not idl_type.v8_conversion_needs_exception_state:
+                if use_exception_state:
+                    check_expression = '!%s.prepare(exceptionState)' % variable_name
+                else:
+                    check_expression = '!%s.prepare()' % variable_name
+    elif not idl_type.v8_conversion_is_trivial:
+        raise Exception('unclassified V8 -> C++ conversion for IDL type: %s' % idl_type.name)
+    else:
+        assign_expression = cpp_value
 
     # Types that don't need error handling, and simply assign a value to the
     # local variable.
 
-    if not idl_type.v8_conversion_is_trivial:
-        raise Exception('unclassified V8 -> C++ conversion for IDL type: %s' % idl_type.name)
-
-    assignment = '%s = %s' % (variable_name, cpp_value)
-    if declare_variable:
-        return '%s %s' % (this_cpp_type, assignment)
-    return assignment
+    return {
+        'assign_expression': assign_expression,
+        'check_expression': check_expression,
+        'cpp_type': this_cpp_type,
+        'cpp_name': variable_name,
+        'declare_variable': declare_variable,
+        'return_expression': bailout_return_value,
+        'set_expression': set_expression,
+    }
 
 
 IdlTypeBase.v8_value_to_local_cpp_value = v8_value_to_local_cpp_value
@@ -668,10 +672,12 @@ IdlTypeBase.use_output_parameter_for_result = property(use_output_parameter_for_
 ################################################################################
 
 def preprocess_idl_type(idl_type):
+    if idl_type.is_nullable:
+        return IdlNullableType(idl_type.inner_type.preprocessed_type)
     if idl_type.is_enum:
         # Enumerations are internally DOMStrings
         return IdlType('DOMString')
-    if (idl_type.name in ['Any', 'Object'] or idl_type.is_callback_function):
+    if idl_type.base_type in ['any', 'object'] or idl_type.is_callback_function:
         return IdlType('ScriptValue')
     return idl_type
 
@@ -834,7 +840,7 @@ IdlUnionType.release = False
 
 CPP_VALUE_TO_V8_VALUE = {
     # Built-in types
-    'Date': 'v8DateOrNaN({cpp_value}, {isolate})',
+    'Date': 'v8DateOrNaN({isolate}, {cpp_value})',
     'DOMString': 'v8String({isolate}, {cpp_value})',
     'ByteString': 'v8String({isolate}, {cpp_value})',
     'USVString': 'v8String({isolate}, {cpp_value})',
@@ -886,12 +892,31 @@ IdlTypeBase.cpp_value_to_v8_value = cpp_value_to_v8_value
 def literal_cpp_value(idl_type, idl_literal):
     """Converts an expression that is a valid C++ literal for this type."""
     # FIXME: add validation that idl_type and idl_literal are compatible
+    if idl_type.base_type in ('any', 'object') and idl_literal.is_null:
+        return 'ScriptValue()'
     literal_value = str(idl_literal)
     if idl_type.base_type in CPP_UNSIGNED_TYPES:
         return literal_value + 'u'
     return literal_value
 
+
+def union_literal_cpp_value(idl_type, idl_literal):
+    if idl_literal.is_null:
+        return idl_type.name + '()'
+    elif idl_literal.idl_type == 'DOMString':
+        member_type = idl_type.string_member_type
+    elif idl_literal.idl_type in ('integer', 'float'):
+        member_type = idl_type.numeric_member_type
+    elif idl_literal.idl_type == 'boolean':
+        member_type = idl_type.boolean_member_type
+    else:
+        raise ValueError('Unsupported literal type: ' + idl_literal.idl_type)
+
+    return '%s::from%s(%s)' % (idl_type.name, member_type.name,
+                               member_type.literal_cpp_value(idl_literal))
+
 IdlType.literal_cpp_value = literal_cpp_value
+IdlUnionType.literal_cpp_value = union_literal_cpp_value
 
 
 ################################################################################
@@ -903,13 +928,14 @@ def cpp_type_has_null_value(idl_type):
     # - String types (String/AtomicString) represent null as a null string,
     #   i.e. one for which String::isNull() returns true.
     # - Enum types, as they are implemented as Strings.
-    # - Wrapper types (raw pointer or RefPtr/PassRefPtr) represent null as
+    # - Interface types (raw pointer or RefPtr/PassRefPtr) represent null as
     #   a null pointer.
     # - Union types, as thier container classes can represent null value.
     # - 'Object' type. We use ScriptValue for object type.
-    return (idl_type.is_string_type or idl_type.is_wrapper_type or
+    return (idl_type.is_string_type or idl_type.is_interface_type or
             idl_type.is_enum or idl_type.is_union_type
-            or idl_type.base_type == 'object')
+            or idl_type.base_type == 'object'
+            or idl_type.is_callback_function or idl_type.is_callback_interface)
 
 IdlTypeBase.cpp_type_has_null_value = property(cpp_type_has_null_value)
 

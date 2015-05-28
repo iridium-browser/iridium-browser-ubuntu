@@ -8,8 +8,8 @@ import logging
 import os
 
 from telemetry import benchmark
-from telemetry import page as page_module
 from telemetry.core import util
+from telemetry import page as page_module
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.value import list_of_scalar_values
@@ -49,8 +49,7 @@ DESCRIPTIONS = {
 
 class _SpaceportMeasurement(page_test.PageTest):
   def __init__(self):
-    super(_SpaceportMeasurement, self).__init__(
-        action_name_to_run='RunPageInteractions')
+    super(_SpaceportMeasurement, self).__init__()
 
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs('--disable-gpu-vsync')
@@ -106,6 +105,10 @@ class Spaceport(benchmark.Benchmark):
   be simultaneously animated while still achieving 30FPS.
   """
   test = _SpaceportMeasurement
+
+  @classmethod
+  def Name(cls):
+    return 'spaceport'
 
   def CreatePageSet(self, options):
     spaceport_dir = os.path.join(util.GetChromiumSrcDir(), 'chrome', 'test',

@@ -8,6 +8,7 @@
 #include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
+#include "core/fetch/Resource.h"
 #include "core/frame/ConsoleTypes.h"
 #include "core/frame/UseCounter.h"
 #include "core/inspector/ConsoleMessage.h"
@@ -79,11 +80,10 @@ static String algorithmToString(HashAlgorithm algorithm)
 static String digestToString(const DigestValue& digest)
 {
     // We always output base64url encoded data, even though we use base64 internally.
-    String output = base64Encode(reinterpret_cast<const char*>(digest.data()), digest.size(), Base64DoNotInsertLFs);
-    return output.replace('+', '-').replace('/', '_');
+    return base64URLEncode(reinterpret_cast<const char*>(digest.data()), digest.size(), Base64DoNotInsertLFs);
 }
 
-bool SubresourceIntegrity::CheckSubresourceIntegrity(const Element& element, const String& source, const KURL& resourceUrl, const String& resourceType)
+bool SubresourceIntegrity::CheckSubresourceIntegrity(const Element& element, const String& source, const KURL& resourceUrl, const String& resourceType, const Resource& resource)
 {
     if (!RuntimeEnabledFeatures::subresourceIntegrityEnabled())
         return true;
@@ -93,23 +93,8 @@ bool SubresourceIntegrity::CheckSubresourceIntegrity(const Element& element, con
 
     Document& document = element.document();
 
-    // Instead of just checking SecurityOrigin::isSecure on resourceUrl, this
-    // checks canAccessFeatureRequiringSecureOrigin so that file:// protocols
-    // and localhost resources can be allowed. These may be useful for testing
-    // and are allowed for features requiring authenticated origins, so Chrome
-    // allows them here.
-    String insecureOriginMsg = "";
-    RefPtr<SecurityOrigin> resourceSecurityOrigin = SecurityOrigin::create(resourceUrl);
-    if (!document.securityOrigin()->canAccessFeatureRequiringSecureOrigin(insecureOriginMsg)) {
-        UseCounter::count(document, UseCounter::SRIElementWithIntegrityAttributeAndInsecureOrigin);
-        // FIXME: This console message should probably utilize
-        // inesecureOriginMsg to give a more helpful message to the user.
-        logErrorToConsole("The 'integrity' attribute may only be used in documents in secure origins.", document);
-        return false;
-    }
-    if (!resourceSecurityOrigin->canAccessFeatureRequiringSecureOrigin(insecureOriginMsg)) {
-        UseCounter::count(document, UseCounter::SRIElementWithIntegrityAttributeAndInsecureResource);
-        logErrorToConsole("The 'integrity' attribute may only be used with resources on secure origins.", document);
+    if (!resource.isEligibleForIntegrityCheck(document.securityOrigin())) {
+        logErrorToConsole("Subresource Integrity: The resource '" + resourceUrl.elidedString() + "' has an integrity attribute, but the resource requires CORS to be enabled to check the integrity, and it is not. The resource has been blocked.", document);
         return false;
     }
 
@@ -117,10 +102,13 @@ bool SubresourceIntegrity::CheckSubresourceIntegrity(const Element& element, con
     HashAlgorithm algorithm;
     String type;
     String attribute = element.fastGetAttribute(HTMLNames::integrityAttr);
-    if (!parseIntegrityAttribute(attribute, integrity, algorithm, type, document)) {
+    IntegrityParseResult integrityParseResult = parseIntegrityAttribute(attribute, integrity, algorithm, type, document);
+    if (integrityParseResult != IntegrityParseErrorNone) {
         // An error is logged to the console during parsing; we don't need to log one here.
         UseCounter::count(document, UseCounter::SRIElementWithUnparsableIntegrityAttribute);
-        return false;
+        // For non-fatal errors, the integrity attribute is treated as
+        // if it weren't present.
+        return integrityParseResult == IntegrityParseErrorNonfatal;
     }
 
     if (!type.isEmpty() && !equalIgnoringCase(type, resourceType)) {
@@ -219,7 +207,7 @@ bool SubresourceIntegrity::parseDigest(const UChar*& position, const UChar* end,
     }
 
     // We accept base64url encoding, but normalize to "normal" base64 internally:
-    digest = String(begin, position - begin).replace('-', '+').replace('_', '/');
+    digest = normalizeToBase64(String(begin, position - begin));
     return true;
 }
 
@@ -263,7 +251,7 @@ bool SubresourceIntegrity::parseMimeType(const UChar*& position, const UChar* en
     return true;
 }
 
-bool SubresourceIntegrity::parseIntegrityAttribute(const String& attribute, String& digest, HashAlgorithm& algorithm, String& type, Document& document)
+SubresourceIntegrity::IntegrityParseResult SubresourceIntegrity::parseIntegrityAttribute(const String& attribute, String& digest, HashAlgorithm& algorithm, String& type, Document& document)
 {
     Vector<UChar> characters;
     attribute.stripWhiteSpace().appendTo(characters);
@@ -272,30 +260,34 @@ bool SubresourceIntegrity::parseIntegrityAttribute(const String& attribute, Stri
 
     if (!skipToken<UChar>(position, end, "ni:///")) {
         logErrorToConsole("Error parsing 'integrity' attribute ('" + attribute + "'). The value must begin with 'ni:///'.", document);
-        return false;
+        return IntegrityParseErrorFatal;
     }
 
+    // Algorithm parsing errors are non-fatal (the subresource should
+    // still be loaded) because strong hash algorithms should be used
+    // without fear of breaking older user agents that don't support
+    // them.
     if (!parseAlgorithm(position, end, algorithm)) {
         logErrorToConsole("Error parsing 'integrity' attribute ('" + attribute + "'). The specified hash algorithm must be one of 'sha256', 'sha384', or 'sha512'.", document);
-        return false;
+        return IntegrityParseErrorNonfatal;
     }
 
     if (!skipExactly<UChar>(position, end, ';')) {
         logErrorToConsole("Error parsing 'integrity' attribute ('" + attribute + "'). The hash algorithm must be followed by a ';' character.", document);
-        return false;
+        return IntegrityParseErrorFatal;
     }
 
     if (!parseDigest(position, end, digest)) {
         logErrorToConsole("Error parsing 'integrity' attribute ('" + attribute + "'). The digest must be a valid, base64-encoded value.", document);
-        return false;
+        return IntegrityParseErrorFatal;
     }
 
     if (!parseMimeType(position, end, type)) {
         logErrorToConsole("Error parsing 'integrity' attribute ('" + attribute + "'). The content type could not be parsed.", document);
-        return false;
+        return IntegrityParseErrorFatal;
     }
 
-    return true;
+    return IntegrityParseErrorNone;
 }
 
 } // namespace blink

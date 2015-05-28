@@ -8,8 +8,13 @@
 #include <string>
 
 #include "components/user_manager/user.h"
+#include "components/user_manager/user_id.h"
 #include "components/user_manager/user_manager_export.h"
 #include "components/user_manager/user_type.h"
+
+namespace base {
+class DictionaryValue;
+}
 
 namespace chromeos {
 class ScopedUserManagerEnabler;
@@ -116,11 +121,6 @@ class USER_MANAGER_EXPORT UserManager {
   // Returns an empty list in case when primary user is not a regular one or
   // has a policy that prohibits it to be part of multi-profile session.
   virtual UserList GetUsersAllowedForMultiProfile() const = 0;
-
-  // Returns list of users allowed for supervised user creation.
-  // Returns an empty list in cases when supervised user creation or adding new
-  // users is restricted.
-  virtual UserList GetUsersAllowedForSupervisedUsersCreation() const = 0;
 
   // Returns a list of users who are currently logged in.
   virtual const UserList& GetLoggedInUsers() const = 0;
@@ -310,6 +310,42 @@ class USER_MANAGER_EXPORT UserManager {
 
   // Returns true if supervised users allowed.
   virtual bool AreSupervisedUsersAllowed() const = 0;
+
+  // Methods for storage/retrieval of per-user properties in Local State.
+
+  // Performs a lookup of properties associated with |user_id|. If found,
+  // returns |true| and fills |out_value|. |out_value| can be NULL, if
+  // only existence check is required.
+  virtual bool FindKnownUserPrefs(const UserID& user_id,
+                                  const base::DictionaryValue** out_value) = 0;
+
+  // Updates (or creates) properties associated with |user_id| based
+  // on |values|. |clear| defines if existing properties are cleared (|true|)
+  // or if it is just a incremental update (|false|).
+  virtual void UpdateKnownUserPrefs(const UserID& user_id,
+                                    const base::DictionaryValue& values,
+                                    bool clear) = 0;
+
+  // Returns true if |user_id| preference by |path| does exist,
+  // fills in |out_value|. Otherwise returns false.
+  virtual bool GetKnownUserStringPref(const UserID& user_id,
+                                      const std::string& path,
+                                      std::string* out_value) = 0;
+
+  // Updates user identified by |user_id| GAIA ID preference.
+  virtual void SetKnownUserStringPref(const UserID& user_id,
+                                      const std::string& path,
+                                      const std::string& in_value) = 0;
+
+  // Updates |gaia_id| for user with |user_id|.
+  // TODO(antrim): Update this once UserID contains GAIA ID.
+  virtual void UpdateGaiaID(const UserID& user_id,
+                            const std::string& gaia_id) = 0;
+
+  // Find GAIA ID for user with |user_id|, fill in |out_value| and return true
+  // if GAIA ID was found or false otherwise.
+  // TODO(antrim): Update this once UserID contains GAIA ID.
+  virtual bool FindGaiaID(const UserID& user_id, std::string* out_value) = 0;
 
  protected:
   // Sets UserManager instance.

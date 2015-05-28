@@ -22,7 +22,7 @@
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/fake_desktop_environment.h"
-#include "remoting/host/video_scheduler.h"
+#include "remoting/host/video_frame_pump.h"
 #include "remoting/protocol/jingle_session_manager.h"
 #include "remoting/protocol/libjingle_transport_factory.h"
 #include "remoting/protocol/me2me_host_authenticator_factory.h"
@@ -75,13 +75,14 @@ class ProtocolPerfTest
       public testing::WithParamInterface<NetworkPerformanceParams>,
       public ClientUserInterface,
       public VideoRenderer,
+      public protocol::VideoStub,
       public HostStatusObserver {
  public:
   ProtocolPerfTest()
       : host_thread_("host"),
         capture_thread_("capture"),
         encode_thread_("encode") {
-    VideoScheduler::EnableTimestampsForTests();
+    VideoFramePump::EnableTimestampsForTests();
     host_thread_.StartWithOptions(
         base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
     capture_thread_.Start();
@@ -119,6 +120,9 @@ class ProtocolPerfTest
   // VideoRenderer interface.
   void OnSessionConfig(const protocol::SessionConfig& config) override {}
   ChromotingStats* GetStats() override { return nullptr; }
+  protocol::VideoStub* GetVideoStub() override { return this; }
+
+  // protocol::VideoStub interface.
   void ProcessVideoPacket(scoped_ptr<VideoPacket> video_packet,
                           const base::Closure& done) override {
     if (video_packet->data().empty()) {
@@ -361,6 +365,7 @@ class ProtocolPerfTest
 
   scoped_ptr<VideoPacket> last_video_packet_;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(ProtocolPerfTest);
 };
 

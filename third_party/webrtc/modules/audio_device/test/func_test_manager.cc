@@ -96,7 +96,7 @@ AudioTransportImpl::AudioTransportImpl(AudioDeviceModule* audioDevice) :
     _recCount(0),
     _playCount(0)
 {
-    _resampler.Reset(48000, 48000, kResamplerSynchronousStereo);
+    _resampler.Reset(48000, 48000, 2);
 }
 
 AudioTransportImpl::~AudioTransportImpl()
@@ -332,8 +332,7 @@ int32_t AudioTransportImpl::NeedMorePlayData(
                 if (nChannelsIn == 2 && nBytesPerSampleIn == 4)
                 {
                     // input is stereo => we will resample in stereo
-                    ret = _resampler.ResetIfNeeded(fsInHz, fsOutHz,
-                                                   kResamplerSynchronousStereo);
+                    ret = _resampler.ResetIfNeeded(fsInHz, fsOutHz, 2);
                     if (ret == 0)
                     {
                         if (nChannels == 2)
@@ -374,8 +373,7 @@ int32_t AudioTransportImpl::NeedMorePlayData(
                 {
                     // input is mono (can be "reduced from stereo" as well) =>
                     // we will resample in mono
-                    ret = _resampler.ResetIfNeeded(fsInHz, fsOutHz,
-                                                   kResamplerSynchronous);
+                    ret = _resampler.ResetIfNeeded(fsInHz, fsOutHz, 1);
                     if (ret == 0)
                     {
                         if (nChannels == 1)
@@ -558,7 +556,6 @@ void AudioTransportImpl::PullRenderData(int bits_per_sample, int sample_rate,
                                         int64_t* ntp_time_ms) {}
 
 FuncTestManager::FuncTestManager() :
-    _processThread(NULL),
     _audioDevice(NULL),
     _audioEventObserver(NULL),
     _audioTransport(NULL)
@@ -579,7 +576,7 @@ FuncTestManager::~FuncTestManager()
 
 int32_t FuncTestManager::Init()
 {
-    EXPECT_TRUE((_processThread = ProcessThread::CreateProcessThread()) != NULL);
+    EXPECT_TRUE((_processThread = ProcessThread::Create()) != NULL);
     if (_processThread == NULL)
     {
         return -1;
@@ -620,7 +617,7 @@ int32_t FuncTestManager::Close()
     {
         _processThread->DeRegisterModule(_audioDevice);
         _processThread->Stop();
-        ProcessThread::DestroyProcessThread(_processThread);
+        _processThread.reset();
     }
 
     // delete the audio observer
@@ -664,6 +661,7 @@ int32_t FuncTestManager::DoTest(const TestType testType)
             TestSpeakerVolume();
             TestMicrophoneVolume();
             TestLoopback();
+            FALLTHROUGH();
         case TTAudioLayerSelection:
             TestAudioLayerSelection();
             break;
@@ -702,6 +700,7 @@ int32_t FuncTestManager::DoTest(const TestType testType)
             break;
         case TTMobileAPI:
             TestAdvancedMBAPI();
+            FALLTHROUGH();
         case TTTest:
             TestExtra();
             break;
@@ -787,7 +786,7 @@ int32_t FuncTestManager::TestAudioLayerSelection()
         {
             _processThread->DeRegisterModule(_audioDevice);
             _processThread->Stop();
-            ProcessThread::DestroyProcessThread(_processThread);
+            _processThread.reset();
         }
 
         // delete the audio observer
@@ -814,7 +813,7 @@ int32_t FuncTestManager::TestAudioLayerSelection()
         // ==================================================
         // Next, try to make fresh start with new audio layer
 
-        EXPECT_TRUE((_processThread = ProcessThread::CreateProcessThread()) != NULL);
+        EXPECT_TRUE((_processThread = ProcessThread::Create()) != NULL);
         if (_processThread == NULL)
         {
             return -1;

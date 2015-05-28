@@ -85,14 +85,11 @@ public:
     }
 
 protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    SkString onShortName() SK_OVERRIDE { return SkString("gradients_no_texture"); }
-    virtual SkISize onISize() SK_OVERRIDE { return SkISize::Make(640, 615); }
+    SkString onShortName() override { return SkString("gradients_no_texture"); }
+    SkISize onISize() override { return SkISize::Make(640, 615); }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         static const SkPoint kPts[2] = { { 0, 0 },
                                          { SkIntToScalar(50), SkIntToScalar(50) } };
         static const SkShader::TileMode kTM = SkShader::kClamp_TileMode;
@@ -211,14 +208,11 @@ public:
     GradientsManyColorsGM() {}
 
 protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    SkString onShortName() SK_OVERRIDE { return SkString("gradients_many"); }
-    virtual SkISize onISize() SK_OVERRIDE { return SkISize::Make(850, 100); }
+    SkString onShortName() override { return SkString("gradients_many"); }
+    SkISize onISize() override { return SkISize::Make(850, 100); }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         const Proc procs[] = {
             make0, make1, make2,
         };

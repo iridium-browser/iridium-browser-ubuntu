@@ -1,14 +1,14 @@
 {##############################################################################}
 {% macro constant_getter_callback(constant) %}
 {% filter conditional(constant.conditional_string) %}
-static void {{constant.name}}ConstantGetterCallback(v8::Local<v8::String>, const v8::PropertyCallbackInfo<v8::Value>& info)
+static void {{constant.name}}ConstantGetterCallback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
     TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     {% if constant.deprecate_as %}
     UseCounter::countDeprecationIfNotPrivateScript(info.GetIsolate(), callingExecutionContext(info.GetIsolate()), UseCounter::{{constant.deprecate_as}});
     {% endif %}
     {% if constant.measure_as %}
-    UseCounter::countIfNotPrivateScript(info.GetIsolate(), callingExecutionContext(info.GetIsolate()), UseCounter::{{constant.measure_as}});
+    UseCounter::countIfNotPrivateScript(info.GetIsolate(), callingExecutionContext(info.GetIsolate()), UseCounter::{{constant.measure_as('ConstantGetter')}});
     {% endif %}
     {% if constant.idl_type in ('Double', 'Float') %}
     v8SetReturnValue(info, {{constant.value}});
@@ -38,12 +38,12 @@ V8DOMConfiguration::installConstants(isolate, functionTemplate, prototypeTemplat
 {% for constant in runtime_enabled_constants %}
 {% filter runtime_enabled(constant.runtime_enabled_function) %}
 static const V8DOMConfiguration::ConstantConfiguration constantConfiguration = {{constant_configuration(constant)}};
-V8DOMConfiguration::installConstants(isolate, functionTemplate, prototypeTemplate, &constantConfiguration, 1);
+V8DOMConfiguration::installConstant(isolate, functionTemplate, prototypeTemplate, constantConfiguration);
 {% endfilter %}
 {% endfor %}
 {# Constants with [DeprecateAs] or [MeasureAs] #}
 {% for constant in special_getter_constants %}
-V8DOMConfiguration::installConstant(isolate, functionTemplate, prototypeTemplate, "{{constant.name}}", {{cpp_class}}V8Internal::{{constant.name}}ConstantGetterCallback);
+V8DOMConfiguration::installConstantWithGetter(isolate, functionTemplate, prototypeTemplate, "{{constant.name}}", {{cpp_class}}V8Internal::{{constant.name}}ConstantGetterCallback);
 {% endfor %}
 {# Check constants #}
 {% if not do_not_check_constants %}

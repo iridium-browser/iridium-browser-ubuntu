@@ -39,7 +39,7 @@ this.onDomReady_ = function() {
   // Set-up the tracer dialog.
   $('#ps-tracer-dialog').dialog({autoOpen: false, modal: true, width: 400,
       buttons: {'Start': this.startTracingSelectedProcess_.bind(this)}});
-  $('#ps-tracer-period').spinner({min: 0, step: 20});
+  $('#ps-tracer-period').spinner({min: 0, step: 10});
   $('#ps-tracer-snapshots').spinner({min: 1, max: 100});
 
   // Create the process table.
@@ -65,14 +65,14 @@ this.getSelectedProcessURI = function() {
 
 this.snapshotSelectedProcess_ = function() {
   if (!this.selProcUri_)
-    return alert('Must select a process!');
+    return rootUi.showDialog('Must select a process!');
   mmap.dumpMmaps(this.selProcUri_, true);
   rootUi.showTab('prof');
 };
 
 this.dumpSelectedProcessMmaps_ = function() {
   if (!this.selProcUri_)
-    return alert('Must select a process!');
+    return rootUi.showDialog('Must select a process!');
   mmap.dumpMmaps(this.selProcUri_, false);
   rootUi.showTab('mm');
 };
@@ -99,14 +99,18 @@ this.showAndroidProvisionDialog_ = function() {
 
 this.showTracingDialog_ = function() {
   if (!this.selProcUri_)
-    return alert('Must select a process!');
+    return rootUi.showDialog('Must select a process!');
   $('#ps-tracer-process').val(this.selProcName_);
+  if (window.DISABLE_NATIVE_TRACING) {
+    $('#ps-tracer-bt').hide();
+    $('label[for="ps-tracer-bt"]').hide();
+  }
   $('#ps-tracer-dialog').dialog('open');
 };
 
 this.startTracingSelectedProcess_ = function() {
   if (!this.selProcUri_)
-    return alert('The process ' + this.selProcUri_ + ' died.');
+    return rootUi.showDialog('The process ' + this.selProcUri_ + ' died.');
   var traceNativeHeap = $('#ps-tracer-bt').prop('checked');
 
   $('#ps-tracer-dialog').dialog('close');

@@ -24,6 +24,7 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_implementation.h"
 
+using blink::WGC3Denum;
 using gpu::gles2::GLES2Implementation;
 using gpu::GLInProcessContext;
 
@@ -151,6 +152,10 @@ WebGraphicsContext3DInProcessCommandBufferImpl::InitializeOnCurrentThread() {
   if (!MaybeInitializeGL())
     return false;
   return context_ && !isContextLost();
+}
+
+void WebGraphicsContext3DInProcessCommandBufferImpl::SetLock(base::Lock* lock) {
+  context_->SetLock(lock);
 }
 
 bool WebGraphicsContext3DInProcessCommandBufferImpl::isContextLost() {

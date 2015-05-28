@@ -43,11 +43,7 @@ class StartupBrowserCreator {
   bool Start(const base::CommandLine& cmd_line,
              const base::FilePath& cur_dir,
              Profile* last_used_profile,
-             const Profiles& last_opened_profiles,
-             int* return_code) {
-    return ProcessCmdLineImpl(cmd_line, cur_dir, true, last_used_profile,
-                              last_opened_profiles, return_code, this);
-  }
+             const Profiles& last_opened_profiles);
 
   // This function performs command-line handling and is invoked only after
   // start up (for example when we get a start request for another process).
@@ -74,8 +70,7 @@ class StartupBrowserCreator {
                      Profile* profile,
                      const base::FilePath& cur_dir,
                      chrome::startup::IsProcessStartup is_process_startup,
-                     chrome::startup::IsFirstRun is_first_run,
-                     int* return_code);
+                     chrome::startup::IsFirstRun is_first_run);
 
   // When called the first time, reads the value of the preference kWasRestarted
   // and resets it to false. Subsequent calls return the value which was read
@@ -128,7 +123,6 @@ class StartupBrowserCreator {
                                  bool process_startup,
                                  Profile* last_used_profile,
                                  const Profiles& last_opened_profiles,
-                                 int* return_code,
                                  StartupBrowserCreator* browser_creator);
 
   // This function performs command-line handling and is invoked only after

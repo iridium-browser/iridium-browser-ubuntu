@@ -299,12 +299,6 @@ WebInspector.TimelineView.prototype = {
         WebInspector.View.prototype.willHide.call(this);
     },
 
-    wasShown: function()
-    {
-        this._presentationModel.refreshRecords();
-        WebInspector.VBox.prototype.wasShown.call(this);
-    },
-
     _onScroll: function(event)
     {
         this._closeRecordDetails();
@@ -345,7 +339,7 @@ WebInspector.TimelineView.prototype = {
                 idle -= aggregatedStats[category];
             aggregatedStats["idle"] = idle;
 
-            var contentHelper = new WebInspector.TimelineDetailsContentHelper(null, null, true);
+            var contentHelper = new WebInspector.TimelineDetailsContentHelper(null, null, null, true);
             var pieChart = WebInspector.TimelineUIUtils.generatePieChart(aggregatedStats);
             var title = WebInspector.TimelineUIUtils.eventTitle(presentationRecord.record().traceEvent());
             contentHelper.appendTextRow(WebInspector.UIString("Type"), title);
@@ -505,7 +499,7 @@ WebInspector.TimelineView.prototype = {
         }
         var recordsInWindow = this._presentationModel.filteredRecords();
         var index = recordsInWindow.indexOf(recordToReveal);
-
+        console.assert(index >= 0, "Failed to find record in window");
         var itemOffset = index * WebInspector.TimelinePanel.rowHeight;
         var visibleTop = this._scrollTop - WebInspector.TimelinePanel.headerHeight;
         var visibleBottom = visibleTop + this._containerElementHeight - WebInspector.TimelinePanel.rowHeight;
@@ -864,7 +858,7 @@ WebInspector.TimelineView.prototype = {
     {
         if (!anchor._tasksInfo)
             return;
-        popover.showForAnchor(WebInspector.TimelineUIUtils.generateMainThreadBarPopupContent(this._model, anchor._tasksInfo), anchor, null, null, WebInspector.Popover.Orientation.Bottom);
+        popover.showForAnchor(WebInspector.TimelineUIUtils.generateMainThreadBarPopupContent(this._model, anchor._tasksInfo), anchor);
     },
 
     _closeRecordDetails: function()

@@ -83,18 +83,16 @@ def main(args):
 def gen_request_data(isolated_hash=FILE_HASH, properties=None, **kwargs):
   out = {
     'name': u'unit_tests',
+    'parent_task_id': '',
     'priority': 101,
     'properties': {
       'commands': [
         [
           'python',
           'run_isolated.zip',
-          '--hash',
-          isolated_hash,
-          '--isolate-server',
-          'https://localhost:2',
-          '--namespace',
-          'default-gzip',
+          '--isolated', isolated_hash,
+          '--isolate-server', 'https://localhost:2',
+          '--namespace', 'default-gzip',
           '--',
           '--some-arg',
           '123',
@@ -198,7 +196,7 @@ class NetTestCase(net_utils.TestCase):
   def tempdir(self):
     """Creates the directory on first reference."""
     if not self._tempdir:
-      self._tempdir = tempfile.mkdtemp(prefix='swarming_test')
+      self._tempdir = tempfile.mkdtemp(prefix=u'swarming_test')
     return self._tempdir
 
   def _check_output(self, out, err):
@@ -254,12 +252,9 @@ class TestIsolated(auto_stub.TestCase):
     expected = [
       'python',
       'run_isolated.zip',
-      '--hash',
-      '1111111111111111111111111111111111111111',
-      '--isolate-server',
-      'http://foo.invalid',
-      '--namespace',
-      'default',
+      '--isolated', '1111111111111111111111111111111111111111',
+      '--isolate-server', 'http://foo.invalid',
+      '--namespace', 'default',
       '--verbose',
       '--',
       'fo',
@@ -351,7 +346,13 @@ class TestSwarmingTrigger(NetTestCase):
         user='joe@localhost',
         verbose=False)
 
-    request = swarming.task_request_to_raw_request(task_request)
+    os.environ['SWARMING_TASK_ID'] = '123'
+    try:
+      request = swarming.task_request_to_raw_request(task_request)
+    finally:
+      os.environ.pop('SWARMING_TASK_ID')
+    self.assertEqual('123', request['parent_task_id'])
+
     result = gen_request_response(request)
     result['request']['priority'] = 200
     self.expected_requests(
@@ -368,10 +369,14 @@ class TestSwarmingTrigger(NetTestCase):
           ),
         ])
 
-    tasks = swarming.trigger_task_shards(
-        swarming='https://localhost:1',
-        shards=1,
-        task_request=task_request)
+    os.environ['SWARMING_TASK_ID'] = '123'
+    try:
+      tasks = swarming.trigger_task_shards(
+          swarming='https://localhost:1',
+          shards=1,
+          task_request=task_request)
+    finally:
+      os.environ.pop('SWARMING_TASK_ID')
     expected = {
       u'unit_tests': {
         'shard_index': 0,
@@ -388,7 +393,7 @@ class TestSwarmingTrigger(NetTestCase):
     content = '{}'
     expected_hash = hashlib.sha1(content).hexdigest()
     handle, isolated = tempfile.mkstemp(
-        prefix='swarming_test_', suffix='.isolated')
+        prefix=u'swarming_test_', suffix=u'.isolated')
     os.close(handle)
     try:
       with open(isolated, 'w') as f:
@@ -800,10 +805,25 @@ class TestSwarmingCollection(NetTestCase):
 
 class TestMain(NetTestCase):
   # Tests calling main().
+  def test_bot_delete(self):
+    self.expected_requests(
+        [
+          (
+            'https://localhost:1/swarming/api/v1/client/bot/foo',
+            {'method': 'DELETE'},
+            {},
+          ),
+        ])
+    ret = main(
+        ['bot_delete', '--swarming', 'https://localhost:1', 'foo', '--force'])
+    self._check_output('', '')
+    self.assertEqual(0, ret)
+
   def test_run_raw_cmd(self):
     # Minimalist use.
     request = {
       'name': 'None/foo=bar',
+      'parent_task_id': '',
       'priority': 100,
       'properties': {
         'commands': [['python', '-c', 'print(\'hi\')']],
@@ -852,7 +872,6 @@ class TestMain(NetTestCase):
         '  https://localhost:1/user/task/12300\n',
         '')
 
-
   def test_run_isolated_hash(self):
     # pylint: disable=unused-argument
     def isolated_upload_zip_bundle(isolate_server, bundle):
@@ -891,7 +910,7 @@ class TestMain(NetTestCase):
         '--hard-timeout', '60',
         '--io-timeout', '60',
         '--task-name', 'unit_tests',
-        FILE_HASH,
+        '--isolated', FILE_HASH,
         '--',
         '--some-arg',
         '123',
@@ -1012,10 +1031,10 @@ class TestMain(NetTestCase):
     self._check_output(
         '',
         'Usage: swarming.py trigger [options] (hash|isolated) '
-          '[-- extra_args|raw command]'
-        '\n\n'
-        'swarming.py: error: Must pass one .isolated file or its hash (sha1).'
-        '\n')
+          '[-- extra_args|raw command]\n'
+        '\n'
+        'swarming.py: error: Use --isolated, --raw-cmd or \'--\' to pass '
+          'arguments to the called process.\n')
 
   def test_trigger_no_env_vars(self):
     with self.assertRaises(SystemExit):
@@ -1375,6 +1394,6 @@ if __name__ == '__main__':
       level=logging.DEBUG if '-v' in sys.argv else logging.CRITICAL)
   if '-v' in sys.argv:
     unittest.TestCase.maxDiff = None
-  for e in ('ISOLATE_SERVER', 'SWARMING_SERVER'):
+  for e in ('ISOLATE_SERVER', 'SWARMING_TASK_ID', 'SWARMING_SERVER'):
     os.environ.pop(e, None)
   unittest.main()

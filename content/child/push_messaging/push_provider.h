@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_CHILD_PUSH_MESSAGING_PUSH_MANAGER_H_
-#define CONTENT_CHILD_PUSH_MESSAGING_PUSH_MANAGER_H_
+#ifndef CONTENT_CHILD_PUSH_MESSAGING_PUSH_PROVIDER_H_
+#define CONTENT_CHILD_PUSH_MESSAGING_PUSH_PROVIDER_H_
 
 #include <string>
 
@@ -11,10 +11,15 @@
 #include "base/memory/ref_counted.h"
 #include "content/child/push_messaging/push_dispatcher.h"
 #include "content/child/worker_task_runner.h"
-#include "third_party/WebKit/public/platform/WebPushError.h"
-#include "third_party/WebKit/public/platform/WebPushProvider.h"
+#include "content/public/common/push_messaging_status.h"
+#include "third_party/WebKit/public/platform/modules/push_messaging/WebPushError.h"
+#include "third_party/WebKit/public/platform/modules/push_messaging/WebPushProvider.h"
 
 class GURL;
+
+namespace blink {
+struct WebPushSubscriptionOptions;
+}
 
 namespace content {
 
@@ -35,14 +40,36 @@ class PushProvider : public blink::WebPushProvider,
   void OnWorkerRunLoopStopped() override;
 
   // blink::WebPushProvider implementation.
-  virtual void registerPushMessaging(blink::WebServiceWorkerRegistration*,
-                                     blink::WebPushRegistrationCallbacks*);
-  virtual void unregister(blink::WebServiceWorkerRegistration*,
-                          blink::WebPushUnregisterCallbacks*);
-  virtual void getRegistration(blink::WebServiceWorkerRegistration*,
-                       blink::WebPushRegistrationCallbacks*);
-  virtual void getPermissionStatus(blink::WebServiceWorkerRegistration*,
-                                   blink::WebPushPermissionStatusCallbacks*);
+  virtual void subscribe(
+      blink::WebServiceWorkerRegistration* service_worker_registration,
+      const blink::WebPushSubscriptionOptions& options,
+      blink::WebPushSubscriptionCallbacks* callbacks);
+  // TODO(peter): Remove this method when Blink switched over to the above.
+  virtual void registerPushMessaging(
+      blink::WebServiceWorkerRegistration* service_worker_registration,
+      blink::WebPushSubscriptionCallbacks* callbacks);
+  virtual void unsubscribe(
+      blink::WebServiceWorkerRegistration* service_worker_registration,
+      blink::WebPushUnsubscribeCallbacks* callbacks);
+  // TODO(peter): Remove this method when Blink switched over to the above.
+  virtual void unregister(
+      blink::WebServiceWorkerRegistration* service_worker_registration,
+      blink::WebPushUnsubscribeCallbacks* callbacks);
+  virtual void getSubscription(
+      blink::WebServiceWorkerRegistration* service_worker_registration,
+      blink::WebPushSubscriptionCallbacks* callbacks);
+  // TODO(peter): Remove this method when Blink switched over to the above.
+  virtual void getRegistration(
+      blink::WebServiceWorkerRegistration* service_worker_registration,
+      blink::WebPushSubscriptionCallbacks* callbacks);
+  virtual void getPermissionStatus(
+      blink::WebServiceWorkerRegistration* service_worker_registration,
+      const blink::WebPushSubscriptionOptions& options,
+      blink::WebPushPermissionStatusCallbacks* callbacks);
+  // TODO(peter): Remove this method when Blink switched over to the above.
+  virtual void getPermissionStatus(
+      blink::WebServiceWorkerRegistration* service_worker_registration,
+      blink::WebPushPermissionStatusCallbacks* callbacks);
 
   // Called by the PushDispatcher.
   bool OnMessageReceived(const IPC::Message& message);
@@ -71,24 +98,24 @@ class PushProvider : public blink::WebPushProvider,
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
   scoped_refptr<PushDispatcher> push_dispatcher_;
 
-  // Stores the registration callbacks with their request ids. This class owns
+  // Stores the subscription callbacks with their request ids. This class owns
   // the callbacks.
-  IDMap<blink::WebPushRegistrationCallbacks, IDMapOwnPointer>
-      registration_callbacks_;
+  IDMap<blink::WebPushSubscriptionCallbacks, IDMapOwnPointer>
+      subscription_callbacks_;
 
   // Stores the permission status callbacks with their request ids. This class
   // owns the callbacks.
   IDMap<blink::WebPushPermissionStatusCallbacks, IDMapOwnPointer>
       permission_status_callbacks_;
 
-  // Stores the unregistration callbacks with their request ids. This class owns
+  // Stores the unsubscription callbacks with their request ids. This class owns
   // the callbacks.
-  IDMap<blink::WebPushUnregisterCallbacks, IDMapOwnPointer>
-      unregister_callbacks_;
+  IDMap<blink::WebPushUnsubscribeCallbacks, IDMapOwnPointer>
+      unsubscribe_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(PushProvider);
 };
 
 }  // namespace content
 
-#endif  // CONTENT_CHILD_PUSH_MESSAGING_PUSH_MANAGER_H_
+#endif  // CONTENT_CHILD_PUSH_MESSAGING_PUSH_PROVIDER_H_

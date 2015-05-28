@@ -31,11 +31,11 @@
 
 namespace blink {
 
-class RenderObject;
+class LayoutObject;
 
 class SVGFilterBuilder final : public RefCountedWillBeGarbageCollectedFinalized<SVGFilterBuilder> {
 public:
-    typedef WillBeHeapHashSet<RawPtrWillBeMember<FilterEffect> > FilterEffectSet;
+    typedef WillBeHeapHashSet<RawPtrWillBeMember<FilterEffect>> FilterEffectSet;
 
     static PassRefPtrWillBeRawPtr<SVGFilterBuilder> create(PassRefPtrWillBeRawPtr<FilterEffect> sourceGraphic, PassRefPtrWillBeRawPtr<FilterEffect> sourceAlpha)
     {
@@ -47,7 +47,7 @@ public:
     FilterEffect* getEffectById(const AtomicString& id) const;
     FilterEffect* lastEffect() const { return m_lastEffect.get(); }
 
-    void appendEffectToEffectReferences(PassRefPtrWillBeRawPtr<FilterEffect>, RenderObject*);
+    void appendEffectToEffectReferences(PassRefPtrWillBeRawPtr<FilterEffect>, LayoutObject*);
 
     inline FilterEffectSet& effectReferences(FilterEffect* effect)
     {
@@ -57,12 +57,12 @@ public:
     }
 
     // Required to change the attributes of a filter during an svgAttributeChanged.
-    inline FilterEffect* effectByRenderer(RenderObject* object) { return m_effectRenderer.get(object); }
+    inline FilterEffect* effectByRenderer(LayoutObject* object) { return m_effectRenderer.get(object); }
 
     void clearEffects();
     void clearResultsRecursive(FilterEffect*);
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     SVGFilterBuilder(PassRefPtrWillBeRawPtr<FilterEffect> sourceGraphic, PassRefPtrWillBeRawPtr<FilterEffect> sourceAlpha);
@@ -73,14 +73,14 @@ private:
             m_effectReferences.add(entry.value, FilterEffectSet());
     }
 
-    typedef WillBeHeapHashMap<AtomicString, RefPtrWillBeMember<FilterEffect> > NamedFilterEffectMap;
+    typedef WillBeHeapHashMap<AtomicString, RefPtrWillBeMember<FilterEffect>> NamedFilterEffectMap;
 
     NamedFilterEffectMap m_builtinEffects;
     NamedFilterEffectMap m_namedEffects;
     // The value is a list, which contains those filter effects,
     // which depends on the key filter effect.
     WillBeHeapHashMap<RefPtrWillBeMember<FilterEffect>, FilterEffectSet> m_effectReferences;
-    WillBeHeapHashMap<RenderObject*, RawPtrWillBeMember<FilterEffect> > m_effectRenderer;
+    WillBeHeapHashMap<LayoutObject*, RawPtrWillBeMember<FilterEffect>> m_effectRenderer;
 
     RefPtrWillBeMember<FilterEffect> m_lastEffect;
 };

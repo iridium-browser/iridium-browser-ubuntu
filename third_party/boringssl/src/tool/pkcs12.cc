@@ -21,6 +21,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #if defined(OPENSSL_WINDOWS)
@@ -45,10 +46,11 @@ typedef ssize_t read_result_t;
 
 static const struct argument kArguments[] = {
     {
-     "-dump", false, "Dump the key and contents of the given file to stdout",
+     "-dump", kOptionalArgument,
+     "Dump the key and contents of the given file to stdout",
     },
     {
-     "", false, "",
+     "", kOptionalArgument, "",
     },
 };
 

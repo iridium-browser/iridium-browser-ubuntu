@@ -32,65 +32,57 @@
 #define PageScriptDebugServer_h
 
 #include "bindings/core/v8/ScriptDebugServer.h"
-#include "bindings/core/v8/ScriptPreprocessor.h"
 #include <v8.h>
+
+namespace WTF {
+class Mutex;
+}
 
 namespace blink {
 
 class Page;
-class ScriptPreprocessor;
-class ScriptSourceCode;
 
 class PageScriptDebugServer final : public ScriptDebugServer {
     WTF_MAKE_NONCOPYABLE(PageScriptDebugServer);
 public:
-    static PageScriptDebugServer& shared();
-
-    static void setMainThreadIsolate(v8::Isolate*);
-
-    void addListener(ScriptDebugListener*, Page*);
-    void removeListener(ScriptDebugListener*, Page*);
-
-    static void interruptAndRun(PassOwnPtr<Task>);
-
     class ClientMessageLoop {
     public:
         virtual ~ClientMessageLoop() { }
-        virtual void run(Page*) = 0;
+        virtual void run(LocalFrame*) = 0;
         virtual void quitNow() = 0;
     };
-    void setClientMessageLoop(PassOwnPtr<ClientMessageLoop>);
 
-    void compileScript(ScriptState*, const String& expression, const String& sourceURL, String* scriptId, String* exceptionDetailsText, int* lineNumber, int* columnNumber, RefPtrWillBeRawPtr<ScriptCallStack>* stackTrace) override;
-    void clearCompiledScripts() override;
+    PageScriptDebugServer(PassOwnPtr<ClientMessageLoop>, v8::Isolate*);
+    ~PageScriptDebugServer() override;
+    DECLARE_VIRTUAL_TRACE();
+
+    static void setContextDebugData(v8::Local<v8::Context>, const String& type, int contextDebugId);
+    void addListener(ScriptDebugListener*, LocalFrame*, int contextDebugId);
+    void removeListener(ScriptDebugListener*, LocalFrame*);
+
+    static PageScriptDebugServer* instance();
+    static void interruptMainThreadAndRun(PassOwnPtr<Task>);
+
+    void compileScript(ScriptState*, const String& expression, const String& sourceURL, bool persistScript, String* scriptId, String* exceptionDetailsText, int* lineNumber, int* columnNumber, RefPtrWillBeRawPtr<ScriptCallStack>* stackTrace) override;
     void runScript(ScriptState*, const String& scriptId, ScriptValue* result, bool* wasThrown, String* exceptionDetailsText, int* lineNumber, int* columnNumber, RefPtrWillBeRawPtr<ScriptCallStack>* stackTrace) override;
-    void setPreprocessorSource(const String&) override;
-    void preprocessBeforeCompile(const v8::Debug::EventDetails&) override;
-    PassOwnPtr<ScriptSourceCode> preprocess(LocalFrame*, const ScriptSourceCode&) override;
-    String preprocessEventListener(LocalFrame*, const String& source, const String& url, const String& functionName) override;
-    void clearPreprocessor() override;
 
     void muteWarningsAndDeprecations() override;
     void unmuteWarningsAndDeprecations() override;
 
 private:
-    PageScriptDebugServer();
-    ~PageScriptDebugServer() override;
-
-    ScriptDebugListener* getDebugListenerForContext(v8::Handle<v8::Context>) override;
-    void runMessageLoopOnPause(v8::Handle<v8::Context>) override;
+    ScriptDebugListener* getDebugListenerForContext(v8::Local<v8::Context>) override;
+    void clearCompiledScripts() override;
+    void runMessageLoopOnPause(v8::Local<v8::Context>) override;
     void quitMessageLoopOnPause() override;
+    static WTF::Mutex& creationMutex();
 
-    typedef HashMap<Page*, ScriptDebugListener*> ListenersMap;
+    using ListenersMap = WillBeHeapHashMap<RawPtrWillBeMember<LocalFrame>, ScriptDebugListener*>;
     ListenersMap m_listenersMap;
     OwnPtr<ClientMessageLoop> m_clientMessageLoop;
-    Page* m_pausedPage;
+    RawPtrWillBeMember<LocalFrame> m_pausedFrame;
     HashMap<String, String> m_compiledScriptURLs;
 
-    OwnPtr<ScriptSourceCode> m_preprocessorSourceCode;
-    OwnPtr<ScriptPreprocessor> m_scriptPreprocessor;
-    bool canPreprocess(LocalFrame*);
-    static v8::Isolate* s_mainThreadIsolate;
+    static PageScriptDebugServer* s_instance;
 };
 
 } // namespace blink

@@ -12,9 +12,9 @@
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/dbus/cros_disks_client.h"
-#include "storage/browser/blob/file_stream_reader.h"
 #include "storage/browser/fileapi/async_file_util.h"
 #include "storage/browser/fileapi/external_mount_points.h"
+#include "storage/browser/fileapi/file_stream_reader.h"
 #include "storage/browser/fileapi/file_stream_writer.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_operation.h"
@@ -39,11 +39,9 @@ FileSystemBackend::FileSystemBackend(
     FileSystemBackendDelegate* drive_delegate,
     FileSystemBackendDelegate* file_system_provider_delegate,
     FileSystemBackendDelegate* mtp_delegate,
-    scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy,
     scoped_refptr<storage::ExternalMountPoints> mount_points,
     storage::ExternalMountPoints* system_mount_points)
-    : special_storage_policy_(special_storage_policy),
-      file_access_permissions_(new FileAccessPermissions()),
+    : file_access_permissions_(new FileAccessPermissions()),
       local_file_util_(storage::AsyncFileUtil::CreateForLocalFileSystem()),
       drive_delegate_(drive_delegate),
       file_system_provider_delegate_(file_system_provider_delegate),
@@ -173,6 +171,10 @@ bool FileSystemBackend::IsAccessAllowed(
   if (!CanHandleURL(url))
     return false;
 
+  // If there is no origin set, then it's an internal access.
+  if (url.origin().is_empty())
+    return true;
+
   std::string extension_id = url.origin().host();
   // TODO(mtomasz): Temporarily whitelist TimeScapes. Remove this in M-31.
   // See: crbug.com/271946
@@ -181,36 +183,12 @@ bool FileSystemBackend::IsAccessAllowed(
     return true;
   }
 
-  // Check first to make sure this extension has fileBrowserHander permissions.
-  if (!special_storage_policy_.get() ||
-      !special_storage_policy_->IsFileHandler(extension_id))
-    return false;
-
   return file_access_permissions_->HasAccessPermission(extension_id,
                                                        url.virtual_path());
 }
 
-void FileSystemBackend::GrantFullAccessToExtension(
-    const std::string& extension_id) {
-  if (!special_storage_policy_.get())
-    return;
-  if (!special_storage_policy_->IsFileHandler(extension_id)) {
-    NOTREACHED();
-    return;
-  }
-  file_access_permissions_->GrantFullAccessPermission(extension_id);
-}
-
 void FileSystemBackend::GrantFileAccessToExtension(
     const std::string& extension_id, const base::FilePath& virtual_path) {
-  if (!special_storage_policy_.get())
-    return;
-  // All we care about here is access from extensions for now.
-  if (!special_storage_policy_->IsFileHandler(extension_id)) {
-    NOTREACHED();
-    return;
-  }
-
   std::string id;
   storage::FileSystemType type;
   std::string cracked_id;
@@ -220,11 +198,6 @@ void FileSystemBackend::GrantFileAccessToExtension(
                                        &path, &option) &&
       !system_mount_points_->CrackVirtualPath(virtual_path, &id, &type,
                                               &cracked_id, &path, &option)) {
-    return;
-  }
-
-  if (type == storage::kFileSystemTypeRestrictedNativeLocal) {
-    LOG(ERROR) << "Can't grant access for restricted mount point";
     return;
   }
 
@@ -401,16 +374,15 @@ scoped_ptr<storage::FileStreamWriter> FileSystemBackend::CreateFileStreamWriter(
   return scoped_ptr<storage::FileStreamWriter>();
 }
 
-bool FileSystemBackend::GetVirtualPath(
-    const base::FilePath& filesystem_path,
-    base::FilePath* virtual_path) {
+bool FileSystemBackend::GetVirtualPath(const base::FilePath& filesystem_path,
+                                       base::FilePath* virtual_path) const {
   return mount_points_->GetVirtualPath(filesystem_path, virtual_path) ||
          system_mount_points_->GetVirtualPath(filesystem_path, virtual_path);
 }
 
 void FileSystemBackend::GetRedirectURLForContents(
     const storage::FileSystemURL& url,
-    const storage::URLCallback& callback) {
+    const storage::URLCallback& callback) const {
   DCHECK(url.is_valid());
 
   if (!IsAccessAllowed(url))
@@ -435,6 +407,17 @@ void FileSystemBackend::GetRedirectURLForContents(
       NOTREACHED();
   }
   callback.Run(GURL());
+}
+
+storage::FileSystemURL FileSystemBackend::CreateInternalURL(
+    storage::FileSystemContext* context,
+    const base::FilePath& entry_path) const {
+  base::FilePath virtual_path;
+  if (!GetVirtualPath(entry_path, &virtual_path))
+    return storage::FileSystemURL();
+
+  return context->CreateCrackedFileSystemURL(
+      GURL() /* origin */, storage::kFileSystemTypeExternal, virtual_path);
 }
 
 }  // namespace chromeos

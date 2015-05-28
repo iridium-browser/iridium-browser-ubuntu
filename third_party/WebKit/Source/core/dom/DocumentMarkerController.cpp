@@ -32,8 +32,8 @@
 #include "core/dom/Range.h"
 #include "core/dom/RenderedDocumentMarker.h"
 #include "core/dom/Text.h"
-#include "core/editing/TextIterator.h"
-#include "core/rendering/RenderObject.h"
+#include "core/editing/iterators/TextIterator.h"
+#include "core/layout/LayoutObject.h"
 
 #ifndef NDEBUG
 #include <stdio.h>
@@ -97,8 +97,8 @@ void DocumentMarkerController::clear()
 void DocumentMarkerController::addMarker(Range* range, DocumentMarker::MarkerType type, const String& description, uint32_t hash)
 {
     // Use a TextIterator to visit the potentially multiple nodes the range covers.
-    for (TextIterator markedText(range); !markedText.atEnd(); markedText.advance()) {
-        addMarker(markedText.startContainer(), DocumentMarker(type, markedText.startOffset(), markedText.endOffset(), description, hash));
+    for (TextIterator markedText(range->startPosition(), range->endPosition()); !markedText.atEnd(); markedText.advance()) {
+        addMarker(markedText.currentContainer(), DocumentMarker(type, markedText.startOffsetInCurrentContainer(), markedText.endOffsetInCurrentContainer(), description, hash));
     }
 }
 
@@ -106,25 +106,25 @@ void DocumentMarkerController::addMarker(const Position& start, const Position& 
 {
     // Use a TextIterator to visit the potentially multiple nodes the range covers.
     for (TextIterator markedText(start, end); !markedText.atEnd(); markedText.advance()) {
-        addMarker(markedText.startContainer(), DocumentMarker(type, markedText.startOffset(), markedText.endOffset(), description, hash));
+        addMarker(markedText.currentContainer(), DocumentMarker(type, markedText.startOffsetInCurrentContainer(), markedText.endOffsetInCurrentContainer(), description, hash));
     }
 }
 
 void DocumentMarkerController::addTextMatchMarker(const Range* range, bool activeMatch)
 {
     // Use a TextIterator to visit the potentially multiple nodes the range covers.
-    for (TextIterator markedText(range); !markedText.atEnd(); markedText.advance()) {
-        unsigned startOffset = markedText.startOffset();
-        unsigned endOffset = markedText.endOffset();
-        addMarker(markedText.startContainer(), DocumentMarker(startOffset, endOffset, activeMatch));
+    for (TextIterator markedText(range->startPosition(), range->endPosition()); !markedText.atEnd(); markedText.advance()) {
+        unsigned startOffset = markedText.startOffsetInCurrentContainer();
+        unsigned endOffset = markedText.endOffsetInCurrentContainer();
+        addMarker(markedText.currentContainer(), DocumentMarker(startOffset, endOffset, activeMatch));
         if (endOffset > startOffset) {
             // Rendered rects for markers in WebKit are not populated until each time
             // the markers are painted. However, we need it to happen sooner, because
             // the whole purpose of tickmarks on the scrollbar is to show where
             // matches off-screen are (that haven't been painted yet).
-            Node* node = markedText.startContainer();
+            Node* node = markedText.currentContainer();
             DocumentMarkerVector markers = markersFor(node);
-            toRenderedDocumentMarker(markers[markers.size() - 1])->setRenderedRect(range->boundingBox());
+            toRenderedDocumentMarker(markers[markers.size() - 1])->setRenderedRect(LayoutRect(range->boundingBox()));
         }
     }
 }
@@ -141,15 +141,15 @@ void DocumentMarkerController::removeMarkers(TextIterator& markedText, DocumentM
             return;
         ASSERT(!m_markers.isEmpty());
 
-        int startOffset = markedText.startOffset();
-        int endOffset = markedText.endOffset();
-        removeMarkers(markedText.startContainer(), startOffset, endOffset - startOffset, markerTypes, shouldRemovePartiallyOverlappingMarker);
+        int startOffset = markedText.startOffsetInCurrentContainer();
+        int endOffset = markedText.endOffsetInCurrentContainer();
+        removeMarkers(markedText.currentContainer(), startOffset, endOffset - startOffset, markerTypes, shouldRemovePartiallyOverlappingMarker);
     }
 }
 
 void DocumentMarkerController::removeMarkers(Range* range, DocumentMarker::MarkerTypes markerTypes, RemovePartiallyOverlappingMarkerOrNot shouldRemovePartiallyOverlappingMarker)
 {
-    TextIterator markedText(range);
+    TextIterator markedText(range->startPosition(), range->endPosition());
     DocumentMarkerController::removeMarkers(markedText, markerTypes, shouldRemovePartiallyOverlappingMarker);
 }
 
@@ -225,8 +225,8 @@ void DocumentMarkerController::addMarker(Node* node, const DocumentMarker& newMa
     }
 
     // repaint the affected node
-    if (node->renderer())
-        node->renderer()->setShouldDoFullPaintInvalidation();
+    if (node->layoutObject())
+        node->layoutObject()->setShouldDoFullPaintInvalidation();
 }
 
 void DocumentMarkerController::mergeOverlapping(MarkerList* list, DocumentMarker& toInsert)
@@ -286,8 +286,8 @@ void DocumentMarkerController::copyMarkers(Node* srcNode, unsigned startOffset, 
     }
 
     // repaint the affected node
-    if (docDirty && dstNode->renderer())
-        dstNode->renderer()->setShouldDoFullPaintInvalidation();
+    if (docDirty && dstNode->layoutObject())
+        dstNode->layoutObject()->setShouldDoFullPaintInvalidation();
 }
 
 void DocumentMarkerController::removeMarkers(Node* node, unsigned startOffset, int length, DocumentMarker::MarkerTypes markerTypes, RemovePartiallyOverlappingMarkerOrNot shouldRemovePartiallyOverlappingMarker)
@@ -367,8 +367,8 @@ void DocumentMarkerController::removeMarkers(Node* node, unsigned startOffset, i
     }
 
     // repaint the affected node
-    if (docDirty && node->renderer())
-        node->renderer()->setShouldDoFullPaintInvalidation();
+    if (docDirty && node->layoutObject())
+        node->layoutObject()->setShouldDoFullPaintInvalidation();
 }
 
 DocumentMarker* DocumentMarkerController::markerContainingPoint(const LayoutPoint& point, DocumentMarker::MarkerType markerType)
@@ -444,10 +444,7 @@ DocumentMarkerVector DocumentMarkerController::markersInRange(Range* range, Docu
 
     Node* pastLastNode = range->pastLastNode();
     for (Node* node = range->firstNode(); node != pastLastNode; node = NodeTraversal::next(*node)) {
-        DocumentMarkerVector markers = markersFor(node);
-        DocumentMarkerVector::const_iterator end = markers.end();
-        for (DocumentMarkerVector::const_iterator it = markers.begin(); it != end; ++it) {
-            DocumentMarker* marker = *it;
+        for (DocumentMarker* marker : markersFor(node)) {
             if (!markerTypes.contains(marker->type()))
                 continue;
             if (node == startContainer && marker->endOffset() <= static_cast<unsigned>(range->startOffset()))
@@ -489,7 +486,7 @@ Vector<IntRect> DocumentMarkerController::renderedRectsForMarkers(DocumentMarker
     return result;
 }
 
-void DocumentMarkerController::trace(Visitor* visitor)
+DEFINE_TRACE(DocumentMarkerController)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_markers);
@@ -514,7 +511,7 @@ void DocumentMarkerController::removeMarkers(const MarkerRemoverPredicate& shoul
         for (size_t markerListIndex = 0; markerListIndex < DocumentMarker::MarkerTypeIndexesCount; ++markerListIndex) {
             OwnPtrWillBeMember<MarkerList>& list = (*markers)[markerListIndex];
 
-            WillBeHeapVector<RawPtrWillBeMember<RenderedDocumentMarker> > markersToBeRemoved;
+            WillBeHeapVector<RawPtrWillBeMember<RenderedDocumentMarker>> markersToBeRemoved;
             for (size_t j = 0; list.get() && j < list->size(); ++j) {
                 if (i->key->isTextNode() && shouldRemoveMarker(*list->at(j).get(), static_cast<const Text&>(*i->key)))
                     markersToBeRemoved.append(list->at(j).get());
@@ -576,7 +573,7 @@ void DocumentMarkerController::removeMarkersFromList(MarkerMap::iterator iterato
     }
 
     if (needsRepainting) {
-        if (RenderObject* renderer = iterator->key->renderer())
+        if (LayoutObject* renderer = iterator->key->layoutObject())
             renderer->setShouldDoFullPaintInvalidation();
     }
 
@@ -606,7 +603,7 @@ void DocumentMarkerController::repaintMarkers(DocumentMarker::MarkerTypes marker
                 continue;
 
             // cause the node to be redrawn
-            if (RenderObject* renderer = node->renderer()) {
+            if (LayoutObject* renderer = node->layoutObject()) {
                 renderer->setShouldDoFullPaintInvalidation();
                 break;
             }
@@ -660,8 +657,8 @@ void DocumentMarkerController::shiftMarkers(Node* node, unsigned startOffset, in
     }
 
     // repaint the affected node
-    if (docDirty && node->renderer())
-        node->renderer()->setShouldDoFullPaintInvalidation();
+    if (docDirty && node->layoutObject())
+        node->layoutObject()->setShouldDoFullPaintInvalidation();
 }
 
 void DocumentMarkerController::setMarkersActive(Range* range, bool active)
@@ -704,37 +701,8 @@ void DocumentMarkerController::setMarkersActive(Node* node, unsigned startOffset
     }
 
     // repaint the affected node
-    if (docDirty && node->renderer())
-        node->renderer()->setShouldDoFullPaintInvalidation();
-}
-
-bool DocumentMarkerController::hasMarkers(Range* range, DocumentMarker::MarkerTypes markerTypes)
-{
-    if (!possiblyHasMarkers(markerTypes))
-        return false;
-    ASSERT(!m_markers.isEmpty());
-
-    Node* startContainer = range->startContainer();
-    ASSERT(startContainer);
-    Node* endContainer = range->endContainer();
-    ASSERT(endContainer);
-
-    Node* pastLastNode = range->pastLastNode();
-    for (Node* node = range->firstNode(); node != pastLastNode; node = NodeTraversal::next(*node)) {
-        DocumentMarkerVector markers = markersFor(node);
-        DocumentMarkerVector::const_iterator end = markers.end();
-        for (DocumentMarkerVector::const_iterator it = markers.begin(); it != end; ++it) {
-            DocumentMarker* marker = *it;
-            if (!markerTypes.contains(marker->type()))
-                continue;
-            if (node == startContainer && marker->endOffset() <= static_cast<unsigned>(range->startOffset()))
-                continue;
-            if (node == endContainer && marker->startOffset() >= static_cast<unsigned>(range->endOffset()))
-                continue;
-            return true;
-        }
-    }
-    return false;
+    if (docDirty && node->layoutObject())
+        node->layoutObject()->setShouldDoFullPaintInvalidation();
 }
 
 #ifndef NDEBUG

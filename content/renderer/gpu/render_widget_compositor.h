@@ -9,12 +9,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "cc/base/swap_promise.h"
-#include "cc/base/swap_promise_monitor.h"
 #include "cc/input/top_controls_state.h"
+#include "cc/output/swap_promise.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_single_thread_client.h"
 #include "cc/trees/layer_tree_settings.h"
+#include "cc/trees/swap_promise_monitor.h"
 #include "content/common/content_export.h"
 #include "content/renderer/gpu/compositor_dependencies.h"
 #include "third_party/WebKit/public/platform/WebLayerTreeView.h"
@@ -52,20 +52,15 @@ class CONTENT_EXPORT RenderWidgetCompositor
   bool BeginMainFrameRequested() const;
   void SetNeedsDisplayOnAllLayers();
   void SetRasterizeOnlyVisibleContent();
-  void UpdateTopControlsState(cc::TopControlsState constraints,
-                              cc::TopControlsState current,
-                              bool animate);
-  void SetTopControlsShrinkBlinkSize(bool shrink);
-  void SetTopControlsHeight(float height);
   void SetNeedsRedrawRect(gfx::Rect damage_rect);
   // Like setNeedsRedraw but forces the frame to be drawn, without early-outs.
   // Redraw will be forced after the next commit
   void SetNeedsForcedRedraw();
   // Calling CreateLatencyInfoSwapPromiseMonitor() to get a scoped
   // LatencyInfoSwapPromiseMonitor. During the life time of the
-  // LatencyInfoSwapPromiseMonitor, if SetNeedsCommit() or SetNeedsUpdateLayer()
-  // is called on LayerTreeHost, the original latency info will be turned
-  // into a LatencyInfoSwapPromise.
+  // LatencyInfoSwapPromiseMonitor, if SetNeedsCommit() or
+  // SetNeedsUpdateLayers() is called on LayerTreeHost, the original latency
+  // info will be turned into a LatencyInfoSwapPromise.
   scoped_ptr<cc::SwapPromiseMonitor> CreateLatencyInfoSwapPromiseMonitor(
       ui::LatencyInfo* latency);
   // Calling QueueSwapPromise() to directly queue a SwapPromise into
@@ -73,6 +68,7 @@ class CONTENT_EXPORT RenderWidgetCompositor
   void QueueSwapPromise(scoped_ptr<cc::SwapPromise> swap_promise);
   int GetLayerTreeId() const;
   int GetSourceFrameNumber() const;
+  void SetNeedsUpdateLayers();
   void SetNeedsCommit();
   void NotifyInputThrottledUntilCommit();
   const cc::Layer* GetRootLayer() const;
@@ -98,7 +94,6 @@ class CONTENT_EXPORT RenderWidgetCompositor
   virtual float deviceScaleFactor() const;
   virtual void setBackgroundColor(blink::WebColor color);
   virtual void setHasTransparentBackground(bool transparent);
-  virtual void setOverhangBitmap(const SkBitmap& bitmap);
   virtual void setVisible(bool visible);
   virtual void setPageScaleFactorAndLimits(float page_scale_factor,
                                            float minimum,
@@ -130,15 +125,21 @@ class CONTENT_EXPORT RenderWidgetCompositor
   virtual void setShowDebugBorders(bool show);
   virtual void setContinuousPaintingEnabled(bool enabled);
   virtual void setShowScrollBottleneckRects(bool show);
-  virtual void setTopControlsContentOffset(float);
+
+  virtual void updateTopControlsState(blink::WebTopControlsState constraints,
+                              blink::WebTopControlsState current,
+                              bool animate);
+  virtual void setTopControlsHeight(float height, bool shrink);
+  virtual void setTopControlsShownRatio(float);
 
   // cc::LayerTreeHostClient implementation.
-  void WillBeginMainFrame(int frame_id) override;
+  void WillBeginMainFrame() override;
   void DidBeginMainFrame() override;
   void BeginMainFrame(const cc::BeginFrameArgs& args) override;
+  void BeginMainFrameNotExpectedSoon() override;
   void Layout() override;
-  void ApplyViewportDeltas(const gfx::Vector2d& inner_delta,
-                           const gfx::Vector2d& outer_delta,
+  void ApplyViewportDeltas(const gfx::Vector2dF& inner_delta,
+                           const gfx::Vector2dF& outer_delta,
                            const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override;
@@ -152,6 +153,7 @@ class CONTENT_EXPORT RenderWidgetCompositor
   void DidCommit() override;
   void DidCommitAndDrawFrame() override;
   void DidCompleteSwapBuffers() override;
+  void DidCompletePageScaleAnimation() override;
   void RateLimitSharedMainThreadContext() override;
 
   // cc::LayerTreeHostSingleThreadClient implementation.

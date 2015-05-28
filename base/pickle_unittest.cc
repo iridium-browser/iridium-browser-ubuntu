@@ -30,10 +30,13 @@ const double testdouble = 2.71828182845904523;
 const std::string teststring("Hello world");  // note non-aligned string length
 const std::wstring testwstring(L"Hello, world");
 const base::string16 teststring16(base::ASCIIToUTF16("Hello, world"));
+const char testrawstring[] = "Hello new world"; // Test raw string writing
+// Test raw char16 writing, assumes UTF16 encoding is ANSI for alpha chars.
+const base::char16 testrawstring16[] = {'A', 'l', 'o', 'h', 'a', 0};
 const char testdata[] = "AAA\0BBB\0";
 const int testdatalen = arraysize(testdata) - 1;
 
-// checks that the result
+// checks that the results can be read correctly from the Pickle
 void VerifyResult(const Pickle& pickle) {
   PickleIterator iter(pickle);
 
@@ -83,13 +86,17 @@ void VerifyResult(const Pickle& pickle) {
   EXPECT_TRUE(iter.ReadString(&outstring));
   EXPECT_EQ(teststring, outstring);
 
-  std::wstring outwstring;
-  EXPECT_TRUE(iter.ReadWString(&outwstring));
-  EXPECT_EQ(testwstring, outwstring);
-
   base::string16 outstring16;
   EXPECT_TRUE(iter.ReadString16(&outstring16));
   EXPECT_EQ(teststring16, outstring16);
+
+  base::StringPiece outstringpiece;
+  EXPECT_TRUE(iter.ReadStringPiece(&outstringpiece));
+  EXPECT_EQ(testrawstring, outstringpiece);
+
+  base::StringPiece16 outstringpiece16;
+  EXPECT_TRUE(iter.ReadStringPiece16(&outstringpiece16));
+  EXPECT_EQ(testrawstring16, outstringpiece16);
 
   const char* outdata;
   int outdatalen;
@@ -119,8 +126,9 @@ TEST(PickleTest, EncodeDecode) {
   EXPECT_TRUE(pickle.WriteFloat(testfloat));
   EXPECT_TRUE(pickle.WriteDouble(testdouble));
   EXPECT_TRUE(pickle.WriteString(teststring));
-  EXPECT_TRUE(pickle.WriteWString(testwstring));
   EXPECT_TRUE(pickle.WriteString16(teststring16));
+  EXPECT_TRUE(pickle.WriteString(testrawstring));
+  EXPECT_TRUE(pickle.WriteString16(testrawstring16));
   EXPECT_TRUE(pickle.WriteData(testdata, testdatalen));
   VerifyResult(pickle);
 
@@ -198,9 +206,9 @@ TEST(PickleTest, ZeroLenStr) {
   EXPECT_EQ("", outstr);
 }
 
-TEST(PickleTest, ZeroLenWStr) {
+TEST(PickleTest, ZeroLenStr16) {
   Pickle pickle;
-  EXPECT_TRUE(pickle.WriteWString(std::wstring()));
+  EXPECT_TRUE(pickle.WriteString16(base::string16()));
 
   PickleIterator iter(pickle);
   std::string outstr;
@@ -217,13 +225,13 @@ TEST(PickleTest, BadLenStr) {
   EXPECT_FALSE(iter.ReadString(&outstr));
 }
 
-TEST(PickleTest, BadLenWStr) {
+TEST(PickleTest, BadLenStr16) {
   Pickle pickle;
   EXPECT_TRUE(pickle.WriteInt(-1));
 
   PickleIterator iter(pickle);
-  std::wstring woutstr;
-  EXPECT_FALSE(iter.ReadWString(&woutstr));
+  base::string16 outstr;
+  EXPECT_FALSE(iter.ReadString16(&outstr));
 }
 
 TEST(PickleTest, FindNext) {
@@ -391,13 +399,6 @@ TEST(PickleTest, EvilLengths) {
   EXPECT_TRUE(bad_len.WriteInt(1 << 31));
   iter = PickleIterator(bad_len);
   EXPECT_FALSE(iter.ReadString16(&str16));
-
-  // Check we don't fail in a length check with large WStrings.
-  Pickle big_len;
-  EXPECT_TRUE(big_len.WriteInt(1 << 30));
-  iter = PickleIterator(big_len);
-  std::wstring wstr;
-  EXPECT_FALSE(iter.ReadWString(&wstr));
 }
 
 // Check we can write zero bytes of data and 'data' can be NULL.

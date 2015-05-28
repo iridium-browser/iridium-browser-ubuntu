@@ -15,16 +15,20 @@
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/scoped_observer.h"
 #include "base/synchronization/lock.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/top_sites.h"
-#include "chrome/browser/history/top_sites_backend.h"
+#include "components/history/core/browser/history_service.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/page_usage_data.h"
+#include "components/history/core/browser/top_sites.h"
+#include "components/history/core/browser/top_sites_backend.h"
 #include "components/history/core/common/thumbnail_score.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
@@ -35,6 +39,7 @@ namespace base {
 class FilePath;
 class RefCountedBytes;
 class RefCountedMemory;
+class SingleThreadTaskRunner;
 }
 
 namespace history {
@@ -46,12 +51,16 @@ class TopSitesImplTest;
 // thread. All other methods must be invoked on the UI thread. All mutations
 // to internal state happen on the UI thread and are scheduled to update the
 // db using TopSitesBackend.
-class TopSitesImpl : public TopSites {
+class TopSitesImpl : public TopSites,
+                     public HistoryServiceObserver,
+                     public content::NotificationObserver {
  public:
-  explicit TopSitesImpl(Profile* profile);
+  TopSitesImpl(Profile* profile,
+               const PrepopulatedPageList& prepopulated_pages);
 
   // Initializes TopSitesImpl.
-  void Init(const base::FilePath& db_name);
+  void Init(const base::FilePath& db_name,
+            const scoped_refptr<base::SingleThreadTaskRunner>& db_task_runner);
 
   bool SetPageThumbnail(const GURL& url,
                         const gfx::Image& thumbnail,
@@ -73,15 +82,17 @@ class TopSitesImpl : public TopSites {
   void RemoveBlacklistedURL(const GURL& url) override;
   bool IsBlacklisted(const GURL& url) override;
   void ClearBlacklistedURLs() override;
-  void Shutdown() override;
   base::CancelableTaskTracker::TaskId StartQueryForMostVisited() override;
   bool IsKnownURL(const GURL& url) override;
   const std::string& GetCanonicalURLString(const GURL& url) const override;
   bool IsNonForcedFull() override;
   bool IsForcedFull() override;
-  MostVisitedURLList GetPrepopulatePages() override;
+  PrepopulatedPageList GetPrepopulatedPages() override;
   bool loaded() const override;
   bool AddForcedURL(const GURL& url, const base::Time& time) override;
+
+  // RefcountedKeyedService:
+  void ShutdownOnUIThread() override;
 
  protected:
   ~TopSitesImpl() override;
@@ -210,6 +221,14 @@ class TopSitesImpl : public TopSites {
   // Called when history service returns a list of top URLs.
   void OnTopSitesAvailableFromHistory(const MostVisitedURLList* data);
 
+  // history::HistoryServiceObserver:
+  void OnURLsDeleted(HistoryService* history_service,
+                     bool all_history,
+                     bool expired,
+                     const URLRows& deleted_rows,
+                     const std::set<GURL>& favicon_urls) override;
+  void HistoryServiceBeingDeleted(HistoryService* history_service) override;
+
   scoped_refptr<TopSitesBackend> backend_;
 
   // The top sites data.
@@ -252,10 +271,13 @@ class TopSitesImpl : public TopSites {
   TempImages temp_images_;
 
   // URL List of prepopulated page.
-  std::vector<GURL> prepopulated_page_urls_;
+  PrepopulatedPageList prepopulated_pages_;
 
   // Are we loaded?
   bool loaded_;
+
+  ScopedObserver<HistoryService, HistoryServiceObserver>
+      history_service_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(TopSitesImpl);
 };

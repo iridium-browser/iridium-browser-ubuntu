@@ -41,7 +41,7 @@ typedef AccessibilityTreeFormatter::Filter Filter;
 // tests it against an expected baseline.
 //
 // The flow of the test is as outlined below.
-// 1. Load an html file from chrome/test/data/accessibility.
+// 1. Load an html file from content/test/data/accessibility.
 // 2. Read the expectation.
 // 3. Browse to the page and serialize the platform specific tree into a human
 //    readable string.
@@ -66,10 +66,9 @@ class DumpAccessibilityTreeTest : public DumpAccessibilityTestBase {
   void RunAriaTest(const base::FilePath::CharType* file_path) {
     base::FilePath dir_test_data;
     ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &dir_test_data));
-    base::FilePath test_path(
-        dir_test_data.AppendASCII("accessibility/aria"));
-    ASSERT_TRUE(base::PathExists(test_path))
-        << test_path.LossyDisplayName();
+    base::FilePath test_path(dir_test_data.AppendASCII("accessibility")
+        .AppendASCII("aria"));
+    ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
 
     base::FilePath aria_file = test_path.Append(base::FilePath(file_path));
     RunTest(aria_file, "accessibility/aria");
@@ -78,10 +77,9 @@ class DumpAccessibilityTreeTest : public DumpAccessibilityTestBase {
   void RunHtmlTest(const base::FilePath::CharType* file_path) {
     base::FilePath dir_test_data;
     ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &dir_test_data));
-    base::FilePath test_path(
-        dir_test_data.AppendASCII("accessibility/html"));
-    ASSERT_TRUE(base::PathExists(test_path))
-        << test_path.LossyDisplayName();
+    base::FilePath test_path(dir_test_data.AppendASCII("accessibility")
+        .AppendASCII("html"));
+    ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
 
     base::FilePath html_file = test_path.Append(base::FilePath(file_path));
     RunTest(html_file, "accessibility/html");
@@ -144,6 +142,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaAlert) {
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityAriaAlertDialog) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-alertdialog.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
                        AccessibilityAriaApplication) {
   RunAriaTest(FILE_PATH_LITERAL("aria-application.html"));
 }
@@ -203,8 +206,17 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunAriaTest(FILE_PATH_LITERAL("aria-contentinfo.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaControls) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-controls.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaDefinition) {
   RunAriaTest(FILE_PATH_LITERAL("aria-definition.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityAriaDescribedBy) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-describedby.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaDialog) {
@@ -221,6 +233,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaDisabled) {
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaDocument) {
   RunAriaTest(FILE_PATH_LITERAL("aria-document.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaDropEffect) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-dropeffect.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaExpanded) {
@@ -248,12 +264,32 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaForm) {
   RunAriaTest(FILE_PATH_LITERAL("aria-form.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaGrabbed) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-grabbed.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaGrid) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-grid.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaGridCell) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-gridcell.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaGroup) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-group.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaImg) {
   RunAriaTest(FILE_PATH_LITERAL("aria-img.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaInvalid) {
   RunAriaTest(FILE_PATH_LITERAL("aria-invalid.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaLabel) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-label.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
@@ -263,6 +299,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaLevel) {
   RunAriaTest(FILE_PATH_LITERAL("aria-level.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaLink) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-link.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaList) {
@@ -321,6 +361,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaMenuBar) {
   RunAriaTest(FILE_PATH_LITERAL("aria-menubar.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaMenuItem) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-menuitem.html"));
+}
+
 // crbug.com/442278 will stop creating new text elements representing title.
 // Re-baseline after the Blink change goes in
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
@@ -336,7 +380,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       AccessibilityAriaMultiline) {
+                       DISABLED_AccessibilityAriaMultiline) {
   RunAriaTest(FILE_PATH_LITERAL("aria-multiline.html"));
 }
 
@@ -347,6 +391,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaNavigation) {
   RunAriaTest(FILE_PATH_LITERAL("aria-navigation.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaNote) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-note.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
@@ -360,6 +408,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaMath) {
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaNone) {
   RunAriaTest(FILE_PATH_LITERAL("aria-none.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaOption) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-option.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
@@ -376,14 +428,21 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunAriaTest(FILE_PATH_LITERAL("aria-progressbar.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       AccessibilityAriaRadio) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRadio) {
   RunAriaTest(FILE_PATH_LITERAL("aria-radio.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
                        AccessibilityAriaRadiogroup) {
   RunAriaTest(FILE_PATH_LITERAL("aria-radiogroup.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaReadonly) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-readonly.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRegion) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-region.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRelevant) {
@@ -402,16 +461,20 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRowGroup) {
   RunAriaTest(FILE_PATH_LITERAL("aria-rowgroup.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaReadonly) {
-  RunAriaTest(FILE_PATH_LITERAL("aria-readonly.html"));
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRowHeader) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-rowheader.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaRegion) {
-  RunAriaTest(FILE_PATH_LITERAL("aria-region.html"));
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaScrollbar) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-scrollbar.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSearch) {
   RunAriaTest(FILE_PATH_LITERAL("aria-search.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSearchBox) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-searchbox.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSelected) {
@@ -422,12 +485,18 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSeparator) {
   RunAriaTest(FILE_PATH_LITERAL("aria-separator.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSort) {
-  RunAriaTest(FILE_PATH_LITERAL("aria-sort.html"));
-}
-
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSlider) {
   RunAriaTest(FILE_PATH_LITERAL("aria-slider.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityAriaSortOnAriaGrid) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-sort-aria-grid.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityAriaSortOnHtmlTable) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-sort-html-table.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
@@ -439,7 +508,24 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaStatus) {
   RunAriaTest(FILE_PATH_LITERAL("aria-status.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaTextbox) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaSwitch) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-switch.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaTab) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-tab.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaTabList) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-tablist.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaTabPanel) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-tabpanel.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       DISABLED_AccessibilityAriaTextbox) {
   RunAriaTest(FILE_PATH_LITERAL("aria-textbox.html"));
 }
 
@@ -480,6 +566,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaValueNow) {
   RunAriaTest(FILE_PATH_LITERAL("aria-valuenow.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaValueText) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-valuetext.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityArticle) {
   RunHtmlTest(FILE_PATH_LITERAL("article.html"));
 }
@@ -496,6 +586,14 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAWithImg) {
   RunHtmlTest(FILE_PATH_LITERAL("a-with-img.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityB) {
+  RunHtmlTest(FILE_PATH_LITERAL("b.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityBase) {
+  RunHtmlTest(FILE_PATH_LITERAL("base.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityBdo) {
   RunHtmlTest(FILE_PATH_LITERAL("bdo.html"));
 }
@@ -508,7 +606,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityBody) {
   RunHtmlTest(FILE_PATH_LITERAL("body.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityBR) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, DISABLED_AccessibilityBR) {
   RunHtmlTest(FILE_PATH_LITERAL("br.html"));
 }
 
@@ -524,8 +622,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityCanvas) {
   RunHtmlTest(FILE_PATH_LITERAL("canvas.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityCaption) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityCaption) {
   RunHtmlTest(FILE_PATH_LITERAL("caption.html"));
 }
 
@@ -536,6 +633,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityCite) {
   RunHtmlTest(FILE_PATH_LITERAL("cite.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityCode) {
+  RunHtmlTest(FILE_PATH_LITERAL("code.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityCol) {
@@ -639,6 +740,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityHR) {
   RunHtmlTest(FILE_PATH_LITERAL("hr.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityHTML) {
+  RunHtmlTest(FILE_PATH_LITERAL("html.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityI) {
   RunHtmlTest(FILE_PATH_LITERAL("i.html"));
 }
@@ -647,8 +752,9 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityIframe) {
   RunHtmlTest(FILE_PATH_LITERAL("iframe.html"));
 }
 
+// Flaky. See http://crbug.com/224659.
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       AccessibilityIframeCoordinates) {
+                       DISABLED_AccessibilityIframeCoordinates) {
   RunHtmlTest(FILE_PATH_LITERAL("iframe-coordinates.html"));
 }
 
@@ -701,8 +807,20 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunHtmlTest(FILE_PATH_LITERAL("input-datetime-local.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputEmail) {
+  RunHtmlTest(FILE_PATH_LITERAL("input-email.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputFile) {
   RunHtmlTest(FILE_PATH_LITERAL("input-file.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputHidden) {
+  RunHtmlTest(FILE_PATH_LITERAL("input-hidden.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputImage) {
+  RunHtmlTest(FILE_PATH_LITERAL("input-image.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
@@ -721,6 +839,12 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputMonth) {
   RunHtmlTest(FILE_PATH_LITERAL("input-month.html"));
 }
 #endif
+
+// crbug.com/84250
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+    DISABLED_AccessibilityInputPassword) {
+  RunHtmlTest(FILE_PATH_LITERAL("input-password.html"));
+}
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputRadio) {
   RunHtmlTest(FILE_PATH_LITERAL("input-radio.html"));
@@ -741,6 +865,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputReset) {
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputSearch) {
   RunHtmlTest(FILE_PATH_LITERAL("input-search.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilitySmall) {
+  RunHtmlTest(FILE_PATH_LITERAL("small.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputSubmit) {
@@ -792,6 +920,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityIns) {
   RunHtmlTest(FILE_PATH_LITERAL("ins.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityKeygen) {
+  RunHtmlTest(FILE_PATH_LITERAL("keygen.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityLabel) {
   RunHtmlTest(FILE_PATH_LITERAL("label.html"));
 }
@@ -804,8 +936,17 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityLegend) {
   RunHtmlTest(FILE_PATH_LITERAL("legend.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityLi) {
+  RunHtmlTest(FILE_PATH_LITERAL("li.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityLink) {
   RunHtmlTest(FILE_PATH_LITERAL("link.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityLinkInsideHeading) {
+  RunHtmlTest(FILE_PATH_LITERAL("link-inside-heading.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityList) {
@@ -882,6 +1023,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityObject) {
   RunHtmlTest(FILE_PATH_LITERAL("object.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityOptgroup) {
+  RunHtmlTest(FILE_PATH_LITERAL("optgroup.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
                        AccessibilityOptionindatalist) {
   RunHtmlTest(FILE_PATH_LITERAL("option-in-datalist.html"));
@@ -944,8 +1089,20 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilitySpan) {
   RunHtmlTest(FILE_PATH_LITERAL("span.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityStrong) {
+  RunHtmlTest(FILE_PATH_LITERAL("strong.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityStyle) {
+  RunHtmlTest(FILE_PATH_LITERAL("style.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilitySub) {
   RunHtmlTest(FILE_PATH_LITERAL("sub.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilitySup) {
+  RunHtmlTest(FILE_PATH_LITERAL("sup.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilitySummary) {
@@ -956,22 +1113,17 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilitySvg) {
   RunHtmlTest(FILE_PATH_LITERAL("svg.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityTab) {
-  RunHtmlTest(FILE_PATH_LITERAL("tab.html"));
-}
-
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityTableSimple) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityTableSimple) {
   RunHtmlTest(FILE_PATH_LITERAL("table-simple.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityTableThRowHeader) {
+                       AccessibilityTableThRowHeader) {
   RunHtmlTest(FILE_PATH_LITERAL("table-th-rowheader.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityTableTbodyTfoot) {
+                       AccessibilityTableTbodyTfoot) {
   RunHtmlTest(FILE_PATH_LITERAL("table-thead-tbody-tfoot.html"));
 }
 
@@ -1001,6 +1153,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityUl) {
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityVar) {
   RunHtmlTest(FILE_PATH_LITERAL("var.html"));
+}
+
+// crbug.com/281952
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, DISABLED_AccessibilityVideo) {
+  RunHtmlTest(FILE_PATH_LITERAL("video.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityWbr) {

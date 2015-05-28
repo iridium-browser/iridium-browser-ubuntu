@@ -163,6 +163,49 @@ GURL GetUrlFromClipboard() {
   return GURL(url_text);
 }
 
+class VectorIterator {
+ public:
+  explicit VectorIterator(std::vector<const BookmarkNode*>* nodes)
+      : nodes_(nodes), current_(nodes->begin()) {}
+  bool has_next() { return (current_ != nodes_->end()); }
+  const BookmarkNode* Next() {
+    const BookmarkNode* result = *current_;
+    ++current_;
+    return result;
+  }
+
+ private:
+  std::vector<const BookmarkNode*>* nodes_;
+  std::vector<const BookmarkNode*>::iterator current_;
+
+  DISALLOW_COPY_AND_ASSIGN(VectorIterator);
+};
+
+template <class type>
+void GetBookmarksMatchingPropertiesImpl(
+    type& iterator,
+    BookmarkModel* model,
+    const QueryFields& query,
+    const std::vector<base::string16>& query_words,
+    size_t max_count,
+    const std::string& languages,
+    std::vector<const BookmarkNode*>* nodes) {
+  while (iterator.has_next()) {
+    const BookmarkNode* node = iterator.Next();
+    if ((!query_words.empty() &&
+         !DoesBookmarkContainWords(node, query_words, languages)) ||
+        model->is_permanent_node(node)) {
+      continue;
+    }
+    if (query.title && node->GetTitle() != *query.title)
+      continue;
+
+    nodes->push_back(node);
+    if (nodes->size() == max_count)
+      return;
+  }
+}
+
 }  // namespace
 
 QueryFields::QueryFields() {}
@@ -258,7 +301,7 @@ void PasteFromClipboard(BookmarkModel* model,
     index = parent->child_count();
   ScopedGroupBookmarkActions group_paste(model);
 
-  if (bookmark_data.elements.size() == 1 &&
+  if (bookmark_data.size() == 1 &&
       model->IsBookmarked(bookmark_data.elements[0].url)) {
     MakeTitleUnique(model,
                     parent,
@@ -361,30 +404,20 @@ void GetBookmarksMatchingProperties(BookmarkModel* model,
       return;
   }
 
-  ui::TreeNodeIterator<const BookmarkNode> iterator(model->root_node());
-  while (iterator.has_next()) {
-    const BookmarkNode* node = iterator.Next();
-    if ((!query_words.empty() &&
-        !DoesBookmarkContainWords(node, query_words, languages)) ||
-        model->is_permanent_node(node)) {
-      continue;
-    }
-    if (query.url) {
-      // Check against bare url spec and IDN-decoded url.
-      if (!node->is_url() ||
-          !(base::UTF8ToUTF16(node->url().spec()) == *query.url ||
-            net::FormatUrl(
-                node->url(), languages, net::kFormatUrlOmitNothing,
-                net::UnescapeRule::NORMAL, NULL, NULL, NULL) == *query.url)) {
-        continue;
-      }
-    }
-    if (query.title && node->GetTitle() != *query.title)
-      continue;
-
-    nodes->push_back(node);
-    if (nodes->size() == max_count)
-      return;
+  if (query.url) {
+    // Shortcut into the BookmarkModel if searching for URL.
+    GURL url(*query.url);
+    std::vector<const BookmarkNode*> url_matched_nodes;
+    if (url.is_valid())
+      model->GetNodesByURL(url, &url_matched_nodes);
+    bookmarks::VectorIterator iterator(&url_matched_nodes);
+    GetBookmarksMatchingPropertiesImpl<bookmarks::VectorIterator>(
+        iterator, model, query, query_words, max_count, languages, nodes);
+  } else {
+    ui::TreeNodeIterator<const BookmarkNode> iterator(model->root_node());
+    GetBookmarksMatchingPropertiesImpl<
+        ui::TreeNodeIterator<const BookmarkNode>>(
+        iterator, model, query, query_words, max_count, languages, nodes);
   }
 }
 
@@ -508,6 +541,19 @@ bool IsBookmarkedByUser(BookmarkModel* model, const GURL& url) {
 const BookmarkNode* GetBookmarkNodeByID(const BookmarkModel* model, int64 id) {
   // TODO(sky): TreeNode needs a method that visits all nodes using a predicate.
   return GetNodeByID(model->root_node(), id);
+}
+
+bool IsDescendantOf(const BookmarkNode* node, const BookmarkNode* root) {
+  return node && node->HasAncestor(root);
+}
+
+bool HasDescendantsOf(const std::vector<const BookmarkNode*>& list,
+                      const BookmarkNode* root) {
+  for (const BookmarkNode* node : list) {
+    if (IsDescendantOf(node, root))
+      return true;
+  }
+  return false;
 }
 
 }  // namespace bookmarks

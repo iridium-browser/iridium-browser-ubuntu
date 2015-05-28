@@ -113,7 +113,7 @@ class AppDataLoadWaiter : public KioskAppManagerObserver {
     manager_->AddObserver(this);
   }
 
-  virtual ~AppDataLoadWaiter() { manager_->RemoveObserver(this); }
+  ~AppDataLoadWaiter() override { manager_->RemoveObserver(this); }
 
   void Wait() {
     if (quit_)
@@ -126,7 +126,7 @@ class AppDataLoadWaiter : public KioskAppManagerObserver {
 
  private:
   // KioskAppManagerObserver overrides:
-  virtual void OnKioskAppDataChanged(const std::string& app_id) override {
+  void OnKioskAppDataChanged(const std::string& app_id) override {
     ++data_change_count_;
     if (data_change_count_ < data_loaded_threshold_)
       return;
@@ -136,20 +136,18 @@ class AppDataLoadWaiter : public KioskAppManagerObserver {
       runner_->Quit();
   }
 
-  virtual void OnKioskAppDataLoadFailure(const std::string& app_id) override {
+  void OnKioskAppDataLoadFailure(const std::string& app_id) override {
     loaded_ = false;
     quit_ = true;
     if (runner_.get())
       runner_->Quit();
   }
 
-  virtual void OnKioskExtensionLoadedInCache(
-      const std::string& app_id) override {
+  void OnKioskExtensionLoadedInCache(const std::string& app_id) override {
     OnKioskAppDataChanged(app_id);
   }
 
-  virtual void OnKioskExtensionDownloadFailed(
-      const std::string& app_id) override {
+  void OnKioskExtensionDownloadFailed(const std::string& app_id) override {
     OnKioskAppDataLoadFailure(app_id);
   }
 
@@ -168,10 +166,10 @@ class AppDataLoadWaiter : public KioskAppManagerObserver {
 class KioskAppManagerTest : public InProcessBrowserTest {
  public:
   KioskAppManagerTest() : fake_cws_(new FakeCWS()) {}
-  virtual ~KioskAppManagerTest() {}
+  ~KioskAppManagerTest() override {}
 
   // InProcessBrowserTest overrides:
-  virtual void SetUp() override {
+  void SetUp() override {
     base::FilePath test_data_dir;
     PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
     embedded_test_server()->ServeFilesFromDirectory(test_data_dir);
@@ -185,21 +183,21 @@ class KioskAppManagerTest : public InProcessBrowserTest {
     InProcessBrowserTest::SetUp();
   }
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     InProcessBrowserTest::SetUpCommandLine(command_line);
 
     // Initialize fake_cws_ to setup web store gallery.
     fake_cws_->Init(embedded_test_server());
   }
 
-  virtual void SetUpOnMainThread() override {
+  void SetUpOnMainThread() override {
     InProcessBrowserTest::SetUpOnMainThread();
 
     // Restart the thread as the sandbox host process has already been spawned.
     embedded_test_server()->RestartThreadAndListen();
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() override {
+  void SetUpInProcessBrowserTestFixture() override {
     InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
 
     host_resolver()->AddRule("*", "127.0.0.1");
@@ -363,10 +361,25 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, Basic) {
   manager()->SetAutoLaunchApp("fake_app_1");
   EXPECT_EQ("fake_app_1", manager()->GetAutoLaunchApp());
 
+  // Make sure that if an app was auto launched with zero delay, it is reflected
+  // in the app data.
+  KioskAppManager::App app;
+  manager()->GetApp("fake_app_1", &app);
+  EXPECT_FALSE(app.was_auto_launched_with_zero_delay);
+
+  manager()->SetAppWasAutoLaunchedWithZeroDelay("fake_app_1");
+  manager()->GetApp("fake_app_1", &app);
+  EXPECT_TRUE(app.was_auto_launched_with_zero_delay);
+
   // Clear the auto launch app.
   manager()->SetAutoLaunchApp("");
   EXPECT_EQ("", manager()->GetAutoLaunchApp());
   EXPECT_FALSE(manager()->IsAutoLaunchEnabled());
+
+  // App should still report it was auto launched with zero delay, even though
+  // it is no longer set to auto launch in the future.
+  manager()->GetApp("fake_app_1", &app);
+  EXPECT_TRUE(app.was_auto_launched_with_zero_delay);
 
   // Set another auto launch app.
   manager()->SetAutoLaunchApp("fake_app_2");

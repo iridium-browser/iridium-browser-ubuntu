@@ -24,18 +24,27 @@ class FakeOutputSurface : public OutputSurface {
 
   static scoped_ptr<FakeOutputSurface> Create3d() {
     return make_scoped_ptr(new FakeOutputSurface(
-        TestContextProvider::Create(), false));
+        TestContextProvider::Create(), TestContextProvider::Create(), false));
   }
 
   static scoped_ptr<FakeOutputSurface> Create3d(
       scoped_refptr<ContextProvider> context_provider) {
-    return make_scoped_ptr(new FakeOutputSurface(context_provider, false));
+    return make_scoped_ptr(new FakeOutputSurface(
+        context_provider, TestContextProvider::Create(), false));
+  }
+
+  static scoped_ptr<FakeOutputSurface> Create3d(
+      scoped_refptr<ContextProvider> context_provider,
+      scoped_refptr<ContextProvider> worker_context_provider) {
+    return make_scoped_ptr(new FakeOutputSurface(
+        context_provider, worker_context_provider, false));
   }
 
   static scoped_ptr<FakeOutputSurface> Create3d(
       scoped_ptr<TestWebGraphicsContext3D> context) {
-    return make_scoped_ptr(new FakeOutputSurface(
-        TestContextProvider::Create(context.Pass()), false));
+    return make_scoped_ptr(
+        new FakeOutputSurface(TestContextProvider::Create(context.Pass()),
+                              TestContextProvider::Create(), false));
   }
 
   static scoped_ptr<FakeOutputSurface> CreateSoftware(
@@ -46,7 +55,7 @@ class FakeOutputSurface : public OutputSurface {
 
   static scoped_ptr<FakeOutputSurface> CreateDelegating3d() {
     return make_scoped_ptr(new FakeOutputSurface(
-        TestContextProvider::Create(), true));
+        TestContextProvider::Create(), TestContextProvider::Create(), true));
   }
 
   static scoped_ptr<FakeOutputSurface> CreateDelegating3d(
@@ -94,6 +103,7 @@ class FakeOutputSurface : public OutputSurface {
 
   void SwapBuffers(CompositorFrame* frame) override;
 
+  OutputSurfaceClient* client() { return client_; }
   bool BindToClient(OutputSurfaceClient* client) override;
 
   void set_framebuffer(unsigned framebuffer) { framebuffer_ = framebuffer; }
@@ -128,9 +138,12 @@ class FakeOutputSurface : public OutputSurface {
       scoped_refptr<ContextProvider> context_provider,
       bool delegated_rendering);
 
-  FakeOutputSurface(
-      scoped_ptr<SoftwareOutputDevice> software_device,
-      bool delegated_rendering);
+  FakeOutputSurface(scoped_refptr<ContextProvider> context_provider,
+                    scoped_refptr<ContextProvider> worker_context_provider,
+                    bool delegated_rendering);
+
+  FakeOutputSurface(scoped_ptr<SoftwareOutputDevice> software_device,
+                    bool delegated_rendering);
 
   FakeOutputSurface(
       scoped_refptr<ContextProvider> context_provider,

@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/login/startup_utils.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
@@ -15,6 +16,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/chromeos_switches.h"
 #include "components/web_resource/web_resource_pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -57,6 +59,7 @@ void StartupUtils::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kEnrollmentRecoveryRequired, false);
   registry->RegisterStringPref(prefs::kInitialLocale, "en-US");
   registry->RegisterBooleanPref(prefs::kNewOobe, false);
+  registry->RegisterBooleanPref(prefs::kWebviewSigninEnabled, false);
 }
 
 // static
@@ -172,6 +175,30 @@ std::string StartupUtils::GetInitialLocale() {
   if (!l10n_util::IsValidLocaleSyntax(locale))
     locale = "en-US";
   return locale;
+}
+
+// static
+bool StartupUtils::IsWebviewSigninAllowed() {
+  return extensions::GetCurrentChannel() <= chrome::VersionInfo::CHANNEL_DEV &&
+         !base::CommandLine::ForCurrentProcess()->HasSwitch(
+             switches::kDisableWebviewSigninFlow);
+}
+
+// static
+bool StartupUtils::IsWebviewSigninEnabled() {
+  return IsWebviewSigninAllowed() &&
+      g_browser_process->local_state()->GetBoolean(
+          prefs::kWebviewSigninEnabled);
+}
+
+// static
+bool StartupUtils::EnableWebviewSignin(bool is_enabled) {
+  if (!IsWebviewSigninAllowed())
+    return false;
+
+  g_browser_process->local_state()->SetBoolean(prefs::kWebviewSigninEnabled,
+                                               is_enabled);
+  return true;
 }
 
 // static

@@ -25,11 +25,11 @@ public:
 
     const float* coefficients() const { return fCoefficients; }
 
-    virtual const char* name() const SK_OVERRIDE { return "Bicubic"; }
+    const char* name() const override { return "Bicubic"; }
 
-    virtual void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const SK_OVERRIDE;
+    void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const override;
 
-    virtual GrGLFragmentProcessor* createGLInstance() const SK_OVERRIDE;
+    GrGLFragmentProcessor* createGLInstance() const override;
 
     const GrTextureDomain& domain() const { return fDomain; }
 
@@ -91,9 +91,9 @@ private:
                     const SkMatrix &matrix, const SkShader::TileMode tileModes[2]);
     GrBicubicEffect(GrTexture*, const SkScalar coefficients[16],
                     const SkMatrix &matrix, const SkRect& domain);
-    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE;
+    bool onIsEqual(const GrFragmentProcessor&) const override;
 
-    virtual void onComputeInvariantOutput(GrInvariantOutput* inout) const SK_OVERRIDE;
+    void onComputeInvariantOutput(GrInvariantOutput* inout) const override;
 
     float           fCoefficients[16];
     GrTextureDomain fDomain;

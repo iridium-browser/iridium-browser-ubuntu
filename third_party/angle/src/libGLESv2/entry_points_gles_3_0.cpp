@@ -35,14 +35,13 @@ void GL_APIENTRY ReadBuffer(GLenum mode)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (!ValidateReadBuffer(context, mode))
         {
-            context->recordError(Error(GL_INVALID_OPERATION));
             return;
         }
 
-        // glReadBuffer
-        UNIMPLEMENTED();
+        Framebuffer *readFBO = context->getState().getReadFramebuffer();
+        readFBO->setReadBuffer(mode);
     }
 }
 
@@ -60,8 +59,28 @@ void GL_APIENTRY DrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsize
             return;
         }
 
-        // glDrawRangeElements
-        UNIMPLEMENTED();
+        rx::RangeUI indexRange;
+        if (!ValidateDrawElements(context, mode, count, type, indices, 0, &indexRange))
+        {
+            return;
+        }
+        if (indexRange.end > end || indexRange.start < start)
+        {
+            // GL spec says that behavior in this case is undefined - generating an error is fine.
+            context->recordError(Error(GL_INVALID_OPERATION));
+            return;
+        }
+
+        // As long as index validation is done, it doesn't matter whether the context receives a drawElements or
+        // a drawRangeElements call - the GL back-end is free to choose to call drawRangeElements based on the
+        // validated index range. If index validation is removed, adding drawRangeElements to the context interface
+        // should be reconsidered.
+        Error error = context->drawElements(mode, count, type, indices, 0, indexRange);
+        if (error.isError())
+        {
+            context->recordError(error);
+            return;
+        }
     }
 }
 
@@ -707,7 +726,7 @@ void GL_APIENTRY RenderbufferStorageMultisample(GLenum target, GLsizei samples, 
         }
 
         Renderbuffer *renderbuffer = context->getState().getCurrentRenderbuffer();
-        renderbuffer->setStorage(width, height, internalformat, samples);
+        renderbuffer->setStorageMultisample(samples, internalformat, width, height);
     }
 }
 
@@ -1097,17 +1116,26 @@ void GL_APIENTRY BindBufferRange(GLenum target, GLuint index, GLuint buffer, GLi
         switch (target)
         {
           case GL_TRANSFORM_FEEDBACK_BUFFER:
-
-            // size and offset must be a multiple of 4
-            if (buffer != 0 && ((offset % 4) != 0 || (size % 4) != 0))
             {
-                context->recordError(Error(GL_INVALID_VALUE));
-                return;
-            }
+                // size and offset must be a multiple of 4
+                if (buffer != 0 && ((offset % 4) != 0 || (size % 4) != 0))
+                {
+                    context->recordError(Error(GL_INVALID_VALUE));
+                    return;
+                }
 
-            context->bindIndexedTransformFeedbackBuffer(buffer, index, offset, size);
-            context->bindGenericTransformFeedbackBuffer(buffer);
-            break;
+                // Cannot bind a transform feedback buffer if the current transform feedback is active (3.0.4 pg 91 section 2.15.2)
+                TransformFeedback *curTransformFeedback = context->getState().getCurrentTransformFeedback();
+                if (curTransformFeedback && curTransformFeedback->isStarted())
+                {
+                    context->recordError(Error(GL_INVALID_OPERATION));
+                    return;
+                }
+
+                context->bindIndexedTransformFeedbackBuffer(buffer, index, offset, size);
+                context->bindGenericTransformFeedbackBuffer(buffer);
+                break;
+            }
 
           case GL_UNIFORM_BUFFER:
 
@@ -1169,10 +1197,19 @@ void GL_APIENTRY BindBufferBase(GLenum target, GLuint index, GLuint buffer)
         switch (target)
         {
           case GL_TRANSFORM_FEEDBACK_BUFFER:
-            context->bindIndexedTransformFeedbackBuffer(buffer, index, 0, 0);
-            context->bindGenericTransformFeedbackBuffer(buffer);
-            break;
+            {
+                // Cannot bind a transform feedback buffer if the current transform feedback is active (3.0.4 pg 91 section 2.15.2)
+                TransformFeedback *curTransformFeedback = context->getState().getCurrentTransformFeedback();
+                if (curTransformFeedback && curTransformFeedback->isStarted())
+                {
+                    context->recordError(Error(GL_INVALID_OPERATION));
+                    return;
+                }
 
+                context->bindIndexedTransformFeedbackBuffer(buffer, index, 0, 0);
+                context->bindGenericTransformFeedbackBuffer(buffer);
+                break;
+            }
           case GL_UNIFORM_BUFFER:
             context->bindIndexedUniformBuffer(buffer, index, 0, 0);
             context->bindGenericUniformBuffer(buffer);
@@ -1362,8 +1399,6 @@ void GL_APIENTRY GetVertexAttribIiv(GLuint index, GLenum pname, GLint* params)
             return;
         }
 
-        const VertexAttribute &attribState = context->getState().getVertexAttribState(index);
-
         if (!ValidateGetVertexAttribParameters(context, pname))
         {
             return;
@@ -1379,6 +1414,7 @@ void GL_APIENTRY GetVertexAttribIiv(GLuint index, GLenum pname, GLint* params)
         }
         else
         {
+            const VertexAttribute &attribState = context->getState().getVertexArray()->getVertexAttribute(index);
             *params = QuerySingleVertexAttributeParameter<GLint>(attribState, pname);
         }
     }
@@ -1404,8 +1440,6 @@ void GL_APIENTRY GetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params)
             return;
         }
 
-        const VertexAttribute &attribState = context->getState().getVertexAttribState(index);
-
         if (!ValidateGetVertexAttribParameters(context, pname))
         {
             return;
@@ -1421,6 +1455,7 @@ void GL_APIENTRY GetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params)
         }
         else
         {
+            const VertexAttribute &attribState = context->getState().getVertexArray()->getVertexAttribute(index);
             *params = QuerySingleVertexAttributeParameter<GLuint>(attribState, pname);
         }
     }
@@ -2047,7 +2082,7 @@ void GL_APIENTRY GetActiveUniformsiv(GLuint program, GLsizei uniformCount, const
             return;
         }
 
-        if (uniformCount > 0)
+        if (uniformCount > programObject->getActiveUniformCount())
         {
             context->recordError(Error(GL_INVALID_VALUE));
             return;
@@ -2265,8 +2300,17 @@ void GL_APIENTRY DrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GL
             return;
         }
 
-        // glDrawArraysInstanced
-        UNIMPLEMENTED();
+        if (!ValidateDrawArraysInstanced(context, mode, first, count, instanceCount))
+        {
+            return;
+        }
+
+        Error error = context->drawArrays(mode, first, count, instanceCount);
+        if (error.isError())
+        {
+            context->recordError(error);
+            return;
+        }
     }
 }
 
@@ -2284,8 +2328,18 @@ void GL_APIENTRY DrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, 
             return;
         }
 
-        // glDrawElementsInstanced
-        UNIMPLEMENTED();
+        rx::RangeUI indexRange;
+        if (!ValidateDrawElementsInstanced(context, mode, count, type, indices, instanceCount, &indexRange))
+        {
+            return;
+        }
+
+        Error error = context->drawElements(mode, count, type, indices, instanceCount, indexRange);
+        if (error.isError())
+        {
+            context->recordError(error);
+            return;
+        }
     }
 }
 
@@ -3102,8 +3156,8 @@ void GL_APIENTRY GetProgramBinary(GLuint program, GLsizei bufSize, GLsizei* leng
             return;
         }
 
-        // glGetProgramBinary
-        UNIMPLEMENTED();
+        // TODO: Pipe through to the OES extension for now, needs proper validation
+        return GetProgramBinaryOES(program, bufSize, length, binaryFormat, binary);
     }
 }
 
@@ -3121,8 +3175,8 @@ void GL_APIENTRY ProgramBinary(GLuint program, GLenum binaryFormat, const GLvoid
             return;
         }
 
-        // glProgramBinary
-        UNIMPLEMENTED();
+        // TODO: Pipe through to the OES extension for now, needs proper validation
+        return ProgramBinaryOES(program, binaryFormat, binary, length);
     }
 }
 
@@ -3320,7 +3374,14 @@ void GL_APIENTRY GetInternalformativ(GLenum target, GLenum internalformat, GLenu
             break;
 
           case GL_SAMPLES:
-            std::copy_n(formatCaps.sampleCounts.rbegin(), std::min<size_t>(bufSize, formatCaps.sampleCounts.size()), params);
+            {
+                size_t returnCount = std::min<size_t>(bufSize, formatCaps.sampleCounts.size());
+                auto sampleReverseIt = formatCaps.sampleCounts.rbegin();
+                for (size_t sampleIndex = 0; sampleIndex < returnCount; ++sampleIndex)
+                {
+                    params[sampleIndex] = *sampleReverseIt++;;
+                }
+            }
             break;
 
           default:

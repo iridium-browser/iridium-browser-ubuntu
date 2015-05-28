@@ -23,6 +23,8 @@
 
 namespace media {
 
+class MidiScheduler;
+
 // MidiManager for USB-MIDI.
 class MEDIA_EXPORT MidiManagerUsb : public MidiManager,
                                     public UsbMidiDeviceDelegate,
@@ -44,6 +46,8 @@ class MEDIA_EXPORT MidiManagerUsb : public MidiManager,
                           const uint8* data,
                           size_t size,
                           base::TimeTicks time) override;
+  void OnDeviceAttached(scoped_ptr<UsbMidiDevice> device) override;
+  void OnDeviceDetached(size_t index) override;
 
   // UsbMidiInputStream::Delegate implementation.
   void OnReceivedData(size_t jack_index,
@@ -67,6 +71,7 @@ class MEDIA_EXPORT MidiManagerUsb : public MidiManager,
 
  private:
   void OnEnumerateDevicesDone(bool result, UsbMidiDevice::Devices* devices);
+  bool AddPorts(UsbMidiDevice* device, int device_id);
 
   scoped_ptr<UsbMidiDevice::Factory> device_factory_;
   ScopedVector<UsbMidiDevice> devices_;
@@ -77,6 +82,8 @@ class MEDIA_EXPORT MidiManagerUsb : public MidiManager,
 
   // A map from <endpoint_number, cable_number> to the index of input jacks.
   base::hash_map<std::pair<int, int>, size_t> input_jack_dictionary_;
+
+  scoped_ptr<MidiScheduler> scheduler_;
 
   DISALLOW_COPY_AND_ASSIGN(MidiManagerUsb);
 };

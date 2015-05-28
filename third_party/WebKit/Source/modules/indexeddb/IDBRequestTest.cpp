@@ -28,6 +28,7 @@
 
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForTesting.h"
 #include "core/dom/DOMError.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/testing/NullExecutionContext.h"
@@ -65,7 +66,7 @@ public:
     virtual void TearDown() override
     {
         m_executionContext->notifyContextDestroyed();
-        m_scope.scriptState()->setExecutionContext(0);
+        m_scope.scriptState()->setExecutionContext(nullptr);
     }
 
     v8::Isolate* isolate() const { return m_scope.isolate(); }
@@ -79,7 +80,7 @@ private:
 
 TEST_F(IDBRequestTest, EventsAfterStopping)
 {
-    IDBTransaction* transaction = 0;
+    IDBTransaction* transaction = nullptr;
     IDBRequest* request = IDBRequest::create(scriptState(), IDBAny::createUndefined(), transaction);
     EXPECT_EQ(request->readyState(), "pending");
     executionContext()->stopActiveDOMObjects();
@@ -98,7 +99,7 @@ TEST_F(IDBRequestTest, EventsAfterStopping)
 
 TEST_F(IDBRequestTest, AbortErrorAfterAbort)
 {
-    IDBTransaction* transaction = 0;
+    IDBTransaction* transaction = nullptr;
     IDBRequest* request = IDBRequest::create(scriptState(), IDBAny::createUndefined(), transaction);
     EXPECT_EQ(request->readyState(), "pending");
 
@@ -108,6 +109,10 @@ TEST_F(IDBRequestTest, AbortErrorAfterAbort)
     // Now simulate the back end having fired an abort error at the request to clear up any intermediaries.
     // Ensure an assertion is not raised.
     request->onError(DOMError::create(AbortError, "Description goes here."));
+
+    // Stop the request lest it be GCed and its destructor
+    // finds the object in a pending state (and asserts.)
+    executionContext()->stopActiveDOMObjects();
 }
 
 class MockWebIDBDatabase : public WebIDBDatabase {

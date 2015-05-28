@@ -24,7 +24,8 @@
 #include "ash/multi_profile_uma.h"
 #include "ash/new_window_delegate.h"
 #include "ash/root_window_controller.h"
-#include "ash/rotator/screen_rotation.h"
+#include "ash/rotator/screen_rotation_animator.h"
+#include "ash/rotator/window_rotation.h"
 #include "ash/screenshot_delegate.h"
 #include "ash/session/session_state_delegate.h"
 #include "ash/shelf/shelf.h"
@@ -293,8 +294,9 @@ void HandleRotateScreen() {
   gfx::Display display = Shell::GetScreen()->GetDisplayNearestPoint(point);
   const DisplayInfo& display_info =
       Shell::GetInstance()->display_manager()->GetDisplayInfo(display.id());
-  Shell::GetInstance()->display_manager()->SetDisplayRotation(
-      display.id(), GetNextRotation(display_info.rotation()));
+  ash::ScreenRotationAnimator(display.id())
+      .Rotate(GetNextRotation(display_info.GetActiveRotation()),
+              gfx::Display::ROTATION_SOURCE_USER);
 }
 
 // Rotate the active window.
@@ -310,7 +312,7 @@ void HandleRotateActiveWindow() {
         set_preemption_strategy(ui::LayerAnimator::REPLACE_QUEUED_ANIMATIONS);
     active_window->layer()->GetAnimator()->StartAnimation(
         new ui::LayerAnimationSequence(
-            new ash::ScreenRotation(360, active_window->layer())));
+            new ash::WindowRotation(360, active_window->layer())));
   }
 }
 
@@ -405,18 +407,17 @@ void HandleSwitchIme(ImeControlDelegate* ime_control_delegate,
 
 void HandleTakePartialScreenshot(ScreenshotDelegate* screenshot_delegate) {
   base::RecordAction(UserMetricsAction("Accel_Take_Partial_Screenshot"));
-  if (screenshot_delegate) {
-    ash::PartialScreenshotController::StartPartialScreenshotSession(
-        screenshot_delegate);
-  }
+  DCHECK(screenshot_delegate);
+  Shell::GetInstance()
+      ->partial_screenshot_controller()
+      ->StartPartialScreenshotSession(screenshot_delegate);
 }
 
 void HandleTakeScreenshot(ScreenshotDelegate* screenshot_delegate) {
   base::RecordAction(UserMetricsAction("Accel_Take_Screenshot"));
-  if (screenshot_delegate &&
-      screenshot_delegate->CanTakeScreenshot()) {
+  DCHECK(screenshot_delegate);
+  if (screenshot_delegate->CanTakeScreenshot())
     screenshot_delegate->HandleTakeScreenshotForAllRootWindows();
-  }
 }
 
 bool CanHandleToggleAppList(const ui::Accelerator& accelerator,
@@ -864,6 +865,11 @@ void AcceleratorController::RegisterAccelerators(
 bool AcceleratorController::CanPerformAction(
     AcceleratorAction action,
     const ui::Accelerator& accelerator) {
+  if (nonrepeatable_actions_.find(action) != nonrepeatable_actions_.end() &&
+      accelerator.IsRepeat()) {
+    return false;
+  }
+
   AcceleratorProcessingRestriction restriction =
       GetAcceleratorProcessingRestriction(action);
   if (restriction != RESTRICTION_NONE)
@@ -998,17 +1004,12 @@ bool AcceleratorController::CanPerformAction(
   return false;
 }
 
-void  AcceleratorController::PerformAction(AcceleratorAction action,
-                                           const ui::Accelerator& accelerator) {
+void AcceleratorController::PerformAction(AcceleratorAction action,
+                                          const ui::Accelerator& accelerator) {
   AcceleratorProcessingRestriction restriction =
       GetAcceleratorProcessingRestriction(action);
   if (restriction != RESTRICTION_NONE)
     return;
-
-  if (nonrepeatable_actions_.find(action) != nonrepeatable_actions_.end() &&
-      accelerator.IsRepeat()) {
-    return;
-  }
 
   // If your accelerator invokes more than one line of code, please either
   // implement it in your module's controller code (like TOGGLE_MIRROR_MODE
@@ -1218,8 +1219,8 @@ void  AcceleratorController::PerformAction(AcceleratorAction action,
     case POWER_PRESSED:  // fallthrough
     case POWER_RELEASED:
       if (!base::SysInfo::IsRunningOnChromeOS()) {
-        // There is no powerd in linux desktop, so call the
-        // PowerButtonController here.
+        // There is no powerd, the Chrome OS power manager, in linux desktop,
+        // so call the PowerButtonController here.
         Shell::GetInstance()->power_button_controller()->
             OnPowerButtonEvent(action == POWER_PRESSED, base::TimeTicks());
       }
@@ -1319,7 +1320,7 @@ AcceleratorController::GetAcceleratorProcessingRestriction(int action) {
     // cycling through its window elements.
     return RESTRICTION_PREVENT_PROCESSING_AND_PROPAGATION;
   }
-  if (MruWindowTracker::BuildWindowList().empty() &&
+  if (shell->mru_window_tracker()->BuildMruWindowList().empty() &&
       actions_needing_window_.find(action) != actions_needing_window_.end()) {
     Shell::GetInstance()->accessibility_delegate()->TriggerAccessibilityAlert(
         ui::A11Y_ALERT_WINDOW_NEEDED);

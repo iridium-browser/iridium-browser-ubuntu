@@ -33,6 +33,7 @@ PATH_TO_CBUILDBOT = os.path.join(CHROMITE_BIN_SUBDIR, 'cbuildbot')
 DEFAULT_CHROOT_DIR = 'chroot'
 SDK_TOOLCHAINS_OUTPUT = 'tmp/toolchain-pkgs'
 AUTOTEST_BUILD_PATH = 'usr/local/build/autotest'
+CQ_CONFIG_FILENAME = 'COMMIT-QUEUE.ini'
 
 HOME_DIRECTORY = os.path.expanduser('~')
 
@@ -48,8 +49,9 @@ WATERFALL_EXTERNAL = 'chromiumos'
 WATERFALL_TRYBOT = 'chromiumos.tryserver'
 WATERFALL_RELEASE = 'chromeos_release'
 WATERFALL_BRANCH = 'chromeos.branch'
-# This waterfall is not yet using cidb.
+# These waterfalls are not yet using cidb.
 WATERFALL_CHROMIUM = 'chromiumos.chromium'
+WATERFALL_CHROME = 'chromeos.chrome'
 
 CIDB_KNOWN_WATERFALLS = (WATERFALL_INTERNAL,
                          WATERFALL_EXTERNAL,
@@ -67,6 +69,7 @@ RELEASE_DASHBOARD = 'https://uberchromegw.corp.google.com/i/chromeos_release'
 BRANCH_DASHBOARD = 'https://uberchromegw.corp.google.com/i/chromeos.branch'
 CHROMIUM_DASHBOARD = ('https://uberchromegw.corp.google.com/'
                       'i/chromiumos.chromium')
+CHROME_DASHBOARD = 'https://uberchromegw.corp.google.com/i/chromeos.chrome'
 
 # Waterfall to dashboard URL mapping.
 WATERFALL_TO_DASHBOARD = {
@@ -76,6 +79,7 @@ WATERFALL_TO_DASHBOARD = {
     WATERFALL_RELEASE: RELEASE_DASHBOARD,
     WATERFALL_BRANCH: BRANCH_DASHBOARD,
     WATERFALL_CHROMIUM: CHROMIUM_DASHBOARD,
+    WATERFALL_CHROME: CHROME_DASHBOARD,
 }
 
 # Builder status strings
@@ -219,6 +223,7 @@ INTERNAL_GOB_URL = 'https://%s' % INTERNAL_GOB_HOST
 INTERNAL_GERRIT_URL = 'https://%s' % INTERNAL_GERRIT_HOST
 
 GOB_COOKIE_PATH = os.path.expanduser('~/.git-credential-cache/cookie')
+GITCOOKIES_PATH = os.path.expanduser('~/.gitcookies')
 
 # Timestamps in the JSON from GoB's web interface is of the form 'Tue
 # Dec 02 17:48:06 2014' and is assumed to be in UTC.
@@ -244,6 +249,9 @@ MANIFEST_INT_URL = '%s/%s' % (INTERNAL_GERRIT_URL, MANIFEST_INT_PROJECT)
 
 DEFAULT_MANIFEST = 'default.xml'
 OFFICIAL_MANIFEST = 'official.xml'
+LATEST_PROJECT_SDK_MANIFEST = 'project-sdk/latest.xml'
+LKGM_MANIFEST = 'LKGM/lkgm.xml'
+
 SHARED_CACHE_ENVVAR = 'CROS_CACHEDIR'
 
 # CrOS remotes specified in the manifests.
@@ -288,6 +296,8 @@ CHANGE_PREFIX = {
 # List of remotes that are ok to include in the external manifest.
 EXTERNAL_REMOTES = (EXTERNAL_REMOTE, CHROMIUM_REMOTE)
 
+PROJECT_SDK_GROUPS = ('minilayout',)
+
 # Mapping 'remote name' -> regexp that matches names of repositories on that
 # remote that can be branched when creating CrOS branch. Branching script will
 # actually create a new git ref when branching these projects. It won't attempt
@@ -303,6 +313,11 @@ MANIFEST_VERSIONS_SUFFIX = '/chromiumos/manifest-versions'
 MANIFEST_VERSIONS_INT_SUFFIX = '/chromeos/manifest-versions'
 MANIFEST_VERSIONS_GS_URL = 'gs://chromeos-manifest-versions'
 TRASH_BUCKET = 'gs://chromeos-throw-away-bucket'
+
+# Standard directories under buildroot for cloning these repos.
+EXTERNAL_MANIFEST_VERSIONS_PATH = 'manifest-versions'
+INTERNAL_MANIFEST_VERSIONS_PATH = 'manifest-versions-internal'
+PROJECT_SDK_MANIFEST_VERSIONS_PATH = 'manifest-versions-project-sdk'
 
 STREAK_COUNTERS = 'streak_counters'
 
@@ -389,6 +404,9 @@ CANARY_TYPE = 'canary'
 # Generate payloads for an already built build/version.
 PAYLOADS_TYPE = 'payloads'
 
+# Generate a Project SDK build.
+PROJECT_SDK_TYPE = 'project-sdk'
+
 BRANCH_UTIL_CONFIG = 'branch-util'
 
 # Special build type for Chroot builders.  These builds focus on building
@@ -412,6 +430,7 @@ VALID_BUILD_TYPES = (
     REFRESH_PACKAGES_TYPE,
     CREATE_BRANCH_TYPE,
     PAYLOADS_TYPE,
+    PROJECT_SDK_TYPE,
 )
 
 # The name of the standard pre-cq testing config.
@@ -466,6 +485,8 @@ HWTEST_COMMIT_SUITE = 'bvt-cq'
 HWTEST_CANARY_SUITE = 'bvt-perbuild'
 HWTEST_AFDO_SUITE = 'AFDO_record'
 HWTEST_MOBLAB_SUITE = 'moblab'
+HWTEST_SANITY_SUITE = 'sanity'
+HWTEST_PROVISION_SUITE = 'bvt-provision'
 
 
 # Additional timeout to wait for autotest to abort a suite if the test takes
@@ -574,7 +595,8 @@ THROTTLED_CQ_READY_QUERY = (
 PRECQ_READY_QUERY = (
     '%(open)s AND (%(approved)s AND label:Commit-Queue>=1 OR '
     'label:Code-Review=+2 AND -age:2h OR label:Trybot-Ready=+1)' % _QUERIES,
-    lambda change: (change.HasApproval('CRVW', '2') or
+    lambda change: (not change.IsBeingMerged() and
+                    change.HasApproval('CRVW', '2') or
                     change.HasApproval('TRY', '1')))
 
 GERRIT_ON_BORG_LABELS = {
@@ -601,6 +623,9 @@ CL_ACTION_PRE_CQ_LAUNCHING = 'pre_cq_launching'
 CL_ACTION_PRE_CQ_WAITING = 'pre_cq_waiting'
 CL_ACTION_PRE_CQ_FULLY_VERIFIED = 'pre_cq_fully_verified'
 CL_ACTION_PRE_CQ_READY_TO_SUBMIT = 'pre_cq_ready_to_submit'
+# Recording this action causes the pre-cq status and all per-config statuses to
+# be reset.
+CL_ACTION_PRE_CQ_RESET = 'pre_cq_reset'
 
 # Miscellaneous actions
 
@@ -651,7 +676,8 @@ CL_ACTIONS = [CL_ACTION_PICKED_UP,
               CL_ACTION_TRYBOT_LAUNCHING,
               CL_ACTION_SPECULATIVE,
               CL_ACTION_FORGIVEN,
-              CL_ACTION_PRE_CQ_FULLY_VERIFIED]
+              CL_ACTION_PRE_CQ_FULLY_VERIFIED,
+              CL_ACTION_PRE_CQ_RESET]
 
 # Per-config status strings for a CL.
 CL_PRECQ_CONFIG_STATUS_PENDING = 'pending'
@@ -703,7 +729,6 @@ CHROOT_ENVIRONMENT_WHITELIST = (
 # Paths for Chrome LKGM which are relative to the Chromium base url.
 CHROME_LKGM_FILE = 'CHROMEOS_LKGM'
 PATH_TO_CHROME_LKGM = 'chromeos/%s' % CHROME_LKGM_FILE
-SVN_CHROME_LKGM = 'trunk/src/%s' % PATH_TO_CHROME_LKGM
 
 # Cache constants.
 COMMON_CACHE = 'common'
@@ -747,22 +772,16 @@ GOLO_SMTP_SERVER = 'mail.golo.chromium.org'
 
 # Valid sherrif types.
 TREE_SHERIFF = 'tree'
-BUILD_DEPUTY = 'build'
-LAB_SHERIFF = 'lab'
 CHROME_GARDENER = 'chrome'
 
 # URLs to retrieve sheriff names from the waterfall.
 TREE_SHERIFF_URL = '%s/sheriff.js' % (BUILD_DASHBOARD)
 TREE_SHERIFF2_URL = '%s/sheriff2.js' % (BUILD_DASHBOARD)
-BUILD_DEPUTY_URL = '%s/chromeos_build_deputy.js' % (BUILD_DASHBOARD)
-LAB_SHERIFF_URL = '%s/sheriff_cros_lab.js' % (BUILD_DASHBOARD)
 CHROME_GARDENER_URL = '%s/sheriff_cr_cros_gardeners.js' % (BUILD_DASHBOARD)
 
 SHERIFF_TYPE_TO_URL = {
     TREE_SHERIFF: (TREE_SHERIFF_URL, TREE_SHERIFF2_URL),
-    BUILD_DEPUTY: (BUILD_DEPUTY_URL,),
-    LAB_SHERIFF: (LAB_SHERIFF_URL,),
-    CHROME_GARDENER: (CHROME_GARDENER_URL)
+    CHROME_GARDENER: (CHROME_GARDENER_URL,)
 }
 
 
@@ -771,9 +790,6 @@ CQ_MASTER = 'master-paladin'
 CANARY_MASTER = 'master-release'
 PFQ_MASTER = 'master-chromium-pfq'
 
-
-# Useful google storage locations.
-PRE_CQ_GROUP_GS_LOCATION = 'trybot-pre-cq-group'
 
 # Email validation regex. Not quite fully compliant with RFC 2822, but good
 # approximation.

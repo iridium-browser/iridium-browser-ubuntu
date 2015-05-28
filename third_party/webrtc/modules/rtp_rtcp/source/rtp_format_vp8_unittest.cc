@@ -16,12 +16,11 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_format_vp8.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_format_vp8_test_helper.h"
-#include "webrtc/system_wrappers/interface/compile_assert.h"
 #include "webrtc/typedefs.h"
 
-#define CHECK_ARRAY_SIZE(expected_size, array)                      \
-  COMPILE_ASSERT(expected_size == sizeof(array) / sizeof(array[0]), \
-                 check_array_size);
+#define CHECK_ARRAY_SIZE(expected_size, array)                     \
+  static_assert(expected_size == sizeof(array) / sizeof(array[0]), \
+                "check array size");
 
 namespace webrtc {
 namespace {
@@ -422,7 +421,7 @@ class RtpDepacketizerVp8Test : public ::testing::Test {
                 ::testing::ElementsAreArray(data, length));
   }
 
-  scoped_ptr<RtpDepacketizer> depacketizer_;
+  rtc::scoped_ptr<RtpDepacketizer> depacketizer_;
 };
 
 TEST_F(RtpDepacketizerVp8Test, BasicHeader) {

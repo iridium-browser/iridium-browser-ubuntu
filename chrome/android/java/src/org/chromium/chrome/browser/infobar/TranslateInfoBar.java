@@ -45,7 +45,7 @@ public class TranslateInfoBar extends InfoBar implements SubPanelListener {
             int infoBarType, int sourceLanguageIndex, int targetLanguageIndex,
             boolean autoTranslatePair, boolean shouldShowNeverBar,
             boolean triggeredFromMenu, String[] languages) {
-        super(null, R.drawable.infobar_translate, null);
+        super(null, R.drawable.infobar_translate, null, null);
         mTranslateDelegate = delegate;
         mOptions = new TranslateOptions(sourceLanguageIndex, targetLanguageIndex, languages,
                 autoTranslatePair, triggeredFromMenu);
@@ -120,8 +120,7 @@ public class TranslateInfoBar extends InfoBar implements SubPanelListener {
                 String translated = context.getString(
                         R.string.translate_infobar_translation_done, mOptions.targetLanguage());
                 if (needsAlwaysPanel()) {
-                    String moreOptions = context.getString(
-                            R.string.translate_infobar_translation_more_options);
+                    String moreOptions = context.getString(R.string.more);
                     return formatAfterTranslateInfoBarMessage(translated, moreOptions,
                             ALWAYS_PANEL);
                 } else {
@@ -181,9 +180,9 @@ public class TranslateInfoBar extends InfoBar implements SubPanelListener {
         layout.setMessage(getMessageText(context));
         layout.setButtons(getPrimaryButtonText(context), getSecondaryButtonText(context));
 
-        if (getInfoBarType() == AFTER_TRANSLATE_INFOBAR &&
-                !needsAlwaysPanel() &&
-                !mOptions.triggeredFromMenu()) {
+        if (getInfoBarType() == AFTER_TRANSLATE_INFOBAR
+                && !needsAlwaysPanel()
+                && !mOptions.triggeredFromMenu()) {
             // Long always translate version
             TranslateCheckBox checkBox = new TranslateCheckBox(context, mOptions, this);
             layout.setCustomContent(checkBox);

@@ -39,6 +39,7 @@
 #include "ui/compositor/compositor_vsync_manager.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
+#include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/public/activation_client.h"
 
 #if defined(OS_CHROMEOS)
@@ -108,7 +109,7 @@ void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
   const char kInternalProp[] = "_CHROME_DISPLAY_INTERNAL";
   const char kCARDINAL[] = "CARDINAL";
   int xrandr_rotation = RR_Rotate_0;
-  switch (info.rotation()) {
+  switch (info.GetActiveRotation()) {
     case gfx::Display::ROTATE_0:
       xrandr_rotation = RR_Rotate_0;
       break;
@@ -139,7 +140,7 @@ void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
     scale *= kCursorMultiplierForExternalDisplays;
 
   ui::CursorController::GetInstance()->SetCursorConfigForWindow(
-      host->GetAcceleratedWidget(), info.rotation(), scale);
+      host->GetAcceleratedWidget(), info.GetActiveRotation(), scale);
 #endif
 #endif
   scoped_ptr<RootWindowTransformer> transformer(
@@ -266,6 +267,7 @@ DisplayController::DisplayController()
       focus_activation_store_(new FocusActivationStore()),
       cursor_window_controller_(new CursorWindowController()),
       mirror_window_controller_(new MirrorWindowController()),
+      cursor_display_id_for_restore_(gfx::Display::kInvalidDisplayID),
       weak_ptr_factory_(this) {
 #if defined(OS_CHROMEOS)
   if (base::SysInfo::IsRunningOnChromeOS())
@@ -536,7 +538,7 @@ void DisplayController::SetPrimaryDisplay(
   GetDisplayManager()->set_force_bounds_changed(false);
 }
 
-void DisplayController::EnsurePointerInDisplays() {
+void DisplayController::UpdateMouseLocationAfterDisplayChange() {
   // If the mouse is currently on a display in native location,
   // use the same native location. Otherwise find the display closest
   // to the current cursor location in screen coordinates.
@@ -569,18 +571,53 @@ void DisplayController::EnsurePointerInDisplays() {
     if (closest_distance_squared < 0 ||
         closest_distance_squared > distance_squared) {
       aura::Window* root_window = GetRootWindowForDisplayId(display.id());
-      aura::client::ScreenPositionClient* client =
-          aura::client::GetScreenPositionClient(root_window);
-      client->ConvertPointFromScreen(root_window, &center);
+      ::wm::ConvertPointFromScreen(root_window, &center);
       root_window->GetHost()->ConvertPointToNativeScreen(&center);
       dst_root_window = root_window;
       target_location_in_native = center;
       closest_distance_squared = distance_squared;
     }
   }
+
+  gfx::Point target_location_in_root = target_location_in_native;
   dst_root_window->GetHost()->ConvertPointFromNativeScreen(
-      &target_location_in_native);
-  dst_root_window->MoveCursorTo(target_location_in_native);
+      &target_location_in_root);
+
+#if defined(USE_OZONE)
+  gfx::Point target_location_in_screen = target_location_in_root;
+  ::wm::ConvertPointToScreen(dst_root_window, &target_location_in_screen);
+  const gfx::Display& target_display =
+      display_manager->FindDisplayContainingPoint(target_location_in_screen);
+  int64 target_display_id = target_display.id();
+
+  // Do not move the cursor if the cursor's location did not change. This avoids
+  // moving (and showing) the cursor:
+  // - At startup.
+  // - When the device is rotated in maximized mode.
+  // |cursor_display_id_for_restore_| is checked to ensure that the cursor is
+  // moved when the cursor's native position does not change but the display
+  // that it is on has changed. This occurs when swapping the primary display.
+  if (target_location_in_native !=
+          cursor_location_in_native_coords_for_restore_ ||
+      target_display_id != cursor_display_id_for_restore_) {
+    dst_root_window->MoveCursorTo(target_location_in_root);
+  } else if (target_location_in_screen !=
+             cursor_location_in_screen_coords_for_restore_) {
+    // The cursor's native position did not change but its screen position did
+    // change. This occurs when the scale factor or the rotation of the display
+    // that the cursor is on changes.
+    Shell::GetInstance()->cursor_manager()->SetDisplay(target_display);
+
+    // Update the cursor's root location. This ends up dispatching a synthetic
+    // mouse move. The synthetic mouse move updates the composited cursor's
+    // location and hover effects. Synthetic mouse moves do not affect the
+    // cursor's visibility.
+    dst_root_window->GetHost()->dispatcher()->OnCursorMovedToRootLocation(
+        target_location_in_root);
+  }
+#else
+  dst_root_window->MoveCursorTo(target_location_in_root);
+#endif
 }
 
 bool DisplayController::UpdateWorkAreaOfDisplayNearestWindow(
@@ -620,21 +657,25 @@ void DisplayController::OnDisplayRemoved(const gfx::Display& display) {
   AshWindowTreeHost* host_to_delete = window_tree_hosts_[display.id()];
   CHECK(host_to_delete) << display.ToString();
 
-  // Display for root window will be deleted when the Primary RootWindow
-  // is deleted by the Shell.
-  window_tree_hosts_.erase(display.id());
-
   // When the primary root window's display is removed, move the primary
   // root to the other display.
   if (primary_display_id == display.id()) {
     // Temporarily store the primary root window in
     // |primary_root_window_for_replace_| when replacing the display.
-    if (window_tree_hosts_.size() == 0) {
+    if (window_tree_hosts_.size() == 1) {
       primary_display_id = gfx::Display::kInvalidDisplayID;
       primary_tree_host_for_replace_ = host_to_delete;
+      // Display for root window will be deleted when the Primary RootWindow
+      // is deleted by the Shell.
+      window_tree_hosts_.erase(display.id());
       return;
     }
-    primary_display_id = window_tree_hosts_.begin()->first;
+    for (const auto& pair : window_tree_hosts_) {
+      if (pair.first != display.id()) {
+        primary_display_id = pair.first;
+        break;
+      }
+    }
     CHECK_NE(gfx::Display::kInvalidDisplayID, primary_display_id);
 
     AshWindowTreeHost* primary_host = host_to_delete;
@@ -660,6 +701,11 @@ void DisplayController::OnDisplayRemoved(const gfx::Display& display) {
   // root window itself yet because the stack may be using it.
   controller->Shutdown();
   base::MessageLoop::current()->DeleteSoon(FROM_HERE, controller);
+
+  // The window tree host should be erased at last because some handlers can
+  // access to the host through GetRootWindowForDisplayId() during
+  // MoveWindowsTo(). See http://crbug.com/415222
+  window_tree_hosts_.erase(display.id());
 }
 
 void DisplayController::OnDisplayMetricsChanged(const gfx::Display& display,
@@ -713,14 +759,16 @@ void DisplayController::PreDisplayConfigurationChange(bool clear_focus) {
   focus_activation_store_->Store(clear_focus);
   gfx::Screen* screen = Shell::GetScreen();
   gfx::Point point_in_screen = screen->GetCursorScreenPoint();
-  gfx::Display display = screen->GetDisplayNearestPoint(point_in_screen);
-  aura::Window* root_window = GetRootWindowForDisplayId(display.id());
+  cursor_location_in_screen_coords_for_restore_ = point_in_screen;
 
-  aura::client::ScreenPositionClient* client =
-      aura::client::GetScreenPositionClient(root_window);
-  client->ConvertPointFromScreen(root_window, &point_in_screen);
-  root_window->GetHost()->ConvertPointToNativeScreen(&point_in_screen);
-  cursor_location_in_native_coords_for_restore_ = point_in_screen;
+  gfx::Display display = screen->GetDisplayNearestPoint(point_in_screen);
+  cursor_display_id_for_restore_ = display.id();
+
+  gfx::Point point_in_native = point_in_screen;
+  aura::Window* root_window = GetRootWindowForDisplayId(display.id());
+  ::wm::ConvertPointFromScreen(root_window, &point_in_native);
+  root_window->GetHost()->ConvertPointToNativeScreen(&point_in_native);
+  cursor_location_in_native_coords_for_restore_ = point_in_native;
 }
 
 void DisplayController::PostDisplayConfigurationChange() {
@@ -751,7 +799,7 @@ void DisplayController::PostDisplayConfigurationChange() {
   }
   FOR_EACH_OBSERVER(Observer, observers_, OnDisplayConfigurationChanged());
   UpdateHostWindowNames();
-  EnsurePointerInDisplays();
+  UpdateMouseLocationAfterDisplayChange();
 }
 
 AshWindowTreeHost* DisplayController::AddWindowTreeHostForDisplay(

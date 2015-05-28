@@ -90,9 +90,12 @@ const std::string GetFontCssClass(DistilledPagePrefs::FontFamily font_family) {
   return kSansSerifCssClass;
 }
 
-void EnsureNonEmptyTitleAndContent(std::string* title, std::string* content) {
+void EnsureNonEmptyTitle(std::string* title) {
   if (title->empty())
     *title = l10n_util::GetStringUTF8(IDS_DOM_DISTILLER_VIEWER_NO_DATA_TITLE);
+}
+
+void EnsureNonEmptyContent(std::string* content) {
   UMA_HISTOGRAM_BOOLEAN("DomDistiller.PageHasDistilledData", !content->empty());
   if (content->empty()) {
     *content = l10n_util::GetStringUTF8(
@@ -103,26 +106,42 @@ void EnsureNonEmptyTitleAndContent(std::string* title, std::string* content) {
 std::string ReplaceHtmlTemplateValues(
     const std::string& title,
     const std::string& textDirection,
-    const std::string& content,
     const std::string& loading_indicator_class,
     const std::string& original_url,
     const DistilledPagePrefs::Theme theme,
-    const DistilledPagePrefs::FontFamily font_family) {
+    const DistilledPagePrefs::FontFamily font_family,
+    const std::string& htmlContent) {
   base::StringPiece html_template =
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_DOM_DISTILLER_VIEWER_HTML);
+  // TODO(mdjones): Many or all of these substitutions can be placed on the
+  // page via JavaScript.
   std::vector<std::string> substitutions;
   substitutions.push_back(title);                                         // $1
-  substitutions.push_back(kViewerCssPath);                                // $2
-  substitutions.push_back(kViewerJsPath);                                 // $3
+
+  std::ostringstream css;
+  std::ostringstream script;
+#if defined(OS_IOS)
+  // On iOS the content is inlined as there is no API to detect those requests
+  // and return the local data once a page is loaded.
+  css << "<style>" << viewer::GetCss() << "</style>";
+  script << "<script>\n" << viewer::GetJavaScript() << "\n</script>";
+#else
+  css << "<link rel=\"stylesheet\" href=\"/" << kViewerCssPath << "\">";
+  script << "<script src=\"" << kViewerJsPath << "\"></script>";
+#endif  // defined(OS_IOS)
+  substitutions.push_back(css.str());                                     // $2
+  substitutions.push_back(script.str());                                  // $3
+
   substitutions.push_back(GetThemeCssClass(theme) + " " +
                           GetFontCssClass(font_family));                  // $4
-  substitutions.push_back(content);                                       // $5
-  substitutions.push_back(loading_indicator_class);                       // $6
-  substitutions.push_back(original_url);                                  // $7
+  substitutions.push_back(loading_indicator_class);                       // $5
+  substitutions.push_back(original_url);                                  // $6
   substitutions.push_back(
-      l10n_util::GetStringUTF8(IDS_DOM_DISTILLER_VIEWER_VIEW_ORIGINAL));  // $8
-  substitutions.push_back(textDirection);                                 // $9
+      l10n_util::GetStringUTF8(IDS_DOM_DISTILLER_VIEWER_VIEW_ORIGINAL));  // $7
+  substitutions.push_back(textDirection);                                 // $8
+  substitutions.push_back(htmlContent);                                   // $9
+
   return ReplaceStringPlaceholders(html_template, substitutions, NULL);
 }
 
@@ -130,17 +149,47 @@ std::string ReplaceHtmlTemplateValues(
 
 namespace viewer {
 
+const std::string GetShowFeedbackFormJs() {
+  base::StringValue question_val(
+      l10n_util::GetStringUTF8(IDS_DOM_DISTILLER_QUALITY_QUESTION));
+  base::StringValue no_val(
+      l10n_util::GetStringUTF8(IDS_DOM_DISTILLER_QUALITY_ANSWER_NO));
+  base::StringValue yes_val(
+      l10n_util::GetStringUTF8(IDS_DOM_DISTILLER_QUALITY_ANSWER_YES));
+
+  std::string question;
+  std::string yes;
+  std::string no;
+
+  base::JSONWriter::Write(&question_val, &question);
+  base::JSONWriter::Write(&yes_val, &yes);
+  base::JSONWriter::Write(&no_val, &no);
+
+  return "showFeedbackForm(" + question + ", " + yes + ", " + no + ");";
+}
+
 const std::string GetUnsafeIncrementalDistilledPageJs(
     const DistilledPageProto* page_proto,
     const bool is_last_page) {
   std::string output;
   base::StringValue value(page_proto->html());
   base::JSONWriter::Write(&value, &output);
+  EnsureNonEmptyContent(&output);
   std::string page_update("addToPage(");
   page_update += output + ");";
   return page_update + GetToggleLoadingIndicatorJs(
       is_last_page);
 
+}
+
+const std::string GetErrorPageJs() {
+  base::StringValue value(l10n_util::GetStringUTF8(
+      IDS_DOM_DISTILLER_VIEWER_FAILED_TO_FIND_ARTICLE_CONTENT));
+  std::string output;
+  base::JSONWriter::Write(&value, &output);
+  std::string page_update("addToPage(");
+  page_update += output + ");";
+  return page_update;
 }
 
 const std::string GetToggleLoadingIndicatorJs(const bool is_last_page) {
@@ -150,20 +199,51 @@ const std::string GetToggleLoadingIndicatorJs(const bool is_last_page) {
     return "showLoadingIndicator(false);";
 }
 
-const std::string GetUnsafePartialArticleHtml(
+const std::string GetUnsafeArticleTemplateHtml(
     const DistilledPageProto* page_proto,
     const DistilledPagePrefs::Theme theme,
     const DistilledPagePrefs::FontFamily font_family) {
   DCHECK(page_proto);
+
   std::string title = net::EscapeForHTML(page_proto->title());
-  std::ostringstream unsafe_output_stream;
-  unsafe_output_stream << page_proto->html();
-  std::string unsafe_article_html = unsafe_output_stream.str();
-  EnsureNonEmptyTitleAndContent(&title, &unsafe_article_html);
+
+  EnsureNonEmptyTitle(&title);
+
+  std::string text_direction = page_proto->text_direction();
   std::string original_url = page_proto->url();
-  return ReplaceHtmlTemplateValues(
-      title, page_proto->text_direction(), unsafe_article_html, "visible",
-      original_url, theme, font_family);
+
+  return ReplaceHtmlTemplateValues(title, text_direction, "hidden",
+                                   original_url, theme, font_family, "");
+}
+
+const std::string GetUnsafeArticleContentJs(
+    const DistilledArticleProto* article_proto) {
+  DCHECK(article_proto);
+  if (article_proto->pages_size() == 0 || !article_proto->pages(0).has_html()) {
+    return "";
+  }
+
+  std::ostringstream unsafe_output_stream;
+  for (int page_num = 0; page_num < article_proto->pages_size(); ++page_num) {
+    unsafe_output_stream << article_proto->pages(page_num).html();
+  }
+
+  std::string output;
+  base::StringValue value(unsafe_output_stream.str());
+  base::JSONWriter::Write(&value, &output);
+  EnsureNonEmptyContent(&output);
+  std::string page_update("addToPage(");
+  page_update += output + ");";
+  return page_update + GetToggleLoadingIndicatorJs(true);
+}
+
+const std::string GetErrorPageHtml(
+    const DistilledPagePrefs::Theme theme,
+    const DistilledPagePrefs::FontFamily font_family) {
+  std::string title = l10n_util::GetStringUTF8(
+      IDS_DOM_DISTILLER_VIEWER_FAILED_TO_FIND_ARTICLE_TITLE);
+  return ReplaceHtmlTemplateValues(title, "auto", "hidden", "", theme,
+                                   font_family, "");
 }
 
 const std::string GetUnsafeArticleHtml(
@@ -185,7 +265,8 @@ const std::string GetUnsafeArticleHtml(
     text_direction = article_proto->pages(0).text_direction();
   }
 
-  EnsureNonEmptyTitleAndContent(&title, &unsafe_article_html);
+  EnsureNonEmptyTitle(&title);
+  EnsureNonEmptyContent(&unsafe_article_html);
 
   std::string original_url;
   if (article_proto->pages_size() > 0 && article_proto->pages(0).has_url()) {
@@ -193,19 +274,8 @@ const std::string GetUnsafeArticleHtml(
   }
 
   return ReplaceHtmlTemplateValues(
-      title, text_direction, unsafe_article_html, "hidden", original_url,
-      theme, font_family);
-}
-
-const std::string GetErrorPageHtml(
-    const DistilledPagePrefs::Theme theme,
-    const DistilledPagePrefs::FontFamily font_family) {
-  std::string title = l10n_util::GetStringUTF8(
-      IDS_DOM_DISTILLER_VIEWER_FAILED_TO_FIND_ARTICLE_TITLE);
-  std::string content = l10n_util::GetStringUTF8(
-      IDS_DOM_DISTILLER_VIEWER_FAILED_TO_FIND_ARTICLE_CONTENT);
-  return ReplaceHtmlTemplateValues(
-      title, "", content, "hidden", "", theme, font_family);
+      title, text_direction, "hidden", original_url, theme, font_family,
+      unsafe_article_html);
 }
 
 const std::string GetCss() {

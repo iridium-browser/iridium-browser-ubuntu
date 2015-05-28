@@ -128,50 +128,41 @@ static int ssl_check_serverhello_tlsext(SSL *s);
 
 const SSL3_ENC_METHOD TLSv1_enc_data = {
     tls1_enc,
-    tls1_mac,
+    tls1_prf,
     tls1_setup_key_block,
     tls1_generate_master_secret,
     tls1_change_cipher_state,
     tls1_final_finish_mac,
-    TLS1_FINISH_MAC_LENGTH,
     tls1_cert_verify_mac,
     TLS_MD_CLIENT_FINISH_CONST,TLS_MD_CLIENT_FINISH_CONST_SIZE,
     TLS_MD_SERVER_FINISH_CONST,TLS_MD_SERVER_FINISH_CONST_SIZE,
     tls1_alert_code,
     tls1_export_keying_material,
     0,
-    SSL3_HM_HEADER_LENGTH,
-    ssl3_set_handshake_header,
-    ssl3_handshake_write,
 };
 
 const SSL3_ENC_METHOD TLSv1_1_enc_data = {
     tls1_enc,
-    tls1_mac,
+    tls1_prf,
     tls1_setup_key_block,
     tls1_generate_master_secret,
     tls1_change_cipher_state,
     tls1_final_finish_mac,
-    TLS1_FINISH_MAC_LENGTH,
     tls1_cert_verify_mac,
     TLS_MD_CLIENT_FINISH_CONST,TLS_MD_CLIENT_FINISH_CONST_SIZE,
     TLS_MD_SERVER_FINISH_CONST,TLS_MD_SERVER_FINISH_CONST_SIZE,
     tls1_alert_code,
     tls1_export_keying_material,
     SSL_ENC_FLAG_EXPLICIT_IV,
-    SSL3_HM_HEADER_LENGTH,
-    ssl3_set_handshake_header,
-    ssl3_handshake_write,
 };
 
 const SSL3_ENC_METHOD TLSv1_2_enc_data = {
     tls1_enc,
-    tls1_mac,
+    tls1_prf,
     tls1_setup_key_block,
     tls1_generate_master_secret,
     tls1_change_cipher_state,
     tls1_final_finish_mac,
-    TLS1_FINISH_MAC_LENGTH,
     tls1_cert_verify_mac,
     TLS_MD_CLIENT_FINISH_CONST,TLS_MD_CLIENT_FINISH_CONST_SIZE,
     TLS_MD_SERVER_FINISH_CONST,TLS_MD_SERVER_FINISH_CONST_SIZE,
@@ -179,9 +170,6 @@ const SSL3_ENC_METHOD TLSv1_2_enc_data = {
     tls1_export_keying_material,
     SSL_ENC_FLAG_EXPLICIT_IV|SSL_ENC_FLAG_SIGALGS|SSL_ENC_FLAG_SHA256_PRF
             |SSL_ENC_FLAG_TLS1_2_CIPHERS,
-    SSL3_HM_HEADER_LENGTH,
-    ssl3_set_handshake_header,
-    ssl3_handshake_write,
 };
 
 static int compare_uint16_t(const void *p1, const void *p2) {
@@ -255,8 +243,9 @@ static int tls1_check_duplicate_extensions(const CBS *cbs) {
   ret = 1;
 
 done:
-  if (extension_types)
+  if (extension_types) {
     OPENSSL_free(extension_types);
+  }
   return ret;
 }
 
@@ -349,36 +338,17 @@ char SSL_early_callback_ctx_extension_get(
   return 0;
 }
 
-/* ECC curves from RFC4492 */
-static const int nid_list[] = {
-    NID_sect163k1,        /* sect163k1 (1) */
-    NID_sect163r1,        /* sect163r1 (2) */
-    NID_sect163r2,        /* sect163r2 (3) */
-    NID_sect193r1,        /* sect193r1 (4) */
-    NID_sect193r2,        /* sect193r2 (5) */
-    NID_sect233k1,        /* sect233k1 (6) */
-    NID_sect233r1,        /* sect233r1 (7) */
-    NID_sect239k1,        /* sect239k1 (8) */
-    NID_sect283k1,        /* sect283k1 (9) */
-    NID_sect283r1,        /* sect283r1 (10) */
-    NID_sect409k1,        /* sect409k1 (11) */
-    NID_sect409r1,        /* sect409r1 (12) */
-    NID_sect571k1,        /* sect571k1 (13) */
-    NID_sect571r1,        /* sect571r1 (14) */
-    NID_secp160k1,        /* secp160k1 (15) */
-    NID_secp160r1,        /* secp160r1 (16) */
-    NID_secp160r2,        /* secp160r2 (17) */
-    NID_secp192k1,        /* secp192k1 (18) */
-    NID_X9_62_prime192v1, /* secp192r1 (19) */
-    NID_secp224k1,        /* secp224k1 (20) */
-    NID_secp224r1,        /* secp224r1 (21) */
-    NID_secp256k1,        /* secp256k1 (22) */
-    NID_X9_62_prime256v1, /* secp256r1 (23) */
-    NID_secp384r1,        /* secp384r1 (24) */
-    NID_secp521r1,        /* secp521r1 (25) */
-    NID_brainpoolP256r1,  /* brainpoolP256r1 (26) */
-    NID_brainpoolP384r1,  /* brainpoolP384r1 (27) */
-    NID_brainpoolP512r1   /* brainpool512r1 (28) */
+struct tls_curve {
+  uint16_t curve_id;
+  int nid;
+};
+
+/* ECC curves from RFC4492. */
+static const struct tls_curve tls_curves[] = {
+    {21, NID_secp224r1},
+    {23, NID_X9_62_prime256v1},
+    {24, NID_secp384r1},
+    {25, NID_secp521r1},
 };
 
 static const uint8_t ecformats_default[] = {
@@ -386,29 +356,28 @@ static const uint8_t ecformats_default[] = {
 };
 
 static const uint16_t eccurves_default[] = {
-    23, /* secp256r1 (23) */
-    24, /* secp384r1 (24) */
-    25, /* secp521r1 (25) */
+    23, /* X9_64_prime256v1 */
+    24, /* secp384r1 */
 };
 
 int tls1_ec_curve_id2nid(uint16_t curve_id) {
-  if (curve_id < 1 || curve_id > sizeof(nid_list) / sizeof(nid_list[0])) {
-    return OBJ_undef;
-  }
-  return nid_list[curve_id - 1];
-}
-
-uint16_t tls1_ec_nid2curve_id(int nid) {
   size_t i;
-  for (i = 0; i < sizeof(nid_list) / sizeof(nid_list[0]); i++) {
-    /* nid_list[i] stores the NID corresponding to curve ID i+1. */
-    if (nid == nid_list[i]) {
-      return i + 1;
+  for (i = 0; i < sizeof(tls_curves) / sizeof(tls_curves[0]); i++) {
+    if (curve_id == tls_curves[i].curve_id) {
+      return tls_curves[i].nid;
     }
   }
+  return NID_undef;
+}
 
-  /* Use 0 for non-existent curve ID. Note: this assumes that curve ID 0 will
-   * never be allocated. */
+int tls1_ec_nid2curve_id(uint16_t *out_curve_id, int nid) {
+  size_t i;
+  for (i = 0; i < sizeof(tls_curves) / sizeof(tls_curves[0]); i++) {
+    if (nid == tls_curves[i].nid) {
+      *out_curve_id = tls_curves[i].curve_id;
+      return 1;
+    }
+  }
   return 0;
 }
 
@@ -482,41 +451,21 @@ int tls1_get_shared_curve(SSL *s) {
   return NID_undef;
 }
 
-/* NOTE: tls1_ec_curve_id2nid and tls1_set_curves assume that
- *
- * (a) 0 is not a valid curve ID.
- *
- * (b) The largest curve ID is 31.
- *
- * Those implementations must be revised before adding support for curve IDs
- * that break these assumptions. */
-OPENSSL_COMPILE_ASSERT((sizeof(nid_list) / sizeof(nid_list[0])) < 32,
-                       small_curve_ids);
-
 int tls1_set_curves(uint16_t **out_curve_ids, size_t *out_curve_ids_len,
                     const int *curves, size_t ncurves) {
   uint16_t *curve_ids;
   size_t i;
 
-  /* Bitmap of curves included to detect duplicates: only works
-   * while curve ids < 32. */
-  uint32_t dup_list = 0;
   curve_ids = (uint16_t *)OPENSSL_malloc(ncurves * sizeof(uint16_t));
   if (curve_ids == NULL) {
     return 0;
   }
 
   for (i = 0; i < ncurves; i++) {
-    uint32_t idmask;
-    uint16_t id;
-    id = tls1_ec_nid2curve_id(curves[i]);
-    idmask = ((uint32_t)1) << id;
-    if (!id || (dup_list & idmask)) {
+    if (!tls1_ec_nid2curve_id(&curve_ids[i], curves[i])) {
       OPENSSL_free(curve_ids);
       return 0;
     }
-    dup_list |= idmask;
-    curve_ids[i] = id;
   }
 
   if (*out_curve_ids) {
@@ -548,8 +497,7 @@ static int tls1_curve_params_from_ec_key(uint16_t *out_curve_id,
 
   /* Determine curve ID */
   nid = EC_GROUP_get_curve_name(grp);
-  id = tls1_ec_nid2curve_id(nid);
-  if (!id) {
+  if (!tls1_ec_nid2curve_id(&id, nid)) {
     return 0;
   }
 
@@ -658,23 +606,22 @@ done:
 }
 
 int tls1_check_ec_tmp_key(SSL *s) {
-  uint16_t curve_id;
-  EC_KEY *ec = s->cert->ecdh_tmp;
-
-  if (s->cert->ecdh_tmp_auto) {
-    /* Need a shared curve */
-    return tls1_get_shared_curve(s) != NID_undef;
+  if (s->cert->ecdh_nid != NID_undef) {
+    /* If the curve is preconfigured, ECDH is acceptable iff the peer supports
+     * the curve. */
+    uint16_t curve_id;
+    return tls1_ec_nid2curve_id(&curve_id, s->cert->ecdh_nid) &&
+           tls1_check_curve_id(s, curve_id);
   }
 
-  if (!ec) {
-    if (s->cert->ecdh_tmp_cb) {
-      return 1;
-    }
-    return 0;
+  if (s->cert->ecdh_tmp_cb != NULL) {
+    /* Assume the callback will provide an acceptable curve. */
+    return 1;
   }
 
-  return tls1_curve_params_from_ec_key(&curve_id, NULL, ec) &&
-         tls1_check_curve_id(s, curve_id);
+  /* Otherwise, the curve gets selected automatically. ECDH is acceptable iff
+   * there is a shared curve. */
+  return tls1_get_shared_curve(s) != NID_undef;
 }
 
 /* List of supported signature algorithms and hashes. Should make this
@@ -852,7 +799,7 @@ uint8_t *ssl_add_clienthello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit,
 
       alg_k = c->algorithm_mkey;
       alg_a = c->algorithm_auth;
-      if ((alg_k & SSL_kEECDH) || (alg_a & SSL_aECDSA)) {
+      if ((alg_k & SSL_kECDHE) || (alg_a & SSL_aECDSA)) {
         using_ecc = 1;
         break;
       }
@@ -954,7 +901,7 @@ uint8_t *ssl_add_clienthello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit,
     }
   }
 
-  if (SSL_CLIENT_USE_TLS1_2_CIPHERS(s)) {
+  if (ssl3_version_from_wire(s, s->client_version) >= TLS1_2_VERSION) {
     size_t salglen;
     const uint8_t *salg;
     salglen = tls12_get_psigalgs(s, &salg);
@@ -986,7 +933,8 @@ uint8_t *ssl_add_clienthello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit,
     s2n(0, ret);
   }
 
-  if (s->ctx->next_proto_select_cb && !s->s3->tmp.finish_md_len) {
+  if (s->ctx->next_proto_select_cb && !s->s3->tmp.finish_md_len &&
+      !SSL_IS_DTLS(s)) {
     /* The client advertises an emtpy extension to indicate its support for
      * Next Protocol Negotiation */
     if (limit - ret - 4 < 0) {
@@ -1017,7 +965,7 @@ uint8_t *ssl_add_clienthello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit,
     ret += s->alpn_client_proto_list_len;
   }
 
-  if (s->tlsext_channel_id_enabled) {
+  if (s->tlsext_channel_id_enabled && !SSL_IS_DTLS(s)) {
     /* The client advertises an emtpy extension to indicate its support for
      * Channel ID. */
     if (limit - ret - 4 < 0) {
@@ -1159,7 +1107,7 @@ uint8_t *ssl_add_serverhello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit) {
   int next_proto_neg_seen;
   unsigned long alg_k = s->s3->tmp.new_cipher->algorithm_mkey;
   unsigned long alg_a = s->s3->tmp.new_cipher->algorithm_auth;
-  int using_ecc = (alg_k & SSL_kEECDH) || (alg_a & SSL_aECDSA);
+  int using_ecc = (alg_k & SSL_kECDHE) || (alg_a & SSL_aECDSA);
   using_ecc = using_ecc && (s->s3->tmp.peer_ecpointformatlist != NULL);
 
   /* don't add extensions for SSLv3, unless doing secure renegotiation */
@@ -1394,6 +1342,7 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
   CBS extensions;
 
   s->should_ack_sni = 0;
+  s->srtp_profile = NULL;
   s->s3->next_proto_neg_seen = 0;
   s->s3->tmp.certificate_status_expected = 0;
   s->s3->tmp.extended_master_secret = 0;
@@ -1407,12 +1356,14 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
   if (s->cert->peer_sigalgs) {
     OPENSSL_free(s->cert->peer_sigalgs);
     s->cert->peer_sigalgs = NULL;
+    s->cert->peer_sigalgslen = 0;
   }
 
   /* Clear any shared signature algorithms */
   if (s->cert->shared_sigalgs) {
     OPENSSL_free(s->cert->shared_sigalgs);
     s->cert->shared_sigalgs = NULL;
+    s->cert->shared_sigalgslen = 0;
   }
 
   /* Clear ECC extensions */
@@ -1625,13 +1576,14 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
       }
       /* If sigalgs received and no shared algorithms fatal error. */
       if (s->cert->peer_sigalgs && !s->cert->shared_sigalgs) {
-        OPENSSL_PUT_ERROR(SSL, ssl_add_serverhello_tlsext,
+        OPENSSL_PUT_ERROR(SSL, ssl_scan_clienthello_tlsext,
                           SSL_R_NO_SHARED_SIGATURE_ALGORITHMS);
         *out_alert = SSL_AD_ILLEGAL_PARAMETER;
         return 0;
       }
     } else if (type == TLSEXT_TYPE_next_proto_neg &&
-               s->s3->tmp.finish_md_len == 0 && s->s3->alpn_selected == NULL) {
+               s->s3->tmp.finish_md_len == 0 && s->s3->alpn_selected == NULL &&
+               !SSL_IS_DTLS(s)) {
       /* The extension must be empty. */
       if (CBS_len(&extension) != 0) {
         *out_alert = SSL_AD_DECODE_ERROR;
@@ -1658,7 +1610,8 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
       }
       /* ALPN takes precedence over NPN. */
       s->s3->next_proto_neg_seen = 0;
-    } else if (type == TLSEXT_TYPE_channel_id && s->tlsext_channel_id_enabled) {
+    } else if (type == TLSEXT_TYPE_channel_id && s->tlsext_channel_id_enabled &&
+               !SSL_IS_DTLS(s)) {
       /* The extension must be empty. */
       if (CBS_len(&extension) != 0) {
         *out_alert = SSL_AD_DECODE_ERROR;
@@ -1667,7 +1620,7 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
 
       s->s3->tlsext_channel_id_valid = 1;
     } else if (type == TLSEXT_TYPE_channel_id_new &&
-               s->tlsext_channel_id_enabled) {
+               s->tlsext_channel_id_enabled && !SSL_IS_DTLS(s)) {
       /* The extension must be empty. */
       if (CBS_len(&extension) != 0) {
         *out_alert = SSL_AD_DECODE_ERROR;
@@ -1746,10 +1699,10 @@ static int ssl_scan_serverhello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
    * systematically reset on a new handshake; perhaps allocate it fresh each
    * time so it's not even kept around post-handshake. */
   s->s3->next_proto_neg_seen = 0;
-
   s->tlsext_ticket_expected = 0;
   s->s3->tmp.certificate_status_expected = 0;
   s->s3->tmp.extended_master_secret = 0;
+  s->srtp_profile = NULL;
 
   if (s->s3->alpn_selected) {
     OPENSSL_free(s->s3->alpn_selected);
@@ -1842,7 +1795,8 @@ static int ssl_scan_serverhello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
       /* Set a flag to expect a CertificateStatus message */
       s->s3->tmp.certificate_status_expected = 1;
     } else if (type == TLSEXT_TYPE_next_proto_neg &&
-               s->s3->tmp.finish_md_len == 0) {
+               s->s3->tmp.finish_md_len == 0 &&
+               !SSL_IS_DTLS(s)) {
       uint8_t *selected;
       uint8_t selected_len;
 
@@ -1898,14 +1852,14 @@ static int ssl_scan_serverhello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
         *out_alert = SSL_AD_INTERNAL_ERROR;
         return 0;
       }
-    } else if (type == TLSEXT_TYPE_channel_id) {
+    } else if (type == TLSEXT_TYPE_channel_id && !SSL_IS_DTLS(s)) {
       if (CBS_len(&extension) != 0) {
         *out_alert = SSL_AD_DECODE_ERROR;
         return 0;
       }
 
       s->s3->tlsext_channel_id_valid = 1;
-    } else if (type == TLSEXT_TYPE_channel_id_new) {
+    } else if (type == TLSEXT_TYPE_channel_id_new && !SSL_IS_DTLS(s)) {
       if (CBS_len(&extension) != 0) {
         *out_alert = SSL_AD_DECODE_ERROR;
         return 0;
@@ -2025,7 +1979,7 @@ static int ssl_check_serverhello_tlsext(SSL *s) {
    * uncompressed. */
   unsigned long alg_k = s->s3->tmp.new_cipher->algorithm_mkey;
   unsigned long alg_a = s->s3->tmp.new_cipher->algorithm_auth;
-  if (((alg_k & SSL_kEECDH) || (alg_a & SSL_aECDSA)) &&
+  if (((alg_k & SSL_kECDHE) || (alg_a & SSL_aECDSA)) &&
       !tls1_check_point_format(s, TLSEXT_ECPOINTFORMAT_uncompressed)) {
     OPENSSL_PUT_ERROR(SSL, ssl_check_serverhello_tlsext,
                       SSL_R_TLS_INVALID_ECPOINTFORMAT_LIST);
@@ -2037,7 +1991,7 @@ static int ssl_check_serverhello_tlsext(SSL *s) {
     ret = s->ctx->tlsext_servername_callback(s, &al,
                                              s->ctx->tlsext_servername_arg);
   } else if (s->initial_ctx != NULL &&
-           s->initial_ctx->tlsext_servername_callback != 0) {
+             s->initial_ctx->tlsext_servername_callback != 0) {
     ret = s->initial_ctx->tlsext_servername_callback(
         s, &al, s->initial_ctx->tlsext_servername_arg);
   }
@@ -2446,6 +2400,7 @@ static int tls1_set_shared_sigalgs(SSL *s) {
   if (c->shared_sigalgs) {
     OPENSSL_free(c->shared_sigalgs);
     c->shared_sigalgs = NULL;
+    c->shared_sigalgslen = 0;
   }
 
   /* If client use client signature algorithms if not NULL */
@@ -2496,21 +2451,12 @@ int tls1_process_sigalgs(SSL *s, const CBS *sigalgs) {
     return 1;
   }
 
-  /* Length must be even */
-  if (CBS_len(sigalgs) % 2 != 0) {
+  if (CBS_len(sigalgs) % 2 != 0 ||
+      !CBS_stow(sigalgs, &c->peer_sigalgs, &c->peer_sigalgslen) ||
+      !tls1_set_shared_sigalgs(s)) {
     return 0;
   }
 
-  /* Should never happen */
-  if (!c) {
-    return 0;
-  }
-
-  if (!CBS_stow(sigalgs, &c->peer_sigalgs, &c->peer_sigalgslen)) {
-    return 0;
-  }
-
-  tls1_set_shared_sigalgs(s);
   return 1;
 }
 
@@ -2619,7 +2565,10 @@ int tls1_channel_id_hash(EVP_MD_CTX *md, SSL *s) {
     if (s->s3->handshake_dgst[i] == NULL) {
       continue;
     }
-    EVP_MD_CTX_copy_ex(&ctx, s->s3->handshake_dgst[i]);
+    if (!EVP_MD_CTX_copy_ex(&ctx, s->s3->handshake_dgst[i])) {
+      EVP_MD_CTX_cleanup(&ctx);
+      return 0;
+    }
     EVP_DigestFinal_ex(&ctx, temp_digest, &temp_digest_len);
     EVP_DigestUpdate(md, temp_digest, temp_digest_len);
   }

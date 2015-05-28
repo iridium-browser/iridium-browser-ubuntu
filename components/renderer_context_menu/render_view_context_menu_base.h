@@ -161,8 +161,19 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
                WindowOpenDisposition disposition,
                ui::PageTransition transition);
 
+  // Opens the specified URL string in a new tab with the extra headers.
+  void OpenURLWithExtraHeaders(const GURL& url,
+                               const GURL& referrer,
+                               WindowOpenDisposition disposition,
+                               ui::PageTransition transition,
+                               const std::string& extra_headers);
+
   content::ContextMenuParams params_;
   content::WebContents* source_web_contents_;
+  // In the case of a MimeHandlerView this will point to the WebContents that
+  // embeds the MimeHandlerViewGuest. Otherwise this will be the same as
+  // source_web_contents_.
+  content::WebContents* embedder_web_contents_;
   content::BrowserContext* browser_context_;
 
   ui::SimpleMenuModel menu_model_;

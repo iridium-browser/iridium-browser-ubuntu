@@ -36,7 +36,7 @@ namespace blink {
 
 class IDBKey : public GarbageCollectedFinalized<IDBKey> {
 public:
-    typedef HeapVector<Member<IDBKey> > KeyArray;
+    typedef HeapVector<Member<IDBKey>> KeyArray;
 
     static IDBKey* createInvalid()
     {
@@ -93,7 +93,7 @@ public:
     }
 
     ~IDBKey();
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     // In order of the least to the highest precedent in terms of sort order.
     enum Type {

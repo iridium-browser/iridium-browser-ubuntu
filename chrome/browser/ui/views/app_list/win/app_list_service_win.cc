@@ -26,6 +26,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/ui/app_list/app_list_util.h"
 #include "chrome/browser/ui/ash/app_list/app_list_service_ash.h"
 #include "chrome/browser/ui/views/app_list/win/activation_tracker_win.h"
 #include "chrome/browser/ui/views/app_list/win/app_list_controller_delegate_win.h"
@@ -60,7 +61,8 @@ AppListService* AppListService::Get(chrome::HostDesktopType desktop_type) {
 }
 
 // static
-void AppListService::InitAll(Profile* initial_profile) {
+void AppListService::InitAll(Profile* initial_profile,
+                             const base::FilePath& profile_path) {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kViewerConnect))
     AppListServiceAsh::GetInstance()->Init(initial_profile);
@@ -69,17 +71,6 @@ void AppListService::InitAll(Profile* initial_profile) {
 }
 
 namespace {
-
-// Migrate chrome::kAppLauncherIsEnabled pref to
-// chrome::kAppLauncherHasBeenEnabled pref.
-void MigrateAppLauncherEnabledPref() {
-  PrefService* prefs = g_browser_process->local_state();
-  if (prefs->HasPrefPath(prefs::kAppLauncherIsEnabled)) {
-    prefs->SetBoolean(prefs::kAppLauncherHasBeenEnabled,
-                      prefs->GetBoolean(prefs::kAppLauncherIsEnabled));
-    prefs->ClearPref(prefs::kAppLauncherIsEnabled);
-  }
-}
 
 int GetAppListIconIndex() {
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
@@ -296,8 +287,6 @@ void AppListServiceWin::SetAppListNextPaintCallback(void (*callback)()) {
 
 void AppListServiceWin::Init(Profile* initial_profile) {
   ScheduleWarmup();
-
-  MigrateAppLauncherEnabledPref();
   AppListServiceViews::Init(initial_profile);
 }
 
@@ -342,6 +331,12 @@ void AppListServiceWin::ScheduleWarmup() {
     case chrome::VersionInfo::CHANNEL_DEV:
     case chrome::VersionInfo::CHANNEL_BETA:
     case chrome::VersionInfo::CHANNEL_STABLE:
+      // Except on Canary, don't bother scheduling an app launcher warmup when
+      // it's not already enabled. Always schedule on Canary while collecting
+      // profiler data (see comment above).
+      if (!IsAppLauncherEnabled())
+        return;
+
       // Profiler instrumentations are not enabled.
       break;
   }

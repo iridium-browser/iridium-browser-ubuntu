@@ -13,8 +13,10 @@
 #include "base/values.h"
 #include "cc/debug/lap_timer.h"
 #include "cc/debug/rasterize_and_record_benchmark_impl.h"
+#include "cc/layers/content_layer_client.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/picture_layer.h"
+#include "cc/resources/display_item_list.h"
 #include "cc/resources/picture_pile.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_host_common.h"
@@ -27,10 +29,13 @@ namespace {
 
 const int kDefaultRecordRepeatCount = 100;
 
-const char* kModeSuffixes[Picture::RECORDING_MODE_COUNT] = {
-    "",
-    "_sk_null_canvas",
-    "_painting_disabled"};
+// Parameters for LapTimer.
+const int kTimeLimitMillis = 1;
+const int kWarmupRuns = 0;
+const int kTimeCheckInterval = 1;
+
+const char* kModeSuffixes[RecordingSource::RECORDING_MODE_COUNT] =
+    {"", "_sk_null_canvas", "_painting_disabled", "_caching_disabled"};
 
 }  // namespace
 
@@ -60,14 +65,14 @@ void RasterizeAndRecordBenchmark::DidUpdateLayers(LayerTreeHost* host) {
   host_ = host;
   LayerTreeHostCommon::CallFunctionForSubtree(
       host->root_layer(),
-      base::Bind(&RasterizeAndRecordBenchmark::Run, base::Unretained(this)));
+      [this](Layer* layer) { layer->RunMicroBenchmark(this); });
 
   DCHECK(!results_.get());
   results_ = make_scoped_ptr(new base::DictionaryValue);
   results_->SetInteger("pixels_recorded", record_results_.pixels_recorded);
   results_->SetInteger("picture_memory_usage", record_results_.bytes_used);
 
-  for (int i = 0; i < Picture::RECORDING_MODE_COUNT; i++) {
+  for (int i = 0; i < RecordingSource::RECORDING_MODE_COUNT; i++) {
     std::string name = base::StringPrintf("record_time%s_ms", kModeSuffixes[i]);
     results_->SetDouble(name,
                         record_results_.total_best_time[i].InMillisecondsF());
@@ -97,36 +102,36 @@ scoped_ptr<MicroBenchmarkImpl> RasterizeAndRecordBenchmark::CreateBenchmarkImpl(
                  weak_ptr_factory_.GetWeakPtr())));
 }
 
-void RasterizeAndRecordBenchmark::Run(Layer* layer) {
-  layer->RunMicroBenchmark(this);
-}
-
 void RasterizeAndRecordBenchmark::RunOnLayer(PictureLayer* layer) {
-  ContentLayerClient* painter = layer->client();
-  gfx::Size content_bounds = layer->content_bounds();
-
   DCHECK(host_);
-  gfx::Size tile_grid_size = host_->settings().default_tile_size;
-
-  SkTileGridFactory::TileGridInfo tile_grid_info;
-  PicturePile::ComputeTileGridInfo(tile_grid_size, &tile_grid_info);
 
   gfx::Rect visible_content_rect = gfx::ScaleToEnclosingRect(
       layer->visible_content_rect(), 1.f / layer->contents_scale_x());
   if (visible_content_rect.IsEmpty())
     return;
 
-  for (int mode_index = 0; mode_index < Picture::RECORDING_MODE_COUNT;
+  if (host_->settings().use_display_lists) {
+    RunOnDisplayListLayer(layer, visible_content_rect);
+  } else {
+    RunOnPictureLayer(layer, visible_content_rect);
+  }
+}
+
+void RasterizeAndRecordBenchmark::RunOnPictureLayer(
+    PictureLayer* layer,
+    const gfx::Rect& visible_content_rect) {
+  ContentLayerClient* painter = layer->client();
+
+  DCHECK(host_ && !host_->settings().use_display_lists);
+
+  gfx::Size tile_grid_size = host_->settings().default_tile_size;
+
+  for (int mode_index = 0; mode_index < RecordingSource::RECORDING_MODE_COUNT;
        mode_index++) {
-    Picture::RecordingMode mode =
-        static_cast<Picture::RecordingMode>(mode_index);
+    RecordingSource::RecordingMode mode =
+        static_cast<RecordingSource::RecordingMode>(mode_index);
     base::TimeDelta min_time = base::TimeDelta::Max();
     size_t memory_used = 0;
-
-    // Parameters for LapTimer.
-    const int kTimeLimitMillis = 1;
-    const int kWarmupRuns = 0;
-    const int kTimeCheckInterval = 1;
 
     for (int i = 0; i < record_repeat_count_; ++i) {
       // Run for a minimum amount of time to avoid problems with timer
@@ -136,18 +141,91 @@ void RasterizeAndRecordBenchmark::RunOnLayer(PictureLayer* layer) {
                      kTimeCheckInterval);
       scoped_refptr<Picture> picture;
       do {
-        picture = Picture::Create(visible_content_rect, painter, tile_grid_info,
+        picture = Picture::Create(visible_content_rect, painter, tile_grid_size,
                                   false, mode);
+        if (memory_used) {
+          // Verify we are recording the same thing each time.
+          DCHECK(memory_used == picture->ApproximateMemoryUsage());
+        } else {
+          memory_used = picture->ApproximateMemoryUsage();
+        }
+
         timer.NextLap();
       } while (!timer.HasTimeLimitExpired());
       base::TimeDelta duration =
           base::TimeDelta::FromMillisecondsD(timer.MsPerLap());
       if (duration < min_time)
         min_time = duration;
-      memory_used = picture->ApproximateMemoryUsage();
     }
 
-    if (mode == Picture::RECORD_NORMALLY) {
+    if (mode == RecordingSource::RECORD_NORMALLY) {
+      record_results_.bytes_used += memory_used;
+      record_results_.pixels_recorded +=
+          visible_content_rect.width() * visible_content_rect.height();
+    }
+    record_results_.total_best_time[mode_index] += min_time;
+  }
+}
+
+void RasterizeAndRecordBenchmark::RunOnDisplayListLayer(
+    PictureLayer* layer,
+    const gfx::Rect& visible_content_rect) {
+  ContentLayerClient* painter = layer->client();
+
+  DCHECK(host_ && host_->settings().use_display_lists);
+
+  for (int mode_index = 0; mode_index < RecordingSource::RECORDING_MODE_COUNT;
+       mode_index++) {
+    ContentLayerClient::PaintingControlSetting painting_control =
+        ContentLayerClient::PAINTING_BEHAVIOR_NORMAL;
+    switch (static_cast<RecordingSource::RecordingMode>(mode_index)) {
+      case RecordingSource::RECORD_NORMALLY:
+        // Already setup for normal recording.
+        break;
+      case RecordingSource::RECORD_WITH_SK_NULL_CANVAS:
+      // TODO(schenney): Remove this when DisplayList recording is the only
+      // option. For now, fall through and disable construction.
+      case RecordingSource::RECORD_WITH_PAINTING_DISABLED:
+        painting_control =
+            ContentLayerClient::DISPLAY_LIST_CONSTRUCTION_DISABLED;
+        break;
+      case RecordingSource::RECORD_WITH_CACHING_DISABLED:
+        painting_control = ContentLayerClient::DISPLAY_LIST_CACHING_DISABLED;
+        break;
+      default:
+        NOTREACHED();
+    }
+    base::TimeDelta min_time = base::TimeDelta::Max();
+    size_t memory_used = 0;
+
+    scoped_refptr<DisplayItemList> display_list;
+    for (int i = 0; i < record_repeat_count_; ++i) {
+      // Run for a minimum amount of time to avoid problems with timer
+      // quantization when the layer is very small.
+      LapTimer timer(kWarmupRuns,
+                     base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
+                     kTimeCheckInterval);
+
+      do {
+        display_list = painter->PaintContentsToDisplayList(visible_content_rect,
+                                                           painting_control);
+
+        if (memory_used) {
+          // Verify we are recording the same thing each time.
+          DCHECK(memory_used == display_list->PictureMemoryUsage());
+        } else {
+          memory_used = display_list->PictureMemoryUsage();
+        }
+
+        timer.NextLap();
+      } while (!timer.HasTimeLimitExpired());
+      base::TimeDelta duration =
+          base::TimeDelta::FromMillisecondsD(timer.MsPerLap());
+      if (duration < min_time)
+        min_time = duration;
+    }
+
+    if (mode_index == RecordingSource::RECORD_NORMALLY) {
       record_results_.bytes_used += memory_used;
       record_results_.pixels_recorded +=
           visible_content_rect.width() * visible_content_rect.height();

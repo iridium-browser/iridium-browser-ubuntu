@@ -31,8 +31,10 @@
 #ifndef DOMWebSocket_h
 #define DOMWebSocket_h
 
+#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/events/EventListener.h"
+#include "core/events/EventTarget.h"
 #include "modules/EventTargetModules.h"
 #include "modules/websockets/WebSocketChannel.h"
 #include "modules/websockets/WebSocketChannelClient.h"
@@ -41,7 +43,9 @@
 #include "platform/weborigin/KURL.h"
 #include "wtf/Deque.h"
 #include "wtf/Forward.h"
-#include "wtf/text/AtomicStringHash.h"
+#include "wtf/PassRefPtr.h"
+#include "wtf/RefPtr.h"
+#include "wtf/text/WTFString.h"
 #include <stdint.h>
 
 namespace blink {
@@ -50,6 +54,8 @@ class Blob;
 class DOMArrayBuffer;
 class DOMArrayBufferView;
 class ExceptionState;
+class ExecutionContext;
+class StringOrStringSequence;
 
 class DOMWebSocket : public RefCountedGarbageCollectedEventTargetWithInlineData<DOMWebSocket>, public ActiveDOMObject, public WebSocketChannelClient {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<DOMWebSocket>);
@@ -61,8 +67,7 @@ public:
     // lifetime management is designed assuming the V8 holds a ref on it while
     // hasPendingActivity() returns true.
     static DOMWebSocket* create(ExecutionContext*, const String& url, ExceptionState&);
-    static DOMWebSocket* create(ExecutionContext*, const String& url, const String& protocol, ExceptionState&);
-    static DOMWebSocket* create(ExecutionContext*, const String& url, const Vector<String>& protocols, ExceptionState&);
+    static DOMWebSocket* create(ExecutionContext*, const String& url, const StringOrStringSequence& protocols, ExceptionState&);
     virtual ~DOMWebSocket();
 
     enum State {
@@ -119,13 +124,13 @@ public:
     // WebSocketChannelClient functions.
     virtual void didConnect(const String& subprotocol, const String& extensions) override;
     virtual void didReceiveTextMessage(const String& message) override;
-    virtual void didReceiveBinaryMessage(PassOwnPtr<Vector<char> >) override;
+    virtual void didReceiveBinaryMessage(PassOwnPtr<Vector<char>>) override;
     virtual void didError() override;
     virtual void didConsumeBufferedAmount(uint64_t) override;
     virtual void didStartClosingHandshake() override;
     virtual void didClose(ClosingHandshakeCompletionStatus, unsigned short code, const String& reason) override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     static bool isValidSubprotocolString(const String&);
 
@@ -153,7 +158,7 @@ private:
         void resume();
         void stop();
 
-        void trace(Visitor*);
+        DECLARE_TRACE();
 
     private:
         enum State {
@@ -171,7 +176,7 @@ private:
 
         State m_state;
         EventTarget* m_target;
-        WillBeHeapDeque<RefPtrWillBeMember<Event> > m_events;
+        WillBeHeapDeque<RefPtrWillBeMember<Event>> m_events;
         Timer<EventQueue> m_resumeTimer;
     };
 
@@ -181,6 +186,13 @@ private:
         WebSocketSendTypeArrayBufferView,
         WebSocketSendTypeBlob,
         WebSocketSendTypeMax,
+    };
+
+    enum WebSocketReceiveType {
+        WebSocketReceiveTypeString,
+        WebSocketReceiveTypeArrayBuffer,
+        WebSocketReceiveTypeBlob,
+        WebSocketReceiveTypeMax,
     };
 
     // This function is virtual for unittests.

@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import "chrome/browser/ui/cocoa/apps/native_app_window_cocoa.h"
+// This file tests whichever implementation of NativeAppWindow is used.
+// I.e. it could be NativeAppWindowCocoa or ChromeNativeAppWindowViewsMac.
+#include "extensions/browser/app_window/native_app_window.h"
 
 #import <Cocoa/Cocoa.h>
 
 #include "base/mac/mac_util.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/mac/sdk_forward_declarations.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -209,4 +212,95 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, Fullscreen) {
             app_window->fullscreen_types_for_test());
   EXPECT_FALSE(window->IsFullscreen());
   EXPECT_FALSE([ns_window styleMask] & NSFullScreenWindowMask);
+}
+
+// Test that, in frameless windows, the web contents has the same size as the
+// window.
+IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, Frameless) {
+  extensions::AppWindow* app_window =
+      CreateTestAppWindow("{\"frame\": \"none\"}");
+  NSWindow* ns_window = app_window->GetNativeWindow();
+  NSView* web_contents = app_window->web_contents()->GetNativeView();
+  EXPECT_TRUE(NSEqualSizes(NSMakeSize(512, 384), [web_contents frame].size));
+  // Move and resize the window.
+  NSRect new_frame = NSMakeRect(50, 50, 200, 200);
+  [ns_window setFrame:new_frame display:YES];
+  EXPECT_TRUE(NSEqualSizes(new_frame.size, [web_contents frame].size));
+
+  // Windows created with NSBorderlessWindowMask by default don't have shadow,
+  // but packaged apps should always have one.
+  EXPECT_TRUE([ns_window hasShadow]);
+
+  // Since the window has no constraints, it should have all of the following
+  // style mask bits.
+  NSUInteger style_mask = NSTitledWindowMask | NSClosableWindowMask |
+                          NSMiniaturizableWindowMask | NSResizableWindowMask |
+                          NSTexturedBackgroundWindowMask;
+  EXPECT_EQ(style_mask, [ns_window styleMask]);
+
+  CloseAppWindow(app_window);
+}
+
+namespace {
+
+// Test that resize and fullscreen controls are correctly enabled/disabled.
+void TestControls(extensions::AppWindow* app_window) {
+  NSWindow* ns_window = app_window->GetNativeWindow();
+
+  // The window is resizable.
+  EXPECT_TRUE([ns_window styleMask] & NSResizableWindowMask);
+  if (base::mac::IsOSSnowLeopard())
+    EXPECT_TRUE([ns_window showsResizeIndicator]);
+
+  // Due to this bug: http://crbug.com/362039, which manifests on the Cocoa
+  // implementation but not the views one, frameless windows should have
+  // fullscreen controls disabled.
+  BOOL can_fullscreen =
+      ![NSStringFromClass([ns_window class]) isEqualTo:@"AppFramelessNSWindow"];
+  // The window can fullscreen and maximize.
+  if (base::mac::IsOSLionOrLater())
+    EXPECT_EQ(can_fullscreen, !!([ns_window collectionBehavior] &
+                                 NSWindowCollectionBehaviorFullScreenPrimary));
+  EXPECT_EQ(can_fullscreen,
+            [[ns_window standardWindowButton:NSWindowZoomButton] isEnabled]);
+
+  // Set a maximum size.
+  app_window->SetContentSizeConstraints(gfx::Size(), gfx::Size(200, 201));
+  EXPECT_EQ(200, [ns_window contentMaxSize].width);
+  EXPECT_EQ(201, [ns_window contentMaxSize].height);
+  NSView* web_contents = app_window->web_contents()->GetNativeView();
+  EXPECT_EQ(200, [web_contents frame].size.width);
+  EXPECT_EQ(201, [web_contents frame].size.height);
+
+  // Still resizable.
+  EXPECT_TRUE([ns_window styleMask] & NSResizableWindowMask);
+  if (base::mac::IsOSSnowLeopard())
+    EXPECT_TRUE([ns_window showsResizeIndicator]);
+
+  // Fullscreen and maximize are disabled.
+  if (base::mac::IsOSLionOrLater())
+    EXPECT_FALSE([ns_window collectionBehavior] &
+                 NSWindowCollectionBehaviorFullScreenPrimary);
+  EXPECT_FALSE([[ns_window standardWindowButton:NSWindowZoomButton] isEnabled]);
+
+  // Set a minimum size equal to the maximum size.
+  app_window->SetContentSizeConstraints(gfx::Size(200, 201),
+                                        gfx::Size(200, 201));
+  EXPECT_EQ(200, [ns_window contentMinSize].width);
+  EXPECT_EQ(201, [ns_window contentMinSize].height);
+
+  // No longer resizable.
+  EXPECT_FALSE([ns_window styleMask] & NSResizableWindowMask);
+  if (base::mac::IsOSSnowLeopard())
+    EXPECT_FALSE([ns_window showsResizeIndicator]);
+}
+
+}  // namespace
+
+IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, Controls) {
+  TestControls(CreateTestAppWindow("{}"));
+}
+
+IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, ControlsFrameless) {
+  TestControls(CreateTestAppWindow("{\"frame\": \"none\"}"));
 }

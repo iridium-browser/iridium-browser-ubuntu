@@ -16,24 +16,21 @@
 
 namespace rx
 {
-class RendererD3D;
+class BufferFactoryD3D;
 class StaticIndexBufferInterface;
 class StaticVertexBufferInterface;
 
 class BufferD3D : public BufferImpl
 {
   public:
-    BufferD3D();
+    BufferD3D(BufferFactoryD3D *factory);
     virtual ~BufferD3D();
-
-    static BufferD3D *makeBufferD3D(BufferImpl *buffer);
-    static BufferD3D *makeFromBuffer(gl::Buffer *buffer);
 
     unsigned int getSerial() const { return mSerial; }
 
     virtual size_t getSize() const = 0;
     virtual bool supportsDirectBinding() const = 0;
-    virtual RendererD3D *getRenderer() = 0;
+    virtual void markTransformFeedbackUsage() = 0;
 
     StaticVertexBufferInterface *getStaticVertexBuffer() { return mStaticVertexBuffer; }
     StaticIndexBufferInterface *getStaticIndexBuffer() { return mStaticIndexBuffer; }
@@ -43,10 +40,11 @@ class BufferD3D : public BufferImpl
     void promoteStaticUsage(int dataSize);
 
   protected:
+    void updateSerial();
+
+    BufferFactoryD3D *mFactory;
     unsigned int mSerial;
     static unsigned int mNextSerial;
-
-    void updateSerial();
 
     StaticVertexBufferInterface *mStaticVertexBuffer;
     StaticIndexBufferInterface *mStaticIndexBuffer;

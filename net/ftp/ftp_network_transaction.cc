@@ -10,19 +10,19 @@
 #include "base/metrics/histogram.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "net/base/address_list.h"
 #include "net/base/connection_type_histograms.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/ftp/ftp_network_session.h"
 #include "net/ftp/ftp_request_info.h"
 #include "net/ftp/ftp_util.h"
+#include "net/log/net_log.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/stream_socket.h"
 
@@ -224,7 +224,8 @@ FtpNetworkTransaction::FtpNetworkTransaction(
       data_connection_port_(0),
       socket_factory_(socket_factory),
       next_state_(STATE_NONE),
-      state_after_data_connect_complete_(STATE_CTRL_WRITE_SIZE) {}
+      state_after_data_connect_complete_(STATE_NONE) {
+}
 
 FtpNetworkTransaction::~FtpNetworkTransaction() {
 }
@@ -236,11 +237,6 @@ int FtpNetworkTransaction::Stop(int error) {
   next_state_ = STATE_CTRL_WRITE_QUIT;
   last_error_ = error;
   return OK;
-}
-
-int FtpNetworkTransaction::RestartIgnoringLastError(
-    const CompletionCallback& callback) {
-  return ERR_NOT_IMPLEMENTED;
 }
 
 int FtpNetworkTransaction::Start(const FtpRequestInfo* request_info,
@@ -345,20 +341,13 @@ void FtpNetworkTransaction::ResetStateForRestart() {
   ctrl_socket_.reset();
   data_socket_.reset();
   next_state_ = STATE_NONE;
-  state_after_data_connect_complete_ = STATE_CTRL_WRITE_SIZE;
+  state_after_data_connect_complete_ = STATE_NONE;
 }
 
-void FtpNetworkTransaction::ResetDataConnectionAfterError(State next_state) {
-  // The server _might_ have reset the data connection
-  // (see RFC 959 3.2. ESTABLISHING DATA CONNECTIONS:
-  // "The server MUST close the data connection under the following
-  // conditions:
-  // ...
-  // 5. An irrecoverable error condition occurs.")
-  //
-  // It is ambiguous what an irrecoverable error condition is,
-  // so we take no chances.
-  state_after_data_connect_complete_ = next_state;
+void FtpNetworkTransaction::EstablishDataConnection(State state_after_connect) {
+  DCHECK(state_after_connect == STATE_CTRL_WRITE_RETR ||
+         state_after_connect == STATE_CTRL_WRITE_LIST);
+  state_after_data_connect_complete_ = state_after_connect;
   next_state_ = use_epsv_ ? STATE_CTRL_WRITE_EPSV : STATE_CTRL_WRITE_PASV;
 }
 
@@ -944,7 +933,7 @@ int FtpNetworkTransaction::ProcessResponseTYPE(
     case ERROR_CLASS_INITIATED:
       return Stop(ERR_INVALID_RESPONSE);
     case ERROR_CLASS_OK:
-      next_state_ = use_epsv_ ? STATE_CTRL_WRITE_EPSV : STATE_CTRL_WRITE_PASV;
+      next_state_ = STATE_CTRL_WRITE_SIZE;
       break;
     case ERROR_CLASS_INFO_NEEDED:
       return Stop(ERR_INVALID_RESPONSE);
@@ -1039,16 +1028,18 @@ int FtpNetworkTransaction::DoCtrlWriteRETR() {
 
 int FtpNetworkTransaction::ProcessResponseRETR(
     const FtpCtrlResponse& response) {
+  // Resource type should be either filled in by DetectTypecode() or
+  // detected with CWD. RETR is sent only when the resource is a file.
+  DCHECK_EQ(RESOURCE_TYPE_FILE, resource_type_);
+
   switch (GetErrorClass(response.status_code)) {
     case ERROR_CLASS_INITIATED:
       // We want the client to start reading the response at this point.
       // It got here either through Start or RestartWithAuth. We want that
       // method to complete. Not setting next state here will make DoLoop exit
       // and in turn make Start/RestartWithAuth complete.
-      resource_type_ = RESOURCE_TYPE_FILE;
       break;
     case ERROR_CLASS_OK:
-      resource_type_ = RESOURCE_TYPE_FILE;
       next_state_ = STATE_CTRL_WRITE_QUIT;
       break;
     case ERROR_CLASS_INFO_NEEDED:
@@ -1056,27 +1047,11 @@ int FtpNetworkTransaction::ProcessResponseRETR(
     case ERROR_CLASS_TRANSIENT_ERROR:
       return Stop(GetNetErrorCodeForFtpResponseCode(response.status_code));
     case ERROR_CLASS_PERMANENT_ERROR:
-      // Code 550 means "Failed to open file". Other codes are unrelated,
-      // like "Not logged in" etc.
-      if (response.status_code != 550 || resource_type_ == RESOURCE_TYPE_FILE)
-        return Stop(GetNetErrorCodeForFtpResponseCode(response.status_code));
-
-      // It's possible that RETR failed because the path is a directory.
-      resource_type_ = RESOURCE_TYPE_DIRECTORY;
-
-      // We're going to try CWD next, but first send a PASV one more time,
-      // because some FTP servers, including FileZilla, require that.
-      // See http://crbug.com/25316.
-      next_state_ = use_epsv_ ? STATE_CTRL_WRITE_EPSV : STATE_CTRL_WRITE_PASV;
-      break;
+      return Stop(GetNetErrorCodeForFtpResponseCode(response.status_code));
     default:
       NOTREACHED();
       return Stop(ERR_UNEXPECTED);
   }
-
-  // We should be sure about our resource type now. Otherwise we risk
-  // an infinite loop (RETR can later send CWD, and CWD can later send RETR).
-  DCHECK_NE(RESOURCE_TYPE_UNKNOWN, resource_type_);
 
   return OK;
 }
@@ -1090,15 +1065,8 @@ int FtpNetworkTransaction::DoCtrlWriteSIZE() {
 
 int FtpNetworkTransaction::ProcessResponseSIZE(
     const FtpCtrlResponse& response) {
-  State state_after_size;
-  if (resource_type_ == RESOURCE_TYPE_FILE)
-    state_after_size = STATE_CTRL_WRITE_RETR;
-  else
-    state_after_size = STATE_CTRL_WRITE_CWD;
-
   switch (GetErrorClass(response.status_code)) {
     case ERROR_CLASS_INITIATED:
-      next_state_ = state_after_size;
       break;
     case ERROR_CLASS_OK:
       if (response.lines.size() != 1)
@@ -1113,29 +1081,30 @@ int FtpNetworkTransaction::ProcessResponseSIZE(
       // Some FTP servers (for example, the qnx one) send a SIZE even for
       // directories.
       response_.expected_content_size = size;
-
-      next_state_ = state_after_size;
       break;
     case ERROR_CLASS_INFO_NEEDED:
-      next_state_ = state_after_size;
       break;
     case ERROR_CLASS_TRANSIENT_ERROR:
-      ResetDataConnectionAfterError(state_after_size);
       break;
     case ERROR_CLASS_PERMANENT_ERROR:
       // It's possible that SIZE failed because the path is a directory.
+      // TODO(xunjieli): Add a test for this case.
       if (resource_type_ == RESOURCE_TYPE_UNKNOWN &&
           response.status_code != 550) {
         return Stop(GetNetErrorCodeForFtpResponseCode(response.status_code));
       }
-
-      ResetDataConnectionAfterError(state_after_size);
       break;
     default:
       NOTREACHED();
       return Stop(ERR_UNEXPECTED);
   }
 
+  // If the resource is known beforehand to be a file, RETR should be issued,
+  // otherwise do CWD which will detect the resource type.
+  if (resource_type_ == RESOURCE_TYPE_FILE)
+    EstablishDataConnection(STATE_CTRL_WRITE_RETR);
+  else
+    next_state_ = STATE_CTRL_WRITE_CWD;
   return OK;
 }
 
@@ -1147,14 +1116,15 @@ int FtpNetworkTransaction::DoCtrlWriteCWD() {
 }
 
 int FtpNetworkTransaction::ProcessResponseCWD(const FtpCtrlResponse& response) {
-  // We should never issue CWD if we know the target resource is a file.
+  // CWD should be invoked only when the resource is not a file.
   DCHECK_NE(RESOURCE_TYPE_FILE, resource_type_);
 
   switch (GetErrorClass(response.status_code)) {
     case ERROR_CLASS_INITIATED:
       return Stop(ERR_INVALID_RESPONSE);
     case ERROR_CLASS_OK:
-      next_state_ = STATE_CTRL_WRITE_LIST;
+      resource_type_ = RESOURCE_TYPE_DIRECTORY;
+      EstablishDataConnection(STATE_CTRL_WRITE_LIST);
       break;
     case ERROR_CLASS_INFO_NEEDED:
       return Stop(ERR_INVALID_RESPONSE);
@@ -1186,12 +1156,10 @@ int FtpNetworkTransaction::ProcessResponseCWDNotADirectory() {
     return Stop(ERR_FILE_NOT_FOUND);
   }
 
-  // We are here because SIZE failed and we are not sure what the resource
-  // type is. It could still be file, and SIZE could fail because of
-  // an access error (http://crbug.com/56734). Try RETR just to be sure.
+  // If it is not a directory, it is probably a file.
   resource_type_ = RESOURCE_TYPE_FILE;
 
-  ResetDataConnectionAfterError(STATE_CTRL_WRITE_RETR);
+  EstablishDataConnection(STATE_CTRL_WRITE_RETR);
   return OK;
 }
 
@@ -1210,6 +1178,10 @@ int FtpNetworkTransaction::DoCtrlWriteLIST() {
 
 int FtpNetworkTransaction::ProcessResponseLIST(
     const FtpCtrlResponse& response) {
+  // Resource type should be either filled in by DetectTypecode() or
+  // detected with CWD. LIST is sent only when the resource is a directory.
+  DCHECK_EQ(RESOURCE_TYPE_DIRECTORY, resource_type_);
+
   switch (GetErrorClass(response.status_code)) {
     case ERROR_CLASS_INITIATED:
       // We want the client to start reading the response at this point.

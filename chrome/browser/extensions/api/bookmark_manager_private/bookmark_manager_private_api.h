@@ -34,16 +34,17 @@ class BookmarkManagerPrivateEventRouter
     : public bookmarks::BaseBookmarkModelObserver {
  public:
   BookmarkManagerPrivateEventRouter(content::BrowserContext* browser_context,
-                                    BookmarkModel* bookmark_model);
+                                    bookmarks::BookmarkModel* bookmark_model);
   ~BookmarkManagerPrivateEventRouter() override;
 
   // bookmarks::BaseBookmarkModelObserver:
   void BookmarkModelChanged() override;
-  void BookmarkModelBeingDeleted(BookmarkModel* model) override;
-  void OnWillChangeBookmarkMetaInfo(BookmarkModel* model,
-                                    const BookmarkNode* node) override;
-  void BookmarkMetaInfoChanged(BookmarkModel* model,
-                               const BookmarkNode* node) override;
+  void BookmarkModelBeingDeleted(bookmarks::BookmarkModel* model) override;
+  void OnWillChangeBookmarkMetaInfo(
+      bookmarks::BookmarkModel* model,
+      const bookmarks::BookmarkNode* node) override;
+  void BookmarkMetaInfoChanged(bookmarks::BookmarkModel* model,
+                               const bookmarks::BookmarkNode* node) override;
 
  private:
   // Helper to actually dispatch an event to extension listeners.
@@ -51,10 +52,10 @@ class BookmarkManagerPrivateEventRouter
                      scoped_ptr<base::ListValue> event_args);
 
   // Remembers the previous meta info of a node before it was changed.
-  BookmarkNode::MetaInfoMap prev_meta_info_;
+  bookmarks::BookmarkNode::MetaInfoMap prev_meta_info_;
 
   content::BrowserContext* browser_context_;
-  BookmarkModel* bookmark_model_;
+  bookmarks::BookmarkModel* bookmark_model_;
 };
 
 class BookmarkManagerPrivateAPI : public BrowserContextKeyedAPI,

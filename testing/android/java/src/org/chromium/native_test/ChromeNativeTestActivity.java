@@ -7,6 +7,7 @@ package org.chromium.native_test;
 import android.app.Activity;
 import android.content.Context;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.util.Log;
 
@@ -15,6 +16,8 @@ import org.chromium.base.PathUtils;
 import org.chromium.base.PowerMonitor;
 import org.chromium.base.ResourceExtractor;
 import org.chromium.base.library_loader.NativeLibraries;
+
+import java.io.File;
 
 /**
  *  Android's NativeActivity is mostly useful for pure-native code.
@@ -26,6 +29,8 @@ public class ChromeNativeTestActivity extends Activity {
             "org.chromium.native_test.ChromeNativeTestActivity.CommandLineFile";
     public static final String EXTRA_COMMAND_LINE_FLAGS =
             "org.chromium.native_test.ChromeNativeTestActivity.CommandLineFlags";
+    public static final String EXTRA_STDOUT_FILE =
+            "org.chromium.native_test.ChromeNativeTestActivity.StdoutFile";
 
     private static final String TAG = "ChromeNativeTestActivity";
     private static final String EXTRA_RUN_IN_SUB_THREAD = "RunInSubThread";
@@ -75,11 +80,28 @@ public class ChromeNativeTestActivity extends Activity {
         if (commandLineFlags == null) commandLineFlags = "";
 
         String commandLineFilePath = getIntent().getStringExtra(EXTRA_COMMAND_LINE_FILE);
-        if (commandLineFilePath == null) commandLineFilePath = "";
+        if (commandLineFilePath == null) {
+            commandLineFilePath = "";
+        } else {
+            File commandLineFile = new File(commandLineFilePath);
+            if (!commandLineFile.isAbsolute()) {
+                commandLineFilePath = Environment.getExternalStorageDirectory() + "/"
+                        + commandLineFilePath;
+            }
+            Log.i(TAG, "command line file path: " + commandLineFilePath);
+        }
+
+        String stdoutFilePath = getIntent().getStringExtra(EXTRA_STDOUT_FILE);
+        boolean stdoutFifo = false;
+        if (stdoutFilePath == null) {
+            stdoutFilePath = new File(getFilesDir(), "test.fifo").getAbsolutePath();
+            stdoutFifo = true;
+        }
 
         // This directory is used by build/android/pylib/test_package_apk.py.
-        nativeRunTests(commandLineFlags, commandLineFilePath, getFilesDir().getAbsolutePath(),
+        nativeRunTests(commandLineFlags, commandLineFilePath, stdoutFilePath, stdoutFifo,
                 getApplicationContext());
+        finish();
     }
 
     // Signal a failure of the native test loader to python scripts
@@ -98,5 +120,5 @@ public class ChromeNativeTestActivity extends Activity {
     }
 
     private native void nativeRunTests(String commandLineFlags, String commandLineFilePath,
-            String filesDir, Context appContext);
+            String stdoutFilePath, boolean stdoutFifo, Context appContext);
 }

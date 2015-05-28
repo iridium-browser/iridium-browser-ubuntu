@@ -33,10 +33,10 @@
 
 #include "core/dom/DOMTypedArray.h"
 #include "modules/EventModules.h"
-#include "modules/webmidi/MIDIMessageEventInit.h"
 
 namespace blink {
 
+class MIDIMessageEventInit;
 
 class MIDIMessageEvent final : public Event {
     DEFINE_WRAPPERTYPEINFO();
@@ -61,7 +61,7 @@ public:
 
     virtual const AtomicString& interfaceName() const override { return EventNames::MIDIMessageEvent; }
 
-    virtual void trace(Visitor* visitor) override { Event::trace(visitor); }
+    DEFINE_INLINE_VIRTUAL_TRACE() { Event::trace(visitor); }
 
 private:
     MIDIMessageEvent()

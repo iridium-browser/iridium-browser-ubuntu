@@ -22,17 +22,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/storage_partition_descriptor.h"
 #include "components/content_settings/core/common/content_settings_types.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/resource_context.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_job_factory.h"
 
 class ChromeHttpUserAgentSettings;
@@ -48,6 +44,10 @@ class SupervisedUserURLFilter;
 
 namespace chrome_browser_net {
 class ResourcePrefetchPredictorObserver;
+}
+
+namespace data_reduction_proxy {
+class DataReductionProxyIOData;
 }
 
 namespace extensions {
@@ -75,10 +75,6 @@ class PolicyCertVerifier;
 class PolicyHeaderIOHelper;
 class URLBlacklistManager;
 }  // namespace policy
-
-namespace prerender {
-class PrerenderTracker;
-}
 
 // Conceptually speaking, the ProfileIOData represents data that lives on the IO
 // thread that is owned by a Profile, such as, but not limited to, network
@@ -150,30 +146,6 @@ class ProfileIOData {
 
   StringPrefMember* google_services_account_id() const {
     return &google_services_user_account_id_;
-  }
-
-  StringPrefMember* google_services_username() const {
-    return &google_services_username_;
-  }
-
-  StringPrefMember* google_services_username_pattern() const {
-    return &google_services_username_pattern_;
-  }
-
-  BooleanPrefMember* reverse_autologin_enabled() const {
-    return &reverse_autologin_enabled_;
-  }
-
-  const std::string& reverse_autologin_pending_email() const {
-    return reverse_autologin_pending_email_;
-  }
-
-  void set_reverse_autologin_pending_email(const std::string& email) {
-    reverse_autologin_pending_email_ = email;
-  }
-
-  StringListPrefMember* one_click_signin_rejected_email_list() const {
-    return &one_click_signin_rejected_email_list_;
   }
 
   net::URLRequestContext* extensions_request_context() const {
@@ -250,13 +222,16 @@ class ProfileIOData {
   // should only be called from there.
   bool GetMetricsEnabledStateOnIOThread() const;
 
-  // Returns whether or not data reduction proxy is enabled in the browser
-  // instance on which this profile resides.
-  virtual bool IsDataReductionProxyEnabled() const;
-
   void set_client_cert_store_factory_for_testing(
     const base::Callback<scoped_ptr<net::ClientCertStore>()>& factory) {
       client_cert_store_factory_ = factory;
+  }
+
+  bool IsDataReductionProxyEnabled() const;
+
+  data_reduction_proxy::DataReductionProxyIOData*
+  data_reduction_proxy_io_data() const {
+    return data_reduction_proxy_io_data_.get();
   }
 
  protected:
@@ -319,6 +294,10 @@ class ProfileIOData {
     scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
         protocol_handler_interceptor;
 
+    // Holds the URLRequestInterceptor pointer that is created on the UI thread
+    // and then passed to the list of request_interceptors on the IO thread.
+    scoped_ptr<net::URLRequestInterceptor> new_tab_page_interceptor;
+
     // We need to initialize the ProxyConfigService from the UI thread
     // because on linux it relies on initializing things through gconf,
     // and needs to be on the main thread.
@@ -337,8 +316,6 @@ class ProfileIOData {
     // ensure it's not accidently used on the IO thread. Before using it on the
     // UI thread, call ProfileManager::IsValidProfile to ensure it's alive.
     void* profile;
-
-    prerender::PrerenderTracker* prerender_tracker;
   };
 
   explicit ProfileIOData(Profile::ProfileType profile_type);
@@ -367,85 +344,9 @@ class ProfileIOData {
   void set_channel_id_service(
       net::ChannelIDService* channel_id_service) const;
 
-  data_reduction_proxy::DataReductionProxyParams* data_reduction_proxy_params()
-      const {
-    return data_reduction_proxy_params_.get();
-  }
-
-  void set_data_reduction_proxy_params(
-      scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
-          data_reduction_proxy_params) const {
-    data_reduction_proxy_params_ = data_reduction_proxy_params.Pass();
-  }
-
-  data_reduction_proxy::DataReductionProxyUsageStats*
-      data_reduction_proxy_usage_stats() const {
-    return data_reduction_proxy_usage_stats_.get();
-  }
-
-  void set_data_reduction_proxy_statistics_prefs(
-      base::WeakPtr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
-          data_reduction_proxy_statistics_prefs) {
-    data_reduction_proxy_statistics_prefs_ =
-        data_reduction_proxy_statistics_prefs;
-  }
-
-  base::WeakPtr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
-      data_reduction_proxy_statistics_prefs() const {
-    return data_reduction_proxy_statistics_prefs_;
-  }
-
-  void set_data_reduction_proxy_usage_stats(
-      scoped_ptr<data_reduction_proxy::DataReductionProxyUsageStats>
-          data_reduction_proxy_usage_stats) const {
-     data_reduction_proxy_usage_stats_ =
-         data_reduction_proxy_usage_stats.Pass();
-  }
-
-  base::Callback<void(bool)> data_reduction_proxy_unavailable_callback() const {
-    return data_reduction_proxy_unavailable_callback_;
-  }
-
-  void set_data_reduction_proxy_unavailable_callback(
-      const base::Callback<void(bool)>& unavailable_callback) const {
-    data_reduction_proxy_unavailable_callback_ = unavailable_callback;
-  }
-
-  data_reduction_proxy::DataReductionProxyConfigurator*
-  data_reduction_proxy_configurator() const {
-    return data_reduction_proxy_configurator_.get();
-  }
-
-  void set_data_reduction_proxy_configurator(
-      scoped_ptr<data_reduction_proxy::DataReductionProxyConfigurator>
-          data_reduction_proxy_configurator) const {
-    data_reduction_proxy_configurator_ =
-        data_reduction_proxy_configurator.Pass();
-  }
-
-  data_reduction_proxy::DataReductionProxyAuthRequestHandler*
-      data_reduction_proxy_auth_request_handler() const {
-    return data_reduction_proxy_auth_request_handler_.get();
-  }
-
-  void set_data_reduction_proxy_auth_request_handler(
-      scoped_ptr<data_reduction_proxy::DataReductionProxyAuthRequestHandler>
-          data_reduction_proxy_auth_request_handler) const {
-    data_reduction_proxy_auth_request_handler_ =
-        data_reduction_proxy_auth_request_handler.Pass();
-  }
-
-  data_reduction_proxy::DataReductionProxyEventStore*
-      data_reduction_proxy_event_store() const {
-    return data_reduction_proxy_event_store_.get();
-  }
-
-  void set_data_reduction_proxy_event_store(
-      scoped_ptr<data_reduction_proxy::DataReductionProxyEventStore>
-          data_reduction_proxy_event_store) const {
-    data_reduction_proxy_event_store_ =
-        data_reduction_proxy_event_store.Pass();
-  }
+  void set_data_reduction_proxy_io_data(
+      scoped_ptr<data_reduction_proxy::DataReductionProxyIOData>
+          data_reduction_proxy_io_data) const;
 
   net::FraudulentCertificateReporter* fraudulent_certificate_reporter() const {
     return fraudulent_certificate_reporter_.get();
@@ -597,15 +498,6 @@ class ProfileIOData {
       client_cert_store_factory_;
 
   mutable StringPrefMember google_services_user_account_id_;
-  mutable StringPrefMember google_services_username_;
-  mutable StringPrefMember google_services_username_pattern_;
-  mutable BooleanPrefMember reverse_autologin_enabled_;
-
-  // During the reverse autologin request chain processing, this member saves
-  // the email of the google account that is being signed into.
-  std::string reverse_autologin_pending_email_;
-
-  mutable StringListPrefMember one_click_signin_rejected_email_list_;
 
   mutable scoped_refptr<MediaDeviceIDSalt> media_device_id_salt_;
 
@@ -645,23 +537,8 @@ class ProfileIOData {
 #endif
   mutable scoped_ptr<net::ChannelIDService> channel_id_service_;
 
-  // data_reduction_proxy_* classes must be declared before |network_delegate_|.
-  // The data_reduction_proxy_* classes are passed in to |network_delegate_|,
-  // so this ordering ensures that the |network_delegate_| never references
-  // freed objects.
-  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
-      data_reduction_proxy_params_;
-  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyUsageStats>
-      data_reduction_proxy_usage_stats_;
-  mutable base::WeakPtr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
-      data_reduction_proxy_statistics_prefs_;
-  mutable base::Callback<void(bool)> data_reduction_proxy_unavailable_callback_;
-  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyConfigurator>
-      data_reduction_proxy_configurator_;
-  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyAuthRequestHandler>
-      data_reduction_proxy_auth_request_handler_;
-  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyEventStore>
-      data_reduction_proxy_event_store_;
+  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyIOData>
+      data_reduction_proxy_io_data_;
 
   mutable scoped_ptr<net::FraudulentCertificateReporter>
       fraudulent_certificate_reporter_;

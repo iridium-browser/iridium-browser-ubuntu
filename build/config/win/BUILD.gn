@@ -17,6 +17,9 @@ config("sdk") {
     "PSAPI_VERSION=1",
     "WIN32",
     "_SECURE_ATL",
+
+    # This is required for ATL to use XP-safe versions of its functions.
+    "_USING_V110_SDK71_",
   ]
 }
 
@@ -31,7 +34,7 @@ config("winver") {
 
 # Linker flags for Windows SDK setup, this is applied only to EXEs and DLLs.
 config("sdk_link") {
-  if (cpu_arch == "x64") {
+  if (current_cpu == "x64") {
     ldflags = [ "/MACHINE:X64" ]
     lib_dirs = [
       "$windows_sdk_path\Lib\winv6.3\um\x64",
@@ -63,6 +66,12 @@ config("common_linker_setup") {
     "/ignore:4199",
     "/ignore:4221",
     "/NXCOMPAT",
+
+    # Suggested by Microsoft Devrel to avoid
+    #   LINK : fatal error LNK1248: image size (80000000)
+    #   exceeds maximum allowable size (80000000)
+    # which started happening more regularly after VS2013 Update 4.
+    "/maxilksize:2147483647",
   ]
 
   # ASLR makes debugging with windbg difficult because Chrome.exe and
@@ -97,11 +106,39 @@ config("windowed") {
 
 # Incremental linking ----------------------------------------------------------
 
+incremental_linking_on_switch = [ "/INCREMENTAL" ]
+incremental_linking_off_switch = [ "/INCREMENTAL:NO" ]
+if (is_debug) {
+  default_incremental_linking_switch = incremental_linking_on_switch
+} else {
+  default_incremental_linking_switch = incremental_linking_off_switch
+}
+
+# Applies incremental linking or not depending on the current configuration.
+config("default_incremental_linking") {
+  ldflags = default_incremental_linking_switch
+}
+
+# Explicitly on or off incremental linking
 config("incremental_linking") {
-  ldflags = [ "/INCREMENTAL" ]
+  ldflags = incremental_linking_on_switch
 }
 config("no_incremental_linking") {
-  ldflags = [ "/INCREMENTAL:NO" ]
+  ldflags = incremental_linking_off_switch
+}
+
+# Some large modules can't handle incremental linking in some situations. This
+# config should be applied to large modules to turn off incremental linking
+# when it won't work.
+config("default_large_module_incremental_linking") {
+  if (symbol_level > 0 && (current_cpu == "x86" || !is_component_build)) {
+    # When symbols are on, things get so large that the tools fail due to the
+    # size of the .ilk files.
+    ldflags = incremental_linking_off_switch
+  } else {
+    # Otherwise just do the default incremental linking for this build type.
+    ldflags = default_incremental_linking_switch
+  }
 }
 
 # Character set ----------------------------------------------------------------

@@ -23,7 +23,7 @@ class TestPasswordStore : public PasswordStore {
   TestPasswordStore();
 
   typedef std::map<std::string /* signon_realm */,
-                   std::vector<autofill::PasswordForm> > PasswordMap;
+                   std::vector<autofill::PasswordForm>> PasswordMap;
 
   const PasswordMap& stored_passwords() const;
   void Clear();
@@ -47,28 +47,25 @@ class TestPasswordStore : public PasswordStore {
       const autofill::PasswordForm& form) override;
   PasswordStoreChangeList RemoveLoginImpl(
       const autofill::PasswordForm& form) override;
-  void GetLoginsImpl(const autofill::PasswordForm& form,
-                     PasswordStore::AuthorizationPromptPolicy prompt_policy,
-                     const ConsumerCallbackRunner& runner) override;
-  void WrapModificationTask(ModificationTask task) override;
-  void GetAutofillableLoginsImpl(
-      PasswordStore::GetLoginsRequest* request) override;
+  ScopedVector<autofill::PasswordForm> FillMatchingLogins(
+      const autofill::PasswordForm& form,
+      PasswordStore::AuthorizationPromptPolicy prompt_policy) override;
+  void GetAutofillableLoginsImpl(scoped_ptr<GetLoginsRequest> request) override;
 
   // Unused portions of PasswordStore interface
   void ReportMetricsImpl(const std::string& sync_username,
-                         bool custom_passphrase_sync_enabled) override {}
+                         bool custom_passphrase_sync_enabled) override;
   PasswordStoreChangeList RemoveLoginsCreatedBetweenImpl(
       base::Time begin,
       base::Time end) override;
   PasswordStoreChangeList RemoveLoginsSyncedBetweenImpl(
       base::Time delete_begin,
       base::Time delete_end) override;
-  void GetBlacklistLoginsImpl(
-      PasswordStore::GetLoginsRequest* request) override {}
+  void GetBlacklistLoginsImpl(scoped_ptr<GetLoginsRequest> request) override;
   bool FillAutofillableLogins(
-      std::vector<autofill::PasswordForm*>* forms) override;
+      ScopedVector<autofill::PasswordForm>* forms) override;
   bool FillBlacklistLogins(
-      std::vector<autofill::PasswordForm*>* forms) override;
+      ScopedVector<autofill::PasswordForm>* forms) override;
 
  private:
   PasswordMap stored_passwords_;

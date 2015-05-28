@@ -21,8 +21,10 @@
 #include "content/public/browser/devtools_frontend_host.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "net/url_request/url_fetcher_delegate.h"
 #include "ui/gfx/geometry/size.h"
 
+class DevToolsAndroidBridge;
 class InfoBarService;
 class Profile;
 
@@ -36,7 +38,8 @@ class DevToolsUIBindings : public content::NotificationObserver,
                            public content::DevToolsFrontendHost::Delegate,
                            public DevToolsEmbedderMessageDispatcher::Delegate,
                            public DevToolsAndroidBridge::DeviceCountListener,
-                           public content::DevToolsAgentHostClient {
+                           public content::DevToolsAgentHostClient,
+                           public net::URLFetcherDelegate {
  public:
   static DevToolsUIBindings* ForWebContents(
       content::WebContents* web_contents);
@@ -101,7 +104,11 @@ class DevToolsUIBindings : public content::NotificationObserver,
   void SetInspectedPageBounds(const gfx::Rect& rect) override;
   void InspectElementCompleted() override;
   void InspectedURLChanged(const std::string& url) override;
-  void SetIsDocked(bool is_docked) override;
+  void LoadNetworkResource(const DispatchCallback& callback,
+                           const std::string& url,
+                           const std::string& headers,
+                           int stream_id) override;
+  void SetIsDocked(const DispatchCallback& callback, bool is_docked) override;
   void OpenInNewTab(const std::string& url) override;
   void SaveToFile(const std::string& url,
                   const std::string& content,
@@ -113,23 +120,30 @@ class DevToolsUIBindings : public content::NotificationObserver,
   void RemoveFileSystem(const std::string& file_system_path) override;
   void UpgradeDraggedFileSystemPermissions(
       const std::string& file_system_url) override;
-  void IndexPath(int request_id, const std::string& file_system_path) override;
-  void StopIndexing(int request_id) override;
-  void SearchInPath(int request_id,
+  void IndexPath(int index_request_id,
+                 const std::string& file_system_path) override;
+  void StopIndexing(int index_request_id) override;
+  void SearchInPath(int search_request_id,
                     const std::string& file_system_path,
                     const std::string& query) override;
   void SetWhitelistedShortcuts(const std::string& message) override;
   void ZoomIn() override;
   void ZoomOut() override;
   void ResetZoom() override;
-  void OpenUrlOnRemoteDeviceAndInspect(const std::string& browser_id,
-                                       const std::string& url) override;
-  void SetDeviceCountUpdatesEnabled(bool enabled) override;
   void SetDevicesUpdatesEnabled(bool enabled) override;
   void SendMessageToBrowser(const std::string& message) override;
   void RecordActionUMA(const std::string& name, int action) override;
+  void SendJsonRequest(const DispatchCallback& callback,
+                       const std::string& browser_id,
+                       const std::string& url) override;
+
+  // net::URLFetcherDelegate overrides.
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   void EnableRemoteDeviceCounter(bool enable);
+
+  void SendMessageAck(int request_id,
+                      const base::Value* arg1);
 
   // DevToolsAndroidBridge::DeviceCountListener override:
   void DeviceCountChanged(int count) override;
@@ -141,6 +155,10 @@ class DevToolsUIBindings : public content::NotificationObserver,
   void DocumentOnLoadCompletedInMainFrame();
   void DidNavigateMainFrame();
   void FrontendLoaded();
+
+  void JsonReceived(const DispatchCallback& callback,
+                    int result,
+                    const std::string& message);
 
   // DevToolsFileHelper callbacks.
   void FileSavedAs(const std::string& url);
@@ -172,6 +190,7 @@ class DevToolsUIBindings : public content::NotificationObserver,
   scoped_ptr<FrontendWebContentsObserver> frontend_contents_observer_;
 
   Profile* profile_;
+  DevToolsAndroidBridge* android_bridge_;
   content::WebContents* web_contents_;
   scoped_ptr<Delegate> delegate_;
   scoped_refptr<content::DevToolsAgentHost> agent_host_;
@@ -185,12 +204,13 @@ class DevToolsUIBindings : public content::NotificationObserver,
       IndexingJobsMap;
   IndexingJobsMap indexing_jobs_;
 
-  bool device_count_updates_enabled_;
   bool devices_updates_enabled_;
   bool frontend_loaded_;
   scoped_ptr<DevToolsTargetsUIHandler> remote_targets_handler_;
   scoped_ptr<DevToolsEmbedderMessageDispatcher> embedder_message_dispatcher_;
   GURL url_;
+  using PendingRequestsMap = std::map<const net::URLFetcher*, DispatchCallback>;
+  PendingRequestsMap pending_requests_;
   base::WeakPtrFactory<DevToolsUIBindings> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsUIBindings);

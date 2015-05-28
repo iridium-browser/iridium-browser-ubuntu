@@ -80,6 +80,9 @@ class PasswordFormBuilder {
     html_ += "<INPUT type=\"password\" disabled/>";
   }
 
+  // Appends a hidden field at the end of the form.
+  void AddHiddenField() { html_ += "<INPUT type=\"hidden\"/>"; }
+
   // Appends a new submit-type field at the end of the form with the specified
   // |name|. If |activated| is true, the test will emulate as if this button
   // were used to submit the form.
@@ -131,7 +134,7 @@ class PasswordFormConversionUtilsTest : public content::RenderViewTest {
         input_element->setActivatedSubmit(true);
     }
 
-    *password_form = CreatePasswordForm(forms[0], nullptr);
+    *password_form = CreatePasswordForm(forms[0], nullptr, nullptr);
   }
 
  private:
@@ -342,7 +345,10 @@ TEST_F(PasswordFormConversionUtilsTest, IdentifyingThreePasswordFields) {
       {{"alpha", "", ""}, "password1", "alpha", "password2", ""},
       {{"", "beta", "beta"}, "password1", "", "password2", "beta"},
       {{"alpha", "beta", "beta"}, "password1", "alpha", "password2", "beta"},
-      {{"beta", "beta", "alpha"}, "password3", "alpha", "password1", "beta"},
+      // If confirmed password comes first, assume that the third password
+      // field is related to security question, SSN, or credit card and ignore
+      // it.
+      {{"beta", "beta", "alpha"}, "", "", "password1", "beta"},
       // If the fields are yet empty, we speculate that we will identify them as
       // (current + new + new) once they are filled out, so we should classify
       // them the same for now to keep our abstract interpretation less flaky.
@@ -393,6 +399,7 @@ TEST_F(PasswordFormConversionUtilsTest,
     const char* expected_password_value;
     const char* expected_new_password_element;
     const char* expected_new_password_value;
+    bool expected_new_password_marked_by_site;
   } cases[] = {
       // When there are elements marked with autocomplete='current-password',
       // but no elements with 'new-password', we should treat the first of the
@@ -401,86 +408,86 @@ TEST_F(PasswordFormConversionUtilsTest,
       // for other purposes, such as PINs, OTPs, and the like. Actual values in
       // the password fields should be ignored in all cases below.
       {{"current-password", NULL, NULL},
-       "password1", "alpha", "", ""},
+       "password1", "alpha", "", "", false},
       {{NULL, "current-password", NULL},
-       "password2", "beta", "", ""},
+       "password2", "beta", "", "", false},
       {{NULL, NULL, "current-password"},
-       "password3", "gamma", "", ""},
+       "password3", "gamma", "", "", false},
       {{NULL, "current-password", "current-password"},
-       "password2", "beta", "", ""},
+       "password2", "beta", "", "", false},
       {{"current-password", NULL, "current-password"},
-       "password1", "alpha", "", ""},
+       "password1", "alpha", "", "", false},
       {{"current-password", "current-password", NULL},
-       "password1", "alpha", "", ""},
+       "password1", "alpha", "", "", false},
       {{"current-password", "current-password", "current-password"},
-       "password1", "alpha", "", ""},
+       "password1", "alpha", "", "", false},
       // The same goes vice versa for autocomplete='new-password'.
       {{"new-password", NULL, NULL},
-       "", "", "password1", "alpha"},
+       "", "", "password1", "alpha", true},
       {{NULL, "new-password", NULL},
-       "", "", "password2", "beta"},
+       "", "", "password2", "beta", true},
       {{NULL, NULL, "new-password"},
-       "", "", "password3", "gamma"},
+       "", "", "password3", "gamma", true},
       {{NULL, "new-password", "new-password"},
-       "", "", "password2", "beta"},
+       "", "", "password2", "beta", true},
       {{"new-password", NULL, "new-password"},
-       "", "", "password1", "alpha"},
+       "", "", "password1", "alpha", true},
       {{"new-password", "new-password", NULL},
-       "", "", "password1", "alpha"},
+       "", "", "password1", "alpha", true},
       {{"new-password", "new-password", "new-password"},
-       "", "", "password1", "alpha"},
+       "", "", "password1", "alpha", true},
       // When there is one element marked with autocomplete='current-password',
       // and one with 'new-password', just comply, regardless of their order.
       // Ignore the unmarked password field(s) for the same reason as above.
       {{"current-password", "new-password", NULL},
-       "password1", "alpha", "password2", "beta"},
+       "password1", "alpha", "password2", "beta", true},
       {{"current-password", NULL, "new-password"},
-       "password1", "alpha", "password3", "gamma"},
+       "password1", "alpha", "password3", "gamma", true},
       {{NULL, "current-password", "new-password"},
-       "password2", "beta", "password3", "gamma"},
+       "password2", "beta", "password3", "gamma", true},
       {{"new-password", "current-password", NULL},
-       "password2", "beta", "password1", "alpha"},
+       "password2", "beta", "password1", "alpha", true},
       {{"new-password", NULL, "current-password"},
-       "password3", "gamma", "password1", "alpha"},
+       "password3", "gamma", "password1", "alpha", true},
       {{NULL, "new-password", "current-password"},
-       "password3", "gamma", "password2", "beta"},
+       "password3", "gamma", "password2", "beta", true},
       // In case of duplicated elements of either kind, go with the first one of
       // its kind.
       {{"current-password", "current-password", "new-password"},
-       "password1", "alpha", "password3", "gamma"},
+       "password1", "alpha", "password3", "gamma", true},
       {{"current-password", "new-password", "current-password"},
-       "password1", "alpha", "password2", "beta"},
+       "password1", "alpha", "password2", "beta", true},
       {{"new-password", "current-password", "current-password"},
-       "password2", "beta", "password1", "alpha"},
+       "password2", "beta", "password1", "alpha", true},
       {{"current-password", "new-password", "new-password"},
-       "password1", "alpha", "password2", "beta"},
+       "password1", "alpha", "password2", "beta", true},
       {{"new-password", "current-password", "new-password"},
-       "password2", "beta", "password1", "alpha"},
+       "password2", "beta", "password1", "alpha", true},
       {{"new-password", "new-password", "current-password"},
-       "password3", "gamma", "password1", "alpha"},
+       "password3", "gamma", "password1", "alpha", true},
       // When there is an empty autocomplete attribute (i.e. autocomplete=""),
       // it should have the same effect as having no attribute whatsoever.
       {{"current-password", "", ""},
-       "password1", "alpha", "", ""},
+       "password1", "alpha", "", "", false},
       {{"", "", "new-password"},
-       "", "", "password3", "gamma"},
+       "", "", "password3", "gamma", true},
       {{"", "new-password", ""},
-       "", "", "password2", "beta"},
+       "", "", "password2", "beta", true},
       {{"", "current-password", "current-password"},
-       "password2", "beta", "", ""},
+       "password2", "beta", "", "", false},
       {{"new-password", "", "new-password"},
-       "", "", "password1", "alpha"},
+       "", "", "password1", "alpha", true},
       {{"new-password", "", "current-password"},
-       "password3", "gamma", "password1", "alpha"},
+       "password3", "gamma", "password1", "alpha", true},
       // It should not matter if attribute values are upper or mixed case.
       {{NULL, "current-password", NULL},
-       "password2", "beta", "", ""},
+       "password2", "beta", "", "", false},
       {{NULL, "CURRENT-PASSWORD", NULL},
-       "password2", "beta", "", ""},
+       "password2", "beta", "", "", false},
       {{NULL, "new-password", NULL},
-       "", "", "password2", "beta"},
+       "", "", "password2", "beta", true},
       {{NULL, "nEw-PaSsWoRd", NULL},
-       "", "", "password2", "beta"}};
+       "", "", "password2", "beta", true}};
 
   for (size_t i = 0; i < arraysize(cases); ++i) {
     SCOPED_TRACE(testing::Message() << "Iteration " << i);
@@ -515,6 +522,8 @@ TEST_F(PasswordFormConversionUtilsTest,
               password_form->new_password_element);
     EXPECT_EQ(base::UTF8ToUTF16(cases[i].expected_new_password_value),
               password_form->new_password_value);
+    EXPECT_EQ(cases[i].expected_new_password_marked_by_site,
+              password_form->new_password_marked_by_site);
   }
 }
 
@@ -587,6 +596,94 @@ TEST_F(PasswordFormConversionUtilsTest,
   scoped_ptr<PasswordForm> password_form;
   ASSERT_NO_FATAL_FAILURE(LoadHTMLAndConvertForm(html, &password_form));
   EXPECT_FALSE(password_form);
+}
+
+TEST_F(PasswordFormConversionUtilsTest, LayoutClassificationLogin) {
+  PasswordFormBuilder builder(kTestFormActionURL);
+  builder.AddHiddenField();
+  builder.AddUsernameField("username", "", nullptr);
+  builder.AddPasswordField("password", "", nullptr);
+  builder.AddSubmitButton("submit", false);
+  std::string login_html = builder.ProduceHTML();
+
+  scoped_ptr<PasswordForm> login_form;
+  ASSERT_NO_FATAL_FAILURE(LoadHTMLAndConvertForm(login_html, &login_form));
+  ASSERT_TRUE(login_form);
+  EXPECT_EQ(PasswordForm::Layout::LAYOUT_OTHER, login_form->layout);
+}
+
+TEST_F(PasswordFormConversionUtilsTest, LayoutClassificationSignup) {
+  PasswordFormBuilder builder(kTestFormActionURL);
+  builder.AddUsernameField("someotherfield", "", nullptr);
+  builder.AddUsernameField("username", "", nullptr);
+  builder.AddPasswordField("new_password", "", nullptr);
+  builder.AddHiddenField();
+  builder.AddPasswordField("new_password2", "", nullptr);
+  builder.AddSubmitButton("submit", false);
+  std::string signup_html = builder.ProduceHTML();
+
+  scoped_ptr<PasswordForm> signup_form;
+  ASSERT_NO_FATAL_FAILURE(LoadHTMLAndConvertForm(signup_html, &signup_form));
+  ASSERT_TRUE(signup_form);
+  EXPECT_EQ(PasswordForm::Layout::LAYOUT_OTHER, signup_form->layout);
+}
+
+TEST_F(PasswordFormConversionUtilsTest, LayoutClassificationChange) {
+  PasswordFormBuilder builder(kTestFormActionURL);
+  builder.AddUsernameField("username", "", nullptr);
+  builder.AddPasswordField("old_password", "", nullptr);
+  builder.AddHiddenField();
+  builder.AddPasswordField("new_password", "", nullptr);
+  builder.AddPasswordField("new_password2", "", nullptr);
+  builder.AddSubmitButton("submit", false);
+  std::string change_html = builder.ProduceHTML();
+
+  scoped_ptr<PasswordForm> change_form;
+  ASSERT_NO_FATAL_FAILURE(LoadHTMLAndConvertForm(change_html, &change_form));
+  ASSERT_TRUE(change_form);
+  EXPECT_EQ(PasswordForm::Layout::LAYOUT_OTHER, change_form->layout);
+}
+
+TEST_F(PasswordFormConversionUtilsTest, LayoutClassificationLoginPlusSignup_A) {
+  PasswordFormBuilder builder(kTestFormActionURL);
+  builder.AddUsernameField("username", "", nullptr);
+  builder.AddHiddenField();
+  builder.AddPasswordField("password", "", nullptr);
+  builder.AddUsernameField("username2", "", nullptr);
+  builder.AddUsernameField("someotherfield", "", nullptr);
+  builder.AddPasswordField("new_password", "", nullptr);
+  builder.AddPasswordField("new_password2", "", nullptr);
+  builder.AddHiddenField();
+  builder.AddSubmitButton("submit", false);
+  std::string login_plus_signup_html = builder.ProduceHTML();
+
+  scoped_ptr<PasswordForm> login_plus_signup_form;
+  ASSERT_NO_FATAL_FAILURE(
+      LoadHTMLAndConvertForm(login_plus_signup_html, &login_plus_signup_form));
+  ASSERT_TRUE(login_plus_signup_form);
+  EXPECT_EQ(PasswordForm::Layout::LAYOUT_LOGIN_AND_SIGNUP,
+            login_plus_signup_form->layout);
+}
+
+TEST_F(PasswordFormConversionUtilsTest, LayoutClassificationLoginPlusSignup_B) {
+  PasswordFormBuilder builder(kTestFormActionURL);
+  builder.AddUsernameField("username", "", nullptr);
+  builder.AddHiddenField();
+  builder.AddPasswordField("password", "", nullptr);
+  builder.AddUsernameField("username2", "", nullptr);
+  builder.AddUsernameField("someotherfield", "", nullptr);
+  builder.AddPasswordField("new_password", "", nullptr);
+  builder.AddUsernameField("someotherfield2", "", nullptr);
+  builder.AddHiddenField();
+  builder.AddSubmitButton("submit", false);
+  std::string login_plus_signup_html = builder.ProduceHTML();
+
+  scoped_ptr<PasswordForm> login_plus_signup_form;
+  ASSERT_NO_FATAL_FAILURE(
+      LoadHTMLAndConvertForm(login_plus_signup_html, &login_plus_signup_form));
+  ASSERT_TRUE(login_plus_signup_form);
+  EXPECT_EQ(PasswordForm::Layout::LAYOUT_LOGIN_AND_SIGNUP,
+            login_plus_signup_form->layout);
 }
 
 }  // namespace autofill

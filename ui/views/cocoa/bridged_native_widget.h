@@ -52,7 +52,7 @@ class VIEWS_EXPORT BridgedNativeWidget : public ui::LayerDelegate,
 
   // Creates one side of the bridge. |parent| must not be NULL.
   explicit BridgedNativeWidget(NativeWidgetMac* parent);
-  virtual ~BridgedNativeWidget();
+  ~BridgedNativeWidget() override;
 
   // Initialize the bridge, "retains" ownership of |window|.
   void Init(base::scoped_nsobject<NSWindow> window,
@@ -62,7 +62,12 @@ class VIEWS_EXPORT BridgedNativeWidget : public ui::LayerDelegate,
   // This does NOT take ownership of |focus_manager|.
   void SetFocusManager(FocusManager* focus_manager);
 
-  // Changes the bounds of the window and the hosted layer if present.
+  // Changes the bounds of the window and the hosted layer if present. The
+  // origin is a location in screen coordinates except for "child" windows,
+  // which are positioned relative to their parent(). SetBounds() considers a
+  // "child" window to be one initialized with InitParams specifying all of:
+  // a |parent| NSWindow, the |child| attribute, and a |type| that
+  // views::GetAuraWindowTypeForWidgetType does not consider a "popup" type.
   void SetBounds(const gfx::Rect& new_bounds);
 
   // Set or clears the views::View bridged by the content view. This does NOT
@@ -82,6 +87,9 @@ class VIEWS_EXPORT BridgedNativeWidget : public ui::LayerDelegate,
   // See views::Widget.
   void SetNativeWindowProperty(const char* key, void* value);
   void* GetNativeWindowProperty(const char* key) const;
+
+  // Sets the cursor associated with the NSWindow. Retains |cursor|.
+  void SetCursor(NSCursor* cursor);
 
   // Called internally by the NSWindowDelegate when the window is closing.
   void OnWindowWillClose();
@@ -114,6 +122,12 @@ class VIEWS_EXPORT BridgedNativeWidget : public ui::LayerDelegate,
   // Called by the NSWindowDelegate on a scale factor or color space change.
   void OnBackingPropertiesChanged();
 
+  // Called by the NSWindowDelegate when the window becomes or resigns key.
+  void OnWindowKeyStatusChangedTo(bool is_key);
+
+  // Called by NativeWidgetMac when the window size constraints change.
+  void OnSizeConstraintsChanged();
+
   // See widget.h for documentation.
   InputMethod* CreateInputMethod();
   ui::InputMethod* GetHostInputMethod();
@@ -141,7 +155,7 @@ class VIEWS_EXPORT BridgedNativeWidget : public ui::LayerDelegate,
   bool window_visible() { return window_visible_; }
 
   // Overridden from internal::InputMethodDelegate:
-  virtual void DispatchKeyEventPostIME(const ui::KeyEvent& key) override;
+  void DispatchKeyEventPostIME(const ui::KeyEvent& key) override;
 
  private:
   // Closes all child windows. BridgedNativeWidget children will be destroyed.
@@ -186,7 +200,7 @@ class VIEWS_EXPORT BridgedNativeWidget : public ui::LayerDelegate,
                         View* focused_now) override;
 
   // Overridden from ui::LayerDelegate:
-  void OnPaintLayer(gfx::Canvas* canvas) override;
+  void OnPaintLayer(const ui::PaintContext& context) override;
   void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override;
   void OnDeviceScaleFactorChanged(float device_scale_factor) override;
   base::Closure PrepareForLayerBoundsChange() override;
@@ -205,6 +219,7 @@ class VIEWS_EXPORT BridgedNativeWidget : public ui::LayerDelegate,
   scoped_ptr<ui::InputMethod> input_method_;
   scoped_ptr<CocoaMouseCapture> mouse_capture_;
   FocusManager* focus_manager_;  // Weak. Owned by our Widget.
+  Widget::InitParams::Type widget_type_;
 
   BridgedNativeWidget* parent_;  // Weak. If non-null, owns this.
   std::vector<BridgedNativeWidget*> child_windows_;

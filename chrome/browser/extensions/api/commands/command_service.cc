@@ -72,6 +72,14 @@ bool IsForCurrentPlatform(const std::string& key) {
   return StartsWithASCII(key, Command::CommandPlatform() + ":", true);
 }
 
+std::string StripCurrentPlatform(const std::string& key) {
+  DCHECK(IsForCurrentPlatform(key));
+  std::string result = key;
+  ReplaceFirstSubstringAfterOffset(&result, 0, Command::CommandPlatform() + ":",
+                                   "");
+  return result;
+}
+
 void SetInitialBindingsHaveBeenAssigned(
     ExtensionPrefs* prefs, const std::string& extension_id) {
   prefs->UpdateExtensionPref(extension_id, kInitialBindingsHaveBeenAssigned,
@@ -307,6 +315,14 @@ void CommandService::OnExtensionUninstalled(
     content::BrowserContext* browser_context,
     const Extension* extension,
     extensions::UninstallReason reason) {
+  // Adding a component extensions will only trigger install the first time on a
+  // clean profile or on a version increase (see
+  // ComponentLoader::AddComponentExtension). It will, however, always trigger
+  // an uninstall on removal. See http://crbug.com/458612. Isolate this case and
+  // ignore it.
+  if (reason == extensions::UNINSTALL_REASON_COMPONENT_REMOVED)
+    return;
+
   RemoveKeybindingPrefs(extension->id(), std::string());
 }
 
@@ -804,13 +820,12 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
     std::string key = *it;
     bindings->Remove(key, NULL);
 
-    std::pair<const std::string, const std::string> details =
-        std::make_pair(extension_id, command_name);
+    ExtensionCommandRemovedDetails details(extension_id, command_name,
+                                           StripCurrentPlatform(key));
     content::NotificationService::current()->Notify(
         extensions::NOTIFICATION_EXTENSION_COMMAND_REMOVED,
         content::Source<Profile>(profile_),
-        content::Details<std::pair<const std::string, const std::string> >(
-            &details));
+        content::Details<ExtensionCommandRemovedDetails>(&details));
   }
 }
 

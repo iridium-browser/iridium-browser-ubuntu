@@ -33,9 +33,10 @@
 
 #include "core/animation/Animation.h"
 #include "core/animation/AnimationTimeline.h"
+#include "core/dom/Document.h"
 #include "core/frame/FrameView.h"
 #include "core/page/Page.h"
-#include "core/rendering/RenderLayer.h"
+#include "platform/TraceEvent.h"
 
 namespace blink {
 
@@ -60,7 +61,7 @@ bool CompositorPendingAnimations::update(bool startOnCompositor)
     WillBeHeapVector<RawPtrWillBeMember<AnimationPlayer>> waitingForStartTime;
     bool startedSynchronizedOnCompositor = false;
 
-    WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer> > players;
+    WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer>> players;
     players.swap(m_pending);
     int compositorGroup = ++m_compositorGroup;
     if (compositorGroup == 0) {
@@ -125,7 +126,7 @@ bool CompositorPendingAnimations::update(bool startOnCompositor)
 void CompositorPendingAnimations::notifyCompositorAnimationStarted(double monotonicAnimationStartTime, int compositorGroup)
 {
     TRACE_EVENT0("blink", "CompositorPendingAnimations::notifyCompositorAnimationStarted");
-    WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer> > players;
+    WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer>> players;
     players.swap(m_waitingForCompositorAnimationStart);
 
     for (auto player : players) {
@@ -143,7 +144,7 @@ void CompositorPendingAnimations::notifyCompositorAnimationStarted(double monoto
 
 }
 
-void CompositorPendingAnimations::trace(Visitor* visitor)
+DEFINE_TRACE(CompositorPendingAnimations)
 {
     visitor->trace(m_pending);
     visitor->trace(m_waitingForCompositorAnimationStart);

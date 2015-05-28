@@ -103,13 +103,35 @@ std::ostream& operator<<(std::ostream& os, FrameStateCallInfo const& info) {
 }
 
 
-#define CACHED_OP_LIST(V)                     \
-  V(Dead, Operator::kFoldable, 0, 0, 0, 1)    \
-  V(End, Operator::kFoldable, 0, 0, 1, 0)     \
-  V(IfTrue, Operator::kFoldable, 0, 0, 1, 1)  \
-  V(IfFalse, Operator::kFoldable, 0, 0, 1, 1) \
-  V(Throw, Operator::kFoldable, 1, 1, 1, 1)   \
-  V(Return, Operator::kNoProperties, 1, 1, 1, 1)
+size_t ProjectionIndexOf(const Operator* const op) {
+  DCHECK_EQ(IrOpcode::kProjection, op->opcode());
+  return OpParameter<size_t>(op);
+}
+
+
+#define CACHED_OP_LIST(V)                                  \
+  V(Always, Operator::kPure, 0, 0, 0, 1, 0, 0)             \
+  V(Dead, Operator::kFoldable, 0, 0, 0, 0, 0, 1)           \
+  V(End, Operator::kKontrol, 0, 0, 1, 0, 0, 0)             \
+  V(IfTrue, Operator::kKontrol, 0, 0, 1, 0, 0, 1)          \
+  V(IfFalse, Operator::kKontrol, 0, 0, 1, 0, 0, 1)         \
+  V(IfSuccess, Operator::kKontrol, 0, 0, 1, 0, 0, 1)       \
+  V(IfException, Operator::kKontrol, 0, 0, 1, 0, 0, 1)     \
+  V(IfDefault, Operator::kKontrol, 0, 0, 1, 0, 0, 1)       \
+  V(Throw, Operator::kFoldable, 1, 1, 1, 0, 0, 1)          \
+  V(Deoptimize, Operator::kNoThrow, 1, 1, 1, 0, 0, 1)      \
+  V(Return, Operator::kNoThrow, 1, 1, 1, 0, 0, 1)          \
+  V(OsrNormalEntry, Operator::kFoldable, 0, 1, 1, 0, 1, 1) \
+  V(OsrLoopEntry, Operator::kFoldable, 0, 1, 1, 0, 1, 1)
+
+
+#define CACHED_EFFECT_PHI_LIST(V) \
+  V(1)                            \
+  V(2)                            \
+  V(3)                            \
+  V(4)                            \
+  V(5)                            \
+  V(6)
 
 
 #define CACHED_LOOP_LIST(V) \
@@ -138,15 +160,51 @@ std::ostream& operator<<(std::ostream& os, FrameStateCallInfo const& info) {
   V(6)
 
 
+#define CACHED_PHI_LIST(V) \
+  V(kMachAnyTagged, 1)     \
+  V(kMachAnyTagged, 2)     \
+  V(kMachAnyTagged, 3)     \
+  V(kMachAnyTagged, 4)     \
+  V(kMachAnyTagged, 5)     \
+  V(kMachAnyTagged, 6)     \
+  V(kMachBool, 2)          \
+  V(kMachFloat64, 2)       \
+  V(kMachInt32, 2)
+
+
+#define CACHED_PROJECTION_LIST(V) \
+  V(0)                            \
+  V(1)
+
+
+#define CACHED_STATE_VALUES_LIST(V) \
+  V(0)                              \
+  V(1)                              \
+  V(2)                              \
+  V(3)                              \
+  V(4)                              \
+  V(5)                              \
+  V(6)                              \
+  V(7)                              \
+  V(8)                              \
+  V(10)                             \
+  V(11)                             \
+  V(12)                             \
+  V(13)                             \
+  V(14)
+
+
 struct CommonOperatorGlobalCache FINAL {
-#define CACHED(Name, properties, value_input_count, effect_input_count,     \
-               control_input_count, control_output_count)                   \
-  struct Name##Operator FINAL : public Operator {                           \
-    Name##Operator()                                                        \
-        : Operator(IrOpcode::k##Name, properties, #Name, value_input_count, \
-                   effect_input_count, control_input_count, 0, 0,           \
-                   control_output_count) {}                                 \
-  };                                                                        \
+#define CACHED(Name, properties, value_input_count, effect_input_count,      \
+               control_input_count, value_output_count, effect_output_count, \
+               control_output_count)                                         \
+  struct Name##Operator FINAL : public Operator {                            \
+    Name##Operator()                                                         \
+        : Operator(IrOpcode::k##Name, properties, #Name, value_input_count,  \
+                   effect_input_count, control_input_count,                  \
+                   value_output_count, effect_output_count,                  \
+                   control_output_count) {}                                  \
+  };                                                                         \
   Name##Operator k##Name##Operator;
   CACHED_OP_LIST(CACHED)
 #undef CACHED
@@ -154,23 +212,36 @@ struct CommonOperatorGlobalCache FINAL {
   template <BranchHint kBranchHint>
   struct BranchOperator FINAL : public Operator1<BranchHint> {
     BranchOperator()
-        : Operator1<BranchHint>(                       // --
-              IrOpcode::kBranch, Operator::kFoldable,  // opcode
-              "Branch",                                // name
-              1, 0, 1, 0, 0, 2,                        // counts
-              kBranchHint) {}                          // parameter
+        : Operator1<BranchHint>(                      // --
+              IrOpcode::kBranch, Operator::kKontrol,  // opcode
+              "Branch",                               // name
+              1, 0, 1, 0, 0, 2,                       // counts
+              kBranchHint) {}                         // parameter
   };
   BranchOperator<BranchHint::kNone> kBranchNoneOperator;
   BranchOperator<BranchHint::kTrue> kBranchTrueOperator;
   BranchOperator<BranchHint::kFalse> kBranchFalseOperator;
 
+  template <int kEffectInputCount>
+  struct EffectPhiOperator FINAL : public Operator {
+    EffectPhiOperator()
+        : Operator(                                   // --
+              IrOpcode::kEffectPhi, Operator::kPure,  // opcode
+              "EffectPhi",                            // name
+              0, kEffectInputCount, 1, 0, 1, 0) {}    // counts
+  };
+#define CACHED_EFFECT_PHI(input_count) \
+  EffectPhiOperator<input_count> kEffectPhi##input_count##Operator;
+  CACHED_EFFECT_PHI_LIST(CACHED_EFFECT_PHI)
+#undef CACHED_EFFECT_PHI
+
   template <size_t kInputCount>
   struct LoopOperator FINAL : public Operator {
     LoopOperator()
-        : Operator(                                  // --
-              IrOpcode::kLoop, Operator::kFoldable,  // opcode
-              "Loop",                                // name
-              0, 0, kInputCount, 0, 0, 1) {}         // counts
+        : Operator(                                 // --
+              IrOpcode::kLoop, Operator::kKontrol,  // opcode
+              "Loop",                               // name
+              0, 0, kInputCount, 0, 0, 1) {}        // counts
   };
 #define CACHED_LOOP(input_count) \
   LoopOperator<input_count> kLoop##input_count##Operator;
@@ -180,15 +251,29 @@ struct CommonOperatorGlobalCache FINAL {
   template <size_t kInputCount>
   struct MergeOperator FINAL : public Operator {
     MergeOperator()
-        : Operator(                                   // --
-              IrOpcode::kMerge, Operator::kFoldable,  // opcode
-              "Merge",                                // name
-              0, 0, kInputCount, 0, 0, 1) {}          // counts
+        : Operator(                                  // --
+              IrOpcode::kMerge, Operator::kKontrol,  // opcode
+              "Merge",                               // name
+              0, 0, kInputCount, 0, 0, 1) {}         // counts
   };
 #define CACHED_MERGE(input_count) \
   MergeOperator<input_count> kMerge##input_count##Operator;
   CACHED_MERGE_LIST(CACHED_MERGE)
 #undef CACHED_MERGE
+
+  template <MachineType kType, int kInputCount>
+  struct PhiOperator FINAL : public Operator1<MachineType> {
+    PhiOperator()
+        : Operator1<MachineType>(               //--
+              IrOpcode::kPhi, Operator::kPure,  // opcode
+              "Phi",                            // name
+              kInputCount, 0, 1, 1, 0, 0,       // counts
+              kType) {}                         // parameter
+  };
+#define CACHED_PHI(type, input_count) \
+  PhiOperator<type, input_count> kPhi##type##input_count##Operator;
+  CACHED_PHI_LIST(CACHED_PHI)
+#undef CACHED_PHI
 
   template <int kIndex>
   struct ParameterOperator FINAL : public Operator1<int> {
@@ -203,6 +288,35 @@ struct CommonOperatorGlobalCache FINAL {
   ParameterOperator<index> kParameter##index##Operator;
   CACHED_PARAMETER_LIST(CACHED_PARAMETER)
 #undef CACHED_PARAMETER
+
+  template <size_t kIndex>
+  struct ProjectionOperator FINAL : public Operator1<size_t> {
+    ProjectionOperator()
+        : Operator1<size_t>(          // --
+              IrOpcode::kProjection,  // opcode
+              Operator::kPure,        // flags
+              "Projection",           // name
+              1, 0, 0, 1, 0, 0,       // counts,
+              kIndex) {}              // parameter
+  };
+#define CACHED_PROJECTION(index) \
+  ProjectionOperator<index> kProjection##index##Operator;
+  CACHED_PROJECTION_LIST(CACHED_PROJECTION)
+#undef CACHED_PROJECTION
+
+  template <int kInputCount>
+  struct StateValuesOperator FINAL : public Operator {
+    StateValuesOperator()
+        : Operator(                           // --
+              IrOpcode::kStateValues,         // opcode
+              Operator::kPure,                // flags
+              "StateValues",                  // name
+              kInputCount, 0, 0, 1, 0, 0) {}  // counts
+  };
+#define CACHED_STATE_VALUES(input_count) \
+  StateValuesOperator<input_count> kStateValues##input_count##Operator;
+  CACHED_STATE_VALUES_LIST(CACHED_STATE_VALUES)
+#undef CACHED_STATE_VALUES
 };
 
 
@@ -214,10 +328,11 @@ CommonOperatorBuilder::CommonOperatorBuilder(Zone* zone)
     : cache_(kCache.Get()), zone_(zone) {}
 
 
-#define CACHED(Name, properties, value_input_count, effect_input_count, \
-               control_input_count, control_output_count)               \
-  const Operator* CommonOperatorBuilder::Name() {                       \
-    return &cache_.k##Name##Operator;                                   \
+#define CACHED(Name, properties, value_input_count, effect_input_count,      \
+               control_input_count, value_output_count, effect_output_count, \
+               control_output_count)                                         \
+  const Operator* CommonOperatorBuilder::Name() {                            \
+    return &cache_.k##Name##Operator;                                        \
   }
 CACHED_OP_LIST(CACHED)
 #undef CACHED
@@ -234,6 +349,24 @@ const Operator* CommonOperatorBuilder::Branch(BranchHint hint) {
   }
   UNREACHABLE();
   return nullptr;
+}
+
+
+const Operator* CommonOperatorBuilder::Switch(size_t control_output_count) {
+  DCHECK_GE(control_output_count, 3u);        // Disallow trivial switches.
+  return new (zone()) Operator(               // --
+      IrOpcode::kSwitch, Operator::kKontrol,  // opcode
+      "Switch",                               // name
+      1, 0, 1, 0, 0, control_output_count);   // counts
+}
+
+
+const Operator* CommonOperatorBuilder::IfValue(int32_t index) {
+  return new (zone()) Operator1<int32_t>(      // --
+      IrOpcode::kIfValue, Operator::kKontrol,  // opcode
+      "IfValue",                               // name
+      0, 0, 1, 0, 0, 1,                        // counts
+      index);                                  // parameter
 }
 
 
@@ -258,10 +391,10 @@ const Operator* CommonOperatorBuilder::Loop(int control_input_count) {
       break;
   }
   // Uncached.
-  return new (zone()) Operator(              // --
-      IrOpcode::kLoop, Operator::kFoldable,  // opcode
-      "Loop",                                // name
-      0, 0, control_input_count, 0, 0, 1);   // counts
+  return new (zone()) Operator(             // --
+      IrOpcode::kLoop, Operator::kKontrol,  // opcode
+      "Loop",                               // name
+      0, 0, control_input_count, 0, 0, 1);  // counts
 }
 
 
@@ -276,18 +409,10 @@ const Operator* CommonOperatorBuilder::Merge(int control_input_count) {
       break;
   }
   // Uncached.
-  return new (zone()) Operator(               // --
-      IrOpcode::kMerge, Operator::kFoldable,  // opcode
-      "Merge",                                // name
-      0, 0, control_input_count, 0, 0, 1);    // counts
-}
-
-
-const Operator* CommonOperatorBuilder::Terminate(int effects) {
-  return new (zone()) Operator(               // --
-      IrOpcode::kTerminate, Operator::kPure,  // opcode
-      "Terminate",                            // name
-      0, effects, 1, 0, 0, 1);                // counts
+  return new (zone()) Operator(              // --
+      IrOpcode::kMerge, Operator::kKontrol,  // opcode
+      "Merge",                               // name
+      0, 0, control_input_count, 0, 0, 1);   // counts
 }
 
 
@@ -307,6 +432,15 @@ const Operator* CommonOperatorBuilder::Parameter(int index) {
       "Parameter",                            // name
       1, 0, 0, 1, 0, 0,                       // counts
       index);                                 // parameter
+}
+
+
+const Operator* CommonOperatorBuilder::OsrValue(int index) {
+  return new (zone()) Operator1<int>(                // --
+      IrOpcode::kOsrValue, Operator::kNoProperties,  // opcode
+      "OsrValue",                                    // name
+      0, 0, 1, 1, 0, 0,                              // counts
+      index);                                        // parameter
 }
 
 
@@ -388,22 +522,49 @@ const Operator* CommonOperatorBuilder::Select(MachineType type,
 }
 
 
-const Operator* CommonOperatorBuilder::Phi(MachineType type, int arguments) {
-  DCHECK(arguments > 0);                       // Disallow empty phis.
+const Operator* CommonOperatorBuilder::Phi(MachineType type,
+                                           int value_input_count) {
+  DCHECK(value_input_count > 0);  // Disallow empty phis.
+#define CACHED_PHI(kType, kValueInputCount)                     \
+  if (kType == type && kValueInputCount == value_input_count) { \
+    return &cache_.kPhi##kType##kValueInputCount##Operator;     \
+  }
+  CACHED_PHI_LIST(CACHED_PHI)
+#undef CACHED_PHI
+  // Uncached.
   return new (zone()) Operator1<MachineType>(  // --
       IrOpcode::kPhi, Operator::kPure,         // opcode
       "Phi",                                   // name
-      arguments, 0, 1, 1, 0, 0,                // counts
+      value_input_count, 0, 1, 1, 0, 0,        // counts
       type);                                   // parameter
 }
 
 
-const Operator* CommonOperatorBuilder::EffectPhi(int arguments) {
-  DCHECK(arguments > 0);                      // Disallow empty phis.
+const Operator* CommonOperatorBuilder::EffectPhi(int effect_input_count) {
+  DCHECK(effect_input_count > 0);  // Disallow empty effect phis.
+  switch (effect_input_count) {
+#define CACHED_EFFECT_PHI(input_count) \
+  case input_count:                    \
+    return &cache_.kEffectPhi##input_count##Operator;
+    CACHED_EFFECT_PHI_LIST(CACHED_EFFECT_PHI)
+#undef CACHED_EFFECT_PHI
+    default:
+      break;
+  }
+  // Uncached.
   return new (zone()) Operator(               // --
       IrOpcode::kEffectPhi, Operator::kPure,  // opcode
       "EffectPhi",                            // name
-      0, arguments, 1, 0, 1, 0);              // counts
+      0, effect_input_count, 1, 0, 1, 0);     // counts
+}
+
+
+const Operator* CommonOperatorBuilder::EffectSet(int arguments) {
+  DCHECK(arguments > 1);                      // Disallow empty/singleton sets.
+  return new (zone()) Operator(               // --
+      IrOpcode::kEffectSet, Operator::kPure,  // opcode
+      "EffectSet",                            // name
+      0, arguments, 0, 0, 1, 0);              // counts
 }
 
 
@@ -426,10 +587,29 @@ const Operator* CommonOperatorBuilder::Finish(int arguments) {
 
 
 const Operator* CommonOperatorBuilder::StateValues(int arguments) {
+  switch (arguments) {
+#define CACHED_STATE_VALUES(arguments) \
+  case arguments:                      \
+    return &cache_.kStateValues##arguments##Operator;
+    CACHED_STATE_VALUES_LIST(CACHED_STATE_VALUES)
+#undef CACHED_STATE_VALUES
+    default:
+      break;
+  }
+  // Uncached.
   return new (zone()) Operator(                 // --
       IrOpcode::kStateValues, Operator::kPure,  // opcode
       "StateValues",                            // name
       arguments, 0, 0, 1, 0, 0);                // counts
+}
+
+
+const Operator* CommonOperatorBuilder::TypedStateValues(
+    const ZoneVector<MachineType>* types) {
+  return new (zone()) Operator1<const ZoneVector<MachineType>*>(  // --
+      IrOpcode::kTypedStateValues, Operator::kPure,               // opcode
+      "TypedStateValues",                                         // name
+      static_cast<int>(types->size()), 0, 0, 1, 0, 0, types);     // counts
 }
 
 
@@ -452,9 +632,10 @@ const Operator* CommonOperatorBuilder::Call(const CallDescriptor* descriptor) {
               IrOpcode::kCall, descriptor->properties(), mnemonic,
               descriptor->InputCount() + descriptor->FrameStateCount(),
               Operator::ZeroIfPure(descriptor->properties()),
-              Operator::ZeroIfPure(descriptor->properties()),
+              Operator::ZeroIfEliminatable(descriptor->properties()),
               descriptor->ReturnCount(),
-              Operator::ZeroIfPure(descriptor->properties()), 0, descriptor) {}
+              Operator::ZeroIfPure(descriptor->properties()),
+              Operator::ZeroIfNoThrow(descriptor->properties()), descriptor) {}
 
     void PrintParameter(std::ostream& os) const OVERRIDE {
       os << "[" << *parameter() << "]";
@@ -465,12 +646,41 @@ const Operator* CommonOperatorBuilder::Call(const CallDescriptor* descriptor) {
 
 
 const Operator* CommonOperatorBuilder::Projection(size_t index) {
-  return new (zone()) Operator1<size_t>(       // --
-      IrOpcode::kProjection, Operator::kPure,  // opcode
-      "Projection",                            // name
-      1, 0, 0, 1, 0, 0,                        // counts
-      index);                                  // parameter
+  switch (index) {
+#define CACHED_PROJECTION(index) \
+  case index:                    \
+    return &cache_.kProjection##index##Operator;
+    CACHED_PROJECTION_LIST(CACHED_PROJECTION)
+#undef CACHED_PROJECTION
+    default:
+      break;
+  }
+  // Uncached.
+  return new (zone()) Operator1<size_t>(         // --
+      IrOpcode::kProjection,                     // opcode
+      Operator::kFoldable | Operator::kNoThrow,  // flags
+      "Projection",                              // name
+      1, 0, 0, 1, 0, 0,                          // counts
+      index);                                    // parameter
 }
+
+
+const Operator* CommonOperatorBuilder::ResizeMergeOrPhi(const Operator* op,
+                                                        int size) {
+  if (op->opcode() == IrOpcode::kPhi) {
+    return Phi(OpParameter<MachineType>(op), size);
+  } else if (op->opcode() == IrOpcode::kEffectPhi) {
+    return EffectPhi(size);
+  } else if (op->opcode() == IrOpcode::kMerge) {
+    return Merge(size);
+  } else if (op->opcode() == IrOpcode::kLoop) {
+    return Loop(size);
+  } else {
+    UNREACHABLE();
+    return nullptr;
+  }
+}
+
 
 }  // namespace compiler
 }  // namespace internal

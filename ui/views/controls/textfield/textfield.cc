@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/cursor/cursor.h"
@@ -14,6 +14,7 @@
 #include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/touch/selection_bound.h"
 #include "ui/base/ui_base_switches_util.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -255,6 +256,7 @@ size_t Textfield::GetCaretBlinkMs() {
 Textfield::Textfield()
     : model_(new TextfieldModel(this)),
       controller_(NULL),
+      scheduled_edit_command_(kNoCommand),
       read_only_(false),
       default_width_in_chars_(0),
       use_default_text_color_(true),
@@ -267,6 +269,7 @@ Textfield::Textfield()
       selection_background_color_(SK_ColorBLUE),
       placeholder_text_color_(kDefaultPlaceholderTextColor),
       text_input_type_(ui::TEXT_INPUT_TYPE_TEXT),
+      text_input_flags_(0),
       performing_user_action_(false),
       skip_input_method_cancel_composition_(false),
       cursor_visible_(false),
@@ -307,6 +310,10 @@ void Textfield::SetTextInputType(ui::TextInputType type) {
   SchedulePaint();
 }
 
+void Textfield::SetTextInputFlags(int flags) {
+  text_input_flags_ = flags;
+}
+
 void Textfield::SetText(const base::string16& new_text) {
   model_->SetText(new_text);
   OnCaretBoundsChanged();
@@ -331,7 +338,7 @@ void Textfield::InsertOrReplaceText(const base::string16& new_text) {
 }
 
 base::i18n::TextDirection Textfield::GetTextDirection() const {
-  return GetRenderText()->GetTextDirection();
+  return GetRenderText()->GetDisplayTextDirection();
 }
 
 base::string16 Textfield::GetSelectedText() const {
@@ -665,6 +672,9 @@ void Textfield::OnMouseReleased(const ui::MouseEvent& event) {
 }
 
 bool Textfield::OnKeyPressed(const ui::KeyEvent& event) {
+  int edit_command = scheduled_edit_command_;
+  scheduled_edit_command_ = kNoCommand;
+
   // Since HandleKeyEvent() might destroy |this|, get a weak pointer and verify
   // it isn't null before proceeding.
   base::WeakPtr<Textfield> textfield(weak_ptr_factory_.GetWeakPtr());
@@ -691,16 +701,18 @@ bool Textfield::OnKeyPressed(const ui::KeyEvent& event) {
   }
 #endif
 
-  const int command = GetCommandForKeyEvent(event, HasSelection());
-  if (!handled && IsCommandIdEnabled(command)) {
-    ExecuteCommand(command);
+  if (edit_command == kNoCommand)
+    edit_command = GetCommandForKeyEvent(event, HasSelection());
+
+  if (!handled && IsCommandIdEnabled(edit_command)) {
+    ExecuteCommand(edit_command);
     handled = true;
   }
   return handled;
 }
 
 ui::TextInputClient* Textfield::GetTextInputClient() {
-  return read_only_ ? NULL : this;
+  return this;
 }
 
 void Textfield::OnGestureEvent(ui::GestureEvent* event) {
@@ -914,10 +926,12 @@ void Textfield::GetAccessibleState(ui::AXViewState* state) {
   state->name = accessible_name_;
   if (read_only())
     state->AddStateFlag(ui::AX_STATE_READ_ONLY);
-  if (text_input_type_ == ui::TEXT_INPUT_TYPE_PASSWORD)
+  if (text_input_type_ == ui::TEXT_INPUT_TYPE_PASSWORD) {
     state->AddStateFlag(ui::AX_STATE_PROTECTED);
-  state->value = text();
-
+    state->value = base::string16(text().size(), '*');
+  } else {
+    state->value = text();
+  }
   const gfx::Range range = GetSelectedRange();
   state->selection_start = range.start();
   state->selection_end = range.end();
@@ -1057,7 +1071,7 @@ void Textfield::WriteDragDataForView(View* sender,
   // Desktop Linux Aura does not yet support transparency in drag images.
   canvas->DrawColor(GetBackgroundColor());
 #endif
-  label.Paint(canvas.get(), views::CullSet());
+  label.Paint(ui::PaintContext(canvas.get()));
   const gfx::Vector2d kOffset(-15, 0);
   drag_utils::SetDragImageOnDataObject(*canvas, kOffset, data);
   if (controller_)
@@ -1423,16 +1437,7 @@ void Textfield::InsertChar(base::char16 ch, int flags) {
   if (GetTextInputType() == ui::TEXT_INPUT_TYPE_NONE || !should_insert_char)
     return;
 
-  OnBeforeUserAction();
-  skip_input_method_cancel_composition_ = true;
-  if (GetRenderText()->insert_mode())
-    model_->InsertChar(ch);
-  else
-    model_->ReplaceChar(ch);
-  skip_input_method_cancel_composition_ = false;
-
-  UpdateAfterChange(true, true);
-  OnAfterUserAction();
+  DoInsertChar(ch);
 
   if (text_input_type_ == ui::TEXT_INPUT_TYPE_PASSWORD &&
       password_reveal_duration_ != base::TimeDelta()) {
@@ -1468,7 +1473,7 @@ ui::TextInputMode Textfield::GetTextInputMode() const {
 }
 
 int Textfield::GetTextInputFlags() const {
-  return 0;
+  return text_input_flags_;
 }
 
 bool Textfield::CanComposeInline() const {
@@ -1486,13 +1491,14 @@ bool Textfield::GetCompositionCharacterBounds(uint32 index,
   DCHECK(rect);
   if (!HasCompositionText())
     return false;
-  gfx::RenderText* render_text = GetRenderText();
-  const gfx::Range& composition_range = render_text->GetCompositionRange();
+  gfx::Range composition_range;
+  model_->GetCompositionTextRange(&composition_range);
   DCHECK(!composition_range.is_empty());
 
   size_t text_index = composition_range.start() + index;
   if (composition_range.end() <= text_index)
     return false;
+  gfx::RenderText* render_text = GetRenderText();
   if (!render_text->IsValidCursorIndex(text_index)) {
     text_index = render_text->IndexOfAdjacentGrapheme(
         text_index, gfx::CURSOR_BACKWARD);
@@ -1604,16 +1610,30 @@ void Textfield::OnCandidateWindowUpdated() {}
 
 void Textfield::OnCandidateWindowHidden() {}
 
-bool Textfield::IsEditingCommandEnabled(int command_id) {
+bool Textfield::IsEditCommandEnabled(int command_id) {
   return IsCommandIdEnabled(command_id);
 }
 
-void Textfield::ExecuteEditingCommand(int command_id) {
-  ExecuteCommand(command_id);
+void Textfield::SetEditCommandForNextKeyEvent(int command_id) {
+  DCHECK_EQ(kNoCommand, scheduled_edit_command_);
+  scheduled_edit_command_ = command_id;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Textfield, protected:
+
+void Textfield::DoInsertChar(base::char16 ch) {
+  OnBeforeUserAction();
+  skip_input_method_cancel_composition_ = true;
+  if (GetRenderText()->insert_mode())
+    model_->InsertChar(ch);
+  else
+    model_->ReplaceChar(ch);
+  skip_input_method_cancel_composition_ = false;
+
+  UpdateAfterChange(true, true);
+  OnAfterUserAction();
+}
 
 gfx::RenderText* Textfield::GetRenderText() const {
   return model_->render_text();
@@ -1639,7 +1659,11 @@ void Textfield::AccessibilitySetValue(const base::string16& new_value) {
 void Textfield::UpdateBackgroundColor() {
   const SkColor color = GetBackgroundColor();
   set_background(Background::CreateSolidBackground(color));
-  GetRenderText()->set_background_is_transparent(SkColorGetA(color) != 0xFF);
+  // Disable subpixel rendering when the background color is transparent
+  // because it draws incorrect colors around the glyphs in that case.
+  // See crbug.com/115198
+  GetRenderText()->set_subpixel_rendering_suppressed(
+      SkColorGetA(color) != 0xFF);
   SchedulePaint();
 }
 
@@ -1856,23 +1880,17 @@ void Textfield::PasteSelectionClipboard(const ui::MouseEvent& event) {
   DCHECK(event.IsOnlyMiddleMouseButton());
   DCHECK(!read_only());
   base::string16 selection_clipboard_text = GetSelectionClipboardText();
+  OnBeforeUserAction();
+  const gfx::SelectionModel mouse =
+      GetRenderText()->FindCursorPosition(event.location());
+  if (!HasFocus())
+    RequestFocus();
+  model_->MoveCursorTo(mouse);
   if (!selection_clipboard_text.empty()) {
-    OnBeforeUserAction();
-    gfx::Range range = GetSelectionModel().selection();
-    gfx::LogicalCursorDirection affinity = GetSelectionModel().caret_affinity();
-    const gfx::SelectionModel mouse =
-        GetRenderText()->FindCursorPosition(event.location());
-    model_->MoveCursorTo(mouse);
     model_->InsertText(selection_clipboard_text);
-    // Update the new selection range as needed.
-    if (range.GetMin() >= mouse.caret_pos()) {
-      const size_t length = selection_clipboard_text.length();
-      range = gfx::Range(range.start() + length, range.end() + length);
-    }
-    model_->MoveCursorTo(gfx::SelectionModel(range, affinity));
     UpdateAfterChange(true, true);
-    OnAfterUserAction();
   }
+  OnAfterUserAction();
 }
 
 }  // namespace views

@@ -49,8 +49,8 @@ WebInspector.BreakpointManager = function(breakpointStorage, workspace, networkM
     this._breakpointsActive = true;
     this._breakpointsForUISourceCode = new Map();
     this._breakpointsForPrimaryUISourceCode = new Map();
-    /** @type {!StringMultimap.<!WebInspector.BreakpointManager.Breakpoint>} */
-    this._provisionalBreakpoints = new StringMultimap();
+    /** @type {!Multimap.<string, !WebInspector.BreakpointManager.Breakpoint>} */
+    this._provisionalBreakpoints = new Multimap();
 
     this._workspace.addEventListener(WebInspector.Workspace.Events.ProjectRemoved, this._projectRemoved, this);
     this._workspace.addEventListener(WebInspector.Workspace.Events.UISourceCodeAdded, this._uiSourceCodeAdded, this);
@@ -216,8 +216,14 @@ WebInspector.BreakpointManager.prototype = {
      */
     setBreakpoint: function(uiSourceCode, lineNumber, columnNumber, condition, enabled)
     {
+        var uiLocation = new WebInspector.UILocation(uiSourceCode, lineNumber, columnNumber);
+        var normalizedLocation = this._debuggerWorkspaceBinding.normalizeUILocation(uiLocation);
+        if (normalizedLocation.id() !== uiLocation.id()) {
+            WebInspector.Revealer.reveal(normalizedLocation);
+            uiLocation = normalizedLocation;
+        }
         this.setBreakpointsActive(true);
-        return this._innerSetBreakpoint(uiSourceCode, lineNumber, columnNumber, condition, enabled);
+        return this._innerSetBreakpoint(uiLocation.uiSourceCode, uiLocation.lineNumber, uiLocation.columnNumber, condition, enabled);
     },
 
     /**

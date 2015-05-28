@@ -11,7 +11,7 @@
 #include "device/serial/serial.mojom.h"
 #include "device/serial/serial_connection_factory.h"
 #include "device/serial/serial_device_enumerator.h"
-#include "mojo/public/cpp/bindings/interface_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
 
 namespace device {
 
@@ -36,11 +36,13 @@ class SerialServiceImpl : public mojo::InterfaceImpl<serial::SerialService> {
   void GetDevices(
       const mojo::Callback<void(mojo::Array<serial::DeviceInfoPtr>)>& callback)
       override;
-  void Connect(const mojo::String& path,
-               serial::ConnectionOptionsPtr options,
-               mojo::InterfaceRequest<serial::Connection> connection_request,
-               mojo::InterfaceRequest<serial::DataSink> sink,
-               mojo::InterfaceRequest<serial::DataSource> source) override;
+  void Connect(
+      const mojo::String& path,
+      serial::ConnectionOptionsPtr options,
+      mojo::InterfaceRequest<serial::Connection> connection_request,
+      mojo::InterfaceRequest<serial::DataSink> sink,
+      mojo::InterfaceRequest<serial::DataSource> source,
+      mojo::InterfacePtr<serial::DataSourceClient> source_client) override;
 
  private:
   SerialDeviceEnumerator* GetDeviceEnumerator();

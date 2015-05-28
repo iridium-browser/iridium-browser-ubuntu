@@ -12,6 +12,8 @@ const char kServiceWorkerUnregisterErrorPrefix[] =
     "Failed to unregister a ServiceWorkerRegistration: ";
 const char kServiceWorkerGetRegistrationErrorPrefix[] =
     "Failed to get a ServiceWorkerRegistration: ";
+const char kFetchScriptError[] =
+    "An unknown error occurred when fetching the script.";
 
 ServiceWorkerFetchRequest::ServiceWorkerFetchRequest()
     : mode(FETCH_REQUEST_MODE_NO_CORS),
@@ -69,14 +71,6 @@ ServiceWorkerResponse::ServiceWorkerResponse(
 
 ServiceWorkerResponse::~ServiceWorkerResponse() {}
 
-ServiceWorkerCacheQueryParams::ServiceWorkerCacheQueryParams()
-    : ignore_search(false),
-      ignore_method(false),
-      ignore_vary(false),
-      prefix_match(false) {}
-
-ServiceWorkerBatchOperation::ServiceWorkerBatchOperation() {}
-
 ServiceWorkerObjectInfo::ServiceWorkerObjectInfo()
     : handle_id(kInvalidServiceWorkerHandleId),
       state(blink::WebServiceWorkerStateUnknown),
@@ -85,6 +79,11 @@ ServiceWorkerObjectInfo::ServiceWorkerObjectInfo()
 ServiceWorkerRegistrationObjectInfo::ServiceWorkerRegistrationObjectInfo()
     : handle_id(kInvalidServiceWorkerRegistrationHandleId),
       registration_id(kInvalidServiceWorkerRegistrationId) {
+}
+
+ServiceWorkerClientQueryOptions::ServiceWorkerClientQueryOptions()
+    : client_type(blink::WebServiceWorkerClientTypeWindow),
+      include_uncontrolled(false) {
 }
 
 }  // namespace content

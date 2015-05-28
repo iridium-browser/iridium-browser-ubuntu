@@ -8,8 +8,8 @@
 #ifndef MEDIA_VIDEO_CAPTURE_WIN_SINK_INPUT_PIN_WIN_H_
 #define MEDIA_VIDEO_CAPTURE_WIN_SINK_INPUT_PIN_WIN_H_
 
+#include "media/base/video_capture_types.h"
 #include "media/video/capture/video_capture_device.h"
-#include "media/video/capture/video_capture_types.h"
 #include "media/video/capture/win/pin_base_win.h"
 #include "media/video/capture/win/sink_filter_win.h"
 
@@ -24,7 +24,9 @@ class SinkInputPin : public PinBase {
   SinkInputPin(IBaseFilter* filter, SinkFilterObserver* observer);
   virtual ~SinkInputPin();
 
-  void SetRequestedMediaFormat(const VideoCaptureFormat& format);
+  void SetRequestedMediaFormat(VideoPixelFormat pixel_format,
+                               float frame_rate,
+                               const BITMAPINFOHEADER& info_header);
   // Returns the capability that is negotiated when this
   // pin is connected to a media filter.
   const VideoCaptureFormat& ResultingFormat();
@@ -36,7 +38,9 @@ class SinkInputPin : public PinBase {
   STDMETHOD(Receive)(IMediaSample* media_sample);
 
  private:
-  VideoCaptureFormat requested_format_;
+  VideoPixelFormat requested_pixel_format_;
+  float requested_frame_rate_;
+  BITMAPINFOHEADER requested_info_header_;
   VideoCaptureFormat resulting_format_;
   SinkFilterObserver* observer_;
 

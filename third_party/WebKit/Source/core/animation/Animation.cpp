@@ -33,16 +33,17 @@
 
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/animation/ActiveAnimations.h"
 #include "core/animation/AnimationPlayer.h"
 #include "core/animation/AnimationTimeline.h"
+#include "core/animation/AnimationTimingProperties.h"
 #include "core/animation/CompositorAnimations.h"
+#include "core/animation/ElementAnimations.h"
 #include "core/animation/Interpolation.h"
 #include "core/animation/KeyframeEffectModel.h"
 #include "core/dom/Element.h"
-#include "core/dom/NodeRenderStyle.h"
+#include "core/dom/NodeComputedStyle.h"
 #include "core/frame/UseCounter.h"
-#include "core/rendering/RenderLayer.h"
+#include "core/paint/DeprecatedPaintLayer.h"
 
 namespace blink {
 
@@ -51,34 +52,19 @@ PassRefPtrWillBeRawPtr<Animation> Animation::create(Element* target, PassRefPtrW
     return adoptRefWillBeNoop(new Animation(target, effect, timing, priority, eventDelegate));
 }
 
-PassRefPtrWillBeRawPtr<Animation> Animation::create(Element* element, PassRefPtrWillBeRawPtr<AnimationEffect> effect, const Dictionary& timingInputDictionary)
-{
-    ASSERT(RuntimeEnabledFeatures::webAnimationsAPIEnabled());
-    return create(element, effect, TimingInput::convert(timingInputDictionary));
-}
-PassRefPtrWillBeRawPtr<Animation> Animation::create(Element* element, PassRefPtrWillBeRawPtr<AnimationEffect> effect, double duration)
-{
-    ASSERT(RuntimeEnabledFeatures::webAnimationsAPIEnabled());
-    return create(element, effect, TimingInput::convert(duration));
-}
-PassRefPtrWillBeRawPtr<Animation> Animation::create(Element* element, PassRefPtrWillBeRawPtr<AnimationEffect> effect)
-{
-    ASSERT(RuntimeEnabledFeatures::webAnimationsAPIEnabled());
-    return create(element, effect, Timing());
-}
-PassRefPtrWillBeRawPtr<Animation> Animation::create(Element* element, const Vector<Dictionary>& keyframeDictionaryVector, const Dictionary& timingInputDictionary, ExceptionState& exceptionState)
-{
-    ASSERT(RuntimeEnabledFeatures::webAnimationsAPIEnabled());
-    if (element)
-        UseCounter::count(element->document(), UseCounter::AnimationConstructorKeyframeListEffectObjectTiming);
-    return create(element, EffectInput::convert(element, keyframeDictionaryVector, exceptionState), TimingInput::convert(timingInputDictionary));
-}
 PassRefPtrWillBeRawPtr<Animation> Animation::create(Element* element, const Vector<Dictionary>& keyframeDictionaryVector, double duration, ExceptionState& exceptionState)
 {
     ASSERT(RuntimeEnabledFeatures::webAnimationsAPIEnabled());
     if (element)
-        UseCounter::count(element->document(), UseCounter::AnimationConstructorKeyframeListEffectDoubleTiming);
+        UseCounter::count(element->document(), UseCounter::AnimationConstructorKeyframeListEffectObjectTiming);
     return create(element, EffectInput::convert(element, keyframeDictionaryVector, exceptionState), TimingInput::convert(duration));
+}
+PassRefPtrWillBeRawPtr<Animation> Animation::create(Element* element, const Vector<Dictionary>& keyframeDictionaryVector, const AnimationTimingProperties& timingInput, ExceptionState& exceptionState)
+{
+    ASSERT(RuntimeEnabledFeatures::webAnimationsAPIEnabled());
+    if (element)
+        UseCounter::count(element->document(), UseCounter::AnimationConstructorKeyframeListEffectObjectTiming);
+    return create(element, EffectInput::convert(element, keyframeDictionaryVector, exceptionState), TimingInput::convert(timingInput));
 }
 PassRefPtrWillBeRawPtr<Animation> Animation::create(Element* element, const Vector<Dictionary>& keyframeDictionaryVector, ExceptionState& exceptionState)
 {
@@ -97,7 +83,7 @@ Animation::Animation(Element* target, PassRefPtrWillBeRawPtr<AnimationEffect> ef
 {
 #if !ENABLE(OILPAN)
     if (m_target)
-        m_target->ensureActiveAnimations().addAnimation(this);
+        m_target->ensureElementAnimations().addAnimation(this);
 #endif
 }
 
@@ -105,14 +91,14 @@ Animation::~Animation()
 {
 #if !ENABLE(OILPAN)
     if (m_target)
-        m_target->activeAnimations()->notifyAnimationDestroyed(this);
+        m_target->elementAnimations()->notifyAnimationDestroyed(this);
 #endif
 }
 
 void Animation::attach(AnimationPlayer* player)
 {
     if (m_target) {
-        m_target->ensureActiveAnimations().players().add(player);
+        m_target->ensureElementAnimations().players().add(player);
         m_target->setNeedsAnimationStyleRecalc();
     }
     AnimationNode::attach(player);
@@ -121,7 +107,7 @@ void Animation::attach(AnimationPlayer* player)
 void Animation::detach()
 {
     if (m_target)
-        m_target->activeAnimations()->players().remove(player());
+        m_target->elementAnimations()->players().remove(player());
     if (m_sampledEffect)
         clearEffects();
     AnimationNode::detach();
@@ -138,7 +124,7 @@ void Animation::specifiedTimingChanged()
 
 static AnimationStack& ensureAnimationStack(Element* element)
 {
-    return element->ensureActiveAnimations().defaultStack();
+    return element->ensureElementAnimations().defaultStack();
 }
 
 void Animation::applyEffects()
@@ -148,9 +134,17 @@ void Animation::applyEffects()
     if (!m_target || !m_effect)
         return;
 
+    // Cancel composited animation of transform if a motion path has been introduced on the element.
+    if (m_target->computedStyle()
+        && m_target->computedStyle()->hasMotionPath()
+        && player()->hasActiveAnimationsOnCompositor()
+        && player()->affects(*m_target, CSSPropertyTransform)) {
+        player()->cancelAnimationOnCompositor();
+    }
+
     double iteration = currentIteration();
     ASSERT(iteration >= 0);
-    OwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation> > > interpolations = m_sampledEffect ? m_sampledEffect->mutableInterpolations() : nullptr;
+    OwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>> interpolations = m_sampledEffect ? m_sampledEffect->mutableInterpolations() : nullptr;
     // FIXME: Handle iteration values which overflow int.
     m_effect->sample(static_cast<int>(iteration), timeFraction(), iterationDuration(), interpolations);
     if (m_sampledEffect) {
@@ -173,7 +167,7 @@ void Animation::clearEffects()
 
     m_sampledEffect->clear();
     m_sampledEffect = nullptr;
-    cancelAnimationOnCompositor();
+    restartAnimationOnCompositor();
     m_target->setNeedsAnimationStyleRecalc();
     invalidate();
 }
@@ -225,12 +219,6 @@ double Animation::calculateTimeToEffectChange(bool forwards, double localTime, d
     }
 }
 
-void Animation::notifySampledEffectRemovedFromAnimationStack()
-{
-    ASSERT(m_sampledEffect);
-    m_sampledEffect = nullptr;
-}
-
 #if !ENABLE(OILPAN)
 void Animation::notifyElementDestroyed()
 {
@@ -250,10 +238,10 @@ bool Animation::isCandidateForAnimationOnCompositor(double playerPlaybackRate) c
 {
     if (!effect()
         || !m_target
-        || (m_target->renderStyle() && m_target->renderStyle()->hasMotionPath()))
+        || (m_target->computedStyle() && m_target->computedStyle()->hasMotionPath()))
         return false;
 
-    return CompositorAnimations::instance()->isCandidateForAnimationOnCompositor(specifiedTiming(), *effect(), playerPlaybackRate);
+    return CompositorAnimations::instance()->isCandidateForAnimationOnCompositor(specifiedTiming(), *m_target, player(), *effect(), playerPlaybackRate);
 }
 
 bool Animation::maybeStartAnimationOnCompositor(int group, double startTime, double currentTime, double playerPlaybackRate)
@@ -263,7 +251,7 @@ bool Animation::maybeStartAnimationOnCompositor(int group, double startTime, dou
         return false;
     if (!CompositorAnimations::instance()->canStartAnimationOnCompositor(*m_target))
         return false;
-    if (!CompositorAnimations::instance()->startAnimationOnCompositor(*m_target, group, startTime, currentTime, specifiedTiming(), *effect(), m_compositorAnimationIds, playerPlaybackRate))
+    if (!CompositorAnimations::instance()->startAnimationOnCompositor(*m_target, group, startTime, currentTime, specifiedTiming(), *player(), *effect(), m_compositorAnimationIds, playerPlaybackRate))
         return false;
     ASSERT(!m_compositorAnimationIds.isEmpty());
     return true;
@@ -284,32 +272,61 @@ bool Animation::affects(CSSPropertyID property) const
     return m_effect && m_effect->affects(property);
 }
 
-void Animation::cancelAnimationOnCompositor()
+bool Animation::cancelAnimationOnCompositor()
 {
     // FIXME: cancelAnimationOnCompositor is called from withins style recalc.
     // This queries compositingState, which is not necessarily up to date.
     // https://code.google.com/p/chromium/issues/detail?id=339847
     DisableCompositingQueryAsserts disabler;
     if (!hasActiveAnimationsOnCompositor())
-        return;
-    if (!m_target || !m_target->renderer())
-        return;
+        return false;
+    if (!m_target || !m_target->layoutObject())
+        return false;
+    ASSERT(player());
     for (const auto& compositorAnimationId : m_compositorAnimationIds)
-        CompositorAnimations::instance()->cancelAnimationOnCompositor(*m_target, compositorAnimationId);
+        CompositorAnimations::instance()->cancelAnimationOnCompositor(*m_target, *player(), compositorAnimationId);
     m_compositorAnimationIds.clear();
-    player()->setCompositorPending(true);
+    return true;
+}
+
+void Animation::restartAnimationOnCompositor()
+{
+    if (cancelAnimationOnCompositor())
+        player()->setCompositorPending(true);
+}
+
+void Animation::cancelIncompatibleAnimationsOnCompositor()
+{
+    if (m_target && player() && effect())
+        CompositorAnimations::instance()->cancelIncompatibleAnimationsOnCompositor(*m_target, *player(), *effect());
 }
 
 void Animation::pauseAnimationForTestingOnCompositor(double pauseTime)
 {
     ASSERT(hasActiveAnimationsOnCompositor());
-    if (!m_target || !m_target->renderer())
+    if (!m_target || !m_target->layoutObject())
         return;
+    ASSERT(player());
     for (const auto& compositorAnimationId : m_compositorAnimationIds)
-        CompositorAnimations::instance()->pauseAnimationForTestingOnCompositor(*m_target, compositorAnimationId, pauseTime);
+        CompositorAnimations::instance()->pauseAnimationForTestingOnCompositor(*m_target, *player(), compositorAnimationId, pauseTime);
 }
 
-void Animation::trace(Visitor* visitor)
+bool Animation::canAttachCompositedLayers() const
+{
+    if (!m_target || !player())
+        return false;
+
+    return CompositorAnimations::instance()->canAttachCompositedLayers(*m_target, *player());
+}
+
+void Animation::attachCompositedLayers()
+{
+    ASSERT(m_target);
+    ASSERT(player());
+    CompositorAnimations::instance()->attachCompositedLayers(*m_target, *player());
+}
+
+DEFINE_TRACE(Animation)
 {
     visitor->trace(m_target);
     visitor->trace(m_effect);

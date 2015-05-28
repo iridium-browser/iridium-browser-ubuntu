@@ -37,8 +37,8 @@ namespace blink {
 class CSSSelector;
 class ContainerNode;
 class Element;
-class RenderScrollbar;
-class RenderStyle;
+class LayoutScrollbar;
+class ComputedStyle;
 
 class SelectorChecker {
     WTF_MAKE_NONCOPYABLE(SelectorChecker);
@@ -77,8 +77,8 @@ public:
         RawPtrWillBeMember<const ContainerNode> scope;
         VisitedMatchType visitedMatchType;
         PseudoId pseudoId;
-        RenderStyle* elementStyle;
-        RawPtrWillBeMember<RenderScrollbar> scrollbar;
+        ComputedStyle* elementStyle;
+        RawPtrWillBeMember<LayoutScrollbar> scrollbar;
         ScrollbarPart scrollbarPart;
         unsigned isSubSelector : 1;
         unsigned hasScrollbarPseudo : 1;
@@ -112,7 +112,6 @@ public:
     static bool matchesFocusPseudoClass(const Element&);
     static bool matchesSpatialNavigationFocusPseudoClass(const Element&);
     static bool matchesListBoxPseudoClass(const Element&);
-    static bool checkExactAttribute(const Element&, const QualifiedName& selectorAttributeName, const StringImpl* value);
 
     enum LinkMatchMask { MatchLink = 1, MatchVisited = 2, MatchAll = MatchLink | MatchVisited };
     static unsigned determineLinkMatchType(const CSSSelector&);
@@ -138,6 +137,7 @@ private:
     bool checkPseudoHost(const SelectorCheckingContext&, const SiblingTraversalStrategy&, unsigned*) const;
 
     static bool isFrameFocused(const Element&);
+    bool shouldMatchHoverOrActive(const SelectorCheckingContext&) const;
 
     bool m_strictParsing;
     Mode m_mode;
@@ -165,18 +165,17 @@ inline bool SelectorChecker::tagMatches(const Element& element, const QualifiedN
     return namespaceURI == starAtom || namespaceURI == element.namespaceURI();
 }
 
-inline bool SelectorChecker::checkExactAttribute(const Element& element, const QualifiedName& selectorAttributeName, const StringImpl* value)
-{
-    for (const auto& attribute : element.attributesWithoutUpdate()) {
-        if (attribute.matches(selectorAttributeName) && (!value || attribute.value().impl() == value))
-            return true;
-    }
-    return false;
-}
-
 inline bool SelectorChecker::isHostInItsShadowTree(const Element& element, const ContainerNode* scope)
 {
     return scope && scope->isInShadowTree() && scope->shadowHost() == element;
+}
+
+inline bool SelectorChecker::shouldMatchHoverOrActive(const SelectorCheckingContext& context) const
+{
+    // If we're in quirks mode, then :hover and :active should never match anchors with no
+    // href and *:hover and *:active should not match anything. This is specified in
+    // https://quirks.spec.whatwg.org/#the-:active-and-:hover-quirk
+    return m_strictParsing || context.isSubSelector || (context.selector->relation() == CSSSelector::SubSelector && context.selector->tagHistory()) || context.element->isLink();
 }
 
 }

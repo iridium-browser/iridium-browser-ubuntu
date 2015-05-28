@@ -13,7 +13,7 @@
  *    disclaimer in the documentation and/or other materials
  *    provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER “AS IS” AND ANY
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER "AS IS" AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
  * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
@@ -52,11 +52,11 @@ public:
 
     enum Origin { UserAgentOrigin, AuthorOrigin };
 
+    void collectViewportRules();
     void collectViewportRules(RuleSet*, Origin);
-
     void resolve();
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     explicit ViewportStyleResolver(Document*);

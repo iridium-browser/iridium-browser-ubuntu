@@ -60,6 +60,10 @@ int QuicHttpStream::InitializeStream(const HttpRequestInfo* request_info,
     return was_handshake_confirmed_ ? ERR_CONNECTION_CLOSED :
         ERR_QUIC_HANDSHAKE_FAILED;
 
+  stream_net_log.AddEvent(
+      NetLog::TYPE_HTTP_STREAM_REQUEST_BOUND_TO_QUIC_SESSION,
+      stream_net_log.source().ToEventParametersCallback());
+
   if (request_info->url.SchemeIsSecure()) {
     SSLInfo ssl_info;
     bool secure_session =
@@ -108,7 +112,19 @@ int QuicHttpStream::SendRequest(const HttpRequestHeaders& request_headers,
   CHECK(!callback.is_null());
   CHECK(response);
 
-   if (!stream_) {
+  // TODO(rch): remove this once we figure out why channel ID is not being
+  // sent when it should be.
+  HostPortPair origin = HostPortPair::FromURL(request_info_->url);
+  if (origin.Equals(HostPortPair("accounts.google.com", 443)) &&
+      request_headers.HasHeader(HttpRequestHeaders::kCookie)) {
+    SSLInfo ssl_info;
+    bool secure_session =
+        session_->GetSSLInfo(&ssl_info) && ssl_info.cert.get();
+    DCHECK(secure_session);
+    UMA_HISTOGRAM_BOOLEAN("Net.QuicSession.CookieSentToAccountsOverChannelId",
+                          ssl_info.channel_id_sent);
+  }
+  if (!stream_) {
     return ERR_CONNECTION_CLOSED;
   }
 
@@ -265,7 +281,7 @@ bool QuicHttpStream::GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const {
 
 void QuicHttpStream::GetSSLInfo(SSLInfo* ssl_info) {
   DCHECK(stream_);
-  stream_->GetSSLInfo(ssl_info);
+  session_->GetSSLInfo(ssl_info);
 }
 
 void QuicHttpStream::GetSSLCertRequestInfo(

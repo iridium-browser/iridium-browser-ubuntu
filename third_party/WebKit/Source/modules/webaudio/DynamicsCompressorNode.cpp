@@ -23,49 +23,47 @@
  */
 
 #include "config.h"
-
 #if ENABLE(WEB_AUDIO)
-
 #include "modules/webaudio/DynamicsCompressorNode.h"
 
-#include "platform/audio/DynamicsCompressor.h"
 #include "modules/webaudio/AudioContext.h"
 #include "modules/webaudio/AudioNodeInput.h"
 #include "modules/webaudio/AudioNodeOutput.h"
+#include "platform/audio/DynamicsCompressor.h"
 
 // Set output to stereo by default.
 static const unsigned defaultNumberOfOutputChannels = 2;
 
 namespace blink {
 
-DynamicsCompressorNode::DynamicsCompressorNode(AudioContext* context, float sampleRate)
-    : AudioNode(NodeTypeDynamicsCompressor, context, sampleRate)
+DynamicsCompressorHandler::DynamicsCompressorHandler(AudioNode& node, float sampleRate)
+    : AudioHandler(NodeTypeDynamicsCompressor, node, sampleRate)
 {
     addInput();
-    addOutput(AudioNodeOutput::create(this, defaultNumberOfOutputChannels));
+    addOutput(defaultNumberOfOutputChannels);
 
-    m_threshold = AudioParam::create(context, -24);
-    m_knee = AudioParam::create(context, 30);
-    m_ratio = AudioParam::create(context, 12);
-    m_reduction = AudioParam::create(context, 0);
-    m_attack = AudioParam::create(context, 0.003);
-    m_release = AudioParam::create(context, 0.250);
+    m_threshold = AudioParam::create(context(), -24);
+    m_knee = AudioParam::create(context(), 30);
+    m_ratio = AudioParam::create(context(), 12);
+    m_reduction = AudioParam::create(context(), 0);
+    m_attack = AudioParam::create(context(), 0.003);
+    m_release = AudioParam::create(context(), 0.250);
 
     initialize();
 }
 
-DynamicsCompressorNode::~DynamicsCompressorNode()
+DynamicsCompressorHandler::~DynamicsCompressorHandler()
 {
     ASSERT(!isInitialized());
 }
 
-void DynamicsCompressorNode::dispose()
+void DynamicsCompressorHandler::dispose()
 {
     uninitialize();
-    AudioNode::dispose();
+    AudioHandler::dispose();
 }
 
-void DynamicsCompressorNode::process(size_t framesToProcess)
+void DynamicsCompressorHandler::process(size_t framesToProcess)
 {
     AudioBus* outputBus = output(0)->bus();
     ASSERT(outputBus);
@@ -88,40 +86,40 @@ void DynamicsCompressorNode::process(size_t framesToProcess)
     m_reduction->setValue(reduction);
 }
 
-void DynamicsCompressorNode::initialize()
+void DynamicsCompressorHandler::initialize()
 {
     if (isInitialized())
         return;
 
-    AudioNode::initialize();
+    AudioHandler::initialize();
     m_dynamicsCompressor = adoptPtr(new DynamicsCompressor(sampleRate(), defaultNumberOfOutputChannels));
 }
 
-void DynamicsCompressorNode::uninitialize()
+void DynamicsCompressorHandler::uninitialize()
 {
     if (!isInitialized())
         return;
 
     m_dynamicsCompressor.clear();
-    AudioNode::uninitialize();
+    AudioHandler::uninitialize();
 }
 
-void DynamicsCompressorNode::clearInternalStateWhenDisabled()
+void DynamicsCompressorHandler::clearInternalStateWhenDisabled()
 {
     m_reduction->setValue(0);
 }
 
-double DynamicsCompressorNode::tailTime() const
+double DynamicsCompressorHandler::tailTime() const
 {
     return m_dynamicsCompressor->tailTime();
 }
 
-double DynamicsCompressorNode::latencyTime() const
+double DynamicsCompressorHandler::latencyTime() const
 {
     return m_dynamicsCompressor->latencyTime();
 }
 
-void DynamicsCompressorNode::trace(Visitor* visitor)
+DEFINE_TRACE(DynamicsCompressorHandler)
 {
     visitor->trace(m_threshold);
     visitor->trace(m_knee);
@@ -129,7 +127,55 @@ void DynamicsCompressorNode::trace(Visitor* visitor)
     visitor->trace(m_reduction);
     visitor->trace(m_attack);
     visitor->trace(m_release);
-    AudioNode::trace(visitor);
+    AudioHandler::trace(visitor);
+}
+
+// ----------------------------------------------------------------
+
+DynamicsCompressorNode::DynamicsCompressorNode(AudioContext& context, float sampleRate)
+    : AudioNode(context)
+{
+    setHandler(new DynamicsCompressorHandler(*this, sampleRate));
+}
+
+DynamicsCompressorNode* DynamicsCompressorNode::create(AudioContext* context, float sampleRate)
+{
+    return new DynamicsCompressorNode(*context, sampleRate);
+}
+
+DynamicsCompressorHandler& DynamicsCompressorNode::dynamicsCompressorHandler() const
+{
+    return static_cast<DynamicsCompressorHandler&>(handler());
+}
+
+AudioParam* DynamicsCompressorNode::threshold() const
+{
+    return dynamicsCompressorHandler().threshold();
+}
+
+AudioParam* DynamicsCompressorNode::knee() const
+{
+    return dynamicsCompressorHandler().knee();
+}
+
+AudioParam* DynamicsCompressorNode::ratio() const
+{
+    return dynamicsCompressorHandler().ratio();
+}
+
+AudioParam* DynamicsCompressorNode::reduction() const
+{
+    return dynamicsCompressorHandler().reduction();
+}
+
+AudioParam* DynamicsCompressorNode::attack() const
+{
+    return dynamicsCompressorHandler().attack();
+}
+
+AudioParam* DynamicsCompressorNode::release() const
+{
+    return dynamicsCompressorHandler().release();
 }
 
 } // namespace blink

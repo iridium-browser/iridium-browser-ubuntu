@@ -1,12 +1,17 @@
 // Copyright 2014 PDFium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
- 
+
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
 #ifndef _JS_OBJECT_H_
 #define _JS_OBJECT_H_
 
+#include "../fsdk_define.h"  // For FX_UINT
+#include "../fsdk_mgr.h"  // For CPDFDoc_Environment
+#include "../fx_systemhandler.h"  // For IFX_SystemHandler
+
+class CPDFSDK_PageView;
 class CJS_Object;
 class CJS_Timer;
 class CJS_Context;
@@ -28,10 +33,8 @@ public:
 	CPDFSDK_PageView *			JSGetPageView(IFXJS_Context* cc);
 	int							MsgBox(CPDFDoc_Environment* pApp, CPDFSDK_PageView* pPageView, FX_LPCWSTR swMsg, FX_LPCWSTR swTitle = NULL, FX_UINT nType = 0, FX_UINT nIcon = 0);
 	void						Alert(CJS_Context* pContext, FX_LPCWSTR swMsg);
-	FX_BOOL						IsSafeMode(IFXJS_Context* cc);
 
 protected:
-
 	CJS_Object*					m_pJSObject;
 };
 
@@ -40,7 +43,7 @@ class CJS_Object : public CFX_Object
 public:
 	CJS_Object(JSFXObject pObject);
 	virtual ~CJS_Object(void);
-	
+
 	void						MakeWeak();
 
 	virtual FX_BOOL				IsType(FX_LPCSTR sClassName){return TRUE;};
@@ -141,9 +144,9 @@ public:
 	}
 
 	int Find(FX_UINT nIndex)
-	{		
+	{
 		for (int i=0,sz=m_Array.GetSize(); i<sz; i++)
-		{			
+		{
 			if (JS_TIMER_MAP * pMap = m_Array.GetAt(i))
 			{
 				if (pMap->nID == nIndex)
@@ -165,8 +168,8 @@ class CJS_Timer
 {
 public:
 	CJS_Timer(CJS_EmbedObj * pObj,CPDFDoc_Environment* pApp):
-		m_nTimerID(0), 
-		m_pEmbedObj(pObj), 
+		m_nTimerID(0),
+		m_pEmbedObj(pObj),
 		m_bProcessing(FALSE),
 		m_dwStartTime(0),
 		m_dwTimeOut(0),
@@ -176,7 +179,7 @@ public:
 		m_pApp(pApp)
 	{
 	}
-	
+
 	virtual ~CJS_Timer()
 	{
 		KillJSTimer();
@@ -184,7 +187,7 @@ public:
 
 public:
 	FX_UINT SetJSTimer(FX_UINT nElapse)
-	{	
+	{
 		if (m_nTimerID)KillJSTimer();
 		IFX_SystemHandler* pHandler = m_pApp->GetSysHandler();
 		m_nTimerID = pHandler->SetTimer(nElapse,TimerProc);
@@ -238,7 +241,7 @@ public:
 	{
 		m_pRuntime = pRuntime;
 	}
-	
+
 	CJS_Runtime* GetRuntime() const
 	{
 		return m_pRuntime;
@@ -272,7 +275,7 @@ public:
 	};
 
 private:
-	FX_UINT							m_nTimerID;	
+	FX_UINT							m_nTimerID;
 	CJS_EmbedObj*					m_pEmbedObj;
 	FX_BOOL							m_bProcessing;
 

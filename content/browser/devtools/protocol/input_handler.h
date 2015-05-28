@@ -22,6 +22,28 @@ class InputHandler {
   virtual ~InputHandler();
 
   void SetRenderViewHost(RenderViewHostImpl* host);
+  void SetClient(scoped_ptr<DevToolsProtocolClient> client);
+
+  Response DispatchKeyEvent(const std::string& type,
+                            const int* modifiers,
+                            const double* timestamp,
+                            const std::string* text,
+                            const std::string* unmodified_text,
+                            const std::string* key_identifier,
+                            const std::string* code,
+                            const int* windows_virtual_key_code,
+                            const int* native_virtual_key_code,
+                            const bool* auto_repeat,
+                            const bool* is_keypad,
+                            const bool* is_system_key);
+
+  Response DispatchMouseEvent(const std::string& type,
+                              int x,
+                              int y,
+                              const int* modifiers,
+                              const double* timestamp,
+                              const std::string* button,
+                              const int* click_count);
 
   Response EmulateTouchFromMouseEvent(const std::string& type,
                                       int x,
@@ -33,13 +55,38 @@ class InputHandler {
                                       int* modifiers,
                                       int* click_count);
 
+  Response SynthesizePinchGesture(DevToolsCommandId command_id,
+                                  int x,
+                                  int y,
+                                  double scale_factor,
+                                  const int* relative_speed,
+                                  const std::string* gesture_source_type);
+
+  Response SynthesizeScrollGesture(DevToolsCommandId command_id,
+                                   int x,
+                                   int y,
+                                   const int* x_distance,
+                                   const int* y_distance,
+                                   const int* x_overscroll,
+                                   const int* y_overscroll,
+                                   const bool* prevent_fling,
+                                   const int* speed,
+                                   const std::string* gesture_source_type);
+
+  Response SynthesizeTapGesture(DevToolsCommandId command_id,
+                                int x,
+                                int y,
+                                const int* duration,
+                                const int* tap_count,
+                                const std::string* gesture_source_type);
+
  private:
   RenderViewHostImpl* host_;
 
   DISALLOW_COPY_AND_ASSIGN(InputHandler);
 };
 
-}  // namespace inpue
+}  // namespace input
 }  // namespace devtools
 }  // namespace content
 

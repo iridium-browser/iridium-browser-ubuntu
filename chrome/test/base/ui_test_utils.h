@@ -14,7 +14,7 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/history/history_service.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -153,7 +153,7 @@ int FindInPage(content::WebContents* tab,
 void WaitForTemplateURLServiceToLoad(TemplateURLService* service);
 
 // Blocks until the |history_service|'s history finishes loading.
-void WaitForHistoryToLoad(HistoryService* history_service);
+void WaitForHistoryToLoad(history::HistoryService* history_service);
 
 // Download the given file and waits for the download to complete.
 void DownloadURL(Browser* browser, const GURL& download_url);

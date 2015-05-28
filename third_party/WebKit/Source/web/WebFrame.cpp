@@ -5,13 +5,18 @@
 #include "config.h"
 #include "public/web/WebFrame.h"
 
+#include "bindings/core/v8/WindowProxyManager.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
+#include "core/frame/LocalFrame.h"
 #include "core/frame/RemoteFrame.h"
 #include "core/html/HTMLFrameOwnerElement.h"
+#include "core/page/Page.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/heap/Handle.h"
+#include "public/web/WebSandboxFlags.h"
 #include "web/OpenedFrameTracker.h"
+#include "web/RemoteBridgeFrameOwner.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebRemoteFrameImpl.h"
 #include <algorithm>
@@ -81,19 +86,24 @@ bool WebFrame::swap(WebFrame* frame)
     // increments of connected subframes.
     FrameOwner* owner = oldFrame->owner();
     oldFrame->disconnectOwnerElement();
-    if (Frame* newFrame = toCoreFrame(frame)) {
-        ASSERT(owner == newFrame->owner());
-        if (owner->isLocal()) {
-            HTMLFrameOwnerElement* ownerElement = toHTMLFrameOwnerElement(owner);
-            ownerElement->setContentFrame(*newFrame);
-            if (newFrame->isLocalFrame())
-                ownerElement->setWidget(toLocalFrame(newFrame)->view());
+    if (frame->isWebLocalFrame()) {
+        LocalFrame& localFrame = *toWebLocalFrameImpl(frame)->frame();
+        ASSERT(owner == localFrame.owner());
+        if (owner) {
+            if (owner->isLocal()) {
+                HTMLFrameOwnerElement* ownerElement = toHTMLFrameOwnerElement(owner);
+                ownerElement->setContentFrame(localFrame);
+                ownerElement->setWidget(localFrame.view());
+            } else {
+                toRemoteBridgeFrameOwner(owner)->setContentFrame(toWebLocalFrameImpl(frame));
+            }
+        } else {
+            localFrame.page()->setMainFrame(&localFrame);
         }
-    } else if (frame->isWebLocalFrame()) {
-        toWebLocalFrameImpl(frame)->initializeCoreFrame(oldFrame->host(), owner, oldFrame->tree().name(), nullAtom);
     } else {
         toWebRemoteFrameImpl(frame)->initializeCoreFrame(oldFrame->host(), owner, oldFrame->tree().name());
     }
+    toCoreFrame(frame)->finishSwapFrom(oldFrame.get());
 
     return true;
 }
@@ -106,6 +116,16 @@ void WebFrame::detach()
 WebSecurityOrigin WebFrame::securityOrigin() const
 {
     return WebSecurityOrigin(toCoreFrame(this)->securityContext()->securityOrigin());
+}
+
+
+void WebFrame::setFrameOwnerSandboxFlags(WebSandboxFlags flags)
+{
+    // At the moment, this is only used to replicate sandbox flags
+    // for frames with a remote owner.
+    FrameOwner* owner = toCoreFrame(this)->owner();
+    ASSERT(owner);
+    toRemoteBridgeFrameOwner(owner)->setSandboxFlags(static_cast<SandboxFlags>(flags));
 }
 
 WebFrame* WebFrame::opener() const
@@ -250,7 +270,8 @@ WebFrame::~WebFrame()
 }
 
 #if ENABLE(OILPAN)
-void WebFrame::traceFrame(Visitor* visitor, WebFrame* frame)
+template <typename VisitorDispatcher>
+ALWAYS_INLINE void WebFrame::traceFrameImpl(VisitorDispatcher visitor, WebFrame* frame)
 {
     if (!frame)
         return;
@@ -261,7 +282,8 @@ void WebFrame::traceFrame(Visitor* visitor, WebFrame* frame)
         visitor->trace(toWebRemoteFrameImpl(frame));
 }
 
-void WebFrame::traceFrames(Visitor* visitor, WebFrame* frame)
+template <typename VisitorDispatcher>
+ALWAYS_INLINE void WebFrame::traceFramesImpl(VisitorDispatcher visitor, WebFrame* frame)
 {
     ASSERT(frame);
     traceFrame(visitor, frame->m_parent);
@@ -271,7 +293,8 @@ void WebFrame::traceFrames(Visitor* visitor, WebFrame* frame)
     frame->m_openedFrameTracker->traceFrames(visitor);
 }
 
-bool WebFrame::isFrameAlive(Visitor* visitor, const WebFrame* frame)
+template <typename VisitorDispatcher>
+ALWAYS_INLINE bool WebFrame::isFrameAliveImpl(VisitorDispatcher visitor, const WebFrame* frame)
 {
     if (!frame)
         return true;
@@ -282,11 +305,23 @@ bool WebFrame::isFrameAlive(Visitor* visitor, const WebFrame* frame)
     return visitor->isAlive(toWebRemoteFrameImpl(frame));
 }
 
-void WebFrame::clearWeakFrames(Visitor* visitor)
+template <typename VisitorDispatcher>
+ALWAYS_INLINE void WebFrame::clearWeakFramesImpl(VisitorDispatcher visitor)
 {
     if (!isFrameAlive(visitor, m_opener))
         m_opener = nullptr;
 }
+
+#define DEFINE_VISITOR_METHOD(VisitorDispatcher)                                                                               \
+    void WebFrame::traceFrame(VisitorDispatcher visitor, WebFrame* frame) { traceFrameImpl(visitor, frame); }                  \
+    void WebFrame::traceFrames(VisitorDispatcher visitor, WebFrame* frame) { traceFramesImpl(visitor, frame); }                \
+    bool WebFrame::isFrameAlive(VisitorDispatcher visitor, const WebFrame* frame) { return isFrameAliveImpl(visitor, frame); } \
+    void WebFrame::clearWeakFrames(VisitorDispatcher visitor) { clearWeakFramesImpl(visitor); }
+
+DEFINE_VISITOR_METHOD(Visitor*)
+DEFINE_VISITOR_METHOD(InlinedGlobalMarkingVisitor)
+
+#undef DEFINE_VISITOR_METHOD
 #endif
 
 } // namespace blink

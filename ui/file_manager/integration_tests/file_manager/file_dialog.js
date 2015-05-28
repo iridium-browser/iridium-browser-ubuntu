@@ -109,7 +109,8 @@ function openFileDialog(volumeName, expectedSet) {
         volumeName,
         expectedSet,
         function(windowId) {
-          return remoteCall.waitForElement(windowId, '.button-panel button.ok').
+          return remoteCall.waitForElement(windowId,
+                                           '.button-panel button.ok').
               then(function() {
                 return remoteCall.callRemoteTestUtil(
                     'fakeEvent',

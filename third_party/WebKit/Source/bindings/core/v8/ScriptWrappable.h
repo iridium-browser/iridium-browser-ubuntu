@@ -32,6 +32,7 @@
 #define ScriptWrappable_h
 
 #include "bindings/core/v8/WrapperTypeInfo.h"
+#include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Noncopyable.h"
 #include <v8.h>
@@ -50,7 +51,7 @@ namespace blink {
  *  - disposeWrapper (via setWeakCallback, triggered by V8 garbage collecter):
  *        remove v8::Persistent and become empty.
  */
-class ScriptWrappable {
+class CORE_EXPORT ScriptWrappable {
     WTF_MAKE_NONCOPYABLE(ScriptWrappable);
 public:
     ScriptWrappable() { }
@@ -79,7 +80,7 @@ public:
 
     void setWrapper(v8::Handle<v8::Object> wrapper, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
     {
-        ASSERT(!containsWrapper());
+        RELEASE_ASSERT(!containsWrapper());
         if (!*wrapper)
             return;
         RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(toScriptWrappable(wrapper) == this);
@@ -161,8 +162,9 @@ protected:
 private:
     void disposeWrapper(v8::Local<v8::Object> wrapper)
     {
-        ASSERT(containsWrapper());
-        ASSERT(wrapper == m_wrapper);
+        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(toScriptWrappable(wrapper) == this);
+        RELEASE_ASSERT(containsWrapper());
+        RELEASE_ASSERT(wrapper == m_wrapper);
         m_wrapper.Reset();
     }
 
@@ -186,7 +188,7 @@ private:
 // All the derived classes of ScriptWrappable, regardless of directly or
 // indirectly, must write this macro in the class definition as long as the
 // class has a corresponding .idl file.
-#define DEFINE_WRAPPERTYPEINFO() \
+#define DEFINE_WRAPPERTYPEINFO()                \
 public: \
     virtual const WrapperTypeInfo* wrapperTypeInfo() const override \
     { \
@@ -211,6 +213,23 @@ public: \
         ASSERT_NOT_REACHED(); \
         return 0; \
     } \
+private: \
+    typedef void end_of_define_wrappertypeinfo_not_reached_t
+
+
+// Declares 'wrapperTypeInfo' method without definition.
+//
+// This macro is used for template classes. e.g. DOMTypedArray<>.
+// To export such a template class X, we need to instantiate X with EXPORT_API,
+// i.e. "extern template class EXPORT_API X;"
+// However, once we instantiate X, we cannot specialize X after
+// the instantiation. i.e. we will see "error: explicit specialization of ...
+// after instantiation". So we cannot define X's s_wrapperTypeInfo in generated
+// code by using specialization. Instead, we need to implement wrapperTypeInfo
+// in X's cpp code, and instantiate X, i.e. "template class X;".
+#define DECLARE_WRAPPERTYPEINFO() \
+public: \
+    virtual const WrapperTypeInfo* wrapperTypeInfo() const override; \
 private: \
     typedef void end_of_define_wrappertypeinfo_not_reached_t
 

@@ -7,6 +7,7 @@
 #ifndef NATIVE_CLIENT_SRC_PUBLIC_CHROME_MAIN_H_
 #define NATIVE_CLIENT_SRC_PUBLIC_CHROME_MAIN_H_ 1
 
+#include "native_client/src/include/build_config.h"
 #include "native_client/src/include/nacl_base.h"
 #include "native_client/src/include/portability.h"
 /*
@@ -197,9 +198,8 @@ struct NaClChromeMainArgs {
 #endif
 
   /*
-   * Descriptor for the user nexe module to load and run. This is optional and
-   * may be NULL if SRPC is used for module loading.
-   * Callee assumes ownership.
+   * Descriptor for the user nexe module to load and run.  This is
+   * required.  Callee assumes ownership.
    */
   struct NaClDesc *nexe_desc;
 
@@ -231,21 +231,11 @@ void NaClChromeMainInit(void);
  * function is invoked, recent log messages will be passed in the data
  * parameter, and its length in the bytes parameter.
  * This function is only safe to call after NaClChromeMainInit().
- *
- * If NaClSetFatalErrorCallback() is not called, recent log messages will be
- * written to the IMC bootstrap channel on a fatal error.
  */
 void NaClSetFatalErrorCallback(void (*func)(const char *data, size_t bytes));
 
 /* Create a new args struct containing default values. */
 struct NaClChromeMainArgs *NaClChromeMainArgsCreate(void);
-
-/*
- * Start NaCl. This does not return.
- * TODO(teravest): Remove this.
- */
-void NaClChromeMainStartApp(struct NaClApp *nap,
-                            struct NaClChromeMainArgs *args);
 
 /*
  * Start NaCl.

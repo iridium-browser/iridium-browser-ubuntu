@@ -41,7 +41,7 @@ class WebContents;
 
 namespace extensions {
 class ExtensionFunctionDispatcher;
-class ExtensionMessageFilter;
+class IOThreadExtensionMessageFilter;
 class QuotaLimitHeuristic;
 }
 
@@ -100,9 +100,11 @@ class ExtensionFunction
     BAD_MESSAGE
   };
 
-  typedef base::Callback<void(ResponseType type,
-                              const base::ListValue& results,
-                              const std::string& error)> ResponseCallback;
+  using ResponseCallback = base::Callback<void(
+      ResponseType type,
+      const base::ListValue& results,
+      const std::string& error,
+      extensions::functions::HistogramValue histogram_value)>;
 
   ExtensionFunction();
 
@@ -215,9 +217,10 @@ class ExtensionFunction
   // Sets the function's bad message state.
   void set_bad_message(bool bad_message) { bad_message_ = bad_message; }
 
-  // Specifies the name of the function.
-  void set_name(const std::string& name) { name_ = name; }
-  const std::string& name() const { return name_; }
+  // Specifies the name of the function. A long-lived string (such as a string
+  // literal) must be provided.
+  void set_name(const char* name) { name_ = name; }
+  const char* name() const { return name_; }
 
   void set_profile_id(void* profile_id) { profile_id_ = profile_id; }
   void* profile_id() const { return profile_id_; }
@@ -308,24 +311,38 @@ class ExtensionFunction
                       const std::string& s1,
                       const std::string& s2,
                       const std::string& s3);
+  // Error with a list of arguments |args| to pass to caller. TAKES OWNERSHIP.
+  // Using this ResponseValue indicates something is wrong with the API.
+  // It shouldn't be possible to have both an error *and* some arguments.
+  // Some legacy APIs do rely on it though, like webstorePrivate.
+  ResponseValue ErrorWithArguments(scoped_ptr<base::ListValue> args,
+                                   const std::string& error);
   // Bad message. A ResponseValue equivalent to EXTENSION_FUNCTION_VALIDATE(),
   // so this will actually kill the renderer and not respond at all.
   ResponseValue BadMessage();
 
   // ResponseActions.
   //
+  // These are exclusively used as return values from Run(). Call Respond(...)
+  // to respond at any other time - but as described below, only after Run()
+  // has already executed, and only if it returned RespondLater().
+  //
   // Respond to the extension immediately with |result|.
-  ResponseAction RespondNow(ResponseValue result);
+  ResponseAction RespondNow(ResponseValue result) WARN_UNUSED_RESULT;
   // Don't respond now, but promise to call Respond(...) later.
-  ResponseAction RespondLater();
+  ResponseAction RespondLater() WARN_UNUSED_RESULT;
 
   // This is the return value of the EXTENSION_FUNCTION_VALIDATE macro, which
   // needs to work from Run(), RunAsync(), and RunSync(). The former of those
   // has a different return type (ResponseAction) than the latter two (bool).
-  static ResponseAction ValidationFailure(ExtensionFunction* function);
+  static ResponseAction ValidationFailure(ExtensionFunction* function)
+      WARN_UNUSED_RESULT;
 
-  // If RespondLater() was used, functions must at some point call Respond()
-  // with |result| as their result.
+  // If RespondLater() was returned from Run(), functions must at some point
+  // call Respond() with |result| as their result.
+  //
+  // More specifically: call this iff Run() has already executed, it returned
+  // RespondLater(), and Respond(...) hasn't already been called.
   void Respond(ResponseValue result);
 
   virtual ~ExtensionFunction();
@@ -357,7 +374,7 @@ class ExtensionFunction
   scoped_refptr<const extensions::Extension> extension_;
 
   // The name of this function.
-  std::string name_;
+  const char* name_;
 
   // The URL of the frame which is making this request
   GURL source_url_;
@@ -461,7 +478,13 @@ class UIThreadExtensionFunction : public ExtensionFunction {
 
   // Gets the "current" web contents if any. If there is no associated web
   // contents then defaults to the foremost one.
+  // NOTE: "current" can mean different things in different contexts. You
+  // probably want to use GetSenderWebContents().
   virtual content::WebContents* GetAssociatedWebContents();
+
+  // Returns the web contents associated with the sending |render_view_host_|.
+  // This can be null.
+  content::WebContents* GetSenderWebContents();
 
  protected:
   // Emits a message to the extension's devtools console.
@@ -523,13 +546,14 @@ class IOThreadExtensionFunction : public ExtensionFunction {
   IOThreadExtensionFunction* AsIOThreadExtensionFunction() override;
 
   void set_ipc_sender(
-      base::WeakPtr<extensions::ExtensionMessageFilter> ipc_sender,
+      base::WeakPtr<extensions::IOThreadExtensionMessageFilter> ipc_sender,
       int routing_id) {
     ipc_sender_ = ipc_sender;
     routing_id_ = routing_id;
   }
 
-  base::WeakPtr<extensions::ExtensionMessageFilter> ipc_sender_weak() const {
+  base::WeakPtr<extensions::IOThreadExtensionMessageFilter> ipc_sender_weak()
+      const {
     return ipc_sender_;
   }
 
@@ -554,7 +578,7 @@ class IOThreadExtensionFunction : public ExtensionFunction {
   void SendResponse(bool success) override;
 
  private:
-  base::WeakPtr<extensions::ExtensionMessageFilter> ipc_sender_;
+  base::WeakPtr<extensions::IOThreadExtensionMessageFilter> ipc_sender_;
   int routing_id_;
 
   scoped_refptr<const extensions::InfoMap> extension_info_map_;
@@ -580,7 +604,10 @@ class AsyncExtensionFunction : public UIThreadExtensionFunction {
   static bool ValidationFailure(AsyncExtensionFunction* function);
 
  private:
-  ResponseAction Run() override;
+  // If you're hitting a compile error here due to "final" - great! You're
+  // doing the right thing, you just need to extend UIThreadExtensionFunction
+  // instead of AsyncExtensionFunction.
+  ResponseAction Run() final;
 };
 
 // A SyncExtensionFunction is an ExtensionFunction that runs synchronously
@@ -607,7 +634,10 @@ class SyncExtensionFunction : public UIThreadExtensionFunction {
   static bool ValidationFailure(SyncExtensionFunction* function);
 
  private:
-  ResponseAction Run() override;
+  // If you're hitting a compile error here due to "final" - great! You're
+  // doing the right thing, you just need to extend UIThreadExtensionFunction
+  // instead of SyncExtensionFunction.
+  ResponseAction Run() final;
 };
 
 class SyncIOThreadExtensionFunction : public IOThreadExtensionFunction {
@@ -628,7 +658,10 @@ class SyncIOThreadExtensionFunction : public IOThreadExtensionFunction {
   static bool ValidationFailure(SyncIOThreadExtensionFunction* function);
 
  private:
-  ResponseAction Run() override;
+  // If you're hitting a compile error here due to "final" - great! You're
+  // doing the right thing, you just need to extend IOThreadExtensionFunction
+  // instead of SyncIOExtensionFunction.
+  ResponseAction Run() final;
 };
 
 #endif  // EXTENSIONS_BROWSER_EXTENSION_FUNCTION_H_

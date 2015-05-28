@@ -28,12 +28,9 @@ class VcmPayloadSinkFactory::VcmPayloadSink
  public:
   VcmPayloadSink(VcmPayloadSinkFactory* factory,
                  RtpStreamInterface* stream,
-                 scoped_ptr<VideoCodingModule>* vcm,
-                 scoped_ptr<FileOutputFrameReceiver>* frame_receiver)
-      : factory_(factory),
-        stream_(stream),
-        vcm_(),
-        frame_receiver_() {
+                 rtc::scoped_ptr<VideoCodingModule>* vcm,
+                 rtc::scoped_ptr<FileOutputFrameReceiver>* frame_receiver)
+      : factory_(factory), stream_(stream), vcm_(), frame_receiver_() {
     assert(factory);
     assert(stream);
     assert(vcm);
@@ -51,22 +48,20 @@ class VcmPayloadSinkFactory::VcmPayloadSink
   }
 
   // PayloadSinkInterface
-  virtual int32_t OnReceivedPayloadData(
-      const uint8_t* payload_data,
-      const size_t payload_size,
-      const WebRtcRTPHeader* rtp_header) OVERRIDE {
+  int32_t OnReceivedPayloadData(const uint8_t* payload_data,
+                                const size_t payload_size,
+                                const WebRtcRTPHeader* rtp_header) override {
     return vcm_->IncomingPacket(payload_data, payload_size, *rtp_header);
   }
 
-  virtual bool OnRecoveredPacket(const uint8_t* packet,
-                                 size_t packet_length) OVERRIDE {
+  bool OnRecoveredPacket(const uint8_t* packet, size_t packet_length) override {
     // We currently don't handle FEC.
     return true;
   }
 
   // VCMPacketRequestCallback
-  virtual int32_t ResendPackets(const uint16_t* sequence_numbers,
-                                uint16_t length) OVERRIDE {
+  int32_t ResendPackets(const uint16_t* sequence_numbers,
+                        uint16_t length) override {
     stream_->ResendPackets(sequence_numbers, length);
     return 0;
   }
@@ -97,8 +92,8 @@ class VcmPayloadSinkFactory::VcmPayloadSink
  private:
   VcmPayloadSinkFactory* factory_;
   RtpStreamInterface* stream_;
-  scoped_ptr<VideoCodingModule> vcm_;
-  scoped_ptr<FileOutputFrameReceiver> frame_receiver_;
+  rtc::scoped_ptr<VideoCodingModule> vcm_;
+  rtc::scoped_ptr<FileOutputFrameReceiver> frame_receiver_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(VcmPayloadSink);
 };
@@ -108,7 +103,7 @@ VcmPayloadSinkFactory::VcmPayloadSinkFactory(
     Clock* clock,
     bool protection_enabled,
     VCMVideoProtection protection_method,
-    uint32_t rtt_ms,
+    int64_t rtt_ms,
     uint32_t render_delay_ms,
     uint32_t min_playout_delay_ms)
     : base_out_filename_(base_out_filename),
@@ -134,7 +129,7 @@ PayloadSinkInterface* VcmPayloadSinkFactory::Create(
   assert(stream);
   CriticalSectionScoped cs(crit_sect_.get());
 
-  scoped_ptr<VideoCodingModule> vcm(
+  rtc::scoped_ptr<VideoCodingModule> vcm(
       VideoCodingModule::Create(clock_, null_event_factory_.get()));
   if (vcm.get() == NULL) {
     return NULL;
@@ -165,9 +160,9 @@ PayloadSinkInterface* VcmPayloadSinkFactory::Create(
   vcm->SetMinimumPlayoutDelay(min_playout_delay_ms_);
   vcm->SetNackSettings(kMaxNackListSize, kMaxPacketAgeToNack, 0);
 
-  scoped_ptr<FileOutputFrameReceiver> frame_receiver(
+  rtc::scoped_ptr<FileOutputFrameReceiver> frame_receiver(
       new FileOutputFrameReceiver(base_out_filename_, stream->ssrc()));
-  scoped_ptr<VcmPayloadSink> sink(
+  rtc::scoped_ptr<VcmPayloadSink> sink(
       new VcmPayloadSink(this, stream, &vcm, &frame_receiver));
 
   sinks_.push_back(sink.get());

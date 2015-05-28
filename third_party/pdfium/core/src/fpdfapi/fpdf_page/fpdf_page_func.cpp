@@ -4,10 +4,14 @@
  
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
+#include <limits.h>
+
 #include "../../../include/fpdfapi/fpdf_page.h"
 #include "../../../include/fpdfapi/fpdf_module.h"
+#include "../../../src/fxcrt/fx_safe_types.h"
+#include "../../../third_party/base/numerics/safe_conversions_impl.h"
 #include "pageint.h"
-#include <limits.h>
+
 class CPDF_PSEngine;
 typedef enum {PSOP_ADD, PSOP_SUB, PSOP_MUL, PSOP_DIV, PSOP_IDIV, PSOP_MOD,
               PSOP_NEG, PSOP_ABS, PSOP_CEILING, PSOP_FLOOR, PSOP_ROUND, PSOP_TRUNCATE,
@@ -553,13 +557,24 @@ FX_BOOL CPDF_SampledFunc::v_Call(FX_FLOAT* inputs, FX_FLOAT* results) const
         }
         pos += index[i] * blocksize[i];
     }
-    int bitpos = pos * m_nBitsPerSample * m_nOutputs;
+    FX_SAFE_INT32 bitpos = pos;
+    bitpos *= m_nBitsPerSample;
+    bitpos *= m_nOutputs;
+    if (!bitpos.IsValid()) {
+        return FALSE;
+    }
     FX_LPCBYTE pSampleData = m_pSampleStream->GetData();
     if (pSampleData == NULL) {
         return FALSE;
     }
+    FX_SAFE_INT32 bitpos1 = m_nOutputs - 1 > 0 ? m_nOutputs - 1 : 0; 
+    bitpos1 *= m_nBitsPerSample;
+    bitpos1 += bitpos.ValueOrDie();
+    if (!bitpos1.IsValid()) {
+        return FALSE;
+    }
     for (int j = 0; j < m_nOutputs; j ++) {
-        FX_DWORD sample = _GetBits32(pSampleData, bitpos + j * m_nBitsPerSample, m_nBitsPerSample);
+        FX_DWORD sample = _GetBits32(pSampleData, bitpos.ValueOrDie() + j * m_nBitsPerSample, m_nBitsPerSample);
         FX_FLOAT encoded = (FX_FLOAT)sample;
         for (int i = 0; i < m_nInputs; i ++) {
             if (index[i] == m_pEncodeInfo[i].sizes - 1) {
@@ -567,8 +582,15 @@ FX_BOOL CPDF_SampledFunc::v_Call(FX_FLOAT* inputs, FX_FLOAT* results) const
                     encoded = encoded_input[i] * (FX_FLOAT)sample;
                 }
             } else {
-                int bitpos1 = bitpos + m_nBitsPerSample * m_nOutputs * blocksize[i];
-                FX_DWORD sample1 = _GetBits32(pSampleData, bitpos1 + j * m_nBitsPerSample, m_nBitsPerSample);
+                FX_SAFE_INT32 bitpos2 = blocksize[i];
+                bitpos2 += pos;
+                bitpos2 *= m_nOutputs;
+                bitpos2 += j;
+                bitpos2 *= m_nBitsPerSample; 
+                if (!bitpos2.IsValid()) {
+                    return FALSE;
+                }
+                FX_DWORD sample1 = _GetBits32(pSampleData, bitpos2.ValueOrDie(), m_nBitsPerSample);
                 encoded += (encoded_input[i] - index[i]) * ((FX_FLOAT)sample1 - (FX_FLOAT)sample);
             }
         }

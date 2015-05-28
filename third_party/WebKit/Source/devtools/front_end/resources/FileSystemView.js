@@ -39,9 +39,10 @@ WebInspector.FileSystemView = function(fileSystem)
     this.element.classList.add("file-system-view", "storage-view");
 
     var vbox = new WebInspector.VBox();
-    vbox.element.classList.add("outline-disclosure", "sidebar");
-    var directoryTreeElement = vbox.element.createChild("ol", "filesystem-directory-tree");
-    this._directoryTree = new TreeOutline(directoryTreeElement);
+    vbox.element.classList.add("sidebar");
+    this._directoryTree = new TreeOutline();
+    this._directoryTree.element.classList.add("outline-disclosure", "filesystem-directory-tree");
+    vbox.element.appendChild(this._directoryTree.element);
     this.setSidebarView(vbox);
 
     var rootItem = new WebInspector.FileSystemView.EntryTreeElement(this, fileSystem.root);
@@ -90,7 +91,7 @@ WebInspector.FileSystemView.prototype = {
 
     _refresh: function()
     {
-        this._directoryTree.children[0].refresh();
+        this._directoryTree.firstChild().refresh();
     },
 
     _confirmDelete: function()
@@ -115,7 +116,7 @@ WebInspector.FileSystemView.prototype = {
  */
 WebInspector.FileSystemView.EntryTreeElement = function(fileSystemView, entry)
 {
-    TreeElement.call(this, entry.name, null, entry.isDirectory);
+    TreeElement.call(this, entry.name, entry.isDirectory);
 
     this._entry = entry;
     this._fileSystemView = fileSystemView;
@@ -165,7 +166,7 @@ WebInspector.FileSystemView.EntryTreeElement.prototype = {
     _directoryContentReceived: function(errorCode, entries)
     {
         if (errorCode === FileError.NOT_FOUND_ERR) {
-            if (this.parent !== this.treeOutline)
+            if (this.parent)
                 this.parent.refresh();
             return;
         }
@@ -179,7 +180,7 @@ WebInspector.FileSystemView.EntryTreeElement.prototype = {
         if (this._view)
             this._view.showEntries(entries);
 
-        var oldChildren = this.children.slice(0);
+        var oldChildren = this.children().slice(0);
 
         var newEntryIndex = 0;
         var oldChildIndex = 0;
@@ -191,7 +192,7 @@ WebInspector.FileSystemView.EntryTreeElement.prototype = {
 
             if (order === 0) {
                 if (oldChild._entry.isDirectory)
-                    oldChild.shouldRefreshChildren = true;
+                    oldChild.invalidateChildren();
                 else
                     oldChild.refresh();
 

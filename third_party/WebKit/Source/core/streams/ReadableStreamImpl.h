@@ -6,11 +6,16 @@
 #define ReadableStreamImpl_h
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/ScriptPromise.h"
+#include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/V8ArrayBuffer.h"
 #include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8IteratorResultValue.h"
 #include "core/dom/DOMArrayBuffer.h"
+#include "core/dom/DOMArrayBufferView.h"
+#include "core/dom/DOMException.h"
 #include "core/streams/ReadableStream.h"
 #include "wtf/Deque.h"
 #include "wtf/RefPtr.h"
@@ -49,6 +54,19 @@ public:
     }
 };
 
+template<>
+class ReadableStreamChunkTypeTraits<DOMArrayBufferView> {
+public:
+    typedef RefPtr<DOMArrayBufferView> HoldType;
+    typedef PassRefPtr<DOMArrayBufferView> PassType;
+
+    static size_t size(const PassType& chunk) { return chunk->byteLength(); }
+    static ScriptValue toScriptValue(ScriptState* scriptState, const HoldType& value)
+    {
+        return ScriptValue(scriptState, toV8(value.get(), scriptState->context()->Global(), scriptState->isolate()));
+    }
+};
+
 // ReadableStreamImpl<ChunkTypeTraits> is a ReadableStream subtype. It has a
 // queue whose type depends on ChunkTypeTraits and it implements queue-related
 // ReadableStream pure virtual methods.
@@ -63,36 +81,56 @@ public:
         virtual size_t size(const typename ChunkTypeTraits::PassType& chunk, ReadableStream*) { return ChunkTypeTraits::size(chunk); }
         virtual bool shouldApplyBackpressure(size_t totalQueueSize, ReadableStream*) = 0;
 
-        virtual void trace(Visitor*) { }
+        DEFINE_INLINE_VIRTUAL_TRACE() { }
     };
 
     class DefaultStrategy : public Strategy {
     public:
-        ~DefaultStrategy() override { }
         size_t size(const typename ChunkTypeTraits::PassType& chunk, ReadableStream*) override { return 1; }
         bool shouldApplyBackpressure(size_t totalQueueSize, ReadableStream*) override { return totalQueueSize > 1; }
     };
 
-    ReadableStreamImpl(ExecutionContext* executionContext, UnderlyingSource* source)
-        : ReadableStreamImpl(executionContext, source, new DefaultStrategy) { }
-    ReadableStreamImpl(ExecutionContext* executionContext, UnderlyingSource* source, Strategy* strategy)
-        : ReadableStream(executionContext, source)
+    class StrictStrategy : public Strategy {
+    public:
+        size_t size(const typename ChunkTypeTraits::PassType& chunk, ReadableStream*) override { return 1; }
+        bool shouldApplyBackpressure(size_t totalQueueSize, ReadableStream*) override { return true; }
+    };
+
+    explicit ReadableStreamImpl(UnderlyingSource* source)
+        : ReadableStreamImpl(source, new DefaultStrategy) { }
+    ReadableStreamImpl(UnderlyingSource* source, Strategy* strategy)
+        : ReadableStream(source)
         , m_strategy(strategy)
         , m_totalQueueSize(0) { }
     ~ReadableStreamImpl() override { }
 
     // ReadableStream methods
-    ScriptValue read(ScriptState*, ExceptionState&) override;
+    ScriptPromise read(ScriptState*) override;
 
     bool enqueue(typename ChunkTypeTraits::PassType);
 
-    void trace(Visitor* visitor) override
+    // This function is intended to be used by internal code to withdraw
+    // queued data. This pulls all data from this stream's queue, but
+    // ReadableStream public APIs can work with the behavior (i.e. it behaves
+    // as if multiple read-one-buffer calls were made).
+    void readInternal(Deque<std::pair<typename ChunkTypeTraits::HoldType, size_t>>& queue);
+
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_strategy);
+#if ENABLE(OILPAN)
+        visitor->trace(m_pendingReads);
+#endif
         ReadableStream::trace(visitor);
     }
 
 private:
+#if ENABLE(OILPAN)
+    using PendingReads = HeapDeque<Member<ScriptPromiseResolver>>;
+#else
+    using PendingReads = Deque<RefPtr<ScriptPromiseResolver>>;
+#endif
+
     // ReadableStream methods
     bool isQueueEmpty() const override { return m_queue.isEmpty(); }
     void clearQueue() override
@@ -100,13 +138,33 @@ private:
         m_queue.clear();
         m_totalQueueSize = 0;
     }
+
+    void resolveAllPendingReadsAsDone() override
+    {
+        for (auto& resolver : m_pendingReads) {
+            ScriptState::Scope scope(resolver->scriptState());
+            resolver->resolve(v8IteratorResultDone(resolver->scriptState()));
+        }
+        m_pendingReads.clear();
+    }
+
+    void rejectAllPendingReads(PassRefPtrWillBeRawPtr<DOMException> r) override
+    {
+        RefPtrWillBeRawPtr<DOMException> reason = r;
+        for (auto& resolver : m_pendingReads)
+            resolver->reject(reason);
+        m_pendingReads.clear();
+    }
+
     bool shouldApplyBackpressure() override
     {
         return m_strategy->shouldApplyBackpressure(m_totalQueueSize, this);
     }
+    bool hasPendingReads() const override { return !m_pendingReads.isEmpty(); }
 
     Member<Strategy> m_strategy;
-    Deque<std::pair<typename ChunkTypeTraits::HoldType, size_t> > m_queue;
+    Deque<std::pair<typename ChunkTypeTraits::HoldType, size_t>> m_queue;
+    PendingReads m_pendingReads;
     size_t m_totalQueueSize;
 };
 
@@ -116,26 +174,52 @@ bool ReadableStreamImpl<ChunkTypeTraits>::enqueue(typename ChunkTypeTraits::Pass
     size_t size = m_strategy->size(chunk, this);
     if (!enqueuePreliminaryCheck())
         return false;
-    m_queue.append(std::make_pair(chunk, size));
-    m_totalQueueSize += size;
+
+    if (m_pendingReads.isEmpty()) {
+        m_queue.append(std::make_pair(chunk, size));
+        m_totalQueueSize += size;
+        return enqueuePostAction();
+    }
+
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = m_pendingReads.takeFirst();
+    ScriptState* scriptState = resolver->scriptState();
+    ScriptState::Scope scope(scriptState);
+    resolver->resolve(v8IteratorResult(scriptState, chunk));
     return enqueuePostAction();
 }
 
 template <typename ChunkTypeTraits>
-ScriptValue ReadableStreamImpl<ChunkTypeTraits>::read(ScriptState* scriptState, ExceptionState& exceptionState)
+ScriptPromise ReadableStreamImpl<ChunkTypeTraits>::read(ScriptState* scriptState)
 {
-    readPreliminaryCheck(exceptionState);
-    if (exceptionState.hadException())
-        return ScriptValue();
-    ASSERT(state() == Readable);
-    ASSERT(!m_queue.isEmpty());
+    ASSERT(stateInternal() == Readable);
+    if (m_queue.isEmpty()) {
+        m_pendingReads.append(ScriptPromiseResolver::create(scriptState));
+        ScriptPromise promise = m_pendingReads.last()->promise();
+        readInternalPostAction();
+        return promise;
+    }
+
     auto pair = m_queue.takeFirst();
     typename ChunkTypeTraits::HoldType chunk = pair.first;
     size_t size = pair.second;
     ASSERT(m_totalQueueSize >= size);
     m_totalQueueSize -= size;
-    readPostAction();
-    return ChunkTypeTraits::toScriptValue(scriptState, chunk);
+    readInternalPostAction();
+
+    return ScriptPromise::cast(scriptState, v8IteratorResult(scriptState, chunk));
+}
+
+template <typename ChunkTypeTraits>
+void ReadableStreamImpl<ChunkTypeTraits>::readInternal(Deque<std::pair<typename ChunkTypeTraits::HoldType, size_t>>& queue)
+{
+    // We omit the preliminary check. Check it by yourself.
+    ASSERT(stateInternal() == Readable);
+    ASSERT(m_pendingReads.isEmpty());
+    ASSERT(queue.isEmpty());
+
+    queue.swap(m_queue);
+    m_totalQueueSize = 0;
+    readInternalPostAction();
 }
 
 } // namespace blink

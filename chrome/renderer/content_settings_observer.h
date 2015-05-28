@@ -12,7 +12,7 @@
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_frame_observer_tracker.h"
-#include "third_party/WebKit/public/web/WebPermissionClient.h"
+#include "third_party/WebKit/public/web/WebContentSettingsClient.h"
 
 class GURL;
 
@@ -31,7 +31,7 @@ class Extension;
 class ContentSettingsObserver
     : public content::RenderFrameObserver,
       public content::RenderFrameObserverTracker<ContentSettingsObserver>,
-      public blink::WebPermissionClient {
+      public blink::WebContentSettingsClient {
  public:
   // Set |should_whitelist| to true if |render_frame()| contains content that
   // should be whitelisted for content settings.
@@ -56,7 +56,7 @@ class ContentSettingsObserver
   void DidBlockContentType(ContentSettingsType settings_type,
                            const base::string16& details);
 
-  // blink::WebPermissionClient implementation.
+  // blink::WebContentSettingsClient implementation.
   virtual bool allowDatabase(const blink::WebString& name,
                              const blink::WebString& display_name,
                              unsigned long estimated_size) override;
@@ -74,7 +74,6 @@ class ContentSettingsObserver
   virtual bool allowReadFromClipboard(bool default_value) override;
   virtual bool allowWriteToClipboard(bool default_value) override;
   virtual bool allowMutationEvents(bool default_value) override;
-  virtual bool allowPushState() override;
   virtual void didNotAllowPlugins() override;
   virtual void didNotAllowScript() override;
   virtual bool allowDisplayingInsecureContent(
@@ -97,7 +96,8 @@ class ContentSettingsObserver
 
   // RenderFrameObserver implementation.
   bool OnMessageReceived(const IPC::Message& message) override;
-  void DidCommitProvisionalLoad(bool is_new_navigation) override;
+  void DidCommitProvisionalLoad(bool is_new_navigation,
+                                bool is_same_page_navigation) override;
 
   // Message handlers.
   void OnLoadBlockedPlugins(const std::string& identifier);

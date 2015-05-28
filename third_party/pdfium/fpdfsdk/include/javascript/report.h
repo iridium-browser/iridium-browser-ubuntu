@@ -14,8 +14,8 @@ public:
 	virtual ~Report();
 
 public:
-	FX_BOOL save(OBJ_METHOD_PARAMS);
-	FX_BOOL writeText(OBJ_METHOD_PARAMS);
+	FX_BOOL save(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value& vRet, CFX_WideString& sError);
+	FX_BOOL writeText(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value& vRet, CFX_WideString& sError);
 };
 
 class CJS_Report : public CJS_Object

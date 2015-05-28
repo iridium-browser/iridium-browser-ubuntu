@@ -10,11 +10,10 @@ TEST_F('BaseDownloadsWebUITest', 'DeleteAllowed', function() {
   this.expectDeleteControlsVisible(true);
   // TODO(pamg): Mock out the back-end calls, so we can also test removing a
   // single item.
-  testDone();
 });
 
 TEST_F('BaseDownloadsWebUITest', 'NoResultsHiddenWhenDownloads', function() {
-  assertNotEquals(0, downloads.size());
+  assertNotEquals(0, downloads.Manager.size());
   expectFalse($('downloads-display').hidden);
   expectTrue($('no-downloads-or-results').hidden);
 });
@@ -24,7 +23,7 @@ TEST_F('BaseDownloadsWebUITest', 'NoSearchResultsShown', function() {
   var noResults = $('no-downloads-or-results');
   expectTrue(noResults.hidden);
 
-  setSearch('just try to search for me!');
+  downloads.Manager.setSearchText('just try to search for me!');
   this.sendEmptyList();
 
   expectTrue($('downloads-display').hidden);
@@ -36,11 +35,77 @@ TEST_F('BaseDownloadsWebUITest', 'NoDownloadsAfterClearAll', function() {
   var noResults = $('no-downloads-or-results');
   expectTrue(noResults.hidden);
 
-  clearAll();
+  $('clear-all').click();
   this.sendEmptyList();
 
   expectTrue($('downloads-display').hidden);
   this.checkShowing(noResults, loadTimeData.getString('no_downloads'));
+});
+
+TEST_F('BaseDownloadsWebUITest', 'PauseResumeFocus', function() {
+  var manager = downloads.Manager.getInstance();
+  assertGE(manager.size(), 0);
+
+  var freshestDownload = this.createdDownloads[0];
+  freshestDownload.state = downloads.Item.States.IN_PROGRESS;
+  freshestDownload.resume = false;
+  downloads.Manager.updateItem(freshestDownload);
+
+  var node = manager.idMap_[freshestDownload.id].view.node;
+  var pause = node.querySelector('.pause');
+  var resume = node.querySelector('.resume');
+
+  expectFalse(pause.hidden);
+  expectTrue(resume.hidden);
+  // Move the focus to "Pause" then pretend the download was resumed. The focus
+  // should move to the equivalent button ("Resume" in this case).
+  pause.focus();
+  assertEquals(document.activeElement, pause);
+
+  freshestDownload.state = downloads.Item.States.PAUSED;
+  freshestDownload.resume = true;
+  downloads.Manager.updateItem(freshestDownload);
+
+  expectTrue(pause.hidden);
+  expectFalse(resume.hidden);
+  expectEquals(document.activeElement, resume);
+});
+
+TEST_F('BaseDownloadsWebUITest', 'DatesCollapse', function() {
+  function datesShowing() {
+    var displayDiv = $('downloads-display');
+    return displayDiv.querySelectorAll('.date-container:not([hidden])').length;
+  }
+
+  var manager = downloads.Manager.getInstance();
+  var numDownloads = manager.size();
+  assertGE(numDownloads, 2);
+
+  expectEquals(1, datesShowing());
+
+  var freshestId = this.createdDownloads[0].id;
+  this.createDangerousDownload(freshestId + 1, Date.now());
+  manager.updateAll(this.createdDownloads);
+
+  expectEquals(numDownloads + 1, manager.size());
+  expectEquals(1, datesShowing());
+
+  var firstContainer = document.querySelector('.date-container');
+  assertFalse(firstContainer.hidden);
+  expectGT(firstContainer.querySelector('.since').textContent.trim().length, 0);
+  expectGT(firstContainer.querySelector('.date').textContent.trim().length, 0);
+});
+
+TEST_F('BaseDownloadsWebUITest', 'EmptyProgressStatusText', function() {
+  this.createdDownloads[0].state = downloads.Item.States.PAUSED;
+  this.createdDownloads[0].progress_status_text = '';
+  downloads.Manager.updateItem(this.createdDownloads[0]);  // Might assert().
+});
+
+TEST_F('BaseDownloadsWebUITest', 'EmptyLastStatusText', function() {
+  this.createdDownloads[0].state = downloads.Item.States.INTERRUPTED;
+  this.createdDownloads[0].last_reason_text = '';
+  downloads.Manager.updateItem(this.createdDownloads[0]);  // Might assert().
 });
 
 /**
@@ -55,7 +120,7 @@ EmptyDownloadsWebUITest.prototype = {
   /** @override */
   setUp: function() {
     // Doesn't create any fake downloads.
-    assertEquals(0, downloads.size());
+    assertEquals(0, downloads.Manager.size());
   },
 };
 
@@ -66,7 +131,7 @@ TEST_F('EmptyDownloadsWebUITest', 'NoDownloadsMessageShowing', function() {
 });
 
 TEST_F('EmptyDownloadsWebUITest', 'NoSearchResultsWithNoDownloads', function() {
-  setSearch('bananas');
+  downloads.Manager.setSearchText('bananas');
   this.sendEmptyList();
 
   expectTrue($('downloads-display').hidden);
@@ -95,5 +160,10 @@ TEST_F('DownloadsWebUIDeleteProhibitedTest', 'DeleteProhibited', function() {
   this.expectDeleteControlsVisible(false);
   // TODO(pamg): Mock out the back-end calls, so we can also test removing a
   // single item.
-  testDone();
+});
+
+TEST_F('DownloadsWebUIDeleteProhibitedTest', 'ClearLeavesSearch', function() {
+  downloads.Manager.setSearchText('muhahaha');
+  $('clear-all').click();
+  expectGE(downloads.Manager.getInstance().searchText_.length, 0);
 });

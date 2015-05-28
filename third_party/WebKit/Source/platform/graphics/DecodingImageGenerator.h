@@ -29,6 +29,7 @@
 #include "SkImageGenerator.h"
 #include "SkImageInfo.h"
 
+#include "platform/PlatformExport.h"
 #include "wtf/RefPtr.h"
 
 class SkData;
@@ -42,7 +43,7 @@ class ImageFrameGenerator;
 //
 // This class does not own an ImageDecode. It does not own encoded data. It serves
 // as and adapter to ImageFrameGenerator which actually performs decoding.
-class DecodingImageGenerator final : public SkImageGenerator {
+class PLATFORM_EXPORT DecodingImageGenerator final : public SkImageGenerator {
 public:
     static SkImageGenerator* create(SkData*);
 
@@ -54,7 +55,7 @@ public:
 protected:
     virtual SkData* onRefEncodedData() override;
     virtual bool onGetInfo(SkImageInfo*) override;
-    virtual bool onGetPixels(const SkImageInfo&, void* pixels, size_t rowBytes, SkPMColor ctable[], int* ctableCount) override;
+    virtual Result onGetPixels(const SkImageInfo&, void* pixels, size_t rowBytes, SkPMColor ctable[], int* ctableCount) override;
     virtual bool onGetYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3], SkYUVColorSpace*) override;
 
 private:

@@ -5,7 +5,7 @@
 #ifndef CC_RESOURCES_PICTURE_LAYER_TILING_H_
 #define CC_RESOURCES_PICTURE_LAYER_TILING_H_
 
-#include <set>
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -21,7 +21,7 @@
 #include "ui/gfx/geometry/rect.h"
 
 namespace base {
-namespace debug {
+namespace trace_event {
 class TracedValue;
 }
 }
@@ -59,6 +59,10 @@ class CC_EXPORT PictureLayerTiling {
   static const int kBorderTexels = 1;
 
   ~PictureLayerTiling();
+
+  static float CalculateSoonBorderDistance(
+      const gfx::Rect& visible_rect_in_content_space,
+      float content_to_screen_scale);
 
   // Create a tiling with no tiles. CreateTile() must be called to add some.
   static scoped_ptr<PictureLayerTiling> Create(
@@ -136,6 +140,8 @@ class CC_EXPORT PictureLayerTiling {
   bool IsTileRequiredForDrawIfVisible(const Tile* tile) const;
 
   void UpdateTileAndTwinPriority(Tile* tile) const;
+  TilePriority ComputePriorityForTile(const Tile* tile) const;
+  void UpdateRequiredStateForTile(Tile* tile, WhichTree tree) const;
   bool has_visible_rect_tiles() const { return has_visible_rect_tiles_; }
   bool has_skewport_rect_tiles() const { return has_skewport_rect_tiles_; }
   bool has_soon_border_rect_tiles() const {
@@ -155,6 +161,7 @@ class CC_EXPORT PictureLayerTiling {
   const gfx::Rect& current_eventually_rect() const {
     return current_eventually_rect_;
   }
+  void VerifyAllTilesHaveCurrentRasterSource() const;
 
   // Iterate over all tiles to fill content_rect.  Even if tiles are invalid
   // (i.e. no valid resource) this tiling should still iterate over them.
@@ -207,8 +214,9 @@ class CC_EXPORT PictureLayerTiling {
                                 double current_frame_time_in_seconds,
                                 const Occlusion& occlusion_in_layer_space);
 
-  void GetAllTilesForTracing(std::set<const Tile*>* tiles) const;
-  void AsValueInto(base::debug::TracedValue* array) const;
+  void GetAllTilesAndPrioritiesForTracing(
+      std::map<const Tile*, TilePriority>* tile_map) const;
+  void AsValueInto(base::trace_event::TracedValue* array) const;
   size_t GPUMemoryUsageInBytes() const;
 
   struct RectExpansionCache {
@@ -228,16 +236,22 @@ class CC_EXPORT PictureLayerTiling {
       RectExpansionCache* cache);
 
   bool has_ever_been_updated() const {
-    return last_impl_frame_time_in_seconds_ != 0.0;
+    return visible_rect_history_[0].frame_time_in_seconds != 0.0;
   }
 
  protected:
   friend class CoverageIterator;
-  friend class TilingSetRasterQueue;
+  friend class TilingSetRasterQueueAll;
+  friend class TilingSetRasterQueueRequired;
   friend class TilingSetEvictionQueue;
 
   typedef std::pair<int, int> TileMapKey;
   typedef base::hash_map<TileMapKey, scoped_refptr<Tile>> TileMap;
+
+  struct FrameVisibleRect {
+    gfx::Rect visible_rect_in_content_space;
+    double frame_time_in_seconds = 0.0;
+  };
 
   PictureLayerTiling(float contents_scale,
                      scoped_refptr<RasterSource> raster_source,
@@ -274,8 +288,20 @@ class CC_EXPORT PictureLayerTiling {
   bool NeedsUpdateForFrameAtTimeAndViewport(
       double frame_time_in_seconds,
       const gfx::Rect& viewport_in_layer_space) {
-    return frame_time_in_seconds != last_impl_frame_time_in_seconds_ ||
+    return frame_time_in_seconds !=
+               visible_rect_history_[0].frame_time_in_seconds ||
            viewport_in_layer_space != last_viewport_in_layer_space_;
+  }
+  void UpdateVisibleRectHistory(
+      double frame_time_in_seconds,
+      const gfx::Rect& visible_rect_in_content_space) {
+    visible_rect_history_[1] = visible_rect_history_[0];
+    visible_rect_history_[0].frame_time_in_seconds = frame_time_in_seconds;
+    visible_rect_history_[0].visible_rect_in_content_space =
+        visible_rect_in_content_space;
+    // If we don't have a second history item, set it to the most recent one.
+    if (visible_rect_history_[1].frame_time_in_seconds == 0.0)
+      visible_rect_history_[1] = visible_rect_history_[0];
   }
 
   const size_t max_tiles_for_interest_area_;
@@ -293,10 +319,9 @@ class CC_EXPORT PictureLayerTiling {
   TileMap tiles_;  // It is not legal to have a NULL tile in the tiles_ map.
   gfx::Rect live_tiles_rect_;
 
-  // State saved for computing velocities based upon finite differences.
-  double last_impl_frame_time_in_seconds_;
   gfx::Rect last_viewport_in_layer_space_;
-  gfx::Rect last_visible_rect_in_content_space_;
+  // State saved for computing velocities based upon finite differences.
+  FrameVisibleRect visible_rect_history_[2];
 
   bool can_require_tiles_for_activation_;
 

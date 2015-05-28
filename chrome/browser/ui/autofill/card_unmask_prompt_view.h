@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_AUTOFILL_CARD_UNMASK_PROMPT_VIEW_H_
 #define CHROME_BROWSER_UI_AUTOFILL_CARD_UNMASK_PROMPT_VIEW_H_
 
+#include "base/strings/string16.h"
+
 namespace autofill {
 
 class CardUnmaskPromptController;
@@ -19,11 +21,12 @@ class CardUnmaskPromptView {
 
   virtual void ControllerGone() = 0;
   virtual void DisableAndWaitForVerification() = 0;
-  virtual void GotVerificationResult(bool success) = 0;
+  virtual void GotVerificationResult(const base::string16& error_message,
+                                     bool allow_retry) = 0;
 
  protected:
-  CardUnmaskPromptView();
-  virtual ~CardUnmaskPromptView();
+  CardUnmaskPromptView() {}
+  virtual ~CardUnmaskPromptView() {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CardUnmaskPromptView);

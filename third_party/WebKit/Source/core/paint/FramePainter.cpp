@@ -6,20 +6,22 @@
 #include "core/paint/FramePainter.h"
 
 #include "core/dom/DocumentMarkerController.h"
+#include "core/fetch/MemoryCache.h"
 #include "core/frame/FrameView.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
+#include "core/layout/LayoutView.h"
 #include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
-#include "core/paint/LayerPainter.h"
+#include "core/paint/DeprecatedPaintLayer.h"
+#include "core/paint/DeprecatedPaintLayerPainter.h"
 #include "core/paint/ScrollbarPainter.h"
 #include "core/paint/TransformRecorder.h"
-#include "core/rendering/RenderLayer.h"
-#include "core/rendering/RenderView.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/ClipRecorder.h"
+#include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/scroll/ScrollbarTheme.h"
 
 namespace blink {
@@ -35,10 +37,10 @@ void FramePainter::paint(GraphicsContext* context, const IntRect& rect)
     documentDirtyRect.intersect(visibleAreaWithoutScrollbars);
 
     if (!documentDirtyRect.isEmpty()) {
-        TransformRecorder transformRecorder(*context, m_frameView.renderView()->displayItemClient(),
+        TransformRecorder transformRecorder(*context, *m_frameView.layoutView(),
             AffineTransform::translation(m_frameView.x() - m_frameView.scrollX(), m_frameView.y() - m_frameView.scrollY()));
 
-        ClipRecorder recorder(m_frameView.renderView()->displayItemClient(), context, DisplayItem::ClipFrameToVisibleContentRect, m_frameView.visibleContentRect());
+        ClipRecorder recorder(*context, *m_frameView.layoutView(), DisplayItem::ClipFrameToVisibleContentRect, LayoutRect(m_frameView.visibleContentRect()));
 
         documentDirtyRect.moveBy(-m_frameView.location() + m_frameView.scrollPosition());
         paintContents(context, documentDirtyRect);
@@ -53,10 +55,10 @@ void FramePainter::paint(GraphicsContext* context, const IntRect& rect)
         scrollViewDirtyRect.intersect(visibleAreaWithScrollbars);
         scrollViewDirtyRect.moveBy(-m_frameView.location());
 
-        TransformRecorder transformRecorder(*context, m_frameView.renderView()->displayItemClient(),
+        TransformRecorder transformRecorder(*context, *m_frameView.layoutView(),
             AffineTransform::translation(m_frameView.x(), m_frameView.y()));
 
-        ClipRecorder recorder(m_frameView.renderView()->displayItemClient(), context, DisplayItem::ClipFrameScrollbars, IntRect(IntPoint(), visibleAreaWithScrollbars.size()));
+        ClipRecorder recorder(*context, *m_frameView.layoutView(), DisplayItem::ClipFrameScrollbars, LayoutRect(IntPoint(), visibleAreaWithScrollbars.size()));
 
         paintScrollbars(context, scrollViewDirtyRect);
     }
@@ -85,12 +87,16 @@ void FramePainter::paintContents(GraphicsContext* context, const IntRect& rect)
     else
         fillWithRed = true;
 
-    if (fillWithRed)
-        context->fillRect(rect, Color(0xFF, 0, 0));
+    if (fillWithRed) {
+        IntRect contentRect(IntPoint(), m_frameView.contentsSize());
+        DrawingRecorder drawingRecorder(*context, *m_frameView.layoutView(), DisplayItem::DebugRedFill, contentRect);
+        if (!drawingRecorder.canUseCachedDrawing())
+            context->fillRect(contentRect, Color(0xFF, 0, 0));
+    }
 #endif
 
-    RenderView* renderView = m_frameView.renderView();
-    if (!renderView) {
+    LayoutView* layoutView = m_frameView.layoutView();
+    if (!layoutView) {
         WTF_LOG_ERROR("called FramePainter::paint with nil renderer");
         return;
     }
@@ -98,9 +104,7 @@ void FramePainter::paintContents(GraphicsContext* context, const IntRect& rect)
     RELEASE_ASSERT(!m_frameView.needsLayout());
     ASSERT(document->lifecycle().state() >= DocumentLifecycle::CompositingClean);
 
-    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "Paint", "data", InspectorPaintEvent::data(renderView, rect, 0));
-    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
-    InspectorInstrumentation::willPaint(renderView, 0);
+    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "Paint", "data", InspectorPaintEvent::data(layoutView, LayoutRect(rect), 0));
 
     bool isTopLevelPainter = !s_inPaintContents;
     s_inPaintContents = true;
@@ -115,7 +119,7 @@ void FramePainter::paintContents(GraphicsContext* context, const IntRect& rect)
     }
 
     if (m_frameView.paintBehavior() == PaintBehaviorNormal)
-        document->markers().invalidateRenderedRectsForMarkersInRect(rect);
+        document->markers().invalidateRenderedRectsForMarkersInRect(LayoutRect(rect));
 
     if (document->printing())
         m_frameView.setPaintBehavior(m_frameView.paintBehavior() | PaintBehaviorFlattenCompositingLayers);
@@ -124,23 +128,23 @@ void FramePainter::paintContents(GraphicsContext* context, const IntRect& rect)
     m_frameView.setIsPainting(true);
 
     // m_frameView.nodeToDraw() is used to draw only one element (and its descendants)
-    RenderObject* renderer = m_frameView.nodeToDraw() ? m_frameView.nodeToDraw()->renderer() : 0;
-    RenderLayer* rootLayer = renderView->layer();
+    LayoutObject* renderer = m_frameView.nodeToDraw() ? m_frameView.nodeToDraw()->layoutObject() : 0;
+    DeprecatedPaintLayer* rootLayer = layoutView->layer();
 
 #if ENABLE(ASSERT)
-    renderView->assertSubtreeIsLaidOut();
-    RenderObject::SetLayoutNeededForbiddenScope forbidSetNeedsLayout(*rootLayer->renderer());
+    layoutView->assertSubtreeIsLaidOut();
+    LayoutObject::SetLayoutNeededForbiddenScope forbidSetNeedsLayout(*rootLayer->layoutObject());
 #endif
 
-    LayerPainter layerPainter(*rootLayer);
+    DeprecatedPaintLayerPainter layerPainter(*rootLayer);
 
-    float deviceScaleFactor = blink::deviceScaleFactor(rootLayer->renderer()->frame());
+    float deviceScaleFactor = blink::deviceScaleFactor(rootLayer->layoutObject()->frame());
     context->setDeviceScaleFactor(deviceScaleFactor);
 
-    layerPainter.paint(context, rect, m_frameView.paintBehavior(), renderer);
+    layerPainter.paint(context, LayoutRect(rect), m_frameView.paintBehavior(), renderer);
 
     if (rootLayer->containsDirtyOverlayScrollbars())
-        layerPainter.paintOverlayScrollbars(context, rect, m_frameView.paintBehavior(), renderer);
+        layerPainter.paintOverlayScrollbars(context, LayoutRect(rect), m_frameView.paintBehavior(), renderer);
 
     m_frameView.setIsPainting(false);
 
@@ -154,11 +158,11 @@ void FramePainter::paintContents(GraphicsContext* context, const IntRect& rect)
     if (isTopLevelPainter) {
         // Everything that happens after paintContents completions is considered
         // to be part of the next frame.
-        m_frameView.setCurrentFrameTimeStamp(currentTime());
+        memoryCache()->updateFramePaintTimestamp();
         s_inPaintContents = false;
     }
 
-    InspectorInstrumentation::didPaint(renderView, 0, context, rect);
+    InspectorInstrumentation::didPaint(layoutView, 0, context, LayoutRect(rect));
 }
 
 void FramePainter::paintScrollbars(GraphicsContext* context, const IntRect& rect)
@@ -181,13 +185,16 @@ void FramePainter::paintScrollCorner(GraphicsContext* context, const IntRect& co
 {
     if (m_frameView.scrollCorner()) {
         bool needsBackground = m_frameView.frame().isMainFrame();
-        if (needsBackground)
-            context->fillRect(cornerRect, m_frameView.baseBackgroundColor());
-        ScrollbarPainter::paintIntoRect(m_frameView.scrollCorner(), context, cornerRect.location(), cornerRect);
+        if (needsBackground) {
+            DrawingRecorder drawingRecorder(*context, *m_frameView.layoutView(), DisplayItem::ScrollbarCorner, cornerRect);
+            if (!drawingRecorder.canUseCachedDrawing())
+                context->fillRect(cornerRect, m_frameView.baseBackgroundColor());
+        }
+        ScrollbarPainter::paintIntoRect(m_frameView.scrollCorner(), context, cornerRect.location(), LayoutRect(cornerRect));
         return;
     }
 
-    ScrollbarTheme::theme()->paintScrollCorner(context, cornerRect);
+    ScrollbarTheme::theme()->paintScrollCorner(context, m_frameView, cornerRect);
 }
 
 void FramePainter::paintScrollbar(GraphicsContext* context, Scrollbar* bar, const IntRect& rect)

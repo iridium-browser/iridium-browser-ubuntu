@@ -13,6 +13,7 @@
 #include "bindings/core/v8/V8DOMWrapper.h"
 #include "bindings/core/v8/WrapperTypeInfo.h"
 #include "bindings/tests/idls/core/TestObject.h"
+#include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -41,21 +42,23 @@ public:
         static bool enumForPrivateScriptAttributeSetter(LocalFrame* frame, TestObject* holderImpl, String cppValue);
     };
 
-    static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
+    CORE_EXPORT static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
     static v8::Local<v8::Object> findInstanceInPrototypeChain(v8::Local<v8::Value>, v8::Isolate*);
-    static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*);
+    CORE_EXPORT static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*);
     static TestObject* toImpl(v8::Local<v8::Object> object)
     {
         return blink::toScriptWrappable(object)->toImpl<TestObject>();
     }
-    static TestObject* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
-    static const WrapperTypeInfo wrapperTypeInfo;
+    CORE_EXPORT static TestObject* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
+    CORE_EXPORT static const WrapperTypeInfo wrapperTypeInfo;
     static void refObject(ScriptWrappable*);
     static void derefObject(ScriptWrappable*);
-    static void trace(Visitor* visitor, ScriptWrappable* scriptWrappable)
+    template<typename VisitorDispatcher>
+    static void trace(VisitorDispatcher visitor, ScriptWrappable* scriptWrappable)
     {
     }
     static void customVoidMethodMethodCustom(const v8::FunctionCallbackInfo<v8::Value>&);
+    static void customCallEpilogueVoidMethodMethodEpilogueCustom(const v8::FunctionCallbackInfo<v8::Value>&, TestObject*);
 #if ENABLE(CONDITION)
     static void conditionalConditionCustomVoidMethodMethodCustom(const v8::FunctionCallbackInfo<v8::Value>&);
 #endif // ENABLE(CONDITION)
@@ -77,6 +80,11 @@ public:
     static const int internalFieldCount = v8DefaultWrapperInternalFieldCount + 0;
     static void installConditionallyEnabledProperties(v8::Local<v8::Object>, v8::Isolate*);
     static void installConditionallyEnabledMethods(v8::Local<v8::Object>, v8::Isolate*);
+};
+
+template <>
+struct V8TypeOf<TestObject> {
+    typedef V8TestObject Type;
 };
 
 } // namespace blink

@@ -56,7 +56,8 @@ public:
 
     static FetchRequestData* create();
     static FetchRequestData* create(const blink::WebServiceWorkerRequest&);
-    FetchRequestData* createCopy() const;
+    FetchRequestData* clone() const;
+    FetchRequestData* pass() const;
     ~FetchRequestData();
 
     void setMethod(AtomicString method) { m_method = method; }
@@ -83,8 +84,10 @@ public:
     void setHeaderList(FetchHeaderList* headerList) { m_headerList = headerList; }
     PassRefPtr<BlobDataHandle> blobDataHandle() const { return m_blobDataHandle; }
     void setBlobDataHandle(PassRefPtr<BlobDataHandle> blobHandle) { m_blobDataHandle = blobHandle; }
+    String mimeType() const { return m_mimeType; }
+    void setMIMEType(const String& type) { m_mimeType = type; }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     FetchRequestData();
@@ -108,6 +111,7 @@ private:
     // FIXME: Support m_manualRedirectFlag;
     // FIXME: Support m_redirectCount;
     Tainting m_responseTainting;
+    String m_mimeType;
 };
 
 } // namespace blink

@@ -5,13 +5,13 @@
 #include "config.h"
 #include "core/paint/SVGRootPainter.h"
 
+#include "core/layout/PaintInfo.h"
+#include "core/layout/svg/LayoutSVGRoot.h"
+#include "core/layout/svg/SVGResources.h"
+#include "core/layout/svg/SVGResourcesCache.h"
 #include "core/paint/BoxPainter.h"
+#include "core/paint/SVGPaintContext.h"
 #include "core/paint/TransformRecorder.h"
-#include "core/rendering/PaintInfo.h"
-#include "core/rendering/svg/RenderSVGRoot.h"
-#include "core/rendering/svg/SVGRenderingContext.h"
-#include "core/rendering/svg/SVGResources.h"
-#include "core/rendering/svg/SVGResourcesCache.h"
 #include "core/svg/SVGSVGElement.h"
 #include "platform/graphics/paint/ClipRecorder.h"
 
@@ -36,35 +36,31 @@ void SVGRootPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintO
 
     // Don't paint if we don't have kids, except if we have filters we should paint those.
     if (!m_renderSVGRoot.firstChild()) {
-        SVGResources* resources = SVGResourcesCache::cachedResourcesForRenderObject(&m_renderSVGRoot);
+        SVGResources* resources = SVGResourcesCache::cachedResourcesForLayoutObject(&m_renderSVGRoot);
         if (!resources || !resources->filter())
             return;
     }
 
-    PaintInfo childPaintInfo(paintInfo);
-    GraphicsContextStateSaver stateSaver(*childPaintInfo.context);
+    PaintInfo paintInfoBeforeFiltering(paintInfo);
 
     // Apply initial viewport clip.
     OwnPtr<ClipRecorder> clipRecorder;
     if (m_renderSVGRoot.shouldApplyViewportClip())
-        clipRecorder = adoptPtr(new ClipRecorder(m_renderSVGRoot.displayItemClient(), childPaintInfo.context, childPaintInfo.displayItemTypeForClipping(), pixelSnappedIntRect(m_renderSVGRoot.overflowClipRect(paintOffset))));
+        clipRecorder = adoptPtr(new ClipRecorder(*paintInfoBeforeFiltering.context, m_renderSVGRoot, paintInfoBeforeFiltering.displayItemTypeForClipping(), LayoutRect(pixelSnappedIntRect(m_renderSVGRoot.overflowClipRect(paintOffset)))));
 
     // Convert from container offsets (html renderers) to a relative transform (svg renderers).
     // Transform from our paint container's coordinate system to our local coords.
     IntPoint adjustedPaintOffset = roundedIntPoint(paintOffset);
-    TransformRecorder transformRecorder(*childPaintInfo.context, m_renderSVGRoot.displayItemClient(), AffineTransform::translation(adjustedPaintOffset.x(), adjustedPaintOffset.y()) * m_renderSVGRoot.localToBorderBoxTransform());
+    TransformRecorder transformRecorder(*paintInfoBeforeFiltering.context, m_renderSVGRoot, AffineTransform::translation(adjustedPaintOffset.x(), adjustedPaintOffset.y()) * m_renderSVGRoot.localToBorderBoxTransform());
 
     // SVG doesn't use paintOffset internally but we need to bake it into the paint rect.
-    childPaintInfo.rect.move(-adjustedPaintOffset.x(), -adjustedPaintOffset.y());
+    paintInfoBeforeFiltering.rect.move(-adjustedPaintOffset.x(), -adjustedPaintOffset.y());
 
-    SVGRenderingContext renderingContext;
-    if (childPaintInfo.phase == PaintPhaseForeground) {
-        renderingContext.prepareToRenderSVGContent(&m_renderSVGRoot, childPaintInfo);
-        if (!renderingContext.isRenderingPrepared())
-            return;
-    }
+    SVGPaintContext paintContext(m_renderSVGRoot, paintInfoBeforeFiltering);
+    if (paintContext.paintInfo().phase == PaintPhaseForeground && !paintContext.applyClipMaskAndFilterIfNecessary())
+        return;
 
-    BoxPainter(m_renderSVGRoot).paint(childPaintInfo, LayoutPoint());
+    BoxPainter(m_renderSVGRoot).paint(paintContext.paintInfo(), LayoutPoint());
 }
 
 } // namespace blink

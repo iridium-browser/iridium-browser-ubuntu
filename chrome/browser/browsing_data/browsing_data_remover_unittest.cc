@@ -20,9 +20,7 @@
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_test_util.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/pref_names.h"
@@ -36,10 +34,10 @@
 #include "components/domain_reliability/clear_mode.h"
 #include "components/domain_reliability/monitor.h"
 #include "components/domain_reliability/service.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/local_storage_usage_info.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -155,6 +153,11 @@ class TestStoragePartition : public StoragePartition {
     return nullptr;
   }
 
+  content::PlatformNotificationContext* GetPlatformNotificationContext()
+      override {
+    return nullptr;
+  }
+
   content::HostZoomMap* GetHostZoomMap() override { return NULL; }
   content::HostZoomLevelContext* GetHostZoomLevelContext() override {
     return NULL;
@@ -195,6 +198,8 @@ class TestStoragePartition : public StoragePartition {
         base::Bind(&TestStoragePartition::AsyncRunCallback,
                    base::Unretained(this), callback));
   }
+
+  void Flush() override {}
 
   StoragePartitionRemovalData GetStoragePartitionRemovalData() {
     return storage_partition_removal_data_;
@@ -383,7 +388,7 @@ class RemoveHistoryTester {
     if (!profile->CreateHistoryService(true, false))
       return false;
     history_service_ = HistoryServiceFactory::GetForProfile(
-        profile, Profile::EXPLICIT_ACCESS);
+        profile, ServiceAccessType::EXPLICIT_ACCESS);
     return true;
   }
 
@@ -423,7 +428,7 @@ class RemoveHistoryTester {
   base::Closure quit_closure_;
 
   // TestingProfile owns the history service; we shouldn't delete it.
-  HistoryService* history_service_;
+  history::HistoryService* history_service_;
 
   DISALLOW_COPY_AND_ASSIGN(RemoveHistoryTester);
 };
@@ -669,9 +674,9 @@ class ClearDomainReliabilityTester {
     AttachService();
   }
 
-  unsigned clear_count() { return mock_service_->clear_count(); }
+  unsigned clear_count() const { return mock_service_->clear_count(); }
 
-  DomainReliabilityClearMode last_clear_mode() {
+  DomainReliabilityClearMode last_clear_mode() const {
     return mock_service_->last_clear_mode();
   }
 
@@ -703,13 +708,15 @@ class ClearDomainReliabilityTester {
 
 // Test Class ----------------------------------------------------------------
 
-class BrowsingDataRemoverTest : public testing::Test,
-                                public content::NotificationObserver {
+class BrowsingDataRemoverTest : public testing::Test {
  public:
   BrowsingDataRemoverTest()
-      : profile_(new TestingProfile()) {
-    registrar_.Add(this, chrome::NOTIFICATION_BROWSING_DATA_REMOVED,
-                   content::Source<Profile>(profile_.get()));
+      : profile_(new TestingProfile()),
+        clear_domain_reliability_tester_(GetProfile()) {
+    callback_subscription_ =
+        BrowsingDataRemover::RegisterOnBrowsingDataRemovedCallback(
+            base::Bind(&BrowsingDataRemoverTest::NotifyWithDetails,
+                       base::Unretained(this)));
   }
 
   ~BrowsingDataRemoverTest() override {}
@@ -726,6 +733,8 @@ class BrowsingDataRemoverTest : public testing::Test,
     // Otherwise we leak memory.
     profile_.reset();
     base::MessageLoop::current()->RunUntilIdle();
+
+    TestingBrowserProcess::GetGlobal()->SetLocalState(NULL);
   }
 
   void BlockUntilBrowsingDataRemoved(BrowsingDataRemover::TimePeriod period,
@@ -794,19 +803,15 @@ class BrowsingDataRemoverTest : public testing::Test,
     return storage_partition_removal_data_;
   }
 
-  // content::NotificationObserver implementation.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    DCHECK_EQ(type, chrome::NOTIFICATION_BROWSING_DATA_REMOVED);
-
+  // Callback for browsing data removal events.
+  void NotifyWithDetails(
+      const BrowsingDataRemover::NotificationDetails& details) {
     // We're not taking ownership of the details object, but storing a copy of
     // it locally.
-    called_with_details_.reset(new BrowsingDataRemover::NotificationDetails(
-        *content::Details<BrowsingDataRemover::NotificationDetails>(
-            details).ptr()));
+    called_with_details_.reset(
+        new BrowsingDataRemover::NotificationDetails(details));
 
-    registrar_.RemoveAll();
+    callback_subscription_.reset();
   }
 
   MockExtensionSpecialStoragePolicy* CreateMockPolicy() {
@@ -837,12 +842,14 @@ class BrowsingDataRemoverTest : public testing::Test,
 #endif
   }
 
+  const ClearDomainReliabilityTester& clear_domain_reliability_tester() {
+    return clear_domain_reliability_tester_;
+  }
+
  protected:
   scoped_ptr<BrowsingDataRemover::NotificationDetails> called_with_details_;
 
  private:
-  content::NotificationRegistrar registrar_;
-
   content::TestBrowserThreadBundle thread_bundle_;
   scoped_ptr<TestingProfile> profile_;
 
@@ -851,6 +858,11 @@ class BrowsingDataRemoverTest : public testing::Test,
 #if defined(ENABLE_EXTENSIONS)
   scoped_refptr<MockExtensionSpecialStoragePolicy> mock_policy_;
 #endif
+
+  BrowsingDataRemover::CallbackSubscription callback_subscription_;
+
+  // Needed to mock out DomainReliabilityService, even for unrelated tests.
+  ClearDomainReliabilityTester clear_domain_reliability_tester_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingDataRemoverTest);
 };
@@ -1778,13 +1790,15 @@ TEST_F(BrowsingDataRemoverTest, ContentProtectionPlatformKeysRemoval) {
 #endif
 
 TEST_F(BrowsingDataRemoverTest, DomainReliability_Null) {
-  ClearDomainReliabilityTester tester(GetProfile());
+  const ClearDomainReliabilityTester& tester =
+      clear_domain_reliability_tester();
 
   EXPECT_EQ(0u, tester.clear_count());
 }
 
 TEST_F(BrowsingDataRemoverTest, DomainReliability_Beacons) {
-  ClearDomainReliabilityTester tester(GetProfile());
+  const ClearDomainReliabilityTester& tester =
+      clear_domain_reliability_tester();
 
   BlockUntilBrowsingDataRemoved(
       BrowsingDataRemover::EVERYTHING,
@@ -1794,7 +1808,8 @@ TEST_F(BrowsingDataRemoverTest, DomainReliability_Beacons) {
 }
 
 TEST_F(BrowsingDataRemoverTest, DomainReliability_Contexts) {
-  ClearDomainReliabilityTester tester(GetProfile());
+  const ClearDomainReliabilityTester& tester =
+      clear_domain_reliability_tester();
 
   BlockUntilBrowsingDataRemoved(
       BrowsingDataRemover::EVERYTHING,
@@ -1804,7 +1819,8 @@ TEST_F(BrowsingDataRemoverTest, DomainReliability_Contexts) {
 }
 
 TEST_F(BrowsingDataRemoverTest, DomainReliability_ContextsWin) {
-  ClearDomainReliabilityTester tester(GetProfile());
+  const ClearDomainReliabilityTester& tester =
+      clear_domain_reliability_tester();
 
   BlockUntilBrowsingDataRemoved(
       BrowsingDataRemover::EVERYTHING,
@@ -1815,7 +1831,8 @@ TEST_F(BrowsingDataRemoverTest, DomainReliability_ContextsWin) {
 }
 
 TEST_F(BrowsingDataRemoverTest, DomainReliability_ProtectedOrigins) {
-  ClearDomainReliabilityTester tester(GetProfile());
+  const ClearDomainReliabilityTester& tester =
+      clear_domain_reliability_tester();
 
   BlockUntilBrowsingDataRemoved(
       BrowsingDataRemover::EVERYTHING,
@@ -1824,7 +1841,11 @@ TEST_F(BrowsingDataRemoverTest, DomainReliability_ProtectedOrigins) {
   EXPECT_EQ(CLEAR_CONTEXTS, tester.last_clear_mode());
 }
 
-TEST_F(BrowsingDataRemoverTest, DomainReliability_NoMonitor) {
+// TODO(ttuttle): This isn't actually testing the no-monitor case, since
+// BrowsingDataRemoverTest now creates one unconditionally, since it's needed
+// for some unrelated test cases. This should be fixed so it tests the no-
+// monitor case again.
+TEST_F(BrowsingDataRemoverTest, DISABLED_DomainReliability_NoMonitor) {
   BlockUntilBrowsingDataRemoved(
       BrowsingDataRemover::EVERYTHING,
       BrowsingDataRemover::REMOVE_HISTORY |

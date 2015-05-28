@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_DRIVE_FAKE_DRIVE_SERVICE_H_
 #define CHROME_BROWSER_DRIVE_FAKE_DRIVE_SERVICE_H_
 
+#include <string>
+
 #include "base/files/file_path.h"
 #include "base/threading/thread_checker.h"
 #include "chrome/browser/drive/drive_service_interface.h"
@@ -54,7 +56,7 @@ class FakeDriveService : public DriveServiceInterface {
   // Returns true if the service knows the given drive app id.
   bool HasApp(const std::string& app_id) const;
 
-  // Changes the offline state. All functions fail with GDATA_NO_CONNECTION
+  // Changes the offline state. All functions fail with DRIVE_NO_CONNECTION
   // when offline. By default the offline state is false.
   void set_offline(bool offline) { offline_ = offline; }
 
@@ -199,6 +201,7 @@ class FakeDriveService : public DriveServiceInterface {
       const std::string& new_title,
       const base::Time& last_modified,
       const base::Time& last_viewed_by_me,
+      const google_apis::drive::Properties& properties,
       const google_apis::FileResourceCallback& callback) override;
   google_apis::CancelCallback AddResourceToDirectory(
       const std::string& parent_resource_id,
@@ -268,6 +271,7 @@ class FakeDriveService : public DriveServiceInterface {
       const std::string& email,
       google_apis::drive::PermissionRole role,
       const google_apis::EntryActionCallback& callback) override;
+  scoped_ptr<BatchRequestConfiguratorInterface> StartBatchRequest() override;
 
   // Adds a new file with the given parameters. On success, returns
   // HTTP_CREATED with the parsed entry.
@@ -310,7 +314,7 @@ class FakeDriveService : public DriveServiceInterface {
       const google_apis::FileResourceCallback& callback);
 
   // Sets the user's permission for an entry specified by |resource_id|.
-  google_apis::GDataErrorCode SetUserPermission(
+  google_apis::DriveApiErrorCode SetUserPermission(
       const std::string& resource_id,
       google_apis::drive::PermissionRole user_permission);
 

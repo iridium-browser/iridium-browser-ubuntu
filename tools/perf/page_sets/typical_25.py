@@ -7,14 +7,17 @@ from telemetry.page import page_set as page_set_module
 
 class Typical25Page(page_module.Page):
 
-  def __init__(self, url, page_set):
+  def __init__(self, url, page_set, run_no_page_interactions):
     super(Typical25Page, self).__init__(url=url, page_set=page_set)
     self.user_agent_type = 'desktop'
     self.archive_data_file = 'data/typical_25.json'
+    self._run_no_page_interactions = run_no_page_interactions
 
   def RunPageInteractions(self, action_runner):
+    if self._run_no_page_interactions:
+      return
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollPage()
     interaction.End()
 
@@ -23,7 +26,7 @@ class Typical25PageSet(page_set_module.PageSet):
 
   """ Pages designed to represent the median, not highly optimized web """
 
-  def __init__(self):
+  def __init__(self, run_no_page_interactions=False):
     super(Typical25PageSet, self).__init__(
       user_agent_type='desktop',
       archive_data_file='data/typical_25.json',
@@ -71,4 +74,5 @@ class Typical25PageSet(page_set_module.PageSet):
     ]
 
     for url in urls_list:
-      self.AddUserStory(Typical25Page(url, self))
+      self.AddUserStory(
+        Typical25Page(url, self, run_no_page_interactions))

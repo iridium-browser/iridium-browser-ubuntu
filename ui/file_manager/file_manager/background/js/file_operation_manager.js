@@ -3,15 +3,38 @@
 // found in the LICENSE file.
 
 /**
+ * @param {!VolumeManager} volumeManager
  * @constructor
  * @struct
  * @suppress {checkStructDictInheritance}
  * @extends {cr.EventTarget}
  */
-function FileOperationManager() {
+function FileOperationManager(volumeManager) {
+  /**
+   * @private {!VolumeManager}
+   * @const
+   */
+  this.volumeManager_ = volumeManager;
+
+  /**
+   * @private {!Array<!fileOperationUtil.Task>}
+   */
   this.copyTasks_ = [];
+
+  /**
+   * @private {!Array<!fileOperationUtil.Task>}
+   */
   this.deleteTasks_ = [];
+
+  /**
+   * @private {number}
+   */
   this.taskIdCounter_ = 0;
+
+  /**
+   * @private {!fileOperationUtil.EventRouter}
+   * @const
+   */
   this.eventRouter_ = new fileOperationUtil.EventRouter();
 }
 
@@ -92,8 +115,8 @@ FileOperationManager.prototype.requestTaskCancel = function(taskId) {
  * Filters the entry in the same directory
  *
  * @param {Array.<Entry>} sourceEntries Entries of the source files.
- * @param {DirectoryEntry} targetEntry The destination entry of the target
- *     directory.
+ * @param {DirectoryEntry|FakeEntry} targetEntry The destination entry of the
+ *     target directory.
  * @param {boolean} isMove True if the operation is "move", otherwise (i.e.
  *     if the operation is "copy") false.
  * @return {Promise} Promise fulfilled with the filtered entry. This is not
@@ -328,7 +351,7 @@ FileOperationManager.prototype.serviceAllDeleteTasks_ = function() {
 /**
  * Performs the deletion.
  *
- * @param {Object} task The delete task (see deleteEntries function).
+ * @param {!Object} task The delete task (see deleteEntries function).
  * @param {function()} callback Callback run on task end.
  * @private
  */

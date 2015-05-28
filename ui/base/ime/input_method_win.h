@@ -17,7 +17,7 @@
 namespace ui {
 
 // A common InputMethod implementation based on IMM32.
-class UI_BASE_EXPORT InputMethodWin : public InputMethodBase {
+class UI_BASE_IME_EXPORT InputMethodWin : public InputMethodBase {
  public:
   InputMethodWin(internal::InputMethodDelegate* delegate,
                  HWND toplevel_window_handle);
@@ -140,6 +140,10 @@ class UI_BASE_EXPORT InputMethodWin : public InputMethodBase {
   // Window handle where composition is on-going. NULL when there is no
   // composition.
   HWND composing_window_handle_;
+
+  // Set to false initially. Tracks whether the IME has been initialized with
+  // the current input language.
+  bool default_input_language_initialized_;
 
   DISALLOW_COPY_AND_ASSIGN(InputMethodWin);
 };

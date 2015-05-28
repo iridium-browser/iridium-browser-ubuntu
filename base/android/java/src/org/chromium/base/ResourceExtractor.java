@@ -12,6 +12,8 @@ import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.os.AsyncTask;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Trace;
 import android.preference.PreferenceManager;
 import android.util.Log;
@@ -23,7 +25,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -37,7 +38,7 @@ public class ResourceExtractor {
 
     private static final String LOGTAG = "ResourceExtractor";
     private static final String LAST_LANGUAGE = "Last language";
-    private static final String PAK_FILENAMES = "Pak filenames";
+    private static final String PAK_FILENAMES_LEGACY_NOREUSE = "Pak filenames";
     private static final String ICU_DATA_FILENAME = "icudtl.dat";
     private static final String V8_NATIVES_DATA_FILENAME = "natives_blob.bin";
     private static final String V8_SNAPSHOT_DATA_FILENAME = "snapshot_blob.bin";
@@ -49,14 +50,23 @@ public class ResourceExtractor {
     // change this behavior.
     private static boolean sExtractImplicitLocalePak = true;
 
+    private static boolean isAppDataFile(String file) {
+        return ICU_DATA_FILENAME.equals(file)
+                || V8_NATIVES_DATA_FILENAME.equals(file)
+                || V8_SNAPSHOT_DATA_FILENAME.equals(file);
+    }
+
     private class ExtractTask extends AsyncTask<Void, Void, Void> {
         private static final int BUFFER_SIZE = 16 * 1024;
+
+        private final List<Runnable> mCompletionCallbacks = new ArrayList<Runnable>();
 
         public ExtractTask() {
         }
 
         private void doInBackgroundImpl() {
             final File outputDir = getOutputDir();
+            final File appDataDir = getAppDataDir();
             if (!outputDir.exists() && !outputDir.mkdirs()) {
                 Log.e(LOGTAG, "Unable to create pak resources directory!");
                 return;
@@ -74,16 +84,15 @@ public class ResourceExtractor {
             }
 
             SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(mContext);
-            HashSet<String> filenames = (HashSet<String>) prefs.getStringSet(
-                    PAK_FILENAMES, new HashSet<String>());
             String currentLocale = LocaleUtils.getDefaultLocale();
             String currentLanguage = currentLocale.split("-", 2)[0];
-
-            if (prefs.getString(LAST_LANGUAGE, "").equals(currentLanguage)
-                    && filenames.size() >= sMandatoryPaks.length) {
+            // If everything we need is already there (and the locale hasn't
+            // changed), quick exit.
+            if (prefs.getString(LAST_LANGUAGE, "").equals(currentLanguage)) {
                 boolean filesPresent = true;
-                for (String file : filenames) {
-                    if (!new File(outputDir, file).exists()) {
+                for (String file : sMandatoryPaks) {
+                    File directory = isAppDataFile(file) ? appDataDir : outputDir;
+                    if (!new File(directory, file).exists()) {
                         filesPresent = false;
                         break;
                     }
@@ -122,10 +131,7 @@ public class ResourceExtractor {
                     if (!paksToInstall.matcher(file).matches()) {
                         continue;
                     }
-                    boolean isAppDataFile = file.equals(ICU_DATA_FILENAME)
-                            || file.equals(V8_NATIVES_DATA_FILENAME)
-                            || file.equals(V8_SNAPSHOT_DATA_FILENAME);
-                    File output = new File(isAppDataFile ? getAppDataDir() : outputDir, file);
+                    File output = new File(isAppDataFile(file) ? appDataDir : outputDir, file);
                     if (output.exists()) {
                         continue;
                     }
@@ -152,9 +158,7 @@ public class ResourceExtractor {
                             throw new IOException(file + " extracted with 0 length!");
                         }
 
-                        if (!isAppDataFile) {
-                            filenames.add(file);
-                        } else {
+                        if (isAppDataFile(file)) {
                             // icu and V8 data need to be accessed by a renderer
                             // process.
                             output.setReadable(true, false);
@@ -194,9 +198,6 @@ public class ResourceExtractor {
                     Log.w(LOGTAG, "Failed to write resource pak timestamp!");
                 }
             }
-            // TODO(yusufo): Figure out why remove is required here.
-            prefs.edit().remove(PAK_FILENAMES).apply();
-            prefs.edit().putStringSet(PAK_FILENAMES, filenames).apply();
         }
 
         @Override
@@ -212,6 +213,23 @@ public class ResourceExtractor {
                 endTraceSection();
             }
             return null;
+        }
+
+        private void onPostExecuteImpl() {
+            for (int i = 0; i < mCompletionCallbacks.size(); i++) {
+                mCompletionCallbacks.get(i).run();
+            }
+            mCompletionCallbacks.clear();
+        }
+
+        @Override
+        protected void onPostExecute(Void result) {
+            beginTraceSection("ResourceExtractor.ExtractTask.onPostExecute");
+            try {
+                onPostExecuteImpl();
+            } finally {
+                endTraceSection();
+            }
         }
 
         // Looks for a timestamp file on disk that indicates the version of the APK that
@@ -338,6 +356,13 @@ public class ResourceExtractor {
         mContext = context.getApplicationContext();
     }
 
+    /**
+     * Synchronously wait for the resource extraction to be completed.
+     * <p>
+     * This method is bad and you should feel bad for using it.
+     *
+     * @see #addCompletionCallback(Runnable)
+     */
     public void waitForCompletion() {
         if (shouldSkipPakExtraction()) {
             return;
@@ -354,6 +379,35 @@ public class ResourceExtractor {
             deleteFiles();
         } catch (InterruptedException e3) {
             deleteFiles();
+        }
+    }
+
+    /**
+     * Adds a callback to be notified upon the completion of resource extraction.
+     * <p>
+     * If the resource task has already completed, the callback will be posted to the UI message
+     * queue.  Otherwise, it will be executed after all the resources have been extracted.
+     * <p>
+     * This must be called on the UI thread.  The callback will also always be executed on
+     * the UI thread.
+     *
+     * @param callback The callback to be enqueued.
+     */
+    public void addCompletionCallback(Runnable callback) {
+        ThreadUtils.assertOnUiThread();
+
+        Handler handler = new Handler(Looper.getMainLooper());
+        if (shouldSkipPakExtraction()) {
+            handler.post(callback);
+            return;
+        }
+
+        assert mExtractTask != null;
+        assert !mExtractTask.isCancelled();
+        if (mExtractTask.getStatus() == AsyncTask.Status.FINISHED) {
+            handler.post(callback);
+        } else {
+            mExtractTask.mCompletionCallbacks.add(callback);
         }
     }
 

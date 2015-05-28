@@ -4,11 +4,11 @@
 
 #include "chrome/browser/sync/sessions/sessions_sync_manager.h"
 
+#include "base/metrics/field_trial.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
 #include "chrome/browser/sync/glue/synced_window_delegate.h"
-#include "chrome/browser/sync/sessions/sessions_util.h"
 #include "chrome/browser/sync/sessions/synced_window_delegates_getter.h"
 #include "chrome/common/url_constants.h"
 #include "components/sessions/content/content_serialized_navigation_builder.h"
@@ -169,10 +169,10 @@ void SessionsSyncManager::AssociateWindows(
   header_s->set_device_type(local_device_info->device_type());
 
   session_tracker_.ResetSessionTracking(local_tag);
-  std::set<SyncedWindowDelegate*> windows =
+  std::set<const SyncedWindowDelegate*> windows =
       synced_window_getter_->GetSyncedWindowDelegates();
 
-  for (std::set<SyncedWindowDelegate*>::const_iterator i =
+  for (std::set<const SyncedWindowDelegate*>::const_iterator i =
            windows.begin(); i != windows.end(); ++i) {
     // Make sure the window has tabs and a viewable window. The viewable window
     // check is necessary because, for example, when a browser is closed the
@@ -180,8 +180,7 @@ void SessionsSyncManager::AssociateWindows(
     // for us to get a handle to a browser that is about to be removed. If
     // the tab count is 0 or the window is NULL, the browser is about to be
     // deleted, so we ignore it.
-    if (sessions_util::ShouldSyncWindow(*i) &&
-        (*i)->GetTabCount() && (*i)->HasWindow()) {
+    if ((*i)->ShouldSync() && (*i)->GetTabCount() && (*i)->HasWindow()) {
       sync_pb::SessionWindow window_s;
       SessionID::id_type window_id = (*i)->GetSessionId();
       DVLOG(1) << "Associating window " << window_id << " with "
@@ -285,7 +284,7 @@ void SessionsSyncManager::AssociateTab(SyncedTabDelegate* const tab,
     return;
   }
 
-  if (!sessions_util::ShouldSyncTab(*tab))
+  if (!tab->ShouldSync())
     return;
 
   TabLinksMap::iterator local_tab_map_iter = local_tab_map_.find(tab_id);
@@ -900,6 +899,7 @@ void SessionsSyncManager::LocalTabDelegateToSpecifics(
                               tab_delegate.GetSessionId(),
                               tab_delegate.GetSyncId());
   SetSessionTabFromDelegate(tab_delegate, base::Time::Now(), session_tab);
+  SetVariationIds(session_tab);
   sync_pb::SessionTab tab_s = session_tab->ToSyncData();
   specifics->set_session_tag(current_machine_tag_);
   specifics->set_tab_node_id(tab_delegate.GetSyncId());
@@ -1017,6 +1017,19 @@ void SessionsSyncManager::SetSessionTabFromDelegate(
     }
   }
   session_tab->session_storage_persistent_id.clear();
+}
+
+// static.
+void SessionsSyncManager::SetVariationIds(sessions::SessionTab* session_tab) {
+  base::FieldTrial::ActiveGroups active_groups;
+  base::FieldTrialList::GetActiveFieldTrialGroups(&active_groups);
+  for (const base::FieldTrial::ActiveGroup& group : active_groups) {
+    const variations::VariationID id =
+        variations::GetGoogleVariationID(variations::CHROME_SYNC_SERVICE,
+                                         group.trial_name, group.group_name);
+    if (id != variations::EMPTY_ID)
+      session_tab->variation_ids.push_back(id);
+  }
 }
 
 FaviconCache* SessionsSyncManager::GetFaviconCache() {

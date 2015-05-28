@@ -1,3 +1,7 @@
+# Copyright 2015 Google Inc.
+#
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
 # Include this gypi to include all 'effects' files
 # The parent gyp/gypi file must define:
 #       'skia_src_path'     e.g. skia/trunk/src
@@ -12,7 +16,8 @@
     '<(skia_src_path)/effects/SkAlphaThresholdFilter.cpp',
     '<(skia_src_path)/effects/SkArcToPathEffect.cpp',
     '<(skia_src_path)/effects/SkArithmeticMode.cpp',
-    '<(skia_src_path)/effects/SkAvoidXfermode.cpp',
+    '<(skia_src_path)/effects/SkArithmeticMode_gpu.cpp',
+    '<(skia_src_path)/effects/SkArithmeticMode_gpu.h',
     '<(skia_src_path)/effects/SkBitmapSource.cpp',
     '<(skia_src_path)/effects/SkBlurDrawLooper.cpp',
     '<(skia_src_path)/effects/SkBlurMask.cpp',
@@ -50,13 +55,11 @@
     '<(skia_src_path)/effects/SkPerlinNoiseShader.cpp',
     '<(skia_src_path)/effects/SkPictureImageFilter.cpp',
     '<(skia_src_path)/effects/SkPixelXorXfermode.cpp',
-    '<(skia_src_path)/effects/SkPorterDuff.cpp',
     '<(skia_src_path)/effects/SkRectShaderImageFilter.cpp',
     '<(skia_src_path)/effects/SkTableColorFilter.cpp',
     '<(skia_src_path)/effects/SkTableMaskFilter.cpp',
     '<(skia_src_path)/effects/SkTestImageFilters.cpp',
     '<(skia_src_path)/effects/SkTileImageFilter.cpp',
-    '<(skia_src_path)/effects/SkMatrixImageFilter.cpp',
     '<(skia_src_path)/effects/SkTransparentShader.cpp',
     '<(skia_src_path)/effects/SkXfermodeImageFilter.cpp',
 
@@ -85,7 +88,6 @@
     '<(skia_include_path)/effects/SkXfermodeImageFilter.h',
     '<(skia_include_path)/effects/SkAlphaThresholdFilter.h',
     '<(skia_include_path)/effects/SkArithmeticMode.h',
-    '<(skia_include_path)/effects/SkAvoidXfermode.h',
     '<(skia_include_path)/effects/SkBitmapSource.h',
     '<(skia_include_path)/effects/SkBlurDrawLooper.h',
     '<(skia_include_path)/effects/SkBlurImageFilter.h',
@@ -112,7 +114,6 @@
     '<(skia_include_path)/effects/SkPaintFlagsDrawFilter.h',
     '<(skia_include_path)/effects/SkPerlinNoiseShader.h',
     '<(skia_include_path)/effects/SkPixelXorXfermode.h',
-    '<(skia_include_path)/effects/SkPorterDuff.h',
     '<(skia_include_path)/effects/SkRectShaderImageFilter.h',
     '<(skia_include_path)/effects/SkTableColorFilter.h',
     '<(skia_include_path)/effects/SkTableMaskFilter.h',

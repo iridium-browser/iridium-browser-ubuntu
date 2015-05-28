@@ -150,9 +150,6 @@ Chrome supports. -->
         <message name="IDS_PRODUCT_DESCRIPTION" desc="Browser description">
           Google Chrome is a web browser that runs webpages and applications with lightning speed. It's fast, stable, and easy to use. Browse the web more safely with malware and phishing protection built into Google Chrome.
         </message>
-        <message name="IDS_APP_LAUNCHER_PRODUCT_DESCRIPTION" desc="App Launcher description">
-          Google Chrome App Launcher is a standalone platform for Chrome apps.
-        </message>
       </if>
       <if expr="chromeos">
         <message name="IDS_PRODUCT_OS_NAME" desc="The Chrome OS application name">
@@ -173,10 +170,10 @@ Chrome supports. -->
           https://support.google.com/chrome/?p=ib_chromeframe
         </message>
         <message name="IDS_CHROME_FRAME_TURNDOWN_TEXT_IE_OLDER" desc="Text of Chrome Frame turndown prompt for IE 6, 7, and 8">
-          This site is using the retired Chrome Frame plug-in which no longer receives security and stability updates. Please uninstall it and upgrade to a modern browser.
+          This site is using the retired Chrome Frame plugin which no longer receives security and stability updates. Please uninstall it and upgrade to a modern browser.
         </message>
         <message name="IDS_CHROME_FRAME_TURNDOWN_TEXT_IE_NEWER" desc="Text of Chrome Frame turndown prompt for IE 9 and 10">
-          This site is using the retired Chrome Frame plug-in which no longer receives security and stability updates. Please uninstall it and upgrade to a modern browser.
+          This site is using the retired Chrome Frame plugin which no longer receives security and stability updates. Please uninstall it and upgrade to a modern browser.
         </message>
         <message name="IDS_SHORTCUT_NEW_WINDOW" desc="The text label of the New window shortcut context menu entry as of Windows 8">
           New window
@@ -283,9 +280,6 @@ Chrome supports. -->
         </message>
         <message name="IDS_UNINSTALL_CHROME" desc="The text of the shortcut in the Start Menu for uninstalling chrome.">
           Uninstall Google Chrome
-        </message>
-        <message name="IDS_UNINSTALL_APP_LAUNCHER" desc="The text of the shortcut in the Start Menu for uninstalling App Launcher.">
-          Uninstall Google Chrome App Launcher
         </message>
       </if>
       <message name="IDS_FR_CUSTOMIZE_DEFAULT_BROWSER" desc="Default browser checkbox label">
@@ -420,9 +414,6 @@ Google Chrome is unable to recover your settings.
         <message name="IDS_INSTALL_HIGHER_VERSION" desc="Error displayed when higher version already exists.">
           This computer already has a more recent version of Google Chrome. If the software is not working, please uninstall Google Chrome and try again.
         </message>
-        <message name="IDS_INSTALL_HIGHER_VERSION_APP_LAUNCHER" desc="Error displayed when higher version of the Chrome App Launcher already exists.">
-          This computer already has a more recent version of the Google Chrome components. Please use a more recent installer.
-        </message>
         <message name="IDS_INSTALL_FAILED" desc="Error displayed if installation fails due to some unknown error.">
           Installation failed due to unspecified error. If Google Chrome is currently running, please close it and try again.
         </message>
@@ -456,9 +447,6 @@ Google Chrome is unable to recover your settings.
         <message name="IDS_INSTALL_MULTI_INSTALLATION_EXISTS" desc="Error during install if a multi-install Google Chrome is present, thereby preventing the installation of a single-install Google Chrome.">
           A conflicting installation of Google Chrome was found on the system. Please uninstall it and try again.
         </message>
-        <message name="IDS_INSTALL_INCONSISTENT_UPDATE_POLICY" desc="Error during install if the update policies settings in Group Policy are inconsistent.">
-          Google Chrome cannot be updated due to inconsistent Google Update Group Policy settings. Use the Group Policy Editor to set the update policy override for the Google Chrome Binaries application and try again; see https://goo.gl/uJ9gV for details.
-        </message>
       </if>
       <!-- Options Dialog -->
       <message name="IDS_OPTIONS_IMPROVE_BROWSING_EXPERIENCE" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
@@ -470,9 +458,6 @@ Google Chrome is unable to recover your settings.
         </message>
         <message name="IDS_SHORTCUT_TOOLTIP" desc="Text for the hover-on tooltip for the Google Chrome shortcuts.">
           Access the Internet
-        </message>
-        <message name="IDS_APP_LAUNCHER_SHORTCUT_TOOLTIP" desc="Text for the hover-on tooltip for the App Launcher shortcut.">
-          Launch Chrome apps
         </message>
         <message name="IDS_UNINSTALL_DELETE_PROFILE" desc="Text to show user to ask whether to delete all the profile data also during uninstallation.">
           Also delete your browsing data?
@@ -856,9 +841,6 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
         <message name="IDS_SRT_BUBBLE_TITLE" desc="Text for the title of the software removal tool bubble view.">
             Chrome behaving strangely?
         </message>
-        <message name="IDS_SRT_BUBBLE_TEXT" desc="Text for the software removal tool bubble view full description.">
-          Chrome detected that your browser settings may have been changed by a program on your computer without your knowledge. You can use Google's Software Removal Tool to remove that program.
-        </message>
       </if>
       <!-- Sync/sign-in error messages -->
       <if expr="not chromeos">
@@ -899,9 +881,6 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
         </message>
       </if>
 
-      <message name="IDS_AUTOFILL_CC_INFOBAR_TEXT" desc="Text to show in the Autofill credit card request infobar.">
-        Do you want Chrome to save this credit card information for completing web forms?
-      </message>
       <message name="IDS_AUTOFILL_DIALOG_SAVE_LOCALLY_CHECKBOX" desc="Checkbox that controls whether info the user types into the autofill dialog is saved by chrome.">
         Save details in Chrome
       </message>
@@ -914,6 +893,9 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
       <message name="IDS_AUTOFILL_WALLET_UPGRADE_CHROME_ERROR" desc="Text explaining that user must upgrade Chrome to use Wallet.">
         You must upgrade Chrome to use Google Wallet [<ph name="ERROR_CODE">$1<ex>54</ex></ph>].
       </message>
+      <message name="IDS_AUTOFILL_DESCRIBE_LOCAL_COPY" desc="Text label that described a Wallet credit card which has been copied to the local Chrome instance.">
+        Copied to Chrome
+      </message>
 
       <!-- Network Error Pages -->
       <if expr="not is_android">
@@ -923,7 +905,7 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
           <ph name="SETTINGS_TITLE">&lt;span jscontent="settingsTitle"&gt;&lt;/span&gt;<ex>Settings</ex></ph>
           &gt;
           <ph name="ADVANCED_TITLE">&lt;span jscontent="advancedTitle"&gt;&lt;/span&gt;<ex>Under the Hood</ex></ph>
-          and deselect &quot;<ph name="NO_PREFETCH_DESCRIPTION">&lt;span jscontent="noNetworkPredictionTitle"&gt;&lt;/span&gt;<ex>Predict network actions to improve page load performance</ex></ph>.&quot;
+          and deselect &quot;<ph name="NO_PREFETCH_DESCRIPTION">&lt;span jscontent="noNetworkPredictionTitle"&gt;&lt;/span&gt;<ex>Prefetch resources to load pages more quickly</ex></ph>.&quot;
           If this does not resolve the issue, we recommend selecting this option
           again for improved performance.
         </message>
@@ -931,7 +913,7 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
       <if expr="is_android">
         <message name="IDS_ERRORPAGES_SUGGESTION_NETWORK_PREDICTION_BODY" desc="When a page fails to load, sometimes we suggest disabling predicting network actions.  These are details below a header for Android devices.  Note that on devices without mobile network (3G) capability, the setting is a checkbox, while on other devices, it is a list of three items.  The words _disable_ and _re-enabling_ can be used for both cases.">
           Go to the Chrome menu &gt; Settings &gt; (Advanced) Privacy
-          and disable &quot;Network action predictions.&quot;
+          and disable &quot;Prefetch page resources.&quot;
           If this does not resolve the issue, we recommend re-enabling this option
           again for improved performance.
         </message>
@@ -1002,28 +984,14 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
           You need to be signed in to Chrome to use apps. This allows Chrome to sync your apps, bookmarks, history, passwords and other settings across devices.
         </message>
         <if expr="not use_titlecase">
-          <if expr="is_macosx">
-            <message name="IDS_APP_LIST_EXTENSIONS_UNINSTALL" desc="Title text for the context menu item of a non-platform-app app list item that removes the app.">
-              Remove from Chrome
-            </message>
-          </if>
-          <if expr="not is_macosx">
-            <message name="IDS_APP_LIST_EXTENSIONS_UNINSTALL" desc="Title text for the context menu item of a non-platform-app app list item that removes the app.">
-              Remove from Chrome...
-            </message>
-          </if>
+          <message name="IDS_APP_LIST_EXTENSIONS_UNINSTALL" desc="Title text for the context menu item of a non-platform-app app list item that removes the app.">
+            Remove from Chrome...
+          </message>
         </if>
         <if expr="use_titlecase">
-          <if expr="is_macosx">
-            <message name="IDS_APP_LIST_EXTENSIONS_UNINSTALL" desc="In Title Case: Title text for the context menu item of a non-platform-app app list item that removes the app.">
-              Remove From Chrome
-            </message>
-          </if>
-          <if expr="not is_macosx">
-            <message name="IDS_APP_LIST_EXTENSIONS_UNINSTALL" desc="In Title Case: Title text for the context menu item of a non-platform-app app list item that removes the app.">
-              Remove From Chrome...
-            </message>
-          </if>
+          <message name="IDS_APP_LIST_EXTENSIONS_UNINSTALL" desc="In Title Case: Title text for the context menu item of a non-platform-app app list item that removes the app.">
+            Remove From Chrome...
+          </message>
         </if>
       </if>
 
@@ -1151,6 +1119,11 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
         ''' It also controls what page is shown when you start Chrome or search from the Omnibox. '''
       </message>
 
+      <!-- Website Settings bubble -->
+      <message name="IDS_WEBSITE_SETTINGS_INTERNAL_PAGE" desc="Text that is displayed in the header of the Website Settings popup if the page was generated by Chrome itself.">
+        You are viewing a secure Google Chrome page.
+      </message>
+
       <!-- Windows firewall rule strings. -->
       <if expr="is_win">
         <message name="IDS_INBOUND_MDNS_RULE_NAME" desc="The name of the firewall rule allowing inbound mDNS traffic.">
@@ -1178,7 +1151,7 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
         Touch to Search
       </message>
       <message name="IDS_CONTEXTUAL_SEARCH_PROMO_DESCRIPTION_2" desc="Part 2 of the description of the Contextual Search feature. See explanation in DESCRIPTION_1.">
-        sends a word and its surrounding context to Google Search, returning definitions, pictures, search results, and other details.
+        sends a word and its surrounding context to Google Search, returning definitions, pictures, and other search results.
       </message>
       <message name="IDS_CONTEXTUAL_SEARCH_PROMO_OPTIN" desc="Text for the button the user clicks to opt in.">
         Accept &amp; Search
@@ -1222,7 +1195,7 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
         Chrome is out of date
       </message>
       <message name="IDS_RECOVERY_BUBBLE_TEXT" desc="Text for the chrome recovery bubble view full description.">
-        Chrome could not update to the latest version, so you are missing out on new features and security fixes. You need to update Chrome.
+        Important security improvements and new features are available in the latest version.
       </message>
 
       <!-- Dialog that asks whether user wants to participate in Safe Browsing Extended Reporting -->

@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/crypto.gni")
+import("//testing/test.gni")
 
 component("crypto") {
   output_name = "crcrypto"  # Avoid colliding with OpenSSL's libcrypto.
@@ -15,8 +16,8 @@ component("crypto") {
     "crypto_export.h",
     "cssm_init.cc",
     "cssm_init.h",
-    "curve25519.cc",
     "curve25519-donna.c",
+    "curve25519.cc",
     "curve25519.h",
     "ec_private_key.h",
     "ec_private_key_nss.cc",
@@ -66,8 +67,8 @@ component("crypto") {
     "rsa_private_key_openssl.cc",
     "scoped_capi_types.h",
     "scoped_nss_types.h",
-    "secure_hash_default.cc",
     "secure_hash.h",
+    "secure_hash_default.cc",
     "secure_hash_openssl.cc",
     "secure_util.cc",
     "secure_util.h",
@@ -91,6 +92,9 @@ component("crypto") {
     "third_party/nss/secsign.cc",
     "third_party/nss/sha512.cc",
   ]
+
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   deps = [
     ":platform",
@@ -123,11 +127,6 @@ component("crypto") {
 
   if (is_android) {
     deps += [ "//third_party/android_tools:cpu_features" ]
-  }
-
-  if (is_win) {
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4267" ]
   }
 
   if (use_openssl) {
@@ -220,11 +219,11 @@ if (!is_win) {
       "hmac_unittest.cc",
       "nss_util_unittest.cc",
       "openssl_bio_string_unittest.cc",
-      "p224_unittest.cc",
       "p224_spake_unittest.cc",
+      "p224_unittest.cc",
       "random_unittest.cc",
-      "rsa_private_key_unittest.cc",
       "rsa_private_key_nss_unittest.cc",
+      "rsa_private_key_unittest.cc",
       "secure_hash_unittest.cc",
       "sha2_unittest.cc",
       "signature_creator_unittest.cc",
@@ -257,10 +256,10 @@ if (!is_win) {
 
 source_set("test_support") {
   sources = [
-    "scoped_test_nss_db.cc",
-    "scoped_test_nss_db.h",
     "scoped_test_nss_chromeos_user.cc",
     "scoped_test_nss_chromeos_user.h",
+    "scoped_test_nss_db.cc",
+    "scoped_test_nss_db.h",
     "scoped_test_system_nss_key_slot.cc",
     "scoped_test_system_nss_key_slot.h",
   ]
@@ -287,6 +286,14 @@ source_set("test_support") {
   }
 }
 
+config("platform_config") {
+  if (!use_openssl && is_clang) {
+    # There is a broken header guard in /usr/include/nss/secmod.h:
+    # https://bugzilla.mozilla.org/show_bug.cgi?id=884072
+    cflags = [ "-Wno-header-guard" ]
+  }
+}
+
 # This is a meta-target that forwards to NSS's SSL library or OpenSSL,
 # according to the state of the crypto flags. A target just wanting to depend
 # on the current SSL library should just depend on this.
@@ -310,6 +317,7 @@ group("platform") {
       # Therefore, we need to explicitly list our custom libssl's config here
       # before the system one.
       public_configs = [
+        ":platform_config",
         "//net/third_party/nss/ssl:ssl_config",
         "//third_party/nss:system_nss_no_ssl_config",
       ]

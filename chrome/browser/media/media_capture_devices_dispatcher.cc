@@ -94,18 +94,16 @@ const content::MediaStreamDevice* FindDeviceWithId(
 // This is a short-term solution to grant camera and/or microphone access to
 // extensions:
 // 1. Virtual keyboard extension.
-// 2. Google Voice Search Hotword extension.
-// 3. Flutter gesture recognition extension.
-// 4. TODO(smus): Airbender experiment 1.
-// 5. TODO(smus): Airbender experiment 2.
-// 6. Hotwording component extension.
-// 7. XKB input method component extension.
-// 8. M17n/T13n/CJK input method component extension.
+// 2. Flutter gesture recognition extension.
+// 3. TODO(smus): Airbender experiment 1.
+// 4. TODO(smus): Airbender experiment 2.
+// 5. Hotwording component extension.
+// 6. XKB input method component extension.
+// 7. M17n/T13n/CJK input method component extension.
 // Once http://crbug.com/292856 is fixed, remove this whitelist.
 bool IsMediaRequestWhitelistedForExtension(
     const extensions::Extension* extension) {
   return extension->id() == "mppnpdlheglhdfmldimlhpnegondlapf" ||
-      extension->id() == "bepbmhgboaologfdajaanbcjmnhjmhfn" ||
       extension->id() == "jokbpnebhdcladagohdnfgjcpejggllo" ||
       extension->id() == "clffjmdilanldobdnedchkdbofoimcgb" ||
       extension->id() == "nnckehldicaciogcbchegobnafnjkcne" ||
@@ -133,7 +131,26 @@ bool IsOriginForCasting(const GURL& origin) {
       // Google Cast Beta
       origin.spec() == "chrome-extension://dliochdbjfkdbacpmhlcpmleaejidimm/" ||
       // Google Cast Stable
-      origin.spec() == "chrome-extension://boadgeojelhgndaghljhdicfkmllpafd/";
+      origin.spec() == "chrome-extension://boadgeojelhgndaghljhdicfkmllpafd/" ||
+      // http://crbug.com/457908
+      origin.spec() == "chrome-extension://ekpaaapppgpmolpcldedioblbkmijaca/" ||
+      origin.spec() == "chrome-extension://fjhoaacokmgbjemoflkofnenfaiekifl/";
+}
+
+bool IsExtensionWhitelistedForScreenCapture(
+    const extensions::Extension* extension) {
+#if defined(OS_CHROMEOS)
+  std::string hash = base::SHA1HashString(extension->id());
+  std::string hex_hash = base::HexEncode(hash.c_str(), hash.length());
+
+  // crbug.com/446688
+  return hex_hash == "4F25792AF1AA7483936DE29C07806F203C7170A0" ||
+         hex_hash == "BD8781D757D830FC2E85470A1B6E8A718B7EE0D9" ||
+         hex_hash == "4AC2B6C63C6480D150DFDA13E4A5956EB1D0DDBB" ||
+         hex_hash == "81986D4F846CEDDDB962643FA501D1780DD441BB";
+#else
+  return false;
+#endif  // defined(OS_CHROMEOS)
 }
 #endif  // defined(ENABLE_EXTENSIONS)
 
@@ -378,8 +395,15 @@ bool MediaCaptureDevicesDispatcher::CheckMediaAccessPermission(
   }
 #endif
 
-  if (CheckAllowAllMediaStreamContentForOrigin(profile, security_origin))
+  ContentSettingsType contentSettingsType =
+      type == content::MEDIA_DEVICE_AUDIO_CAPTURE
+          ? CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
+          : CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA;
+
+  if (CheckAllowAllMediaStreamContentForOrigin(
+          profile, security_origin, contentSettingsType)) {
     return true;
+  }
 
   const char* policy_name = type == content::MEDIA_DEVICE_AUDIO_CAPTURE
                                 ? prefs::kAudioCaptureAllowed
@@ -398,9 +422,7 @@ bool MediaCaptureDevicesDispatcher::CheckMediaAccessPermission(
   if (profile->GetHostContentSettingsMap()->GetContentSetting(
           security_origin,
           security_origin,
-          type == content::MEDIA_DEVICE_AUDIO_CAPTURE
-              ? CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
-              : CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+          contentSettingsType,
           NO_RESOURCE_IDENTIFIER) == CONTENT_SETTING_ALLOW) {
     return true;
   }
@@ -419,8 +441,15 @@ bool MediaCaptureDevicesDispatcher::CheckMediaAccessPermission(
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
 
-  if (CheckAllowAllMediaStreamContentForOrigin(profile, security_origin))
+  ContentSettingsType contentSettingsType =
+      type == content::MEDIA_DEVICE_AUDIO_CAPTURE
+          ? CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
+          : CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA;
+
+  if (CheckAllowAllMediaStreamContentForOrigin(
+          profile, security_origin, contentSettingsType)) {
     return true;
+  }
 
   const char* policy_name = type == content::MEDIA_DEVICE_AUDIO_CAPTURE
                                 ? prefs::kAudioCaptureAllowed
@@ -439,9 +468,7 @@ bool MediaCaptureDevicesDispatcher::CheckMediaAccessPermission(
   if (profile->GetHostContentSettingsMap()->GetContentSetting(
           security_origin,
           security_origin,
-          type == content::MEDIA_DEVICE_AUDIO_CAPTURE
-              ? CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
-              : CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+          contentSettingsType,
           NO_RESOURCE_IDENTIFIER) == CONTENT_SETTING_ALLOW) {
     return true;
   }
@@ -568,6 +595,7 @@ void MediaCaptureDevicesDispatcher::ProcessScreenCaptureAccessRequest(
 #if defined(ENABLE_EXTENSIONS)
   screen_capture_enabled |=
       IsOriginForCasting(request.security_origin) ||
+      IsExtensionWhitelistedForScreenCapture(extension) ||
       IsBuiltInExtension(request.security_origin);
 #endif
 
@@ -604,9 +632,15 @@ void MediaCaptureDevicesDispatcher::ProcessScreenCaptureAccessRequest(
 #endif
     web_contents = NULL;
 
-    // For component extensions, bypass message box.
+    bool whitelisted_extension = false;
+#if defined(ENABLE_EXTENSIONS)
+    whitelisted_extension = IsExtensionWhitelistedForScreenCapture(
+        extension);
+#endif
+
+    // For whitelisted or component extensions, bypass message box.
     bool user_approved = false;
-    if (!component_extension) {
+    if (!whitelisted_extension && !component_extension) {
       base::string16 application_name =
           base::UTF8ToUTF16(request.security_origin.spec());
 #if defined(ENABLE_EXTENSIONS)
@@ -627,7 +661,7 @@ void MediaCaptureDevicesDispatcher::ProcessScreenCaptureAccessRequest(
       user_approved = (result == chrome::MESSAGE_BOX_RESULT_YES);
     }
 
-    if (user_approved || component_extension) {
+    if (user_approved || component_extension || whitelisted_extension) {
       content::DesktopMediaID screen_id;
 #if defined(OS_CHROMEOS)
       screen_id = content::DesktopMediaID::RegisterAuraWindow(

@@ -9,7 +9,7 @@
 #include "base/strings/string_util.h"
 #include "crypto/ec_private_key.h"
 #include "net/base/connection_type_histograms.h"
-#include "net/base/host_port_pair.h"
+#include "net/base/net_errors.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/ssl_cipher_suite_names.h"
 #include "net/ssl/ssl_config_service.h"
@@ -42,9 +42,8 @@ NextProto SSLClientSocket::NextProtoFromString(
     // For internal consistency, HTTP/2 is named SPDY4 within Chromium.
     // This is the HTTP/2 draft-14 identifier.
     return kProtoSPDY4_14;
-  } else if (proto_string == "h2-15") {
-    // This is the HTTP/2 draft-15 identifier.
-    return kProtoSPDY4_15;
+  } else if (proto_string == "h2") {
+    return kProtoSPDY4;
   } else if (proto_string == "quic/1+spdy/3") {
     return kProtoQUIC1SPDY3;
   } else {
@@ -67,9 +66,8 @@ const char* SSLClientSocket::NextProtoToString(NextProto next_proto) {
       // For internal consistency, HTTP/2 is named SPDY4 within Chromium.
       // This is the HTTP/2 draft-14 identifier.
       return "h2-14";
-    case kProtoSPDY4_15:
-      // This is the HTTP/2 draft-15 identifier.
-      return "h2-15";
+    case kProtoSPDY4:
+      return "h2";
     case kProtoQUIC1SPDY3:
       return "quic/1+spdy/3";
     case kProtoUnknown:
@@ -101,22 +99,10 @@ NextProto SSLClientSocket::GetNegotiatedProtocol() const {
 }
 
 bool SSLClientSocket::IgnoreCertError(int error, int load_flags) {
-  if (error == OK || load_flags & LOAD_IGNORE_ALL_CERT_ERRORS)
+  if (error == OK)
     return true;
-
-  if (error == ERR_CERT_COMMON_NAME_INVALID &&
-      (load_flags & LOAD_IGNORE_CERT_COMMON_NAME_INVALID))
-    return true;
-
-  if (error == ERR_CERT_DATE_INVALID &&
-      (load_flags & LOAD_IGNORE_CERT_DATE_INVALID))
-    return true;
-
-  if (error == ERR_CERT_AUTHORITY_INVALID &&
-      (load_flags & LOAD_IGNORE_CERT_AUTHORITY_INVALID))
-    return true;
-
-  return false;
+  return (load_flags & LOAD_IGNORE_ALL_CERT_ERRORS) &&
+         IsCertificateError(error);
 }
 
 bool SSLClientSocket::set_was_npn_negotiated(bool negotiated) {
@@ -188,28 +174,6 @@ void SSLClientSocket::RecordChannelIDSupport(
   }
   UMA_HISTOGRAM_ENUMERATION("DomainBoundCerts.Support", supported,
                             CHANNEL_ID_USAGE_MAX);
-}
-
-// static
-void SSLClientSocket::RecordConnectionTypeMetrics(int ssl_version) {
-  UpdateConnectionTypeHistograms(CONNECTION_SSL);
-  switch (ssl_version) {
-    case SSL_CONNECTION_VERSION_SSL2:
-      UpdateConnectionTypeHistograms(CONNECTION_SSL_SSL2);
-      break;
-    case SSL_CONNECTION_VERSION_SSL3:
-      UpdateConnectionTypeHistograms(CONNECTION_SSL_SSL3);
-      break;
-    case SSL_CONNECTION_VERSION_TLS1:
-      UpdateConnectionTypeHistograms(CONNECTION_SSL_TLS1);
-      break;
-    case SSL_CONNECTION_VERSION_TLS1_1:
-      UpdateConnectionTypeHistograms(CONNECTION_SSL_TLS1_1);
-      break;
-    case SSL_CONNECTION_VERSION_TLS1_2:
-      UpdateConnectionTypeHistograms(CONNECTION_SSL_TLS1_2);
-      break;
-  }
 }
 
 // static

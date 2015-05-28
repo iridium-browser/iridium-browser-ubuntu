@@ -30,6 +30,7 @@ const char* const kPublicSessionWhitelist[] = {
     "aclofikceldphonlfmghmimkodjdmhck",  // Ancoris login component
     "eilbnahdgoddoedakcmfkcgfoegeloil",  // Ancoris proxy component
     "ceehlgckkmkaoggdnjhibffkphfnphmg",  // Libdata login
+    "fnhgfoccpcjdnjcobejogdnlnidceemb",  // OverDrive
 
     // Retail mode:
     "bjfeaefhaooblkndnoabbkkkenknkemb",  // 500 px demo
@@ -56,12 +57,14 @@ const char* const kPublicSessionWhitelist[] = {
     "ekgadegabdkcbkodfbgidncffijbghhl",  // Duolingo demo
     "iddohohhpmajlkbejjjcfednjnhlnenk",  // Evernote demo
     "bjdhhokmhgelphffoafoejjmlfblpdha",  // Gmail demo
+    "nldmakcnfaflagmohifhcihkfgcbmhph",  // Gmail offline demo
     "mdhnphfgagkpdhndljccoackjjhghlif",  // Google Drive demo
     "dondgdlndnpianbklfnehgdhkickdjck",  // Google Keep demo
     "amfoiggnkefambnaaphodjdmdooiinna",  // Google Play Movie and TV demo
     "fgjnkhlabjcaajddbaenilcmpcidahll",  // Google+ demo
     "ifpkhncdnjfipfjlhfidljjffdgklanh",  // Google+ Photos demo
     "cgmlfbhkckbedohgdepgbkflommbfkep",  // Hangouts.app demo
+    "ndlgnmfmgpdecjgehbcejboifbbmlkhp",  // Hash demo
     "edhhaiphkklkcfcbnlbpbiepchnkgkpn",  // Helper.extension demo
     "jckncghadoodfbbbmbpldacojkooophh",  // Journal demo
     "diehajhcjifpahdplfdkhiboknagmfii",  // Kindle demo
@@ -80,10 +83,12 @@ const char* const kPublicSessionWhitelist[] = {
     "aleodiobpjillgfjdkblghiiaegggmcm",  // Quickoffice demo
     "nifkmgcdokhkjghdlgflonppnefddien",  // Sheets demo
     "hdmobeajeoanbanmdlabnbnlopepchip",  // Slides demo
+    "ikmidginfdcbojdbmejkeakncgdbmonc",  // Soundtrap demo
     "dgohlccohkojjgkkfholmobjjoledflp",  // Spotify demo
     "dhmdaeekeihmajjnmichlhiffffdbpde",  // Store.app demo
     "onklhlmbpfnmgmelakhgehkfdmkpmekd",  // Todoist demo
     "jeabmjjifhfcejonjjhccaeigpnnjaak",  // TweetDeck demo
+    "gnckahkflocidcgjbeheneogeflpjien",  // Vine demo
     "pdckcbpciaaicoomipamcabpdadhofgh",  // Weatherbug demo
     "biliocemfcghhioihldfdmkkhnofcgmb",  // Webcam Toy demo
     "bhfoghflalnnjfcfkaelngenjgjjhapk",  // Wevideo demo
@@ -137,8 +142,9 @@ bool DeviceLocalAccountManagementPolicyProvider::UserMayLoad(
         return true;
     }
   } else if (account_type_ == policy::DeviceLocalAccount::TYPE_KIOSK_APP) {
-    // For single-app kiosk sessions, allow only platform apps.
-    if (extension->GetType() == extensions::Manifest::TYPE_PLATFORM_APP)
+    // For single-app kiosk sessions, allow platform apps and shared modules.
+    if (extension->GetType() == extensions::Manifest::TYPE_PLATFORM_APP ||
+        extension->GetType() == extensions::Manifest::TYPE_SHARED_MODULE)
       return true;
   }
 

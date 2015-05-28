@@ -60,7 +60,7 @@ OfflineLoadPage::OfflineLoadPage(WebContents* web_contents,
 }
 
 OfflineLoadPage::~OfflineLoadPage() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
 }
 
@@ -79,11 +79,11 @@ std::string OfflineLoadPage::GetHTMLContents() {
   DCHECK(profile);
   const extensions::Extension* extension = extensions::ExtensionRegistry::Get(
       profile)->enabled_extensions().GetHostedAppByURL(url_);
+  const std::string& locale = g_browser_process->GetApplicationLocale();
   if (extension && !extension->from_bookmark()) {
-    LocalizedError::GetAppErrorStrings(url_, extension, &error_strings);
+    LocalizedError::GetAppErrorStrings(url_, extension, locale, &error_strings);
     resource_id = IDR_OFFLINE_APP_LOAD_HTML;
   } else {
-    const std::string locale = g_browser_process->GetApplicationLocale();
     const std::string accept_languages =
         profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
     LocalizedError::GetStrings(net::ERR_INTERNET_DISCONNECTED,
@@ -94,9 +94,10 @@ std::string OfflineLoadPage::GetHTMLContents() {
     resource_id = IDR_OFFLINE_NET_LOAD_HTML;
   }
 
-  const base::StringPiece template_html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-          resource_id));
+  std::string template_html = ResourceBundle::GetSharedInstance()
+                                  .GetRawDataResource(resource_id)
+                                  .as_string();
+  webui::AppendWebUiCssTextDefaults(&template_html);
   // "t" is the id of the templates root node.
   return webui::GetTemplatesHtml(template_html, &error_strings, "t");
 }
@@ -110,13 +111,13 @@ void OfflineLoadPage::OverrideRendererPrefs(
 }
 
 void OfflineLoadPage::OnProceed() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   proceeded_ = true;
   NotifyBlockingPageComplete(true);
 }
 
 void OfflineLoadPage::OnDontProceed() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Ignore if it's already proceeded.
   if (proceeded_)
     return;
@@ -131,7 +132,9 @@ void OfflineLoadPage::CommandReceived(const std::string& cmd) {
   }
   // TODO(oshima): record action for metrics.
   if (command == "open_network_settings") {
-    ash::Shell::GetInstance()->system_tray_delegate()->ShowNetworkSettings("");
+    ash::Shell::GetInstance()
+        ->system_tray_delegate()
+        ->ShowNetworkSettingsForGuid("");
   } else if (command == "open_connectivity_diagnostics") {
     Profile* profile = Profile::FromBrowserContext(
         web_contents_->GetBrowserContext());
@@ -154,7 +157,7 @@ void OfflineLoadPage::NotifyBlockingPageComplete(bool proceed) {
 
 void OfflineLoadPage::OnConnectionTypeChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   const bool online = type != net::NetworkChangeNotifier::CONNECTION_NONE;
   DVLOG(1) << "ConnectionTypeObserver notification received: state="
            << (online ? "online" : "offline");

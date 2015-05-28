@@ -34,7 +34,7 @@ Surface::~Surface() {
     factory_->UnrefResources(current_resources);
   }
   if (!draw_callback_.is_null())
-    draw_callback_.Run(false);
+    draw_callback_.Run(SurfaceDrawStatus::DRAW_SKIPPED);
 }
 
 void Surface::QueueFrame(scoped_ptr<CompositorFrame> frame,
@@ -46,7 +46,11 @@ void Surface::QueueFrame(scoped_ptr<CompositorFrame> frame,
   current_frame_ = frame.Pass();
   factory_->ReceiveFromChild(
       current_frame_->delegated_frame_data->resource_list);
-  ++frame_index_;
+  // Empty frames shouldn't be drawn and shouldn't contribute damage, so don't
+  // increment frame index for them.
+  if (!current_frame_ ||
+      !current_frame_->delegated_frame_data->render_pass_list.empty())
+    ++frame_index_;
 
   if (previous_frame) {
     ReturnedResourceArray previous_resources;
@@ -56,7 +60,7 @@ void Surface::QueueFrame(scoped_ptr<CompositorFrame> frame,
     factory_->UnrefResources(previous_resources);
   }
   if (!draw_callback_.is_null())
-    draw_callback_.Run(false);
+    draw_callback_.Run(SurfaceDrawStatus::DRAW_SKIPPED);
   draw_callback_ = callback;
   factory_->manager()->DidSatisfySequences(
       SurfaceIdAllocator::NamespaceForId(surface_id_),
@@ -106,11 +110,11 @@ void Surface::TakeLatencyInfo(std::vector<ui::LatencyInfo>* latency_info) {
   current_frame_->metadata.latency_info.clear();
 }
 
-void Surface::RunDrawCallbacks() {
+void Surface::RunDrawCallbacks(SurfaceDrawStatus drawn) {
   if (!draw_callback_.is_null()) {
     DrawCallback callback = draw_callback_;
     draw_callback_ = DrawCallback();
-    callback.Run(true);
+    callback.Run(drawn);
   }
 }
 

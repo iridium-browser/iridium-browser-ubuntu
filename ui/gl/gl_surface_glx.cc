@@ -9,7 +9,6 @@ extern "C" {
 #include "ui/gl/gl_surface_glx.h"
 
 #include "base/basictypes.h"
-#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -22,6 +21,7 @@ extern "C" {
 #include "base/threading/non_thread_safe.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/x/x11_connection.h"
 #include "ui/gfx/x/x11_types.h"
@@ -32,15 +32,6 @@ extern "C" {
 namespace gfx {
 
 namespace {
-
-// scoped_ptr functor for XFree(). Use as follows:
-//   scoped_ptr<XVisualInfo, ScopedPtrXFree> foo(...);
-// where "XVisualInfo" is any X type that is freed with XFree.
-struct ScopedPtrXFree {
-  void operator()(void* x) const {
-    ::XFree(x);
-  }
-};
 
 Display* g_display = NULL;
 const char* g_glx_extensions = NULL;
@@ -180,9 +171,8 @@ class SGIVideoSyncProviderThreadShim {
     visual_info_template.visualid = XVisualIDFromVisual(attributes.visual);
 
     int visual_info_count = 0;
-    scoped_ptr<XVisualInfo, ScopedPtrXFree> visual_info_list(
-        XGetVisualInfo(display_, VisualIDMask,
-                       &visual_info_template, &visual_info_count));
+    gfx::XScopedPtr<XVisualInfo> visual_info_list(XGetVisualInfo(
+        display_, VisualIDMask, &visual_info_template, &visual_info_count));
 
     DCHECK(visual_info_list.get());
     if (visual_info_count == 0) {
@@ -211,7 +201,7 @@ class SGIVideoSyncProviderThreadShim {
         return;
 
       TRACE_EVENT_INSTANT0("gpu", "vblank", TRACE_EVENT_SCOPE_THREAD);
-      now = base::TimeTicks::HighResNow();
+      now = base::TimeTicks::Now();
 
       glXMakeCurrent(display_, 0, 0);
     }
@@ -476,6 +466,7 @@ void NativeViewGLSurfaceGLX::Destroy() {
     if (event_source)
       event_source->RemovePlatformEventDispatcher(this);
     XDestroyWindow(g_display, window_);
+    window_ = 0;
     XFlush(g_display);
   }
 }
@@ -553,10 +544,8 @@ void* NativeViewGLSurfaceGLX::GetConfig() {
     int visual_id = XVisualIDFromVisual(attributes.visual);
 
     int num_elements = 0;
-    scoped_ptr<GLXFBConfig, ScopedPtrXFree> configs(
-        glXGetFBConfigs(g_display,
-                        DefaultScreen(g_display),
-                        &num_elements));
+    gfx::XScopedPtr<GLXFBConfig> configs(
+        glXGetFBConfigs(g_display, DefaultScreen(g_display), &num_elements));
     if (!configs.get()) {
       LOG(ERROR) << "glXGetFBConfigs failed.";
       return NULL;
@@ -628,11 +617,8 @@ bool PbufferGLSurfaceGLX::Initialize() {
   };
 
   int num_elements = 0;
-  scoped_ptr<GLXFBConfig, ScopedPtrXFree> configs(
-      glXChooseFBConfig(g_display,
-                        DefaultScreen(g_display),
-                        config_attributes,
-                        &num_elements));
+  gfx::XScopedPtr<GLXFBConfig> configs(glXChooseFBConfig(
+      g_display, DefaultScreen(g_display), config_attributes, &num_elements));
   if (!configs.get()) {
     LOG(ERROR) << "glXChooseFBConfig failed.";
     return false;

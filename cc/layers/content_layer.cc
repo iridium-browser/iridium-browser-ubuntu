@@ -26,9 +26,8 @@ scoped_ptr<ContentLayerPainter> ContentLayerPainter::Create(
 
 void ContentLayerPainter::Paint(SkCanvas* canvas,
                                 const gfx::Rect& content_rect) {
-  client_->PaintContents(canvas,
-                         content_rect,
-                         ContentLayerClient::GRAPHICS_CONTEXT_ENABLED);
+  client_->PaintContents(canvas, content_rect,
+                         ContentLayerClient::PAINTING_BEHAVIOR_NORMAL);
 }
 
 scoped_refptr<ContentLayer> ContentLayer::Create(ContentLayerClient* client) {
@@ -115,10 +114,6 @@ void ContentLayer::SetContentsOpaque(bool opaque) {
     updater_->SetOpaque(opaque);
 }
 
-bool ContentLayer::SupportsLCDText() const {
-  return true;
-}
-
 skia::RefPtr<SkPicture> ContentLayer::GetPicture() const {
   if (!DrawsContent())
     return skia::RefPtr<SkPicture>();
@@ -128,9 +123,8 @@ skia::RefPtr<SkPicture> ContentLayer::GetPicture() const {
 
   SkPictureRecorder recorder;
   SkCanvas* canvas = recorder.beginRecording(width, height, nullptr, 0);
-  client_->PaintContents(canvas,
-                         gfx::Rect(width, height),
-                         ContentLayerClient::GRAPHICS_CONTEXT_ENABLED);
+  client_->PaintContents(canvas, gfx::Rect(width, height),
+                         ContentLayerClient::PAINTING_BEHAVIOR_NORMAL);
   skia::RefPtr<SkPicture> picture = skia::AdoptRef(recorder.endRecording());
   return picture;
 }

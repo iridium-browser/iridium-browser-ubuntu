@@ -66,6 +66,10 @@ class VIEWS_EXPORT Textfield : public View,
   // Sets the input type; displays only asterisks for TEXT_INPUT_TYPE_PASSWORD.
   void SetTextInputType(ui::TextInputType type);
 
+  // Sets the input flags so that the system input methods can turn on/off some
+  // features. The flags is the bit map of ui::TextInputFlags.
+  void SetTextInputFlags(int flags);
+
   // Gets the text currently displayed in the Textfield.
   const base::string16& text() const { return model_->text(); }
 
@@ -304,10 +308,13 @@ class VIEWS_EXPORT Textfield : public View,
   void OnCandidateWindowShown() override;
   void OnCandidateWindowUpdated() override;
   void OnCandidateWindowHidden() override;
-  bool IsEditingCommandEnabled(int command_id) override;
-  void ExecuteEditingCommand(int command_id) override;
+  bool IsEditCommandEnabled(int command_id) override;
+  void SetEditCommandForNextKeyEvent(int command_id) override;
 
  protected:
+  // Inserts or appends a character in response to an IME operation.
+  virtual void DoInsertChar(base::char16 ch);
+
   // Returns the TextfieldModel's text/cursor/selection rendering model.
   gfx::RenderText* GetRenderText() const;
 
@@ -390,6 +397,12 @@ class VIEWS_EXPORT Textfield : public View,
   // This is the current listener for events from this Textfield.
   TextfieldController* controller_;
 
+  // If non-zero, an edit command to execute on the next key event. When set,
+  // the key event is still passed to |controller_|, but otherwise ignored in
+  // favor of the edit command. Set via SetEditCommandForNextKeyEvent() during
+  // dispatch of that key event (see comment in TextInputClient).
+  int scheduled_edit_command_;
+
   // True if this Textfield cannot accept input and is read-only.
   bool read_only_;
 
@@ -421,6 +434,9 @@ class VIEWS_EXPORT Textfield : public View,
 
   // The input type of this text field.
   ui::TextInputType text_input_type_;
+
+  // The input flags of this text field.
+  int text_input_flags_;
 
   // The duration and timer to reveal the last typed password character.
   base::TimeDelta password_reveal_duration_;

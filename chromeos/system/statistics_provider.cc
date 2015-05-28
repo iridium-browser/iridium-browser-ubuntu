@@ -70,7 +70,9 @@ const base::CommandLine::CharType kOemManifestFilePath[] =
 // Key values for GetMachineStatistic()/GetMachineFlag() calls.
 const char kActivateDateKey[] = "ActivateDate";
 const char kCustomizationIdKey[] = "customization_id";
-const char kDevSwitchBootMode[] = "devsw_boot";
+const char kDevSwitchBootKey[] = "devsw_boot";
+const char kDevSwitchBootValueDev[] = "1";
+const char kDevSwitchBootValueVerified[] = "0";
 const char kFirmwareTypeKey[] = "mainfw_type";
 const char kFirmwareTypeValueDeveloper[] = "developer";
 const char kFirmwareTypeValueNonchrome[] = "nonchrome";
@@ -79,6 +81,9 @@ const char kHardwareClassKey[] = "hardware_class";
 const char kOffersCouponCodeKey[] = "ubind_attribute";
 const char kOffersGroupCodeKey[] = "gbind_attribute";
 const char kRlzBrandCodeKey[] = "rlz_brand_code";
+const char kWriteProtectSwitchBootKey[] = "wpsw_boot";
+const char kWriteProtectSwitchBootValueOff[] = "0";
+const char kWriteProtectSwitchBootValueOn[] = "1";
 
 // OEM specific statistics. Must be prefixed with "oem_".
 const char kOemCanExitEnterpriseEnrollmentKey[] = "oem_can_exit_enrollment";
@@ -94,15 +99,15 @@ bool HasOemPrefix(const std::string& name) {
 class StatisticsProviderImpl : public StatisticsProvider {
  public:
   // StatisticsProvider implementation:
-  virtual void StartLoadingMachineStatistics(
+  void StartLoadingMachineStatistics(
       const scoped_refptr<base::TaskRunner>& file_task_runner,
       bool load_oem_manifest) override;
-  virtual bool GetMachineStatistic(const std::string& name,
-                                   std::string* result) override;
-  virtual bool HasMachineStatistic(const std::string& name) override;
-  virtual bool GetMachineFlag(const std::string& name, bool* result) override;
-  virtual bool HasMachineFlag(const std::string& name) override;
-  virtual void Shutdown() override;
+  bool GetMachineStatistic(const std::string& name,
+                           std::string* result) override;
+  bool HasMachineStatistic(const std::string& name) override;
+  bool GetMachineFlag(const std::string& name, bool* result) override;
+  bool HasMachineFlag(const std::string& name) override;
+  void Shutdown() override;
 
   static StatisticsProviderImpl* GetInstance();
 
@@ -111,7 +116,7 @@ class StatisticsProviderImpl : public StatisticsProvider {
   friend struct DefaultSingletonTraits<StatisticsProviderImpl>;
 
   StatisticsProviderImpl();
-  virtual ~StatisticsProviderImpl();
+  ~StatisticsProviderImpl() override;
 
   // Waits up to |kTimeoutSecs| for statistics to be loaded. Returns true if
   // they were loaded successfully.

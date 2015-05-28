@@ -6,14 +6,18 @@ import tempfile
 import unittest
 
 from telemetry.core import forwarders
-from telemetry.core import wpr_modes
 from telemetry.core.platform import network_controller_backend
+from telemetry.core import wpr_modes
 
 
 class FakePlatformBackend(object):
   @property
   def wpr_ca_cert_path(self):
     return None
+
+  @property
+  def forwarder_factory(self):
+    return FakeForwarderFactory()
 
 
 class FakeForwarderFactory(object):
@@ -31,7 +35,6 @@ class FakeBrowserBackend(object):
       http=forwarders.PortPair(*http_ports),
       https=forwarders.PortPair(*https_ports),
       dns=forwarders.PortPair(*dns_ports) if dns_ports else None)
-    self.forwarder_factory = FakeForwarderFactory()
 
 
 class FakeReplayServer(object):

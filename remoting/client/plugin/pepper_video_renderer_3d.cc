@@ -153,6 +153,10 @@ void PepperVideoRenderer3D::OnViewChanged(const pp::View& view) {
   PaintIfNeeded();
 }
 
+void PepperVideoRenderer3D::EnableDebugDirtyRegion(bool enable) {
+  debug_dirty_region_ = enable;
+}
+
 void PepperVideoRenderer3D::OnSessionConfig(
     const protocol::SessionConfig& config) {
   PP_VideoProfile video_profile = PP_VIDEOPROFILE_VP8_ANY;
@@ -175,6 +179,10 @@ void PepperVideoRenderer3D::OnSessionConfig(
 
 ChromotingStats* PepperVideoRenderer3D::GetStats() {
   return &stats_;
+}
+
+protocol::VideoStub* PepperVideoRenderer3D::GetVideoStub() {
+  return this;
 }
 
 void PepperVideoRenderer3D::ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
@@ -244,6 +252,18 @@ void PepperVideoRenderer3D::ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
   if (!desktop_shape_.Equals(desktop_shape)) {
     desktop_shape_.Swap(&desktop_shape);
     event_handler_->OnVideoShape(desktop_shape_);
+  }
+
+  // Report the dirty region, for debugging, if requested.
+  if (debug_dirty_region_) {
+    webrtc::DesktopRegion dirty_region;
+    for (int i = 0; i < packet->dirty_rects_size(); ++i) {
+      Rect remoting_rect = packet->dirty_rects(i);
+      dirty_region.AddRect(webrtc::DesktopRect::MakeXYWH(
+          remoting_rect.x(), remoting_rect.y(),
+          remoting_rect.width(), remoting_rect.height()));
+    }
+    event_handler_->OnVideoFrameDirtyRegion(dirty_region);
   }
 
   pending_packets_.push_back(
@@ -354,14 +374,16 @@ void PepperVideoRenderer3D::PaintIfNeeded() {
   EnsureProgramForTexture(picture.texture_target);
 
   gles2_if_->UseProgram(graphics_3d, shader_program_);
-  if (picture.texture_target == GL_TEXTURE_RECTANGLE_ARB) {
-    gles2_if_->Uniform2f(graphics_3d, shader_texcoord_scale_location_,
-                         static_cast<GLfloat>(picture.texture_size.width),
-                         static_cast<GLfloat>(picture.texture_size.height));
-  } else {
-    gles2_if_->Uniform2f(
-        graphics_3d, shader_texcoord_scale_location_, 1.0, 1.0);
+
+  // Calculate v_scale passed to the vertex shader.
+  double scale_x = picture.visible_rect.size.width;
+  double scale_y = picture.visible_rect.size.height;
+  if (picture.texture_target != GL_TEXTURE_RECTANGLE_ARB) {
+    scale_x /= picture.texture_size.width;
+    scale_y /= picture.texture_size.height;
   }
+  gles2_if_->Uniform2f(graphics_3d, shader_texcoord_scale_location_,
+                       scale_x, scale_y);
 
   // Set viewport position & dimensions.
   gles2_if_->Viewport(graphics_3d, 0, 0, view_size_.width(),

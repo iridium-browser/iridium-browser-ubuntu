@@ -6,25 +6,25 @@
 #define UI_BASE_IME_CHROMEOS_MOCK_COMPONENT_EXTENSION_IME_MANAGER_DELEGATE_H_
 
 #include "ui/base/ime/chromeos/component_extension_ime_manager.h"
-#include "ui/base/ui_base_export.h"
+#include "ui/base/ime/ui_base_ime_export.h"
 
 namespace chromeos {
 namespace input_method {
 
-class UI_BASE_EXPORT MockComponentExtIMEManagerDelegate
+class UI_BASE_IME_EXPORT MockComponentExtIMEManagerDelegate
     : public ComponentExtensionIMEManagerDelegate {
  public:
   MockComponentExtIMEManagerDelegate();
-  virtual ~MockComponentExtIMEManagerDelegate();
+  ~MockComponentExtIMEManagerDelegate() override;
 
-  virtual std::vector<ComponentExtensionIME> ListIME() override;
-  virtual void Load(Profile*,
-                    const std::string& extension_id,
-                    const std::string& manifest,
-                    const base::FilePath& path) override;
-  virtual void Unload(Profile*,
-                      const std::string& extension_id,
-                      const base::FilePath& path) override;
+  std::vector<ComponentExtensionIME> ListIME() override;
+  void Load(Profile*,
+            const std::string& extension_id,
+            const std::string& manifest,
+            const base::FilePath& path) override;
+  void Unload(Profile*,
+              const std::string& extension_id,
+              const base::FilePath& path) override;
 
   int load_call_count() const { return load_call_count_; }
   int unload_call_count() const { return unload_call_count_; }

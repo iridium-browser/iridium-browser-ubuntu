@@ -287,15 +287,16 @@ class MEDIA_EXPORT SourceBufferStream {
 
   // Helper function used by Remove() and PrepareRangesForNextAppend() to
   // remove buffers and ranges between |start| and |end|.
-  // |is_exclusive| - If set to true, buffers with timestamps that
+  // |exclude_start| - If set to true, buffers with timestamps that
   // match |start| are not removed. If set to false, buffers with
   // timestamps that match |start| will be removed.
   // |*deleted_buffers| - Filled with buffers for the current playback position
   // if the removal range included the current playback position. These buffers
   // can be used as candidates for placing in the |track_buffer_|.
-  void RemoveInternal(
-      DecodeTimestamp start, DecodeTimestamp end, bool is_exclusive,
-      BufferQueue* deleted_buffers);
+  void RemoveInternal(DecodeTimestamp start,
+                      DecodeTimestamp end,
+                      bool exclude_start,
+                      BufferQueue* deleted_buffers);
 
   Type GetType() const;
 
@@ -324,8 +325,8 @@ class MEDIA_EXPORT SourceBufferStream {
   // appropriately and returns true.  Otherwise returns false.
   bool SetPendingBuffer(scoped_refptr<StreamParserBuffer>* out_buffer);
 
-  // Callback used to report error strings that can help the web developer
-  // figure out what is wrong with the content.
+  // Callback used to report log messages that can help the web developer figure
+  // out what is wrong with the content.
   LogCB log_cb_;
 
   // List of disjoint buffered ranges, ordered by start time.

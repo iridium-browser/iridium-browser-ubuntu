@@ -6,44 +6,76 @@
 #include "core/animation/DoubleStyleInterpolation.h"
 
 #include "core/css/CSSCalculationValue.h"
-#include "core/css/CSSPrimitiveValue.h"
 #include "core/css/resolver/StyleBuilder.h"
 
 namespace blink {
+
+bool DoubleStyleInterpolation::canCreateFrom(const CSSValue& value)
+{
+    return value.isPrimitiveValue() && (toCSSPrimitiveValue(value).isNumber() || toCSSPrimitiveValue(value).isAngle());
+}
 
 PassOwnPtrWillBeRawPtr<InterpolableValue> DoubleStyleInterpolation::doubleToInterpolableValue(const CSSValue& value)
 {
     ASSERT(canCreateFrom(value));
     const CSSPrimitiveValue& primitive = toCSSPrimitiveValue(value);
-    return InterpolableNumber::create(primitive.getDoubleValue());
+    if (primitive.isNumber())
+        return InterpolableNumber::create(primitive.getDoubleValue());
+    if (primitive.isAngle())
+        return InterpolableNumber::create(primitive.computeDegrees());
+    ASSERT_NOT_REACHED();
+    return nullptr;
 }
 
-PassRefPtrWillBeRawPtr<CSSValue> DoubleStyleInterpolation::interpolableValueToDouble(InterpolableValue* value, ClampRange clamp)
+PassRefPtrWillBeRawPtr<CSSValue> DoubleStyleInterpolation::interpolableValueToDouble(InterpolableValue* value, bool isNumber, InterpolationRange clamp)
 {
     ASSERT(value->isNumber());
     double doubleValue = toInterpolableNumber(value)->value();
-    if (clamp == ClampOpacity) {
-        doubleValue = clampTo<float>(doubleValue, 0, nextafterf(1, 0));
-    }
-    return CSSPrimitiveValue::create(doubleValue, CSSPrimitiveValue::CSS_NUMBER);
-}
 
-bool DoubleStyleInterpolation::canCreateFrom(const CSSValue& value)
-{
-    return value.isPrimitiveValue() && toCSSPrimitiveValue(value).isNumber();
+    switch (clamp) {
+    case RangeAll:
+        // Do nothing
+        break;
+    case RangeZeroToOne:
+        doubleValue = clampTo<float>(doubleValue, 0, 1);
+        break;
+    case RangeOpacityFIXME:
+        doubleValue = clampTo<float>(doubleValue, 0, nextafterf(1, 0));
+        break;
+    case RangeFloor:
+        doubleValue = floor(doubleValue);
+        break;
+    case RangeRound:
+        doubleValue = round(doubleValue);
+        break;
+    case RangeRoundGreaterThanOrEqualToOne:
+        doubleValue = clampTo<float>(round(doubleValue), 1);
+        break;
+    case RangeGreaterThanOrEqualToOne:
+        doubleValue = clampTo<float>(doubleValue, 1);
+        break;
+    case RangeNonNegative:
+        doubleValue = clampTo<float>(doubleValue, 0);
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+    }
+    if (isNumber)
+        return CSSPrimitiveValue::create(doubleValue, CSSPrimitiveValue::CSS_NUMBER);
+    return CSSPrimitiveValue::create(doubleValue, CSSPrimitiveValue::CSS_DEG);
 }
 
 void DoubleStyleInterpolation::apply(StyleResolverState& state) const
 {
     if (m_id != CSSPropertyMotionRotation) {
-        StyleBuilder::applyProperty(m_id, state, interpolableValueToDouble(m_cachedValue.get(), m_clamp).get());
+        StyleBuilder::applyProperty(m_id, state, interpolableValueToDouble(m_cachedValue.get(), m_isNumber, m_clamp).get());
         return;
     }
 
     StyleBuilder::applyProperty(m_id, state, interpolableValueToMotionRotation(m_cachedValue.get(), m_flag).get());
 }
 
-void DoubleStyleInterpolation::trace(Visitor* visitor)
+DEFINE_TRACE(DoubleStyleInterpolation)
 {
     StyleInterpolation::trace(visitor);
 }
@@ -113,7 +145,7 @@ PassRefPtrWillBeRawPtr<DoubleStyleInterpolation> DoubleStyleInterpolation::maybe
     return adoptRefWillBeNoop(new DoubleStyleInterpolation(
         motionRotationToInterpolableValue(start),
         motionRotationToInterpolableValue(end),
-        id, NoClamp, startRotationType == MotionRotationAuto));
+        id, true, InterpolationRange::RangeAll, startRotationType == MotionRotationAuto));
 }
 
 }

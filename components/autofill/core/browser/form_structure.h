@@ -34,6 +34,10 @@ namespace buzz {
 class XmlElement;
 }
 
+namespace rappor {
+class RapporService;
+}
+
 namespace autofill {
 
 struct FormData;
@@ -73,14 +77,15 @@ class FormStructure {
 
   // Parses the field types from the server query response. |forms| must be the
   // same as the one passed to EncodeQueryRequest when constructing the query.
+  // |rappor_service| may be null.
   static void ParseQueryResponse(const std::string& response_xml,
-                                 const std::vector<FormStructure*>& forms);
+                                 const std::vector<FormStructure*>& forms,
+                                 rappor::RapporService* rappor_service);
 
-  // Fills |forms| with the details from the given |form_structures| and their
-  // fields' predicted types.
-  static void GetFieldTypePredictions(
-      const std::vector<FormStructure*>& form_structures,
-      std::vector<FormDataPredictions>* forms);
+  // Returns predictions using the details from the given |form_structures| and
+  // their fields' predicted types.
+  static std::vector<FormDataPredictions> GetFieldTypePredictions(
+      const std::vector<FormStructure*>& form_structures);
 
   // The unique signature for this form, composed of the target url domain,
   // the form name, and the form field names in a 64-bit hash.
@@ -118,7 +123,8 @@ class FormStructure {
   // a timestamp corresponding to the form's submission.
   void LogQualityMetrics(const base::TimeTicks& load_time,
                          const base::TimeTicks& interaction_time,
-                         const base::TimeTicks& submission_time) const;
+                         const base::TimeTicks& submission_time,
+                         rappor::RapporService* rappor_service) const;
 
   // Classifies each field in |fields_| based upon its |autocomplete| attribute,
   // if the attribute is available.  The association is stored into the field's
@@ -174,6 +180,8 @@ class FormStructure {
   }
 
   const GURL& source_url() const { return source_url_; }
+
+  bool has_password_field() const { return has_password_field_; }
 
   void set_upload_required(UploadRequired required) {
     upload_required_ = required;

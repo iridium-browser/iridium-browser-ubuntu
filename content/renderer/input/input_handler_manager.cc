@@ -5,8 +5,8 @@
 #include "content/renderer/input/input_handler_manager.h"
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop_proxy.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/input/input_handler.h"
 #include "content/renderer/input/input_event_filter.h"
 #include "content/renderer/input/input_handler_manager_client.h"
@@ -161,8 +161,8 @@ void InputHandlerManager::DidStopFlinging(int routing_id) {
 }
 
 void InputHandlerManager::DidReceiveInputEvent(
-    blink::WebInputEvent::Type type) {
-  renderer_scheduler_->DidReceiveInputEventOnCompositorThread(type);
+    const blink::WebInputEvent& web_input_event) {
+  renderer_scheduler_->DidReceiveInputEventOnCompositorThread(web_input_event);
 }
 
 void InputHandlerManager::DidAnimateForInput() {

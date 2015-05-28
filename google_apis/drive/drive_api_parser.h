@@ -419,7 +419,6 @@ class ImageMediaMetadata {
   int rotation_;
 };
 
-
 // FileResource represents a file or folder metadata in Drive.
 // https://developers.google.com/drive/v2/reference/files
 class FileResource {
@@ -501,6 +500,9 @@ class FileResource {
   // E.g. Google Document, Google Spreadsheet.
   const GURL& alternate_link() const { return alternate_link_; }
 
+  // Returns URL to the share dialog UI.
+  const GURL& share_link() const { return share_link_; }
+
   // Returns parent references (directories) of this file.
   const std::vector<ParentReference>& parents() const { return parents_; }
 
@@ -551,6 +553,9 @@ class FileResource {
   void set_alternate_link(const GURL& alternate_link) {
     alternate_link_ = alternate_link;
   }
+  void set_share_link(const GURL& share_link) {
+    share_link_ = share_link;
+  }
   std::vector<ParentReference>* mutable_parents() { return &parents_; }
   std::vector<OpenWithLink>* mutable_open_with_links() {
     return &open_with_links_;
@@ -579,6 +584,7 @@ class FileResource {
   std::string md5_checksum_;
   int64 file_size_;
   GURL alternate_link_;
+  GURL share_link_;
   std::vector<ParentReference> parents_;
   std::vector<OpenWithLink> open_with_links_;
 };

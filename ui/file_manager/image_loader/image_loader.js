@@ -21,14 +21,28 @@ function ImageLoader() {
    */
   this.scheduler_ = new Scheduler();
 
+  /**
+   * Piex loader for RAW images.
+   * @private {!PiexLoader}
+   */
+  this.piexLoader_ = new PiexLoader();
+
   // Grant permissions to all volumes, initialize the cache and then start the
   // scheduler.
   chrome.fileManagerPrivate.getVolumeMetadataList(function(volumeMetadataList) {
+    // Listen for mount events, and grant permissions to volumes being mounted.
+    chrome.fileManagerPrivate.onMountCompleted.addListener(
+        function(event) {
+          if (event.eventType === 'mount' && event.status === 'success') {
+            chrome.fileSystem.requestFileSystem(
+                {volumeId: event.volumeMetadata.volumeId}, function() {});
+          }
+        });
     var initPromises = volumeMetadataList.map(function(volumeMetadata) {
       var requestPromise = new Promise(function(callback) {
-        chrome.fileManagerPrivate.requestFileSystem(
-            volumeMetadata.volumeId,
-            callback);
+        chrome.fileSystem.requestFileSystem(
+            {volumeId: volumeMetadata.volumeId},
+            /** @type {function(FileSystem=)} */(callback));
       });
       return requestPromise;
     });
@@ -38,15 +52,6 @@ function ImageLoader() {
 
     // After all initialization promises are done, start the scheduler.
     Promise.all(initPromises).then(this.scheduler_.start.bind(this.scheduler_));
-
-    // Listen for mount events, and grant permissions to volumes being mounted.
-    chrome.fileManagerPrivate.onMountCompleted.addListener(
-        function(event) {
-          if (event.eventType == 'mount' && event.status == 'success') {
-            chrome.fileManagerPrivate.requestFileSystem(
-                event.volumeMetadata.volumeId, function() {});
-          }
-        });
   }.bind(this));
 
   // Listen for incoming requests.
@@ -100,7 +105,8 @@ ImageLoader.prototype.onMessage_ = function(senderId, request, callback) {
     return false;  // No callback calls.
   } else {
     // Create a request task and add it to the scheduler (queue).
-    var requestTask = new Request(requestId, this.cache_, request, callback);
+    var requestTask = new Request(
+        requestId, this.cache_, this.piexLoader_, request, callback);
     this.scheduler_.add(requestTask);
     return true;  // Request will call the callback.
   }
@@ -133,6 +139,10 @@ ImageLoader.shouldProcess = function(width, height, options) {
 
   // Orientation has to be adjusted.
   if (options.orientation)
+    return true;
+
+  // Non-standard color space has to be converted.
+  if (options.colorSpace && options.colorSpace !== ColorSpace.SRGB)
     return true;
 
   // No changes required.
@@ -204,32 +214,73 @@ ImageLoader.resize = function(source, target, options) {
   var targetDimensions = ImageLoader.resizeDimensions(
       source.width, source.height, options);
 
-  target.width = targetDimensions.width;
-  target.height = targetDimensions.height;
-
   // Default orientation is 0deg.
-  var orientation = options.orientation || 0;
-
-  // For odd orientation values: 1 (90deg) and 3 (270deg) flip dimensions.
-  var drawImageWidth;
-  var drawImageHeight;
-  if (orientation % 2) {
-    drawImageWidth = target.height;
-    drawImageHeight = target.width;
-  } else {
-    drawImageWidth = target.width;
-    drawImageHeight = target.height;
-  }
+  var orientation = options.orientation || new ImageOrientation(1, 0, 0, 1);
+  var size = orientation.getSizeAfterCancelling(
+      targetDimensions.width, targetDimensions.height);
+  target.width = size.width;
+  target.height = size.height;
 
   var targetContext = target.getContext('2d');
   targetContext.save();
-  targetContext.translate(target.width / 2, target.height / 2);
-  targetContext.rotate(orientation * Math.PI / 2);
+  orientation.cancelImageOrientation(
+      targetContext, targetDimensions.width, targetDimensions.height);
   targetContext.drawImage(
       source,
-      0, 0,
-      source.width, source.height,
-      -drawImageWidth / 2, -drawImageHeight / 2,
-      drawImageWidth, drawImageHeight);
+      0, 0, source.width, source.height,
+      0, 0, targetDimensions.width, targetDimensions.height);
   targetContext.restore();
+};
+
+/**
+ * Matrix converts AdobeRGB color space into sRGB color space.
+ * @const {!Array<number>}
+ */
+ImageLoader.MATRIX_FROM_ADOBE_TO_STANDARD = [
+  1.39836, -0.39836, 0.00000,
+  0.00000,  1.00000, 0.00000,
+  0.00000, -0.04293, 1.04293
+];
+
+/**
+ * Converts the canvas of color space into sRGB.
+ * @param {HTMLCanvasElement} target Target canvas.
+ * @param {ColorSpace} colorSpace Current color space.
+ */
+ImageLoader.convertColorSpace = function(target, colorSpace) {
+  if (colorSpace === ColorSpace.SRGB)
+    return;
+  if (colorSpace === ColorSpace.ADOBE_RGB) {
+    var matrix = ImageLoader.MATRIX_FROM_ADOBE_TO_STANDARD;
+    var context = target.getContext('2d');
+    var imageData = context.getImageData(0, 0, target.width, target.height);
+    var data = imageData.data;
+    for (var i = 0; i < data.length; i += 4) {
+      // Scale to [0, 1].
+      var adobeR = data[i] / 255;
+      var adobeG = data[i + 1] / 255;
+      var adobeB = data[i + 2] / 255;
+
+      // Revert gannma transformation.
+      adobeR = adobeR <= 0.0556 ? adobeR / 32 : Math.pow(adobeR, 2.2);
+      adobeG = adobeG <= 0.0556 ? adobeG / 32 : Math.pow(adobeG, 2.2);
+      adobeB = adobeB <= 0.0556 ? adobeB / 32 : Math.pow(adobeB, 2.2);
+
+      // Convert color space.
+      var sR = matrix[0] * adobeR + matrix[1] * adobeG + matrix[2] * adobeB;
+      var sG = matrix[3] * adobeR + matrix[4] * adobeG + matrix[5] * adobeB;
+      var sB = matrix[6] * adobeR + matrix[7] * adobeG + matrix[8] * adobeB;
+
+      // Gannma transformation.
+      sR = sR <= 0.0031308 ? 12.92 * sR : 1.055 * Math.pow(sR, 1 / 2.4) - 0.055;
+      sG = sG <= 0.0031308 ? 12.92 * sG : 1.055 * Math.pow(sG, 1 / 2.4) - 0.055;
+      sB = sB <= 0.0031308 ? 12.92 * sB : 1.055 * Math.pow(sB, 1 / 2.4) - 0.055;
+
+      // Scale to [0, 255].
+      data[i] = Math.max(0, Math.min(255, sR * 255));
+      data[i + 1] = Math.max(0, Math.min(255, sG * 255));
+      data[i + 2] = Math.max(0, Math.min(255, sB * 255));
+    }
+    context.putImageData(imageData, 0, 0);
+  }
 };

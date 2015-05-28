@@ -9,6 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/mac/foundation_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
@@ -46,7 +47,10 @@ class ManagePasswordsBubbleCocoaTest : public CocoaProfileTest {
     browser()->tab_strip_model()->AppendWebContents(
         test_web_contents_, /*foreground=*/true);
     // Set the initial state.
-    ui_controller->SetState(password_manager::ui::PENDING_PASSWORD_STATE);
+    ScopedVector<autofill::PasswordForm> forms;
+    forms.push_back(new autofill::PasswordForm);
+    forms.back()->origin = GURL("http://example.com");
+    ui_controller->PretendSubmittedPassword(forms.Pass());
   }
 
   content::WebContents* CreateWebContents() {
@@ -72,6 +76,11 @@ class ManagePasswordsBubbleCocoaTest : public CocoaProfileTest {
   NSWindow* bubbleWindow() {
     ManagePasswordsBubbleCocoa* bubble = ManagePasswordsBubbleCocoa::instance();
     return bubble ? [bubble->controller_ window] : nil;
+  }
+
+  ManagePasswordsIconCocoa* icon() {
+    return static_cast<ManagePasswordsIconCocoa*>(
+      ManagePasswordsBubbleCocoa::instance()->icon_);
   }
 
  private:
@@ -120,4 +129,15 @@ TEST_F(ManagePasswordsBubbleCocoaTest, ShowBubbleOnInactiveTabShouldDoNothing) {
   // Try to show the bubble on the inactive tab. Nothing should happen.
   ShowBubble();
   EXPECT_FALSE(ManagePasswordsBubbleCocoa::instance());
+}
+
+TEST_F(ManagePasswordsBubbleCocoaTest, HideBubbleOnChangedState) {
+  ShowBubble();
+  EXPECT_TRUE(ManagePasswordsBubbleCocoa::instance());
+  EXPECT_TRUE([bubbleWindow() isVisible]);
+  EXPECT_TRUE(icon()->active());
+
+  icon()->OnChangingState();
+  EXPECT_FALSE(ManagePasswordsBubbleCocoa::instance());
+  EXPECT_FALSE([bubbleWindow() isVisible]);
 }

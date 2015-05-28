@@ -13,18 +13,30 @@
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/module.h"
+#include "ppapi/cpp/tcp_socket.h"
 #include "ppapi/cpp/var.h"
+#include "ppapi/utility/completion_callback_factory.h"
+
+#if defined(__clang__)
+// ipc_message_attachment_set.h depends on C++11 which nacl-g++ does not
+// fully support.
+#include "ipc/ipc_message_attachment_set.h"
+#endif
 
 namespace {
 
 std::string g_last_error;
 pp::Instance* g_instance = NULL;
 
-// This should be the same as FileDescriptorSet::kMaxDescriptorsPerMessage in
-// ipc/file_descriptor_set_posix.h.
-// TODO(yusukes): Once all the NaCl toolchains support C++11, Add
-// #include "ipc/file_descriptor_set_posix.h" and remove the constant.
-const size_t kMaxDescriptorsPerMessage = 7;
+// This should be the same as MessageAttachmentSet::kMaxDescriptorsPerMessage in
+// ipc/ipc_message_attachment_set.h.
+const size_t kMaxDescriptorsPerMessage = 128;
+
+#if defined(__clang__)
+static_assert(kMaxDescriptorsPerMessage ==
+              IPC::MessageAttachmentSet::kMaxDescriptorsPerMessage,
+              "kMaxDescriptorsPerMessage is not up to date");
+#endif
 
 // Returns true if the resource file whose name is |key| exists and its content
 // matches |content|.
@@ -99,7 +111,7 @@ void PostReply(void* user_data, int32_t status) {
   if (!g_last_error.empty())
     g_instance->PostMessage(g_last_error.c_str());
   else
-    g_instance->PostMessage("Test passed");
+    g_instance->PostMessage("PASS");
 }
 
 void* RunTestsOnBackgroundThread(void* thread_id) {
@@ -111,10 +123,19 @@ void* RunTestsOnBackgroundThread(void* thread_id) {
 
 class MyInstance : public pp::Instance {
  public:
-  explicit MyInstance(PP_Instance instance) : pp::Instance(instance) {
+  explicit MyInstance(PP_Instance instance)
+      : pp::Instance(instance), socket_(this), factory_(this) {
     g_instance = this;
   }
   virtual ~MyInstance() { }
+
+  void DidBindSocket(int32_t result) {
+    // We didn't ask for socket permission in our manifest, so it should fail.
+    if (result == PP_ERROR_NOACCESS)
+      PostMessage("PASS");
+    else
+      PostMessage(result);
+  }
 
   virtual bool Init(uint32_t argc, const char* argn[], const char* argv[]) {
     pthread_t thread;
@@ -124,8 +145,16 @@ class MyInstance : public pp::Instance {
       g_last_error = "pthread_create failed";
       PostReply(NULL, 0);
     }
+    // Attempt to bind a socket. We don't have permissions, so it should fail.
+    PP_NetAddress_IPv4 ipv4_address = {80, {127, 0, 0, 1} };
+    pp::NetAddress address(this, ipv4_address);
+    socket_.Bind(address, factory_.NewCallback(&MyInstance::DidBindSocket));
     return true;
   }
+
+ private:
+  pp::TCPSocket socket_;
+  pp::CompletionCallbackFactory<MyInstance> factory_;
 };
 
 class MyModule : public pp::Module {

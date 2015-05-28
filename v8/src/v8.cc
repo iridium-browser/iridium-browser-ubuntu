@@ -8,7 +8,6 @@
 #include "src/base/once.h"
 #include "src/base/platform/platform.h"
 #include "src/bootstrapper.h"
-#include "src/compiler/pipeline.h"
 #include "src/debug.h"
 #include "src/deoptimizer.h"
 #include "src/elements.h"
@@ -18,12 +17,12 @@
 #include "src/hydrogen.h"
 #include "src/isolate.h"
 #include "src/lithium-allocator.h"
-#include "src/natives.h"
 #include "src/objects.h"
 #include "src/runtime-profiler.h"
 #include "src/sampler.h"
-#include "src/serialize.h"
-#include "src/snapshot.h"
+#include "src/snapshot/natives.h"
+#include "src/snapshot/serialize.h"
+#include "src/snapshot/snapshot.h"
 
 
 namespace v8 {
@@ -50,7 +49,6 @@ void V8::TearDown() {
   Bootstrapper::TearDownExtensions();
   ElementsAccessor::TearDown();
   LOperand::TearDownCaches();
-  compiler::Pipeline::TearDown();
   ExternalReference::TearDownMathExpData();
   RegisteredExtension::UnregisterAll();
   Isolate::GlobalTearDown();
@@ -94,7 +92,6 @@ void V8::InitializeOncePerProcessImpl() {
 #endif
   ElementsAccessor::InitializeOncePerProcess();
   LOperand::SetUpCaches();
-  compiler::Pipeline::SetUp();
   SetUpJSCallerSavedCodeData();
   ExternalReference::SetUp();
   Bootstrapper::InitializeOncePerProcess();

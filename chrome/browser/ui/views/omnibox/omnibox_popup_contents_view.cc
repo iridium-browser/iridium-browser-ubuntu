@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_result_view.h"
 #include "ui/base/theme_provider.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/path.h"
@@ -21,9 +22,13 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
 
+namespace {
+
 // This is the number of pixels in the border image interior to the actual
 // border.
 const int kBorderInterior = 6;
+
+}  // namespace
 
 class OmniboxPopupContentsView::AutocompletePopupWidget
     : public views::Widget,
@@ -63,8 +68,7 @@ OmniboxPopupContentsView::OmniboxPopupContentsView(
       ignore_mouse_drag_(false),
       size_animation_(this),
       left_margin_(0),
-      right_margin_(0),
-      outside_vertical_padding_(0) {
+      right_margin_(0) {
   // The contents is owned by the LocationBarView.
   set_owned_by_client();
 
@@ -111,10 +115,10 @@ gfx::Rect OmniboxPopupContentsView::GetPopupBounds() const {
 void OmniboxPopupContentsView::LayoutChildren() {
   gfx::Rect contents_rect = GetContentsBounds();
 
-  contents_rect.Inset(left_margin_,
-                      views::NonClientFrameView::kClientEdgeThickness +
-                          outside_vertical_padding_,
-                      right_margin_, outside_vertical_padding_);
+  contents_rect.Inset(
+      left_margin_, views::NonClientFrameView::kClientEdgeThickness +
+                        OmniboxResultView::kMinimumTextVerticalPadding,
+      right_margin_, OmniboxResultView::kMinimumTextVerticalPadding);
   int top = contents_rect.y();
   for (size_t i = 0; i < AutocompleteResult::kMaxMatches; ++i) {
     View* v = child_at(i);
@@ -171,7 +175,7 @@ void OmniboxPopupContentsView::UpdatePopupAppearance() {
     const AutocompleteMatch& match = GetMatchAtIndex(i);
     view->SetMatch(match);
     view->SetVisible(i >= hidden_matches);
-    if (match.type == AutocompleteMatchType::SEARCH_SUGGEST_INFINITE) {
+    if (match.type == AutocompleteMatchType::SEARCH_SUGGEST_TAIL) {
       max_match_contents_width_ = std::max(
           max_match_contents_width_, view->GetMatchContentsWidth());
     }
@@ -367,12 +371,6 @@ void OmniboxPopupContentsView::OnGestureEvent(ui::GestureEvent* event) {
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxPopupContentsView, protected:
 
-void OmniboxPopupContentsView::PaintResultViews(gfx::Canvas* canvas) {
-  canvas->DrawColor(result_view_at(0)->GetColor(
-      OmniboxResultView::NORMAL, OmniboxResultView::BACKGROUND));
-  View::PaintChildren(canvas, views::CullSet());
-}
-
 int OmniboxPopupContentsView::CalculatePopupHeight() {
   DCHECK_GE(static_cast<size_t>(child_count()), model_->result().size());
   int popup_height = 0;
@@ -384,18 +382,11 @@ int OmniboxPopupContentsView::CalculatePopupHeight() {
   // amount of space between the text and the popup border as there is in the
   // interior between each row of text.
   //
-  // Discovering the exact amount of leading and padding around the font is
-  // a bit tricky and platform-specific, but this computation seems to work in
-  // practice.
-  OmniboxResultView* result_view = result_view_at(0);
-  outside_vertical_padding_ =
-      (result_view->GetPreferredSize().height() -
-       result_view->GetTextHeight());
-
+  // The * 2 accounts for vertical padding used at the top and bottom.
   return popup_height +
-         views::NonClientFrameView::kClientEdgeThickness +  // Top border.
-         outside_vertical_padding_ * 2 +                    // Padding.
-         bottom_shadow_->height() - kBorderInterior;        // Bottom border.
+         views::NonClientFrameView::kClientEdgeThickness +     // Top border.
+         OmniboxResultView::kMinimumTextVerticalPadding * 2 +  // Padding.
+         bottom_shadow_->height() - kBorderInterior;           // Bottom border.
 }
 
 OmniboxResultView* OmniboxPopupContentsView::CreateResultView(
@@ -406,22 +397,13 @@ OmniboxResultView* OmniboxPopupContentsView::CreateResultView(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// OmniboxPopupContentsView, views::View overrides, protected:
+// OmniboxPopupContentsView, views::View overrides, private:
+
+const char* OmniboxPopupContentsView::GetClassName() const {
+  return "OmniboxPopupContentsView";
+}
 
 void OmniboxPopupContentsView::OnPaint(gfx::Canvas* canvas) {
-  gfx::Rect contents_bounds = GetContentsBounds();
-  contents_bounds.set_height(
-      contents_bounds.height() - bottom_shadow_->height() + kBorderInterior);
-
-  gfx::Path path;
-  MakeContentsPath(&path, contents_bounds);
-  canvas->Save();
-  canvas->sk_canvas()->clipPath(path,
-                                SkRegion::kIntersect_Op,
-                                true /* doAntialias */);
-  PaintResultViews(canvas);
-  canvas->Restore();
-
   // Top border.
   canvas->FillRect(
       gfx::Rect(0, 0, width(), views::NonClientFrameView::kClientEdgeThickness),
@@ -433,9 +415,20 @@ void OmniboxPopupContentsView::OnPaint(gfx::Canvas* canvas) {
                        width(), bottom_shadow_->height());
 }
 
-void OmniboxPopupContentsView::PaintChildren(gfx::Canvas* canvas,
-                                             const views::CullSet& cull_set) {
-  // We paint our children inside OnPaint().
+void OmniboxPopupContentsView::PaintChildren(const ui::PaintContext& context) {
+  gfx::Rect contents_bounds = GetContentsBounds();
+  contents_bounds.Inset(0, views::NonClientFrameView::kClientEdgeThickness, 0,
+                        bottom_shadow_->height() - kBorderInterior);
+
+  gfx::Canvas* canvas = context.canvas();
+  canvas->Save();
+  canvas->sk_canvas()->clipRect(gfx::RectToSkRect(contents_bounds),
+                                SkRegion::kIntersect_Op,
+                                true /* doAntialias */);
+  canvas->DrawColor(result_view_at(0)->GetColor(OmniboxResultView::NORMAL,
+                                                OmniboxResultView::BACKGROUND));
+  View::PaintChildren(context);
+  canvas->Restore();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -454,17 +447,6 @@ bool OmniboxPopupContentsView::HasMatchAt(size_t index) const {
 const AutocompleteMatch& OmniboxPopupContentsView::GetMatchAtIndex(
     size_t index) const {
   return model_->result().match_at(index);
-}
-
-void OmniboxPopupContentsView::MakeContentsPath(
-    gfx::Path* path,
-    const gfx::Rect& bounding_rect) {
-  SkRect rect;
-  rect.set(SkIntToScalar(bounding_rect.x()),
-           SkIntToScalar(bounding_rect.y()),
-           SkIntToScalar(bounding_rect.right()),
-           SkIntToScalar(bounding_rect.bottom()));
-  path->addRect(rect);
 }
 
 size_t OmniboxPopupContentsView::GetIndexForPoint(

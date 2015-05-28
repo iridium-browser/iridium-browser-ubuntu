@@ -276,10 +276,10 @@ static gl::TextureCaps GenerateTextureFormatCaps(GLenum internalFormat, IDirect3
     gl::TextureCaps textureCaps;
 
     const d3d9::TextureFormat &d3dFormatInfo = d3d9::GetTextureFormatInfo(internalFormat);
+    const gl::InternalFormat &formatInfo = gl::GetInternalFormatInfo(internalFormat);
 
     if (d3dFormatInfo.texFormat != D3DFMT_UNKNOWN)
     {
-        const gl::InternalFormat &formatInfo = gl::GetInternalFormatInfo(internalFormat);
         if (formatInfo.depthBits > 0 || formatInfo.stencilBits > 0)
         {
             textureCaps.texturable = SUCCEEDED(d3d9->CheckDeviceFormat(adapter, deviceType, adapterFormat, 0, D3DRTYPE_TEXTURE, d3dFormatInfo.texFormat));
@@ -295,8 +295,12 @@ static gl::TextureCaps GenerateTextureFormatCaps(GLenum internalFormat, IDirect3
 
     if (d3dFormatInfo.renderFormat != D3DFMT_UNKNOWN)
     {
-        textureCaps.renderable = SUCCEEDED(d3d9->CheckDeviceFormat(adapter, deviceType, adapterFormat, D3DUSAGE_DEPTHSTENCIL, D3DRTYPE_TEXTURE, d3dFormatInfo.renderFormat)) ||
-                                 SUCCEEDED(d3d9->CheckDeviceFormat(adapter, deviceType, adapterFormat, D3DUSAGE_RENDERTARGET, D3DRTYPE_TEXTURE, d3dFormatInfo.renderFormat));
+        textureCaps.renderable = SUCCEEDED(d3d9->CheckDeviceFormat(adapter, deviceType, adapterFormat, D3DUSAGE_RENDERTARGET, D3DRTYPE_TEXTURE, d3dFormatInfo.renderFormat));
+
+        if ((formatInfo.depthBits > 0 || formatInfo.stencilBits > 0) && !textureCaps.renderable)
+        {
+            textureCaps.renderable = SUCCEEDED(d3d9->CheckDeviceFormat(adapter, deviceType, adapterFormat, D3DUSAGE_DEPTHSTENCIL, D3DRTYPE_TEXTURE, d3dFormatInfo.renderFormat));
+        }
 
         textureCaps.sampleCounts.insert(1);
         for (size_t i = D3DMULTISAMPLE_2_SAMPLES; i <= D3DMULTISAMPLE_16_SAMPLES; i++)
@@ -387,6 +391,22 @@ void GenerateCaps(IDirect3D9 *d3d9, IDirect3DDevice9 *device, D3DDEVTYPE deviceT
     // Program and shader binary formats (no supported shader binary formats)
     caps->programBinaryFormats.push_back(GL_PROGRAM_BINARY_ANGLE);
 
+    caps->vertexHighpFloat.setIEEEFloat();
+    caps->vertexMediumpFloat.setIEEEFloat();
+    caps->vertexLowpFloat.setIEEEFloat();
+    caps->fragmentHighpFloat.setIEEEFloat();
+    caps->fragmentMediumpFloat.setIEEEFloat();
+    caps->fragmentLowpFloat.setIEEEFloat();
+
+    // Some (most) hardware only supports single-precision floating-point numbers,
+    // which can accurately represent integers up to +/-16777216
+    caps->vertexHighpInt.setSimulatedInt(24);
+    caps->vertexMediumpInt.setSimulatedInt(24);
+    caps->vertexLowpInt.setSimulatedInt(24);
+    caps->fragmentHighpInt.setSimulatedInt(24);
+    caps->fragmentMediumpInt.setSimulatedInt(24);
+    caps->fragmentLowpInt.setSimulatedInt(24);
+
     // WaitSync is ES3-only, set to zero
     caps->maxServerWaitTimeout = 0;
 
@@ -462,6 +482,9 @@ void GenerateCaps(IDirect3D9 *d3d9, IDirect3DDevice9 *device, D3DDEVTYPE deviceT
     extensions->pixelBufferObject = false;
     extensions->mapBuffer = false;
     extensions->mapBufferRange = false;
+
+    // textureRG is emulated and not performant.
+    extensions->textureRG = false;
 
     D3DADAPTER_IDENTIFIER9 adapterId = { 0 };
     if (SUCCEEDED(d3d9->GetAdapterIdentifier(adapter, 0, &adapterId)))
@@ -550,7 +573,7 @@ void MakeValidSize(bool isImage, D3DFORMAT format, GLsizei *requestWidth, GLsize
 
 gl::Error GetAttachmentRenderTarget(const gl::FramebufferAttachment *attachment, RenderTarget9 **outRT)
 {
-    RenderTarget *renderTarget = NULL;
+    RenderTargetD3D *renderTarget = NULL;
     gl::Error error = rx::GetAttachmentRenderTarget(attachment, &renderTarget);
     if (error.isError())
     {
@@ -565,6 +588,7 @@ Workarounds GenerateWorkarounds()
     Workarounds workarounds;
     workarounds.mrtPerfWorkaround = true;
     workarounds.setDataFasterThanImageUpload = false;
+    workarounds.useInstancedPointSpriteEmulation = false;
     return workarounds;
 }
 

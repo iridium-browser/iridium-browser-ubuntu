@@ -210,16 +210,16 @@ SECStatus My_Decrypt(PK11SymKey* key,
 Aes128Gcm12Decrypter::Aes128Gcm12Decrypter()
     : AeadBaseDecrypter(CKM_AES_GCM, My_Decrypt, kKeySize, kAuthTagSize,
                         kNoncePrefixSize) {
-  COMPILE_ASSERT(kKeySize <= kMaxKeySize, key_size_too_big);
-  COMPILE_ASSERT(kNoncePrefixSize <= kMaxNoncePrefixSize,
-                 nonce_prefix_size_too_big);
+  static_assert(kKeySize <= kMaxKeySize, "key size too big");
+  static_assert(kNoncePrefixSize <= kMaxNoncePrefixSize,
+                "nonce prefix size too big");
   ignore_result(g_gcm_support_checker.Get());
 }
 
 Aes128Gcm12Decrypter::~Aes128Gcm12Decrypter() {}
 
 void Aes128Gcm12Decrypter::FillAeadParams(StringPiece nonce,
-                                          StringPiece associated_data,
+                                          const StringPiece& associated_data,
                                           size_t auth_tag_size,
                                           AeadParams* aead_params) const {
   aead_params->len = sizeof(aead_params->data.gcm_params);

@@ -29,28 +29,28 @@
 #ifndef AXSlider_h
 #define AXSlider_h
 
+#include "modules/accessibility/AXLayoutObject.h"
 #include "modules/accessibility/AXMockObject.h"
-#include "modules/accessibility/AXRenderObject.h"
 
 namespace blink {
 
 class AXObjectCacheImpl;
 class HTMLInputElement;
 
-class AXSlider : public AXRenderObject {
+class AXSlider : public AXLayoutObject {
 
 public:
-    static PassRefPtr<AXSlider> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXSlider> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AXSlider() { }
 
 protected:
-    AXSlider(RenderObject*, AXObjectCacheImpl*);
+    AXSlider(LayoutObject*, AXObjectCacheImpl*);
 
 private:
     HTMLInputElement* element() const;
     virtual AXObject* elementAccessibilityHitTest(const IntPoint&) const override final;
 
-    virtual AccessibilityRole roleValue() const override { return SliderRole; }
+    virtual AccessibilityRole roleValue() const override;
     virtual bool isSlider() const override final { return true; }
     virtual bool isControl() const override final { return true; }
 

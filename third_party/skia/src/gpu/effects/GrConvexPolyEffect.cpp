@@ -23,11 +23,11 @@ public:
 
     GrPrimitiveEdgeType getEdgeType() const { return fEdgeType; }
 
-    virtual const char* name() const SK_OVERRIDE { return "AARect"; }
+    const char* name() const override { return "AARect"; }
 
-    virtual void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const SK_OVERRIDE;
+    void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const override;
 
-    virtual GrGLFragmentProcessor* createGLInstance() const SK_OVERRIDE;
+    GrGLFragmentProcessor* createGLInstance() const override;
 
 private:
     AARectEffect(GrPrimitiveEdgeType edgeType, const SkRect& rect)
@@ -36,12 +36,12 @@ private:
         this->setWillReadFragmentPosition();
     }
 
-    virtual bool onIsEqual(const GrFragmentProcessor& other) const SK_OVERRIDE {
+    bool onIsEqual(const GrFragmentProcessor& other) const override {
         const AARectEffect& aare = other.cast<AARectEffect>();
         return fRect == aare.fRect;
     }
 
-    virtual void onComputeInvariantOutput(GrInvariantOutput* inout) const SK_OVERRIDE {
+    void onComputeInvariantOutput(GrInvariantOutput* inout) const override {
         if (fRect.isEmpty()) {
             // An empty rect will have no coverage anywhere.
             inout->mulByKnownSingleComponent(0);
@@ -90,11 +90,11 @@ public:
                           const char* outputColor,
                           const char* inputColor,
                           const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
+                          const TextureSamplerArray&) override;
 
     static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*);
 
-    virtual void setData(const GrGLProgramDataManager&, const GrProcessor&) SK_OVERRIDE;
+    void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
 private:
     GrGLProgramDataManager::UniformHandle fRectUniform;
@@ -185,11 +185,11 @@ public:
                           const char* outputColor,
                           const char* inputColor,
                           const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
+                          const TextureSamplerArray&) override;
 
     static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*);
 
-    virtual void setData(const GrGLProgramDataManager&, const GrProcessor&) SK_OVERRIDE;
+    void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
 private:
     GrGLProgramDataManager::UniformHandle fEdgeUniform;

@@ -12,7 +12,6 @@
 #include "SkData.h"
 #include "SkDescriptor.h"
 #include "SkFontDescriptor.h"
-#include "SkFontHost.h"
 #include "SkGlyph.h"
 #include "SkHRESULT.h"
 #include "SkMaskGamma.h"
@@ -255,22 +254,22 @@ public:
     }
 
 protected:
-    virtual SkStream* onOpenStream(int* ttcIndex) const SK_OVERRIDE;
-    virtual SkScalerContext* onCreateScalerContext(const SkDescriptor*) const SK_OVERRIDE;
-    virtual void onFilterRec(SkScalerContextRec*) const SK_OVERRIDE;
+    SkStreamAsset* onOpenStream(int* ttcIndex) const override;
+    SkScalerContext* onCreateScalerContext(const SkDescriptor*) const override;
+    void onFilterRec(SkScalerContextRec*) const override;
     virtual SkAdvancedTypefaceMetrics* onGetAdvancedTypefaceMetrics(
                                 SkAdvancedTypefaceMetrics::PerGlyphInfo,
-                                const uint32_t*, uint32_t) const SK_OVERRIDE;
-    virtual void onGetFontDescriptor(SkFontDescriptor*, bool*) const SK_OVERRIDE;
+                                const uint32_t*, uint32_t) const override;
+    void onGetFontDescriptor(SkFontDescriptor*, bool*) const override;
     virtual int onCharsToGlyphs(const void* chars, Encoding encoding,
-                                uint16_t glyphs[], int glyphCount) const SK_OVERRIDE;
-    virtual int onCountGlyphs() const SK_OVERRIDE;
-    virtual int onGetUPEM() const SK_OVERRIDE;
-    virtual void onGetFamilyName(SkString* familyName) const SK_OVERRIDE;
-    virtual SkTypeface::LocalizedStrings* onCreateFamilyNameIterator() const SK_OVERRIDE;
-    virtual int onGetTableTags(SkFontTableTag tags[]) const SK_OVERRIDE;
+                                uint16_t glyphs[], int glyphCount) const override;
+    int onCountGlyphs() const override;
+    int onGetUPEM() const override;
+    void onGetFamilyName(SkString* familyName) const override;
+    SkTypeface::LocalizedStrings* onCreateFamilyNameIterator() const override;
+    int onGetTableTags(SkFontTableTag tags[]) const override;
     virtual size_t onGetTableData(SkFontTableTag, size_t offset,
-                                  size_t length, void* data) const SK_OVERRIDE;
+                                  size_t length, void* data) const override;
 };
 
 class FontMemResourceTypeface : public LogFontTypeface {
@@ -283,7 +282,7 @@ public:
     }
 
 protected:
-    virtual void weak_dispose() const SK_OVERRIDE {
+    void weak_dispose() const override {
         RemoveFontMemResourceEx(fFontMemResource);
         //SkTypefaceCache::Remove(this);
         INHERITED::weak_dispose();
@@ -541,13 +540,13 @@ public:
     bool isValid() const;
 
 protected:
-    virtual unsigned generateGlyphCount() SK_OVERRIDE;
-    virtual uint16_t generateCharToGlyph(SkUnichar uni) SK_OVERRIDE;
-    virtual void generateAdvance(SkGlyph* glyph) SK_OVERRIDE;
-    virtual void generateMetrics(SkGlyph* glyph) SK_OVERRIDE;
-    virtual void generateImage(const SkGlyph& glyph) SK_OVERRIDE;
-    virtual void generatePath(const SkGlyph& glyph, SkPath* path) SK_OVERRIDE;
-    virtual void generateFontMetrics(SkPaint::FontMetrics*) SK_OVERRIDE;
+    unsigned generateGlyphCount() override;
+    uint16_t generateCharToGlyph(SkUnichar uni) override;
+    void generateAdvance(SkGlyph* glyph) override;
+    void generateMetrics(SkGlyph* glyph) override;
+    void generateImage(const SkGlyph& glyph) override;
+    void generatePath(const SkGlyph& glyph, SkPath* path) override;
+    void generateFontMetrics(SkPaint::FontMetrics*) override;
 
 private:
     DWORD getGDIGlyphPath(const SkGlyph& glyph, UINT flags,
@@ -866,7 +865,7 @@ void SkScalerContext_GDI::generateMetrics(SkGlyph* glyph) {
             SkMatrix m;
             m.setAll(SkFIXEDToScalar(fMat22.eM11), -SkFIXEDToScalar(fMat22.eM21), 0,
                      -SkFIXEDToScalar(fMat22.eM12), SkFIXEDToScalar(fMat22.eM22), 0,
-                     0,  0, SkScalarToPersp(SK_Scalar1));
+                     0,  0, 1);
             m.mapRect(&bounds);
             bounds.roundOut(&bounds);
             glyph->fLeft = SkScalarTruncToInt(bounds.fLeft);
@@ -1593,17 +1592,17 @@ DWORD SkScalerContext_GDI::getGDIGlyphPath(const SkGlyph& glyph, UINT flags,
 {
     GLYPHMETRICS gm;
 
-    DWORD total_size = GetGlyphOutlineW(fDDC, glyph.fID, flags, &gm, BUFFERSIZE, glyphbuf->get(), &fMat22);
+    DWORD total_size = GetGlyphOutlineW(fDDC, glyph.getGlyphID(), flags, &gm, BUFFERSIZE, glyphbuf->get(), &fMat22);
     // Sometimes GetGlyphOutlineW returns a number larger than BUFFERSIZE even if BUFFERSIZE > 0.
     // It has been verified that this does not involve a buffer overrun.
     if (GDI_ERROR == total_size || total_size > BUFFERSIZE) {
         // GDI_ERROR because the BUFFERSIZE was too small, or because the data was not accessible.
         // When the data is not accessable GetGlyphOutlineW fails rather quickly,
         // so just try to get the size. If that fails then ensure the data is accessible.
-        total_size = GetGlyphOutlineW(fDDC, glyph.fID, flags, &gm, 0, NULL, &fMat22);
+        total_size = GetGlyphOutlineW(fDDC, glyph.getGlyphID(), flags, &gm, 0, NULL, &fMat22);
         if (GDI_ERROR == total_size) {
             LogFontTypeface::EnsureAccessible(this->getTypeface());
-            total_size = GetGlyphOutlineW(fDDC, glyph.fID, flags, &gm, 0, NULL, &fMat22);
+            total_size = GetGlyphOutlineW(fDDC, glyph.getGlyphID(), flags, &gm, 0, NULL, &fMat22);
             if (GDI_ERROR == total_size) {
                 // GetGlyphOutlineW is known to fail for some characters, such as spaces.
                 // In these cases, just return that the glyph does not have a shape.
@@ -1613,10 +1612,10 @@ DWORD SkScalerContext_GDI::getGDIGlyphPath(const SkGlyph& glyph, UINT flags,
 
         glyphbuf->reset(total_size);
 
-        DWORD ret = GetGlyphOutlineW(fDDC, glyph.fID, flags, &gm, total_size, glyphbuf->get(), &fMat22);
+        DWORD ret = GetGlyphOutlineW(fDDC, glyph.getGlyphID(), flags, &gm, total_size, glyphbuf->get(), &fMat22);
         if (GDI_ERROR == ret) {
             LogFontTypeface::EnsureAccessible(this->getTypeface());
-            ret = GetGlyphOutlineW(fDDC, glyph.fID, flags, &gm, total_size, glyphbuf->get(), &fMat22);
+            ret = GetGlyphOutlineW(fDDC, glyph.getGlyphID(), flags, &gm, total_size, glyphbuf->get(), &fMat22);
             if (GDI_ERROR == ret) {
                 SkASSERT(false);
                 return 0;
@@ -1936,7 +1935,8 @@ static HANDLE activate_font(SkData* fontData) {
     return fontHandle;
 }
 
-static SkTypeface* create_from_stream(SkStream* stream) {
+// Does not affect ownership of stream.
+static SkTypeface* create_from_stream(SkStreamAsset* stream) {
     // Create a unique and unpredictable font name.
     // Avoids collisions and access from CSS.
     char familyName[BASE64_GUID_ID_LEN];
@@ -1964,7 +1964,7 @@ static SkTypeface* create_from_stream(SkStream* stream) {
     return SkCreateFontMemResourceTypefaceFromLOGFONT(lf, fontReference);
 }
 
-SkStream* LogFontTypeface::onOpenStream(int* ttcIndex) const {
+SkStreamAsset* LogFontTypeface::onOpenStream(int* ttcIndex) const {
     *ttcIndex = 0;
 
     const DWORD kTTCTag =
@@ -2401,11 +2401,11 @@ public:
         ::DeleteDC(hdc);
     }
 
-    virtual int count() SK_OVERRIDE {
+    int count() override {
         return fArray.count();
     }
 
-    virtual void getStyle(int index, SkFontStyle* fs, SkString* styleName) SK_OVERRIDE {
+    void getStyle(int index, SkFontStyle* fs, SkString* styleName) override {
         if (fs) {
             *fs = get_style(fArray[index].elfLogFont);
         }
@@ -2422,11 +2422,11 @@ public:
         }
     }
 
-    virtual SkTypeface* createTypeface(int index) SK_OVERRIDE {
+    SkTypeface* createTypeface(int index) override {
         return SkCreateTypefaceFromLOGFONT(fArray[index].elfLogFont);
     }
 
-    virtual SkTypeface* matchStyle(const SkFontStyle& pattern) SK_OVERRIDE {
+    SkTypeface* matchStyle(const SkFontStyle& pattern) override {
         // todo:
         return SkCreateTypefaceFromLOGFONT(fArray[0].elfLogFont);
     }
@@ -2448,21 +2448,21 @@ public:
     }
 
 protected:
-    virtual int onCountFamilies() const SK_OVERRIDE {
+    int onCountFamilies() const override {
         return fLogFontArray.count();
     }
 
-    virtual void onGetFamilyName(int index, SkString* familyName) const SK_OVERRIDE {
+    void onGetFamilyName(int index, SkString* familyName) const override {
         SkASSERT((unsigned)index < (unsigned)fLogFontArray.count());
         tchar_to_skstring(fLogFontArray[index].elfLogFont.lfFaceName, familyName);
     }
 
-    virtual SkFontStyleSet* onCreateStyleSet(int index) const SK_OVERRIDE {
+    SkFontStyleSet* onCreateStyleSet(int index) const override {
         SkASSERT((unsigned)index < (unsigned)fLogFontArray.count());
         return SkNEW_ARGS(SkFontStyleSetGDI, (fLogFontArray[index].elfLogFont.lfFaceName));
     }
 
-    virtual SkFontStyleSet* onMatchFamily(const char familyName[]) const SK_OVERRIDE {
+    SkFontStyleSet* onMatchFamily(const char familyName[]) const override {
         if (NULL == familyName) {
             familyName = "";    // do we need this check???
         }
@@ -2472,7 +2472,7 @@ protected:
     }
 
     virtual SkTypeface* onMatchFamilyStyle(const char familyName[],
-                                           const SkFontStyle& fontstyle) const SK_OVERRIDE {
+                                           const SkFontStyle& fontstyle) const override {
         // could be in base impl
         SkAutoTUnref<SkFontStyleSet> sset(this->matchFamily(familyName));
         return sset->matchStyle(fontstyle);
@@ -2480,36 +2480,35 @@ protected:
 
     virtual SkTypeface* onMatchFamilyStyleCharacter(const char familyName[], const SkFontStyle&,
                                                     const char* bcp47[], int bcp47Count,
-                                                    SkUnichar character) const SK_OVERRIDE {
+                                                    SkUnichar character) const override {
         return NULL;
     }
 
     virtual SkTypeface* onMatchFaceStyle(const SkTypeface* familyMember,
-                                         const SkFontStyle& fontstyle) const SK_OVERRIDE {
+                                         const SkFontStyle& fontstyle) const override {
         // could be in base impl
         SkString familyName;
         ((LogFontTypeface*)familyMember)->getFamilyName(&familyName);
         return this->matchFamilyStyle(familyName.c_str(), fontstyle);
     }
 
-    virtual SkTypeface* onCreateFromStream(SkStream* stream, int ttcIndex) const SK_OVERRIDE {
+    SkTypeface* onCreateFromStream(SkStreamAsset* bareStream, int ttcIndex) const override {
+        SkAutoTDelete<SkStreamAsset> stream(bareStream);
         return create_from_stream(stream);
     }
 
-    virtual SkTypeface* onCreateFromData(SkData* data, int ttcIndex) const SK_OVERRIDE {
+    SkTypeface* onCreateFromData(SkData* data, int ttcIndex) const override {
         // could be in base impl
-        SkAutoTUnref<SkStream> stream(SkNEW_ARGS(SkMemoryStream, (data)));
-        return this->createFromStream(stream);
+        return this->createFromStream(SkNEW_ARGS(SkMemoryStream, (data)));
     }
 
-    virtual SkTypeface* onCreateFromFile(const char path[], int ttcIndex) const SK_OVERRIDE {
+    SkTypeface* onCreateFromFile(const char path[], int ttcIndex) const override {
         // could be in base impl
-        SkAutoTUnref<SkStream> stream(SkStream::NewFromFile(path));
-        return this->createFromStream(stream);
+        return this->createFromStream(SkStream::NewFromFile(path));
     }
 
     virtual SkTypeface* onLegacyCreateTypeface(const char familyName[],
-                                               unsigned styleBits) const SK_OVERRIDE {
+                                               unsigned styleBits) const override {
         LOGFONT lf;
         if (NULL == familyName) {
             lf = get_default_font();

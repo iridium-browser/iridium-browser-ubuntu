@@ -483,21 +483,13 @@ void InterstitialPageImpl::DidNavigate(
   // as complete. Without this, navigating in a UI test to a URL that triggers
   // an interstitial would hang.
   web_contents_was_loading_ = controller_->delegate()->IsLoading();
-  controller_->delegate()->SetIsLoading(
-      controller_->delegate()->GetRenderViewHost(), false, true, NULL);
+  controller_->delegate()->SetIsLoading(false, true, NULL);
 }
 
 RendererPreferences InterstitialPageImpl::GetRendererPrefs(
     BrowserContext* browser_context) const {
   delegate_->OverrideRendererPrefs(&renderer_preferences_);
   return renderer_preferences_;
-}
-
-WebPreferences InterstitialPageImpl::ComputeWebkitPrefs() {
-  if (!enabled())
-    return WebPreferences();
-
-  return render_view_host_->ComputeWebkitPrefs(url_);
 }
 
 void InterstitialPageImpl::RenderWidgetDeleted(
@@ -598,8 +590,7 @@ void InterstitialPageImpl::Proceed() {
 
   // Resumes the throbber, if applicable.
   if (web_contents_was_loading_)
-    controller_->delegate()->SetIsLoading(
-        controller_->delegate()->GetRenderViewHost(), true, true, NULL);
+    controller_->delegate()->SetIsLoading(true, true, NULL);
 
   // If this is a new navigation, the old page is going away, so we cancel any
   // blocked requests for it.  If it is not a new navigation, then it means the
@@ -740,13 +731,13 @@ void InterstitialPageImpl::CreateNewFullscreenWidget(int render_process_id,
 
 void InterstitialPageImpl::ShowCreatedWindow(int route_id,
                                              WindowOpenDisposition disposition,
-                                             const gfx::Rect& initial_pos,
+                                             const gfx::Rect& initial_rect,
                                              bool user_gesture) {
   NOTREACHED() << "InterstitialPage does not support showing popups yet.";
 }
 
 void InterstitialPageImpl::ShowCreatedWidget(int route_id,
-                                             const gfx::Rect& initial_pos) {
+                                             const gfx::Rect& initial_rect) {
   NOTREACHED() << "InterstitialPage does not support showing drop-downs yet.";
 }
 
@@ -788,8 +779,7 @@ void InterstitialPageImpl::OnNavigatingAwayOrTabClosing() {
 
 void InterstitialPageImpl::TakeActionOnResourceDispatcher(
     ResourceRequestAction action) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI)) <<
-      "TakeActionOnResourceDispatcher should be called on the main thread.";
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (action == CANCEL || action == RESUME) {
     if (resource_dispatcher_host_notified_)

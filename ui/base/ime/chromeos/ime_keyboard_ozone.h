@@ -10,7 +10,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "ui/base/ui_base_export.h"
+#include "ui/base/ime/ui_base_ime_export.h"
 
 namespace ui {
 class InputController;
@@ -19,21 +19,20 @@ class InputController;
 namespace chromeos {
 namespace input_method {
 
-class UI_BASE_EXPORT ImeKeyboardOzone : public ImeKeyboard {
+class UI_BASE_IME_EXPORT ImeKeyboardOzone : public ImeKeyboard {
  public:
   ImeKeyboardOzone(ui::InputController* controller);
-  virtual ~ImeKeyboardOzone();
+  ~ImeKeyboardOzone() override;
 
-  virtual bool SetCurrentKeyboardLayoutByName(const std::string& layout_name)
-      override;
-  virtual bool SetAutoRepeatRate(const AutoRepeatRate& rate) override;
-  virtual bool SetAutoRepeatEnabled(bool enabled) override;
-  virtual bool GetAutoRepeatEnabled() override;
-  virtual bool ReapplyCurrentKeyboardLayout() override;
-  virtual void ReapplyCurrentModifierLockStatus() override;
-  virtual void DisableNumLock() override;
-  virtual void SetCapsLockEnabled(bool enable_caps_lock) override;
-  virtual bool CapsLockIsEnabled() override;
+  bool SetCurrentKeyboardLayoutByName(const std::string& layout_name) override;
+  bool SetAutoRepeatRate(const AutoRepeatRate& rate) override;
+  bool SetAutoRepeatEnabled(bool enabled) override;
+  bool GetAutoRepeatEnabled() override;
+  bool ReapplyCurrentKeyboardLayout() override;
+  void ReapplyCurrentModifierLockStatus() override;
+  void DisableNumLock() override;
+  void SetCapsLockEnabled(bool enable_caps_lock) override;
+  bool CapsLockIsEnabled() override;
 
  private:
   ui::InputController* input_controller_;

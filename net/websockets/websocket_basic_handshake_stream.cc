@@ -50,30 +50,7 @@ namespace net {
 
 namespace {
 
-// TODO(yhirano): Remove these functions once http://crbug.com/399535 is fixed.
-NOINLINE void RunCallbackWithOk(const CompletionCallback& callback,
-                                int result) {
-  DCHECK_EQ(result, OK);
-  callback.Run(OK);
-}
-
-NOINLINE void RunCallbackWithInvalidResponseCausedByRedirect(
-    const CompletionCallback& callback,
-    int result) {
-  DCHECK_EQ(result, ERR_INVALID_RESPONSE);
-  callback.Run(ERR_INVALID_RESPONSE);
-}
-
-NOINLINE void RunCallbackWithInvalidResponse(
-    const CompletionCallback& callback,
-    int result) {
-  DCHECK_EQ(result, ERR_INVALID_RESPONSE);
-  callback.Run(ERR_INVALID_RESPONSE);
-}
-
-NOINLINE void RunCallback(const CompletionCallback& callback, int result) {
-  callback.Run(result);
-}
+const char kConnectionErrorStatusLine[] = "HTTP/1.1 503 Connection Error";
 
 }  // namespace
 
@@ -272,8 +249,8 @@ bool ValidatePerMessageDeflateExtension(const WebSocketExtension& extension,
   static const char kNoContextTakeover[] = "no_context_takeover";
   static const char kMaxWindowBits[] = "max_window_bits";
   const size_t kPrefixLen = arraysize(kClientPrefix) - 1;
-  COMPILE_ASSERT(kPrefixLen == arraysize(kServerPrefix) - 1,
-                 the_strings_server_and_client_must_be_the_same_length);
+  static_assert(kPrefixLen == arraysize(kServerPrefix) - 1,
+                "the strings server and client must be the same length");
   typedef std::vector<WebSocketExtension::Parameter> ParameterVector;
 
   DCHECK_EQ("permessage-deflate", extension.name());
@@ -326,47 +303,51 @@ bool ValidatePerMessageDeflateExtension(const WebSocketExtension& extension,
 }
 
 bool ValidateExtensions(const HttpResponseHeaders* headers,
-                        const std::vector<std::string>& requested_extensions,
-                        std::string* extensions,
+                        std::string* accepted_extensions_descriptor,
                         std::string* failure_message,
                         WebSocketExtensionParams* params) {
   void* state = nullptr;
-  std::string value;
-  std::vector<std::string> accepted_extensions;
+  std::string header_value;
+  std::vector<std::string> header_values;
   // TODO(ricea): If adding support for additional extensions, generalise this
   // code.
   bool seen_permessage_deflate = false;
-  while (headers->EnumerateHeader(
-             &state, websockets::kSecWebSocketExtensions, &value)) {
+  while (headers->EnumerateHeader(&state, websockets::kSecWebSocketExtensions,
+                                  &header_value)) {
     WebSocketExtensionParser parser;
-    parser.Parse(value);
+    parser.Parse(header_value);
     if (parser.has_error()) {
       // TODO(yhirano) Set appropriate failure message.
       *failure_message =
           "'Sec-WebSocket-Extensions' header value is "
           "rejected by the parser: " +
-          value;
+          header_value;
       return false;
     }
-    if (parser.extension().name() == "permessage-deflate") {
-      if (seen_permessage_deflate) {
-        *failure_message = "Received duplicate permessage-deflate response";
+
+    const std::vector<WebSocketExtension>& extensions = parser.extensions();
+    for (const auto& extension : extensions) {
+      if (extension.name() == "permessage-deflate") {
+        if (seen_permessage_deflate) {
+          *failure_message = "Received duplicate permessage-deflate response";
+          return false;
+        }
+        seen_permessage_deflate = true;
+
+        if (!ValidatePerMessageDeflateExtension(extension, failure_message,
+                                                params)) {
+          return false;
+        }
+        header_values.push_back(header_value);
+      } else {
+        *failure_message = "Found an unsupported extension '" +
+                           extension.name() +
+                           "' in 'Sec-WebSocket-Extensions' header";
         return false;
       }
-      seen_permessage_deflate = true;
-      if (!ValidatePerMessageDeflateExtension(
-              parser.extension(), failure_message, params))
-        return false;
-    } else {
-      *failure_message =
-          "Found an unsupported extension '" +
-          parser.extension().name() +
-          "' in 'Sec-WebSocket-Extensions' header";
-      return false;
     }
-    accepted_extensions.push_back(value);
   }
-  *extensions = JoinString(accepted_extensions, ", ");
+  *accepted_extensions_descriptor = JoinString(header_values, ", ");
   return true;
 }
 
@@ -461,8 +442,7 @@ int WebSocketBasicHandshakeStream::ReadResponseHeaders(
                  callback));
   if (rv == ERR_IO_PENDING)
     return rv;
-  bool is_redirect = false;
-  return ValidateResponse(rv, &is_redirect);
+  return ValidateResponse(rv);
 }
 
 int WebSocketBasicHandshakeStream::ReadResponseBody(
@@ -576,25 +556,7 @@ void WebSocketBasicHandshakeStream::SetWebSocketKeyForTesting(
 void WebSocketBasicHandshakeStream::ReadResponseHeadersCallback(
     const CompletionCallback& callback,
     int result) {
-  bool is_redirect = false;
-  int rv = ValidateResponse(result, &is_redirect);
-
-  // TODO(yhirano): Simplify this statement once http://crbug.com/399535 is
-  // fixed.
-  switch (rv) {
-    case OK:
-      RunCallbackWithOk(callback, rv);
-      break;
-    case ERR_INVALID_RESPONSE:
-      if (is_redirect)
-        RunCallbackWithInvalidResponseCausedByRedirect(callback, rv);
-      else
-        RunCallbackWithInvalidResponse(callback, rv);
-      break;
-    default:
-      RunCallback(callback, rv);
-      break;
-  }
+  callback.Run(ValidateResponse(result));
 }
 
 void WebSocketBasicHandshakeStream::OnFinishOpeningHandshake() {
@@ -605,17 +567,14 @@ void WebSocketBasicHandshakeStream::OnFinishOpeningHandshake() {
                                             http_response_info_->response_time);
 }
 
-int WebSocketBasicHandshakeStream::ValidateResponse(int rv,
-                                                    bool* is_redirect) {
+int WebSocketBasicHandshakeStream::ValidateResponse(int rv) {
   DCHECK(http_response_info_);
-  *is_redirect = false;
   // Most net errors happen during connection, so they are not seen by this
   // method. The histogram for error codes is created in
   // Delegate::OnResponseStarted in websocket_stream.cc instead.
   if (rv >= 0) {
     const HttpResponseHeaders* headers = http_response_info_->headers.get();
     const int response_code = headers->response_code();
-    *is_redirect = HttpResponseHeaders::IsRedirectResponseCode(response_code);
     UMA_HISTOGRAM_SPARSE_SLOWLY("Net.WebSocket.ResponseCode", response_code);
     switch (response_code) {
       case HTTP_SWITCHING_PROTOCOLS:
@@ -654,6 +613,16 @@ int WebSocketBasicHandshakeStream::ValidateResponse(int rv,
     set_failure_message(std::string("Error during WebSocket handshake: ") +
                         ErrorToString(rv));
     OnFinishOpeningHandshake();
+    // Some error codes (for example ERR_CONNECTION_CLOSED) get changed to OK at
+    // higher levels. To prevent an unvalidated connection getting erroneously
+    // upgraded, don't pass through the status code unchanged if it is
+    // HTTP_SWITCHING_PROTOCOLS.
+    if (http_response_info_->headers &&
+        http_response_info_->headers->response_code() ==
+            HTTP_SWITCHING_PROTOCOLS) {
+      http_response_info_->headers->ReplaceStatusLine(
+          kConnectionErrorStatusLine);
+    }
     return rv;
   }
 }
@@ -671,7 +640,6 @@ int WebSocketBasicHandshakeStream::ValidateUpgradeResponse(
                           &sub_protocol_,
                           &failure_message) &&
       ValidateExtensions(headers,
-                         requested_extensions_,
                          &extensions_,
                          &failure_message,
                          extension_params_.get())) {

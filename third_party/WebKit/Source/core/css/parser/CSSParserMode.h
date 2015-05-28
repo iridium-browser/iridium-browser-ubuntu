@@ -14,7 +14,7 @@
  *    disclaimer in the documentation and/or other materials
  *    provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER “AS IS” AND ANY
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER "AS IS" AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
  * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
@@ -64,11 +64,6 @@ inline bool isUASheetBehavior(CSSParserMode mode)
     return mode == UASheetMode;
 }
 
-inline bool isInternalPropertyAndValueParsingEnabledForMode(CSSParserMode mode)
-{
-    return mode == HTMLAttributeMode || mode == UASheetMode;
-}
-
 inline bool isUnitLessLengthParsingEnabledForMode(CSSParserMode mode)
 {
     return mode == HTMLAttributeMode || mode == SVGAttributeMode;
@@ -88,7 +83,7 @@ inline bool isUseCounterEnabledForMode(CSSParserMode mode)
 class UseCounter;
 
 class CSSParserContext {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(CSSParserContext);
 public:
     CSSParserContext(CSSParserMode, UseCounter*);
     // FIXME: We shouldn't need the UseCounter argument as we could infer it from the Document

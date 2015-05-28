@@ -48,7 +48,7 @@ void GCInfoTable::ensureGCInfoIndex(const GCInfo* gcInfo, size_t* gcInfoIndexSlo
     ASSERT(gcInfo);
     ASSERT(gcInfoIndexSlot);
     // Keep a global GCInfoTable lock while allocating a new slot.
-    AtomicallyInitializedStatic(Mutex&, mutex = *new Mutex);
+    AtomicallyInitializedStaticReference(Mutex, mutex, new Mutex);
     MutexLocker locker(mutex);
 
     // If more than one thread ends up allocating a slot for
@@ -59,7 +59,7 @@ void GCInfoTable::ensureGCInfoIndex(const GCInfo* gcInfo, size_t* gcInfoIndexSlo
 
     int index = ++s_gcInfoIndex;
     size_t gcInfoIndex = static_cast<size_t>(index);
-    ASSERT(gcInfoIndex < GCInfoTable::maxIndex);
+    RELEASE_ASSERT(gcInfoIndex < GCInfoTable::maxIndex);
     if (gcInfoIndex >= s_gcInfoTableSize)
         resize();
 
@@ -102,7 +102,7 @@ void assertObjectHasGCInfo(const void* payload, size_t gcInfoIndex)
 #if !defined(COMPONENT_BUILD)
     // On component builds we cannot compare the gcInfos as they are statically
     // defined in each of the components and hence will not match.
-    BaseHeapPage* page = pageFromObject(payload);
+    BasePage* page = pageFromObject(payload);
     ASSERT(page->orphaned() || HeapObjectHeader::fromPayload(payload)->gcInfoIndex() == gcInfoIndex);
 #endif
 }

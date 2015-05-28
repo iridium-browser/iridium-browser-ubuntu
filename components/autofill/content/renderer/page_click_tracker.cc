@@ -4,33 +4,29 @@
 
 #include "components/autofill/content/renderer/page_click_tracker.h"
 
-#include "base/bind.h"
-#include "base/message_loop/message_loop.h"
 #include "components/autofill/content/renderer/form_autofill_util.h"
 #include "components/autofill/content/renderer/page_click_listener.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
-#include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/WebKit/public/web/WebDOMMouseEvent.h"
+#include "third_party/WebKit/public/platform/WebPoint.h"
+#include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebHitTestResult.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebTextAreaElement.h"
 #include "third_party/WebKit/public/web/WebView.h"
 
-using blink::WebDOMEvent;
-using blink::WebDOMMouseEvent;
 using blink::WebElement;
-using blink::WebFormControlElement;
-using blink::WebFrame;
 using blink::WebGestureEvent;
 using blink::WebInputElement;
 using blink::WebInputEvent;
 using blink::WebMouseEvent;
 using blink::WebNode;
-using blink::WebString;
+using blink::WebPoint;
+using blink::WebSize;
 using blink::WebTextAreaElement;
-using blink::WebView;
 
 namespace {
 
@@ -64,19 +60,16 @@ const WebTextAreaElement GetWebTextAreaElement(const WebNode& node) {
 
 namespace autofill {
 
-PageClickTracker::PageClickTracker(content::RenderView* render_view,
+PageClickTracker::PageClickTracker(content::RenderFrame* render_frame,
                                    PageClickListener* listener)
-    : content::RenderViewObserver(render_view),
+    : content::RenderFrameObserver(render_frame),
+      focused_node_was_last_clicked_(false),
       was_focused_before_now_(false),
       listener_(listener),
-      weak_ptr_factory_(this) {
+      legacy_(this) {
 }
 
 PageClickTracker::~PageClickTracker() {
-}
-
-void PageClickTracker::OnDestruct() {
-  // No-op. Don't delete |this|.
 }
 
 void PageClickTracker::DidHandleMouseEvent(const WebMouseEvent& event) {
@@ -85,53 +78,71 @@ void PageClickTracker::DidHandleMouseEvent(const WebMouseEvent& event) {
     return;
   }
 
-  PotentialActivationAt(event.x, event.y);
+  WebNode clicked_node = render_frame()->GetRenderView()->GetWebView()
+      ->hitTestResultAt(WebPoint(event.x, event.y)).node();
+  focused_node_was_last_clicked_ = !clicked_node.isNull() &&
+                                   clicked_node.focused();
 }
 
-void PageClickTracker::DidHandleGestureEvent(
-    const blink::WebGestureEvent& event) {
-  if (event.type != blink::WebGestureEvent::GestureTap)
+void PageClickTracker::DidHandleGestureEvent(const WebGestureEvent& event) {
+  if (event.type != WebGestureEvent::GestureTap)
     return;
 
-  PotentialActivationAt(event.x, event.y);
+  WebNode tapped_node = render_frame()->GetRenderView()->GetWebView()
+      ->hitTestResultForTap(
+          WebPoint(event.x, event.y),
+          WebSize(event.data.tap.width, event.data.tap.height)).node();
+  focused_node_was_last_clicked_ = !tapped_node.isNull() &&
+                                   tapped_node.focused();
 }
 
-void PageClickTracker::FocusedNodeChanged(const blink::WebNode& node) {
+void PageClickTracker::FocusedNodeChanged(const WebNode& node) {
   was_focused_before_now_ = false;
-  // If the focus change was a result of handling a click or tap, we'll soon get
-  // an associated event. Reset |was_focused_before_now_| to true only after the
-  // message loop unwinds.
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&PageClickTracker::SetWasFocused,
-                 weak_ptr_factory_.GetWeakPtr()));
 }
 
-void PageClickTracker::PotentialActivationAt(int x, int y) {
-  blink::WebNode focused_node = render_view()->GetFocusedElement();
-  if (focused_node.isNull())
-    return;
-
-  if (!render_view()->NodeContainsPoint(focused_node, gfx::Point(x, y)))
-    return;
-
-  const WebInputElement input_element = GetTextWebInputElement(focused_node);
-  if (!input_element.isNull()) {
-    listener_->FormControlElementClicked(input_element,
-                                         was_focused_before_now_);
-    return;
+void PageClickTracker::FocusChangeComplete() {
+  WebNode focused_node = render_frame()->GetFocusedElement();
+  if (focused_node_was_last_clicked_ && !focused_node.isNull()) {
+    const WebInputElement input_element = GetTextWebInputElement(focused_node);
+    if (!input_element.isNull()) {
+      listener_->FormControlElementClicked(input_element,
+                                           was_focused_before_now_);
+    } else {
+      const WebTextAreaElement textarea_element =
+          GetWebTextAreaElement(focused_node);
+      if (!textarea_element.isNull()) {
+        listener_->FormControlElementClicked(textarea_element,
+                                             was_focused_before_now_);
+      }
+    }
   }
 
-  const WebTextAreaElement textarea_element =
-      GetWebTextAreaElement(focused_node);
-  if (!textarea_element.isNull()) {
-    listener_->FormControlElementClicked(textarea_element,
-                                         was_focused_before_now_);
-  }
-}
-
-void PageClickTracker::SetWasFocused() {
   was_focused_before_now_ = true;
+  focused_node_was_last_clicked_ = false;
+}
+
+// PageClickTracker::Legacy ----------------------------------------------------
+
+PageClickTracker::Legacy::Legacy(PageClickTracker* tracker)
+    : content::RenderViewObserver(tracker->render_frame()->GetRenderView()),
+      tracker_(tracker) {
+}
+
+void PageClickTracker::Legacy::OnDestruct() {
+  // No-op. Don't delete |this|.
+}
+
+void PageClickTracker::Legacy::DidHandleMouseEvent(const WebMouseEvent& event) {
+  tracker_->DidHandleMouseEvent(event);
+}
+
+void PageClickTracker::Legacy::DidHandleGestureEvent(
+    const WebGestureEvent& event) {
+  tracker_->DidHandleGestureEvent(event);
+}
+
+void PageClickTracker::Legacy::FocusChangeComplete() {
+  tracker_->FocusChangeComplete();
 }
 
 }  // namespace autofill

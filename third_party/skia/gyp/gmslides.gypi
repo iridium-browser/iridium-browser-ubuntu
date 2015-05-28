@@ -1,3 +1,7 @@
+# Copyright 2015 Google Inc.
+#
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
 # include this gypi to include all the golden master slides.
 {
   'include_dirs': [
@@ -15,6 +19,8 @@
       'sources': [
         '../gm/aaclip.cpp',
         '../gm/aarectmodes.cpp',
+        '../gm/addarc.cpp',
+        '../gm/all_bitmap_configs.cpp',
         '../gm/alphagradients.cpp',
         '../gm/arcofzorro.cpp',
         '../gm/arithmode.cpp',
@@ -40,6 +46,7 @@
         '../gm/blurroundrect.cpp',
         '../gm/circles.cpp',
         '../gm/circularclips.cpp',
+        '../gm/clipdrawdraw.cpp',
         '../gm/clip_strokerect.cpp',
         '../gm/clippedbitmapshaders.cpp',
         '../gm/cgms.cpp',
@@ -52,17 +59,20 @@
         '../gm/colortype.cpp',
         '../gm/colortypexfermode.cpp',
         '../gm/colorwheel.cpp',
+        '../gm/concavepaths.cpp',
         '../gm/complexclip.cpp',
         '../gm/complexclip2.cpp',
         '../gm/complexclip3.cpp',
         '../gm/composeshader.cpp',
         '../gm/conicpaths.cpp',
+        '../gm/constcolorprocessor.cpp',
         '../gm/convexpaths.cpp',
         '../gm/convexpolyclip.cpp',
         '../gm/convexpolyeffect.cpp',
         '../gm/copyTo4444.cpp',
         '../gm/cubicpaths.cpp',
         '../gm/cmykjpeg.cpp',
+        '../gm/dstreadshuffle.cpp',
         '../gm/degeneratesegments.cpp',
         '../gm/dcshader.cpp',
         '../gm/discard.cpp',
@@ -73,9 +83,11 @@
         '../gm/displacement.cpp',
         '../gm/downsamplebitmap.cpp',
         '../gm/drawbitmaprect.cpp',
+        '../gm/drawfilter.cpp',
         '../gm/drawlooper.cpp',
         '../gm/dropshadowimagefilter.cpp',
         '../gm/drrect.cpp',
+        '../gm/dstreadshuffle.cpp',
         '../gm/etc1bitmap.cpp',
         '../gm/extractbitmap.cpp',
         '../gm/emboss.cpp',
@@ -122,6 +134,7 @@
         '../gm/imagefilterscropexpand.cpp',
         '../gm/imagefiltersgraph.cpp',
         '../gm/imagefiltersscaled.cpp',
+        '../gm/imagefilterstransformed.cpp',
         '../gm/internal_links.cpp',
         '../gm/lcdtext.cpp',
         '../gm/linepaths.cpp',
@@ -129,6 +142,7 @@
         '../gm/matriximagefilter.cpp',
         '../gm/megalooper.cpp',
         '../gm/mixedxfermodes.cpp',
+        '../gm/mipmap.cpp',
         '../gm/modecolorfilters.cpp',
         '../gm/morphology.cpp',
         '../gm/multipicturedraw.cpp',
@@ -155,7 +169,9 @@
         '../gm/poly2poly.cpp',
         '../gm/polygons.cpp',
         '../gm/quadpaths.cpp',
+        '../gm/recordopts.cpp',
         '../gm/rects.cpp',
+        '../gm/repeated_bitmap.cpp',
         '../gm/resizeimagefilter.cpp',
         '../gm/rrect.cpp',
         '../gm/rrects.cpp',
@@ -173,9 +189,10 @@
         '../gm/skbug1719.cpp',
         '../gm/smallarc.cpp',
         '../gm/smallimage.cpp',
-        '../gm/stringart.cpp',
         '../gm/spritebitmap.cpp',
         '../gm/srcmode.cpp',
+        '../gm/stlouisarch.cpp',
+        '../gm/stringart.cpp',
         '../gm/strokefill.cpp',
         '../gm/strokerect.cpp',
         '../gm/strokerects.cpp',
@@ -212,6 +229,7 @@
         '../gm/yuvtorgbeffect.cpp',
 
         # Files needed by particular GMs
+        '../src/gpu/GrTestBatch.h',
         '../src/utils/debugger/SkDrawCommand.h',
         '../src/utils/debugger/SkDrawCommand.cpp',
         '../src/utils/debugger/SkDebugCanvas.h',

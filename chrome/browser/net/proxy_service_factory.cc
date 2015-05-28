@@ -4,6 +4,8 @@
 
 #include "chrome/browser/net/proxy_service_factory.h"
 
+#include <string>
+
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread.h"
@@ -12,7 +14,7 @@
 #include "chrome/browser/net/pref_proxy_config_tracker_impl.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
-#include "net/base/net_log.h"
+#include "net/log/net_log.h"
 #include "net/proxy/dhcp_proxy_script_fetcher_factory.h"
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
@@ -27,6 +29,11 @@
 
 #if !defined(OS_IOS)
 #include "net/proxy/proxy_resolver_v8.h"
+#endif
+
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
+#include "chrome/browser/net/utility_process_mojo_proxy_resolver_factory.h"
+#include "net/proxy/proxy_service_mojo.h"
 #endif
 
 using content::BrowserThread;
@@ -93,14 +100,14 @@ net::ProxyService* ProxyServiceFactory::CreateProxyService(
     const base::CommandLine& command_line,
     bool quick_check_enabled) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
 #if defined(OS_IOS)
   bool use_v8 = false;
 #else
   bool use_v8 = !command_line.HasSwitch(switches::kWinHttpProxyResolver);
+  // TODO(eroman): Figure out why this doesn't work in single-process mode.
+  // Should be possible now that a private isolate is used.
+  // http://crbug.com/474654
   if (use_v8 && command_line.HasSwitch(switches::kSingleProcess)) {
-    // See the note about V8 multithreading in net/proxy/proxy_resolver_v8.h
-    // to understand why we have this limitation.
     LOG(ERROR) << "Cannot use V8 Proxy resolver in single process mode.";
     use_v8 = false;  // Fallback to non-v8 implementation.
   }
@@ -127,8 +134,6 @@ net::ProxyService* ProxyServiceFactory::CreateProxyService(
 #if defined(OS_IOS)
     NOTREACHED();
 #else
-    net::ProxyResolverV8::EnsureIsolateCreated();
-
     net::DhcpProxyScriptFetcher* dhcp_proxy_script_fetcher;
 #if defined(OS_CHROMEOS)
     dhcp_proxy_script_fetcher =
@@ -138,13 +143,27 @@ net::ProxyService* ProxyServiceFactory::CreateProxyService(
     dhcp_proxy_script_fetcher = dhcp_factory.Create(context);
 #endif
 
-    proxy_service = net::CreateProxyServiceUsingV8ProxyResolver(
-        proxy_config_service,
-        new net::ProxyScriptFetcherImpl(context),
-        dhcp_proxy_script_fetcher,
-        context->host_resolver(),
-        net_log,
-        network_delegate);
+#if !defined(OS_ANDROID)
+    if (command_line.HasSwitch(switches::kV8PacMojoOutOfProcess)) {
+      proxy_service = net::CreateProxyServiceUsingMojoFactory(
+          UtilityProcessMojoProxyResolverFactory::GetInstance(),
+          proxy_config_service, new net::ProxyScriptFetcherImpl(context),
+          dhcp_proxy_script_fetcher, context->host_resolver(), net_log,
+          network_delegate);
+    } else if (command_line.HasSwitch(switches::kV8PacMojoInProcess)) {
+      proxy_service = net::CreateProxyServiceUsingMojoInProcess(
+          proxy_config_service, new net::ProxyScriptFetcherImpl(context),
+          dhcp_proxy_script_fetcher, context->host_resolver(), net_log,
+          network_delegate);
+    }
+#endif  // !defined(OS_ANDROID)
+
+    if (!proxy_service) {
+      proxy_service = net::CreateProxyServiceUsingV8ProxyResolver(
+          proxy_config_service, new net::ProxyScriptFetcherImpl(context),
+          dhcp_proxy_script_fetcher, context->host_resolver(), net_log,
+          network_delegate);
+    }
 #endif  // defined(OS_IOS)
   } else {
     proxy_service = net::ProxyService::CreateUsingSystemProxyResolver(

@@ -31,14 +31,14 @@
 #include "core/css/CSSPropertyMetadata.h"
 #include "core/css/CSSSelector.h"
 #include "core/css/CSSValuePool.h"
-#include "core/css/RenderStyleCSSValueMapping.h"
+#include "core/css/ComputedStyleCSSValueMapping.h"
 #include "core/css/parser/CSSParser.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/PseudoElement.h"
-#include "core/rendering/RenderObject.h"
-#include "core/rendering/style/RenderStyle.h"
+#include "core/layout/LayoutObject.h"
+#include "core/style/ComputedStyle.h"
 #include "wtf/text/StringBuilder.h"
 
 namespace blink {
@@ -101,6 +101,7 @@ static const CSSPropertyID staticComputableProperties[] = {
     CSSPropertyFontFamily,
     CSSPropertyFontKerning,
     CSSPropertyFontSize,
+    CSSPropertyFontSizeAdjust,
     CSSPropertyFontStretch,
     CSSPropertyFontStyle,
     CSSPropertyFontVariant,
@@ -341,7 +342,14 @@ static const CSSPropertyID staticComputableProperties[] = {
     CSSPropertyGlyphOrientationHorizontal,
     CSSPropertyGlyphOrientationVertical,
     CSSPropertyVectorEffect,
-    CSSPropertyPaintOrder
+    CSSPropertyPaintOrder,
+    CSSPropertyCx,
+    CSSPropertyCy,
+    CSSPropertyX,
+    CSSPropertyY,
+    CSSPropertyR,
+    CSSPropertyRx,
+    CSSPropertyRy
 };
 
 static const Vector<CSSPropertyID>& computableProperties()
@@ -411,7 +419,7 @@ static CSSValueID cssIdentifierForFontSizeKeyword(int keywordSize)
     return static_cast<CSSValueID>(CSSValueXxSmall + keywordSize - 1);
 }
 
-inline static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> zoomAdjustedPixelValue(double value, const RenderStyle& style)
+inline static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> zoomAdjustedPixelValue(double value, const ComputedStyle& style)
 {
     return cssValuePool().createValue(adjustFloatForAbsoluteZoom(value, style), CSSPrimitiveValue::CSS_PX);
 }
@@ -423,7 +431,7 @@ PassRefPtrWillBeRawPtr<CSSValue> CSSComputedStyleDeclaration::getFontSizeCSSValu
 
     m_node->document().updateLayoutIgnorePendingStylesheets();
 
-    RefPtr<RenderStyle> style = m_node->computedStyle(m_pseudoElementSpecifier);
+    const ComputedStyle* style = m_node->ensureComputedStyle(m_pseudoElementSpecifier);
     if (!style)
         return nullptr;
 
@@ -437,11 +445,11 @@ PassRefPtrWillBeRawPtr<CSSValue> CSSComputedStyleDeclaration::getFontSizeCSSValu
 FixedPitchFontType CSSComputedStyleDeclaration::fixedPitchFontType() const
 {
     if (!m_node)
-        return NonFixedPitchFont;
+        return VariablePitchFont;
 
-    RefPtr<RenderStyle> style = m_node->computedStyle(m_pseudoElementSpecifier);
+    const ComputedStyle* style = m_node->ensureComputedStyle(m_pseudoElementSpecifier);
     if (!style)
-        return NonFixedPitchFont;
+        return VariablePitchFont;
 
     return style->fontDescription().fixedPitchFontType();
 }
@@ -455,7 +463,7 @@ static void logUnimplementedPropertyID(CSSPropertyID propertyID)
     WTF_LOG_ERROR("WebKit does not yet implement getComputedStyle for '%s'.", getPropertyName(propertyID));
 }
 
-static bool isLayoutDependent(CSSPropertyID propertyID, PassRefPtr<RenderStyle> style, RenderObject* renderer)
+static bool isLayoutDependent(CSSPropertyID propertyID, const ComputedStyle* style, LayoutObject* renderer)
 {
     // Some properties only depend on layout in certain conditions which
     // are specified in the main switch statement below. So we can avoid
@@ -477,10 +485,14 @@ static bool isLayoutDependent(CSSPropertyID propertyID, PassRefPtr<RenderStyle> 
     case CSSPropertyTransformOrigin:
     case CSSPropertyWebkitTransformOrigin:
     case CSSPropertyMotionPath:
-    case CSSPropertyMotionPosition:
+    case CSSPropertyMotionOffset:
     case CSSPropertyMotionRotation:
     case CSSPropertyWidth:
     case CSSPropertyWebkitFilter:
+    case CSSPropertyX:
+    case CSSPropertyY:
+    case CSSPropertyRx:
+    case CSSPropertyRy:
         return true;
     case CSSPropertyMargin:
         return renderer && renderer->isBox() && (!style || !style->marginBottom().isFixed() || !style->marginTop().isFixed() || !style->marginLeft().isFixed() || !style->marginRight().isFixed());
@@ -507,11 +519,11 @@ static bool isLayoutDependent(CSSPropertyID propertyID, PassRefPtr<RenderStyle> 
     }
 }
 
-PassRefPtr<RenderStyle> CSSComputedStyleDeclaration::computeRenderStyle() const
+const ComputedStyle* CSSComputedStyleDeclaration::computeComputedStyle() const
 {
     Node* styledNode = this->styledNode();
     ASSERT(styledNode);
-    return styledNode->computedStyle(styledNode->isPseudoElement() ? NOPSEUDO : m_pseudoElementSpecifier);
+    return styledNode->ensureComputedStyle(styledNode->isPseudoElement() ? NOPSEUDO : m_pseudoElementSpecifier);
 }
 
 Node* CSSComputedStyleDeclaration::styledNode() const
@@ -525,47 +537,43 @@ Node* CSSComputedStyleDeclaration::styledNode() const
     return m_node.get();
 }
 
-PassRefPtrWillBeRawPtr<CSSValue> CSSComputedStyleDeclaration::getPropertyCSSValue(CSSPropertyID propertyID, EUpdateLayout updateLayout) const
+PassRefPtrWillBeRawPtr<CSSValue> CSSComputedStyleDeclaration::getPropertyCSSValue(CSSPropertyID propertyID) const
 {
     Node* styledNode = this->styledNode();
     if (!styledNode)
         return nullptr;
-    RenderObject* renderer = styledNode->renderer();
-    RefPtr<RenderStyle> style;
+    LayoutObject* renderer = styledNode->layoutObject();
+    const ComputedStyle* style;
 
-    if (updateLayout) {
-        Document& document = styledNode->document();
+    Document& document = styledNode->document();
 
-        // A timing update may be required if a compositor animation is running.
-        DocumentAnimations::updateAnimationTimingForGetComputedStyle(*styledNode, propertyID);
+    // A timing update may be required if a compositor animation is running.
+    DocumentAnimations::updateAnimationTimingForGetComputedStyle(*styledNode, propertyID);
 
-        document.updateRenderTreeForNodeIfNeeded(styledNode);
+    document.updateRenderTreeForNodeIfNeeded(styledNode);
 
-        // The style recalc could have caused the styled node to be discarded or replaced
-        // if it was a PseudoElement so we need to update it.
+    // The style recalc could have caused the styled node to be discarded or replaced
+    // if it was a PseudoElement so we need to update it.
+    styledNode = this->styledNode();
+    renderer = styledNode->layoutObject();
+
+    style = computeComputedStyle();
+
+    bool forceFullLayout = isLayoutDependent(propertyID, style, renderer)
+        || styledNode->isInShadowTree()
+        || (document.ownerElement() && document.ensureStyleResolver().hasViewportDependentMediaQueries());
+
+    if (forceFullLayout) {
+        document.updateLayoutIgnorePendingStylesheets();
         styledNode = this->styledNode();
-        renderer = styledNode->renderer();
-
-        style = computeRenderStyle();
-
-        bool forceFullLayout = isLayoutDependent(propertyID, style, renderer)
-            || styledNode->isInShadowTree()
-            || (document.ownerElement() && document.ensureStyleResolver().hasViewportDependentMediaQueries());
-
-        if (forceFullLayout) {
-            document.updateLayoutIgnorePendingStylesheets();
-            styledNode = this->styledNode();
-            style = computeRenderStyle();
-            renderer = styledNode->renderer();
-        }
-    } else {
-        style = computeRenderStyle();
+        style = computeComputedStyle();
+        renderer = styledNode->layoutObject();
     }
 
     if (!style)
         return nullptr;
 
-    RefPtrWillBeRawPtr<CSSValue> value = RenderStyleCSSValueMapping::get(propertyID, *style, renderer, styledNode, m_allowVisitedStyle);
+    RefPtrWillBeRawPtr<CSSValue> value = ComputedStyleCSSValueMapping::get(propertyID, *style, renderer, styledNode, m_allowVisitedStyle);
     if (value)
         return value;
 
@@ -601,7 +609,7 @@ bool CSSComputedStyleDeclaration::cssPropertyMatches(CSSPropertyID propertyID, c
 {
     if (propertyID == CSSPropertyFontSize && propertyValue->isPrimitiveValue() && m_node) {
         m_node->document().updateLayoutIgnorePendingStylesheets();
-        RenderStyle* style = m_node->computedStyle(m_pseudoElementSpecifier);
+        const ComputedStyle* style = m_node->ensureComputedStyle(m_pseudoElementSpecifier);
         if (style && style->fontDescription().keywordSize()) {
             CSSValueID sizeValue = cssIdentifierForFontSizeKeyword(style->fontDescription().keywordSize());
             const CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(propertyValue);
@@ -686,7 +694,7 @@ void CSSComputedStyleDeclaration::setPropertyInternal(CSSPropertyID id, const St
     exceptionState.throwDOMException(NoModificationAllowedError, "These styles are computed, and therefore the '" + getPropertyNameString(id) + "' property is read-only.");
 }
 
-void CSSComputedStyleDeclaration::trace(Visitor* visitor)
+DEFINE_TRACE(CSSComputedStyleDeclaration)
 {
     visitor->trace(m_node);
     CSSStyleDeclaration::trace(visitor);

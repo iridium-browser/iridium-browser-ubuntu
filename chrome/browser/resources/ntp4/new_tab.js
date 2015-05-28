@@ -257,8 +257,7 @@ cr.define('ntp', function() {
       chrome.send('bubblePromoViewed');
     }
 
-    var loginContainer = getRequiredElement('login-container');
-    loginContainer.addEventListener('click', showSyncLoginUI);
+    $('login-container').addEventListener('click', showSyncLoginUI);
     if (loadTimeData.getBoolean('shouldShowSyncLogin'))
       chrome.send('initializeSyncLogin');
 
@@ -298,8 +297,6 @@ cr.define('ntp', function() {
 
       startTime = Date.now();
     });
-
-    cr.ui.FocusManager.disableMouseFocusOnButtons();
   }
 
   /**
@@ -440,7 +437,7 @@ cr.define('ntp', function() {
    * Shows the notification bubble.
    * @param {string|Node} message The notification message or node to use as
    *     message.
-   * @param {Array.<{text: string, action: function()}>} links An array of
+   * @param {Array<{text: string, action: function()}>} links An array of
    *     records describing the links in the notification. Each record should
    *     have a 'text' attribute (the display string) and an 'action' attribute
    *     (a function to run when the link is activated).
@@ -555,7 +552,7 @@ cr.define('ntp', function() {
   }
 
   /**
-   * @param {Array.<PageData>} data
+   * @param {Array<PageData>} data
    * @param {boolean} hasBlacklistedUrls
    */
   function setMostVisitedPages(data, hasBlacklistedUrls) {
@@ -590,24 +587,21 @@ cr.define('ntp', function() {
    * @param {boolean} isUserSignedIn Indicates if the user is signed in or not.
    */
   function updateLogin(loginHeader, loginSubHeader, iconURL, isUserSignedIn) {
-    if (loginHeader || loginSubHeader) {
-      $('login-container').hidden = false;
+    /** @const */ var showLogin = loginHeader || loginSubHeader;
+
+    $('login-container').hidden = !showLogin;
+    $('card-slider-frame').classList.toggle('showing-login-area', !!showLogin);
+
+    if (showLogin) {
+      // TODO(dbeam): we should use .textContent instead to mitigate XSS.
       $('login-status-header').innerHTML = loginHeader;
       $('login-status-sub-header').innerHTML = loginSubHeader;
-      $('card-slider-frame').classList.add('showing-login-area');
 
-      if (iconURL) {
-        $('login-status-header-container').style.backgroundImage = url(iconURL);
-        $('login-status-header-container').classList.add('login-status-icon');
-      } else {
-        $('login-status-header-container').style.backgroundImage = 'none';
-        $('login-status-header-container').classList.remove(
-            'login-status-icon');
-      }
-    } else {
-      $('login-container').hidden = true;
-      $('card-slider-frame').classList.remove('showing-login-area');
+      var headerContainer = $('login-status-header-container');
+      headerContainer.classList.toggle('login-status-icon', !!iconURL);
+      headerContainer.style.backgroundImage = iconURL ? url(iconURL) : 'none';
     }
+
     if (shouldShowLoginBubble) {
       window.setTimeout(loginBubble.show.bind(loginBubble), 0);
       chrome.send('loginMessageSeen');

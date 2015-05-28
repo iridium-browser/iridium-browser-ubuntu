@@ -1,5 +1,5 @@
 <!doctype html>
-<html i18n-values="dir:textdirection;" class="loading">
+<html i18n-values="dir:textdirection;lang:language">
 <head>
 <meta charset="utf-8">
 
@@ -32,6 +32,7 @@
 <script src="chrome://resources/js/cr/ui/drag_wrapper.js"></script>
 <script src="chrome://resources/js/cr/ui/focus_manager.js"></script>
 <script src="chrome://resources/js/cr/ui/focus_outline_manager.js"></script>
+<script src="chrome://resources/js/cr/ui/node_utils.js"></script>
 <script src="chrome://resources/js/cr/ui/overlay.js"></script>
 
 <if expr="chromeos">
@@ -68,7 +69,8 @@
 </div>
 
 <div class="page" id="extension-settings">
-  <header id="page-header"><h1 i18n-content="extensionSettings"></h1>
+  <header id="page-header">
+    <h1 i18n-content="extensionSettings"></h1>
     <div id="header-controls" class="header-extras">
       <div id="dev-toggle" class="checkbox">
         <label>
@@ -84,8 +86,8 @@
       </div>
     </div>
   </header>
-  <div id="dev-controls" hidden>
-    <div class="buttons-container">
+  <div id="dev-controls">
+    <div class="button-container">
       <button id="load-unpacked"
           i18n-content="extensionSettingsLoadUnpackedButton"></button>
       <button id="pack-extension"
@@ -98,8 +100,10 @@
       <button id="update-extensions-now"
           i18n-content="extensionSettingsUpdateButton"></button>
     </div>
+    <!-- NOTE: the code that shows/hides #dev-controls assumes the ADT promo is
+         directly underneath .button-container. -->
     <div id="apps-developer-tools-promo">
-      <img></img>
+      <img alt=""></img>
       <span id="apps-developer-tools-promo-text"
           i18n-values=".innerHTML:extensionSettingsAppsDevToolsPromoHTML">
       </span>
@@ -110,20 +114,21 @@
     </div>
   </div>
   <include src="extension_load_error.html">
-  <div id="extension-settings-list" class="empty-extension-list"></div>
-  <div id="no-extensions">
+  <div id="extension-list-wrapper" hidden>
+    <div id="footer-section">
+      <a target="_blank" class="more-extensions-link"
+          i18n-values="href:extensionSettingsGetMoreExtensionsUrl"
+          i18n-content="extensionSettingsGetMoreExtensions"></a>
+      <a is="action-link" class="extension-commands-config"
+          i18n-content="extensionSettingsCommandsLink" hidden></a>
+    </div>
+  </div>
+  <div id="no-extensions" hidden>
     <span id="no-extensions-message"
         i18n-content="extensionSettingsNoExtensions"></span>
     <span id="suggest-gallery" class="more-extensions-link"
         i18n-values=".innerHTML:extensionSettingsSuggestGallery">
     </span>
-  </div>
-  <div id="footer-section">
-    <a target="_blank" class="more-extensions-link"
-        i18n-values="href:extensionSettingsGetMoreExtensionsUrl"
-        i18n-content="extensionSettingsGetMoreExtensions"></a>
-    <a is="action-link" class="extension-commands-config"
-        i18n-content="extensionSettingsCommandsLink" hidden></a>
   </div>
 </div>
 

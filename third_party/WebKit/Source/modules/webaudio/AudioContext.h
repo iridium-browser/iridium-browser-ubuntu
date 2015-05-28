@@ -70,8 +70,130 @@ class OscillatorNode;
 class PannerNode;
 class PeriodicWave;
 class ScriptProcessorNode;
+class ScriptPromiseResolver;
+class ScriptState;
+class SecurityOrigin;
 class StereoPannerNode;
 class WaveShaperNode;
+
+// DeferredTaskHandler manages the major part of pre- and post- rendering tasks,
+// and provides a lock mechanism against the audio rendering graph. A
+// DeferredTaskHandler object is created when an AudioContext object is created.
+// TODO(tkent): Move this to its own files.
+class DeferredTaskHandler final : public ThreadSafeRefCounted<DeferredTaskHandler> {
+public:
+    static PassRefPtr<DeferredTaskHandler> create();
+    ~DeferredTaskHandler();
+
+    void handleDeferredTasks();
+
+    // AudioContext can pull node(s) at the end of each render quantum even when
+    // they are not connected to any downstream nodes.  These two methods are
+    // called by the nodes who want to add/remove themselves into/from the
+    // automatic pull lists.
+    void addAutomaticPullNode(AudioHandler*);
+    void removeAutomaticPullNode(AudioHandler*);
+    // Called right before handlePostRenderTasks() to handle nodes which need to
+    // be pulled even when they are not connected to anything.
+    void processAutomaticPullNodes(size_t framesToProcess);
+
+    // Keep track of AudioNode's that have their channel count mode changed. We
+    // process the changes in the post rendering phase.
+    void addChangedChannelCountMode(AudioHandler*);
+    void removeChangedChannelCountMode(AudioHandler*);
+
+    // Only accessed when the graph lock is held.
+    void markSummingJunctionDirty(AudioSummingJunction*);
+    // Only accessed when the graph lock is held. Must be called on the main thread.
+    void removeMarkedSummingJunction(AudioSummingJunction*);
+
+    void markAudioNodeOutputDirty(AudioNodeOutput*);
+    void removeMarkedAudioNodeOutput(AudioNodeOutput*);
+    void disposeOutputs(AudioHandler&);
+
+    // In AudioNode::breakConnection() and deref(), a tryLock() is used for
+    // calling actual processing, but if it fails keep track here.
+    void addDeferredBreakConnection(AudioHandler&);
+    void breakConnections();
+
+    //
+    // Thread Safety and Graph Locking:
+    //
+    void setAudioThread(ThreadIdentifier thread) { m_audioThread = thread; } // FIXME: check either not initialized or the same
+    ThreadIdentifier audioThread() const { return m_audioThread; }
+    bool isAudioThread() const;
+
+    void lock();
+    bool tryLock();
+    void unlock();
+#if ENABLE(ASSERT)
+    // Returns true if this thread owns the context's lock.
+    bool isGraphOwner();
+#endif
+
+    class AutoLocker {
+        STACK_ALLOCATED();
+    public:
+        explicit AutoLocker(DeferredTaskHandler& handler)
+            : m_handler(handler)
+        {
+            m_handler.lock();
+        }
+        explicit AutoLocker(AudioContext*);
+
+        ~AutoLocker() { m_handler.unlock(); }
+
+    private:
+        DeferredTaskHandler& m_handler;
+    };
+
+private:
+    DeferredTaskHandler();
+    void updateAutomaticPullNodes();
+    void updateChangedChannelCountMode();
+    void handleDirtyAudioSummingJunctions();
+    void handleDirtyAudioNodeOutputs();
+
+    // For the sake of thread safety, we maintain a seperate Vector of automatic
+    // pull nodes for rendering in m_renderingAutomaticPullNodes.  It will be
+    // copied from m_automaticPullNodes by updateAutomaticPullNodes() at the
+    // very start or end of the rendering quantum.
+    // Oilpan: Since items are added to the vector/hash set by the audio thread
+    // (not registered to Oilpan), we cannot use a HeapVector/HeapHashSet.
+    GC_PLUGIN_IGNORE("http://crbug.com/404527")
+    HashSet<AudioHandler*> m_automaticPullNodes;
+    GC_PLUGIN_IGNORE("http://crbug.com/404527")
+    Vector<AudioHandler*> m_renderingAutomaticPullNodes;
+    // m_automaticPullNodesNeedUpdating keeps track if m_automaticPullNodes is modified.
+    bool m_automaticPullNodesNeedUpdating;
+
+    // Collection of nodes where the channel count mode has changed. We want the
+    // channel count mode to change in the pre- or post-rendering phase so as
+    // not to disturb the running audio thread.
+    GC_PLUGIN_IGNORE("http://crbug.com/404527")
+    HashSet<AudioHandler*> m_deferredCountModeChange;
+
+    // These two HashSet must be accessed only when the graph lock is held.
+    // Oilpan: These HashSet should be HeapHashSet<WeakMember<AudioNodeOutput>>
+    // ideally. But it's difficult to lock them correctly during GC.
+    // Oilpan: Since items are added to these hash sets by the audio thread (not
+    // registered to Oilpan), we cannot use HeapHashSets.
+    GC_PLUGIN_IGNORE("http://crbug.com/404527")
+    HashSet<AudioSummingJunction*> m_dirtySummingJunctions;
+    GC_PLUGIN_IGNORE("http://crbug.com/404527")
+    HashSet<AudioNodeOutput*> m_dirtyAudioNodeOutputs;
+
+    // Only accessed in the audio thread.
+    // Oilpan: Since items are added to these vectors by the audio thread (not
+    // registered to Oilpan), we cannot use HeapVectors.
+    GC_PLUGIN_IGNORE("http://crbug.com/404527")
+    Vector<AudioHandler*> m_deferredBreakConnectionList;
+
+    // Graph locking.
+    RecursiveMutex m_contextGraphMutex;
+    volatile ThreadIdentifier m_audioThread;
+};
+
 
 // AudioContext is the cornerstone of the web audio API and all AudioNodes are created from it.
 // For thread safety between the audio thread and the main thread, it has a rendering graph locking mechanism.
@@ -96,7 +218,7 @@ public:
 
     virtual ~AudioContext();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     bool isInitialized() const { return m_isInitialized; }
     bool isOfflineContext() { return m_isOfflineContext; }
@@ -106,14 +228,16 @@ public:
     virtual bool hasPendingActivity() const override;
 
     AudioDestinationNode* destination() { return m_destinationNode.get(); }
-    // currentSampleFrame() returns the current sample frame. It should only be called from the
-    // audio thread.
-    size_t currentSampleFrame() const { return m_destinationNode->currentSampleFrame(); }
-    // cachedSampleFrame() is like currentSampleFrame() but must be called from the main thread to
-    // get the sample frame. It might be slightly behind curentSampleFrame() due to locking.
-    size_t cachedSampleFrame() const;
-    double currentTime() const { return m_destinationNode->currentTime(); }
-    float sampleRate() const { return m_destinationNode->sampleRate(); }
+
+    // currentSampleFrame() and currentTime() can be called from both the main
+    // thread and the audio thread. Note that, however, they return the cached
+    // value instead of actual current ones when they are accessed from the main
+    // thread. See: crbug.com/431874
+    size_t currentSampleFrame() const;
+    double currentTime() const;
+
+    float sampleRate() const { return m_destinationNode ? m_destinationNode->handler().sampleRate() : 0; }
+
     String state() const;
 
     AudioBuffer* createBuffer(unsigned numberOfChannels, size_t numberOfFrames, float sampleRate, ExceptionState&);
@@ -124,30 +248,33 @@ public:
     AudioListener* listener() { return m_listener.get(); }
 
     // The AudioNode create methods are called on the main thread (from JavaScript).
-    AudioBufferSourceNode* createBufferSource();
+    AudioBufferSourceNode* createBufferSource(ExceptionState&);
     MediaElementAudioSourceNode* createMediaElementSource(HTMLMediaElement*, ExceptionState&);
     MediaStreamAudioSourceNode* createMediaStreamSource(MediaStream*, ExceptionState&);
-    MediaStreamAudioDestinationNode* createMediaStreamDestination();
-    GainNode* createGain();
-    BiquadFilterNode* createBiquadFilter();
-    WaveShaperNode* createWaveShaper();
+    MediaStreamAudioDestinationNode* createMediaStreamDestination(ExceptionState&);
+    GainNode* createGain(ExceptionState&);
+    BiquadFilterNode* createBiquadFilter(ExceptionState&);
+    WaveShaperNode* createWaveShaper(ExceptionState&);
     DelayNode* createDelay(ExceptionState&);
     DelayNode* createDelay(double maxDelayTime, ExceptionState&);
-    PannerNode* createPanner();
-    ConvolverNode* createConvolver();
-    DynamicsCompressorNode* createDynamicsCompressor();
-    AnalyserNode* createAnalyser();
+    PannerNode* createPanner(ExceptionState&);
+    ConvolverNode* createConvolver(ExceptionState&);
+    DynamicsCompressorNode* createDynamicsCompressor(ExceptionState&);
+    AnalyserNode* createAnalyser(ExceptionState&);
     ScriptProcessorNode* createScriptProcessor(ExceptionState&);
     ScriptProcessorNode* createScriptProcessor(size_t bufferSize, ExceptionState&);
     ScriptProcessorNode* createScriptProcessor(size_t bufferSize, size_t numberOfInputChannels, ExceptionState&);
     ScriptProcessorNode* createScriptProcessor(size_t bufferSize, size_t numberOfInputChannels, size_t numberOfOutputChannels, ExceptionState&);
-    StereoPannerNode* createStereoPanner();
+    StereoPannerNode* createStereoPanner(ExceptionState&);
     ChannelSplitterNode* createChannelSplitter(ExceptionState&);
     ChannelSplitterNode* createChannelSplitter(size_t numberOfOutputs, ExceptionState&);
     ChannelMergerNode* createChannelMerger(ExceptionState&);
     ChannelMergerNode* createChannelMerger(size_t numberOfInputs, ExceptionState&);
-    OscillatorNode* createOscillator();
+    OscillatorNode* createOscillator(ExceptionState&);
     PeriodicWave* createPeriodicWave(DOMFloat32Array* real, DOMFloat32Array* imag, ExceptionState&);
+
+    // Close
+    ScriptPromise closeContext(ScriptState*);
 
     // Suspend/Resume
     ScriptPromise suspendContext(ScriptState*);
@@ -169,22 +296,8 @@ public:
     // Called periodically at the end of each render quantum to dereference finished source nodes.
     void derefFinishedSourceNodes();
 
-    void registerLiveAudioSummingJunction(AudioSummingJunction&);
     void registerLiveNode(AudioNode&);
-
-    // AudioContext can pull node(s) at the end of each render quantum even when they are not connected to any downstream nodes.
-    // These two methods are called by the nodes who want to add/remove themselves into/from the automatic pull lists.
-    void addAutomaticPullNode(AudioNode*);
-    void removeAutomaticPullNode(AudioNode*);
-
-    // Called right before handlePostRenderTasks() to handle nodes which need to be pulled even when they are not connected to anything.
-    void processAutomaticPullNodes(size_t framesToProcess);
-
-    // Keep track of AudioNode's that have their channel count mode changed. We process the changes
-    // in the post rendering phase.
-    void addChangedChannelCountMode(AudioNode*);
-    void removeChangedChannelCountMode(AudioNode*);
-    void updateChangedChannelCountMode();
+    void unregisterLiveNode(AudioNode&);
 
     // Keeps track of the number of connections made.
     void incrementConnectionCount()
@@ -195,58 +308,24 @@ public:
 
     unsigned connectionCount() const { return m_connectionCount; }
 
+    DeferredTaskHandler& handler() const { return *m_deferredTaskHandler; }
     //
     // Thread Safety and Graph Locking:
     //
-
-    void setAudioThread(ThreadIdentifier thread) { m_audioThread = thread; } // FIXME: check either not initialized or the same
-    ThreadIdentifier audioThread() const { return m_audioThread; }
-    bool isAudioThread() const;
-
-    void lock();
-    bool tryLock();
-    void unlock();
-
+    // The following functions call corresponding functions of
+    // DeferredTaskHandler.
+    bool isAudioThread() const { return handler().isAudioThread(); }
+    void lock() { handler().lock(); }
+    bool tryLock() { return handler().tryLock(); }
+    void unlock() { handler().unlock(); }
 #if ENABLE(ASSERT)
     // Returns true if this thread owns the context's lock.
-    bool isGraphOwner();
+    bool isGraphOwner() { return handler().isGraphOwner(); }
 #endif
+    using AutoLocker = DeferredTaskHandler::AutoLocker;
 
     // Returns the maximum numuber of channels we can support.
     static unsigned maxNumberOfChannels() { return MaxNumberOfChannels;}
-
-    class AutoLocker {
-        STACK_ALLOCATED();
-    public:
-        explicit AutoLocker(AudioContext* context)
-            : m_context(context)
-        {
-            ASSERT(context);
-            context->lock();
-        }
-
-        ~AutoLocker()
-        {
-            m_context->unlock();
-        }
-    private:
-        Member<AudioContext> m_context;
-    };
-
-    // In AudioNode::breakConnection() and deref(), a tryLock() is used for
-    // calling actual processing, but if it fails keep track here.
-    void addDeferredBreakConnection(AudioNode&);
-
-    // In the audio thread at the start of each render cycle, we'll call this.
-    void handleDeferredAudioNodeTasks();
-
-    // Only accessed when the graph lock is held.
-    void markSummingJunctionDirty(AudioSummingJunction*);
-    // Only accessed when the graph lock is held. Must be called on the main thread.
-    void removeMarkedSummingJunction(AudioSummingJunction*);
-    void markAudioNodeOutputDirty(AudioNodeOutput*);
-    void removeMarkedAudioNodeOutput(AudioNodeOutput*);
-    void disposeOutputs(AudioNode&);
 
     // EventTarget
     virtual const AtomicString& interfaceName() const override final;
@@ -259,12 +338,27 @@ public:
     void fireCompletionEvent();
     void notifyStateChange();
 
+    // The context itself keeps a reference to all source nodes.  The source nodes, then reference all nodes they're connected to.
+    // In turn, these nodes reference all nodes they're connected to.  All nodes are ultimately connected to the AudioDestinationNode.
+    // When the context dereferences a source node, it will be deactivated from the rendering graph along with all other nodes it is
+    // uniquely connected to.  See the AudioNode::ref() and AudioNode::deref() methods for more details.
+    void refNode(AudioNode*);
+
+    // A context is considered closed if closeContext() has been called, even if the audio HW has
+    // not yet been stopped.  It will be stopped eventually.
+    bool isContextClosed() const { return m_closeResolver; }
+
     static unsigned s_hardwareContextCount;
+    static unsigned s_contextId;
+
+    // Get the security origin for this audio context.
+    SecurityOrigin* securityOrigin() const;
 
 protected:
     explicit AudioContext(Document*);
     AudioContext(Document*, unsigned numberOfChannels, size_t numberOfFrames, float sampleRate);
 
+    RefPtrWillBeMember<ScriptPromiseResolver> m_offlineResolver;
 private:
     void initialize();
     void uninitialize();
@@ -275,14 +369,11 @@ private:
     bool m_isCleared;
     void clear();
 
+    void throwExceptionForClosedState(ExceptionState&);
+
     // Set to true when the destination node has been initialized and is ready to process data.
     bool m_isInitialized;
 
-    // The context itself keeps a reference to all source nodes.  The source nodes, then reference all nodes they're connected to.
-    // In turn, these nodes reference all nodes they're connected to.  All nodes are ultimately connected to the AudioDestinationNode.
-    // When the context dereferences a source node, it will be deactivated from the rendering graph along with all other nodes it is
-    // uniquely connected to.  See the AudioNode::ref() and AudioNode::deref() methods for more details.
-    void refNode(AudioNode*);
     void derefNode(AudioNode*);
 
     // When the context goes away, there might still be some sources which haven't finished playing.
@@ -317,9 +408,9 @@ private:
 
     // Vector of promises created by resume(). It takes time to handle them, so we collect all of
     // the promises here until they can be resolved or rejected.
-    WillBeHeapVector<RefPtrWillBeMember<ScriptPromiseResolver> > m_resumeResolvers;
+    WillBeHeapVector<RefPtrWillBeMember<ScriptPromiseResolver>> m_resumeResolvers;
     // Like m_resumeResolvers but for suspend().
-    WillBeHeapVector<RefPtrWillBeMember<ScriptPromiseResolver> > m_suspendResolvers;
+    WillBeHeapVector<RefPtrWillBeMember<ScriptPromiseResolver>> m_suspendResolvers;
     void rejectPendingResolvers();
 
     // True if we're in the process of resolving promises for resume().  Resolving can take some
@@ -327,87 +418,45 @@ private:
     // excessive number of times.
     bool m_isResolvingResumePromises;
 
-    class AudioNodeDisposer {
-    public:
-        explicit AudioNodeDisposer(AudioNode& node) : m_node(node) { }
-        ~AudioNodeDisposer();
-
-    private:
-        AudioNode& m_node;
-    };
-    HeapHashMap<WeakMember<AudioNode>, OwnPtr<AudioNodeDisposer> > m_liveNodes;
-
-    class AudioSummingJunctionDisposer {
-    public:
-        explicit AudioSummingJunctionDisposer(AudioSummingJunction& junction) : m_junction(junction) { }
-        ~AudioSummingJunctionDisposer();
-
-    private:
-        AudioSummingJunction& m_junction;
-    };
-    // The purpose of m_liveAudioSummingJunctions is to remove a dying
-    // AudioSummingJunction from m_dirtySummingJunctions. However we put all of
-    // AudioSummingJunction objects to m_liveAudioSummingJunctions to avoid
-    // concurrent access to m_liveAudioSummingJunctions.
-    HeapHashMap<WeakMember<AudioSummingJunction>, OwnPtr<AudioSummingJunctionDisposer> > m_liveAudioSummingJunctions;
-
-    // These two HashSet must be accessed only when the graph lock is held.
-    // Oilpan: These HashSet should be HeapHashSet<WeakMember<AudioNodeOutput>>
-    // ideally. But it's difficult to lock them correctly during GC.
-    // Oilpan: Since items are added to these hash sets by the audio thread (not registered to Oilpan),
-    // we cannot use HeapHashSets.
+    // Conceptually, this should be HeapHashSet<WeakMember<AudioNode>>. However
+    // AudioNode also registers its pre-finalizer to the GC system, and having
+    // another weak set would make the GC system slower. The AudioNode
+    // pre-finalizer removes a member of this HashSet.
     GC_PLUGIN_IGNORE("http://crbug.com/404527")
-    HashSet<AudioSummingJunction*> m_dirtySummingJunctions;
-    GC_PLUGIN_IGNORE("http://crbug.com/404527")
-    HashSet<AudioNodeOutput*> m_dirtyAudioNodeOutputs;
-    void handleDirtyAudioSummingJunctions();
-    void handleDirtyAudioNodeOutputs();
-
-    // For the sake of thread safety, we maintain a seperate Vector of automatic pull nodes for rendering in m_renderingAutomaticPullNodes.
-    // It will be copied from m_automaticPullNodes by updateAutomaticPullNodes() at the very start or end of the rendering quantum.
-    // Oilpan: Since items are added to the vector/hash set by the audio thread (not registered to Oilpan),
-    // we cannot use a HeapVector/HeapHashSet.
-    GC_PLUGIN_IGNORE("http://crbug.com/404527")
-    HashSet<AudioNode*> m_automaticPullNodes;
-    GC_PLUGIN_IGNORE("http://crbug.com/404527")
-    Vector<AudioNode*> m_renderingAutomaticPullNodes;
-    // m_automaticPullNodesNeedUpdating keeps track if m_automaticPullNodes is modified.
-    bool m_automaticPullNodesNeedUpdating;
-    void updateAutomaticPullNodes();
+    HashSet<AudioNode*> m_liveNodes;
 
     unsigned m_connectionCount;
 
     // Graph locking.
     bool m_didInitializeContextGraphMutex;
-    RecursiveMutex m_contextGraphMutex;
-    volatile ThreadIdentifier m_audioThread;
-
-    // Only accessed in the audio thread.
-    // Oilpan: Since items are added to these vectors by the audio thread (not registered to Oilpan),
-    // we cannot use HeapVectors.
-    GC_PLUGIN_IGNORE("http://crbug.com/404527")
-    Vector<AudioNode*> m_deferredBreakConnectionList;
+    RefPtr<DeferredTaskHandler> m_deferredTaskHandler;
 
     Member<AudioBuffer> m_renderTarget;
 
     bool m_isOfflineContext;
 
+    // The state of the AudioContext.
     AudioContextState m_contextState;
     void setContextState(AudioContextState);
 
     AsyncAudioDecoder m_audioDecoder;
 
-    // Collection of nodes where the channel count mode has changed. We want the channel count mode
-    // to change in the pre- or post-rendering phase so as not to disturb the running audio thread.
-    GC_PLUGIN_IGNORE("http://crbug.com/404527")
-    HashSet<AudioNode*> m_deferredCountModeChange;
+    // The Promise that is returned by close();
+    RefPtrWillBeMember<ScriptPromiseResolver> m_closeResolver;
 
     // Follows the destination's currentSampleFrame, but might be slightly behind due to locking.
     size_t m_cachedSampleFrame;
 
+    // Tries to handle AudioBufferSourceNodes that were started but became disconnected or was never
+    // connected. Because these never get pulled anymore, they will stay around forever. So if we
+    // can, try to stop them so they can be collected.
+    void handleStoppableSourceNodes();
+
     // This is considering 32 is large enough for multiple channels audio.
     // It is somewhat arbitrary and could be increased if necessary.
     enum { MaxNumberOfChannels = 32 };
+
+    unsigned m_contextId;
 };
 
 } // namespace blink

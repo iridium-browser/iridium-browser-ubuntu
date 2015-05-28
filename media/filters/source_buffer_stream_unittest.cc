@@ -50,7 +50,7 @@ class SourceBufferStreamTest : public testing::Test {
   void SetTextStream() {
     video_config_ = TestVideoConfig::Invalid();
     TextTrackConfig config(kTextSubtitles, "", "", "");
-    stream_.reset(new SourceBufferStream(config, LogCB(), true));
+    stream_.reset(new SourceBufferStream(config, log_cb(), true));
     SetStreamInfo(2, 2);
   }
 
@@ -66,7 +66,7 @@ class SourceBufferStreamTest : public testing::Test {
                              false,
                              base::TimeDelta(),
                              0);
-    stream_.reset(new SourceBufferStream(audio_config_, LogCB(), true));
+    stream_.reset(new SourceBufferStream(audio_config_, log_cb(), true));
 
     // Equivalent to 2ms per frame.
     SetStreamInfo(500, 500);
@@ -352,10 +352,7 @@ class SourceBufferStreamTest : public testing::Test {
         << "\nActual: " << actual.AsHumanReadableString();
   }
 
-  const LogCB log_cb() {
-    return base::Bind(&SourceBufferStreamTest::DebugMediaLog,
-                      base::Unretained(this));
-  }
+  const LogCB log_cb() { return base::Bind(&AddLogEntryForTest); }
 
   base::TimeDelta frame_duration() const { return frame_duration_; }
 
@@ -626,10 +623,6 @@ class SourceBufferStreamTest : public testing::Test {
       wrapper.push_back(buffers[i]);
       EXPECT_TRUE(stream_->Append(wrapper));
     }
-  }
-
-  void DebugMediaLog(const std::string& log) {
-    DVLOG(1) << log;
   }
 
   int frames_per_second_;
@@ -3916,6 +3909,33 @@ TEST_F(SourceBufferStreamTest, Audio_SpliceFrame_NoTinySplices) {
   CheckNoNextBuffer();
 }
 
+TEST_F(SourceBufferStreamTest, Audio_SpliceFrame_NoMillisecondSplices) {
+  video_config_ = TestVideoConfig::Invalid();
+  audio_config_.Initialize(kCodecVorbis, kSampleFormatPlanarF32,
+                           CHANNEL_LAYOUT_STEREO, 4000, NULL, 0, false, false,
+                           base::TimeDelta(), 0);
+  stream_.reset(new SourceBufferStream(audio_config_, log_cb(), true));
+  // Equivalent to 0.5ms per frame.
+  SetStreamInfo(2000, 2000);
+  Seek(0);
+
+  // Append four buffers with a 0.5ms duration each.
+  NewSegmentAppend(0, 4);
+  CheckExpectedRangesByTimestamp("{ [0,2) }");
+
+  // Overlap the range [0, 2) with [1.25, 2); this results in an overlap of
+  // 0.75ms between the ranges.
+  NewSegmentAppend_OffsetFirstBuffer(2, 2,
+                                     base::TimeDelta::FromMillisecondsD(0.25));
+  CheckExpectedRangesByTimestamp("{ [0,2) }");
+
+  // A splice frame should not be generated (indicated by the lack of a config
+  // change in the expected buffer string) since it requires at least 1ms of
+  // data to crossfade.
+  CheckExpectedBuffers("0K 0K 1K 1K 1K");
+  CheckNoNextBuffer();
+}
+
 TEST_F(SourceBufferStreamTest, Audio_SpliceFrame_Preroll) {
   SetAudioStream();
   Seek(0);
@@ -3938,6 +3958,31 @@ TEST_F(SourceBufferStreamTest, BFrames) {
   CheckExpectedRangesByTimestamp("{ [0,150) }");
 
   CheckExpectedBuffers("0K 120|30 30|60 60|90 90|120");
+  CheckNoNextBuffer();
+}
+
+TEST_F(SourceBufferStreamTest, RemoveShouldAlwaysExcludeEnd) {
+  NewSegmentAppend("10D2K 12D2 14D2");
+  CheckExpectedRangesByTimestamp("{ [10,16) }");
+
+  // Start new segment, appending KF to abut the start of previous segment.
+  NewSegmentAppend("0D10K");
+  Seek(0);
+  CheckExpectedRangesByTimestamp("{ [0,16) }");
+  CheckExpectedBuffers("0K 10K 12 14");
+  CheckNoNextBuffer();
+
+  // Append another buffer with the same timestamp as the last KF. This triggers
+  // special logic that allows two buffers to have the same timestamp. When
+  // preparing for this new append, there is no reason to remove the later GOP
+  // starting at timestamp 10. This verifies the fix for http://crbug.com/469325
+  // where the decision *not* to remove the start of the overlapped range was
+  // erroneously triggering buffers with a timestamp matching the end
+  // of the append (and any later dependent frames) to be removed.
+  AppendBuffers("0D10");
+  Seek(0);
+  CheckExpectedRangesByTimestamp("{ [0,16) }");
+  CheckExpectedBuffers("0K 0 10K 12 14");
   CheckNoNextBuffer();
 }
 

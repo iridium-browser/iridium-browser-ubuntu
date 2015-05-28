@@ -11,10 +11,10 @@
 #include "gtest/gtest.h"
 #include "vpx/vpx_encoder.h"
 #include "vpx/vp8cx.h"
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/video_coding/codecs/interface/video_codec_interface.h"
 #include "webrtc/modules/video_coding/codecs/vp8/screenshare_layers.h"
 #include "webrtc/modules/video_coding/utility/include/mock/mock_frame_dropper.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 using ::testing::_;
 using ::testing::NiceMock;
@@ -44,9 +44,6 @@ class ScreenshareLayersFT : public ScreenshareLayers {
                           tl0_frame_dropper,
                           tl1_frame_dropper) {}
   virtual ~ScreenshareLayersFT() {}
-
- protected:
-  virtual bool TargetBitrateExperimentEnabled() OVERRIDE { return true; }
 };
 
 class ScreenshareLayerTest : public ::testing::Test {
@@ -93,7 +90,7 @@ class ScreenshareLayerTest : public ::testing::Test {
 
   NiceMock<MockFrameDropper> tl0_frame_dropper_;
   NiceMock<MockFrameDropper> tl1_frame_dropper_;
-  scoped_ptr<ScreenshareLayersFT> layers_;
+  rtc::scoped_ptr<ScreenshareLayersFT> layers_;
 };
 
 TEST_F(ScreenshareLayerTest, 1Layer) {

@@ -30,11 +30,21 @@ import bisect_utils
 # Possible builder types.
 PERF_BUILDER = 'perf'
 FULL_BUILDER = 'full'
+ANDROID_CHROME_PERF_BUILDER = 'android-chrome-perf'
+
+# Maximum time in seconds to wait after posting build request to the try server.
+MAX_MAC_BUILD_TIME = 14400
+MAX_WIN_BUILD_TIME = 14400
+MAX_LINUX_BUILD_TIME = 14400
+
+# Try server status page URLs, used to get build status.
+PERF_TRY_SERVER_URL = 'http://build.chromium.org/p/tryserver.chromium.perf'
+LINUX_TRY_SERVER_URL = 'http://build.chromium.org/p/tryserver.chromium.linux'
 
 
 def GetBucketAndRemotePath(revision, builder_type=PERF_BUILDER,
                            target_arch='ia32', target_platform='chromium',
-                           deps_patch_sha=None):
+                           deps_patch_sha=None, extra_src=None):
   """Returns the location where a build archive is expected to be.
 
   Args:
@@ -44,15 +54,42 @@ def GetBucketAndRemotePath(revision, builder_type=PERF_BUILDER,
     target_platform: Platform name, e.g. "chromium" or "android".
     deps_patch_sha: SHA1 hash which identifies a particular combination of
         custom revisions for dependency repositories.
+    extra_src: Path to a script which can be used to modify the bisect script's
+        behavior.
 
   Returns:
     A pair of strings (bucket, path), where the archive is expected to be.
   """
+  logging.info('Getting GS URL for archive of builder "%s", "%s", "%s".',
+               builder_type, target_arch, target_platform)
   build_archive = BuildArchive.Create(
-      builder_type, target_arch=target_arch, target_platform=target_platform)
+      builder_type, target_arch=target_arch, target_platform=target_platform,
+      extra_src=extra_src)
   bucket = build_archive.BucketName()
   remote_path = build_archive.FilePath(revision, deps_patch_sha=deps_patch_sha)
   return bucket, remote_path
+
+
+def GetBuilderNameAndBuildTime(builder_type=PERF_BUILDER, target_arch='ia32',
+                               target_platform='chromium', extra_src=None):
+  """Gets builder bot name and build time in seconds based on platform."""
+  logging.info('Getting builder name for builder "%s", "%s", "%s".',
+               builder_type, target_arch, target_platform)
+  build_archive = BuildArchive.Create(
+      builder_type, target_arch=target_arch, target_platform=target_platform,
+      extra_src=extra_src)
+  return build_archive.GetBuilderName(), build_archive.GetBuilderBuildTime()
+
+
+def GetBuildBotUrl(builder_type=PERF_BUILDER, target_arch='ia32',
+                   target_platform='chromium', extra_src=None):
+  """Gets buildbot URL for a given builder type."""
+  logging.info('Getting buildbot URL for "%s", "%s", "%s".',
+               builder_type, target_arch, target_platform)
+  build_archive = BuildArchive.Create(
+      builder_type, target_arch=target_arch, target_platform=target_platform,
+      extra_src=extra_src)
+  return build_archive.GetBuildBotUrl()
 
 
 class BuildArchive(object):
@@ -65,16 +102,30 @@ class BuildArchive(object):
   """
 
   @staticmethod
-  def Create(builder_type, target_arch='ia32', target_platform='chromium'):
+  def Create(builder_type, target_arch='ia32', target_platform='chromium',
+             extra_src=None):
     if builder_type == PERF_BUILDER:
       return PerfBuildArchive(target_arch, target_platform)
     if builder_type == FULL_BUILDER:
       return FullBuildArchive(target_arch, target_platform)
+    if builder_type == ANDROID_CHROME_PERF_BUILDER:
+      try:
+        # Load and initialize a module in extra source file and
+        # return its module object to access android-chrome specific data.
+        loaded_extra_src = bisect_utils.LoadExtraSrc(extra_src)
+        return AndroidChromeBuildArchive(
+            target_arch, target_platform, loaded_extra_src)
+      except (IOError, TypeError, ImportError):
+        raise RuntimeError('Invalid or missing --extra_src. [%s]' % extra_src)
     raise NotImplementedError('Builder type "%s" not supported.' % builder_type)
 
-  def __init__(self, target_arch='ia32', target_platform='chromium'):
+  def __init__(self, target_arch='ia32', target_platform='chromium',
+               extra_src=None):
+    self._extra_src = extra_src
     if bisect_utils.IsLinuxHost() and target_platform == 'android':
       self._platform = 'android'
+    elif bisect_utils.IsLinuxHost() and target_platform == 'android-chrome':
+      self._platform = 'android-chrome'
     elif bisect_utils.IsLinuxHost():
       self._platform = 'linux'
     elif bisect_utils.IsMacHost():
@@ -134,6 +185,22 @@ class BuildArchive(object):
       return 'mac'
     raise NotImplementedError('Unknown platform "%s".' % sys.platform)
 
+  def GetBuilderName(self):
+    raise NotImplementedError()
+
+  def GetBuilderBuildTime(self):
+    """Returns the time to wait for a build after requesting one."""
+    if self._platform in ('win', 'win64'):
+      return MAX_WIN_BUILD_TIME
+    if self._platform in ('linux', 'android', 'android-chrome'):
+      return MAX_LINUX_BUILD_TIME
+    if self._platform == 'mac':
+      return MAX_MAC_BUILD_TIME
+    raise NotImplementedError('Unsupported Platform "%s".' % sys.platform)
+
+  def GetBuildBotUrl(self):
+    raise NotImplementedError()
+
 
 class PerfBuildArchive(BuildArchive):
 
@@ -155,6 +222,24 @@ class PerfBuildArchive(BuildArchive):
     }
     assert self._platform in platform_to_directory
     return platform_to_directory.get(self._platform)
+
+  def GetBuilderName(self):
+    """Gets builder bot name based on platform."""
+    if self._platform == 'win64':
+      return 'win_x64_perf_bisect_builder'
+    elif self._platform == 'win':
+      return 'win_perf_bisect_builder'
+    elif self._platform == 'linux':
+      return 'linux_perf_bisect_builder'
+    elif self._platform == 'android':
+      return 'android_perf_bisect_builder'
+    elif self._platform == 'mac':
+      return 'mac_perf_bisect_builder'
+    raise NotImplementedError('Unsupported platform "%s".' % sys.platform)
+
+  def GetBuildBotUrl(self):
+    """Returns buildbot URL for fetching build info."""
+    return PERF_TRY_SERVER_URL
 
 
 class FullBuildArchive(BuildArchive):
@@ -186,10 +271,65 @@ class FullBuildArchive(BuildArchive):
     assert self._platform in platform_to_directory
     return platform_to_directory.get(self._platform)
 
+  def GetBuilderName(self):
+    """Gets builder bot name based on platform."""
+    if self._platform == 'linux':
+      return 'linux_full_bisect_builder'
+    raise NotImplementedError('Unsupported platform "%s".' % sys.platform)
+
+  def GetBuildBotUrl(self):
+    """Returns buildbot URL for fetching build info."""
+    return LINUX_TRY_SERVER_URL
+
+
+class AndroidChromeBuildArchive(BuildArchive):
+  """Represents a place where builds of android-chrome type are stored.
+
+  If AndroidChromeBuildArchive is used, it is assumed that the --extra_src
+  is a valid Python module which contains the module-level functions
+  GetBucketName and GetArchiveDirectory.
+  """
+
+  def BucketName(self):
+    return self._extra_src.GetBucketName()
+
+  def _ZipFileName(self, revision, deps_patch_sha=None):
+    """Gets the file name of a zip archive on android-chrome.
+
+    This returns a file name of the form build_product_<revision>.zip,
+    which is a format used by android-chrome.
+
+    Args:
+      revision: A git commit hash or other revision string.
+      deps_patch_sha: SHA1 hash of a DEPS file patch.
+
+    Returns:
+      The archive file name.
+    """
+    if deps_patch_sha:
+      revision = '%s_%s' % (revision, deps_patch_sha)
+    return 'build_product_%s.zip' % revision
+
+  def FilePath(self, revision, deps_patch_sha=None):
+    return '%s/%s' % (self._ArchiveDirectory(),
+                      self._ZipFileName(revision, deps_patch_sha))
+
+  def _ArchiveDirectory(self):
+    """Returns the directory name to download builds from."""
+    return self._extra_src.GetArchiveDirectory()
+
+  def GetBuilderName(self):
+    """Returns the builder name extra source."""
+    return self._extra_src.GetBuilderName()
+
+  def GetBuildBotUrl(self):
+    """Returns buildbot URL for fetching build info."""
+    return self._extra_src.GetBuildBotUrl()
+
 
 def BuildIsAvailable(bucket_name, remote_path):
   """Checks whether a build is currently archived at some place."""
-  logging.info('Checking existance: gs://%s/%s' % (bucket_name, remote_path))
+  logging.info('Checking existence: gs://%s/%s' % (bucket_name, remote_path))
   try:
     exists = cloud_storage.Exists(bucket_name, remote_path)
     logging.info('Exists? %s' % exists)
@@ -361,4 +501,3 @@ def Main(argv):
 
 if __name__ == '__main__':
   sys.exit(Main(sys.argv))
-

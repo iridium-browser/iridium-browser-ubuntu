@@ -32,19 +32,21 @@ namespace blink {
 
 class AudioContext;
 
+class ChannelSplitterHandler final : public AudioHandler {
+public:
+    ChannelSplitterHandler(AudioNode&, float sampleRate, unsigned numberOfOutputs);
+
+    // AudioHandler
+    virtual void process(size_t framesToProcess) override;
+};
+
 class ChannelSplitterNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static ChannelSplitterNode* create(AudioContext*, float sampleRate, unsigned numberOfOutputs);
 
-    // AudioNode
-    virtual void process(size_t framesToProcess) override;
-
 private:
-    virtual double tailTime() const override { return 0; }
-    virtual double latencyTime() const override { return 0; }
-
-    ChannelSplitterNode(AudioContext*, float sampleRate, unsigned numberOfOutputs);
+    ChannelSplitterNode(AudioContext&, float sampleRate, unsigned numberOfOutputs);
 };
 
 } // namespace blink

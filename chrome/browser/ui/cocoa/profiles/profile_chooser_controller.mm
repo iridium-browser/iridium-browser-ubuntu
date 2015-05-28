@@ -166,14 +166,17 @@ NSTextView* BuildFixedWidthTextViewWithLink(
       [[HyperlinkTextView alloc] initWithFrame:NSZeroRect]);
   NSColor* link_color = gfx::SkColorToCalibratedNSColor(
       chrome_style::GetLinkColor());
+  NSMutableString* finalMessage =
+      [NSMutableString stringWithFormat:@"%@\n", message];
+  [finalMessage insertString:link atIndex:link_offset];
   // Adds a padding row at the bottom, because |boundingRectWithSize| below cuts
   // off the last row sometimes.
-  [text_view setMessageAndLink:[NSString stringWithFormat:@"%@\n", message]
-                      withLink:link
-                      atOffset:link_offset
-                          font:[NSFont labelFontOfSize:kTextFontSize]
-                  messageColor:[NSColor blackColor]
-                     linkColor:link_color];
+  [text_view setMessage:finalMessage
+               withFont:[NSFont labelFontOfSize:kTextFontSize]
+           messageColor:[NSColor blackColor]];
+  [text_view addLinkRange:NSMakeRange(link_offset, [link length])
+                 withName:@""
+                linkColor:link_color];
 
   // Removes the underlining from the link.
   [text_view setLinkTextAttributes:nil];
@@ -615,7 +618,7 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
 @end
 
 // A custom text control that turns into a textfield for editing when clicked.
-@interface EditableProfileNameButton : HoverImageButton {
+@interface EditableProfileNameButton : HoverImageButton<NSTextFieldDelegate> {
  @private
   base::scoped_nsobject<NSTextField> profileNameTextField_;
   Profile* profile_;  // Weak.
@@ -632,7 +635,7 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
 - (void)showEditableView:(id)sender;
 
 // Called when enter is pressed in the text field.
-- (void)saveProfileName:(id)sender;
+- (void)saveProfileName;
 
 @end
 
@@ -688,8 +691,7 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
           NSLineBreakByTruncatingTail];
       [[profileNameTextField_ cell] setUsesSingleLineMode:YES];
       [self addSubview:profileNameTextField_];
-      [profileNameTextField_ setTarget:self];
-      [profileNameTextField_ setAction:@selector(saveProfileName:)];
+      [profileNameTextField_ setDelegate:self];
 
       // Hide the textfield until the user clicks on the button.
       [profileNameTextField_ setHidden:YES];
@@ -698,6 +700,13 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
           IDS_PROFILES_NEW_AVATAR_MENU_EDIT_NAME_ACCESSIBLE_NAME,
           base::SysNSStringToUTF16(profileName))
                                     forAttribute:NSAccessibilityTitleAttribute];
+
+      NSSize textSize = [profileName sizeWithAttributes:@{
+        NSFontAttributeName : [profileNameTextField_ font]
+      }];
+
+      if (textSize.width > frameRect.size.width - [hoverImage size].width * 2)
+        [self setToolTip:profileName];
     }
 
     [[self cell] accessibilitySetOverrideValue:NSAccessibilityButtonRole
@@ -716,21 +725,18 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
   return self;
 }
 
-- (void)saveProfileName:(id)sender {
+- (void)saveProfileName {
   base::string16 newProfileName =
       base::SysNSStringToUTF16([profileNameTextField_ stringValue]);
 
-  // Empty profile names are not allowed, and are treated as a cancel.
+  // Empty profile names are not allowed, and do nothing.
   base::TrimWhitespace(newProfileName, base::TRIM_ALL, &newProfileName);
   if (!newProfileName.empty()) {
     profiles::UpdateProfileName(profile_, newProfileName);
     [controller_
         postActionPerformed:ProfileMetrics::PROFILE_DESKTOP_MENU_EDIT_NAME];
-  } else {
-    // Since the text is empty and not allowed, revert it from the textbox.
-    [profileNameTextField_ setStringValue:[self title]];
+    [profileNameTextField_ setHidden:YES];
   }
-  [profileNameTextField_ setHidden:YES];
 }
 
 - (void)showEditableView:(id)sender {
@@ -740,6 +746,17 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
 
 - (BOOL)canBecomeKeyView {
   return false;
+}
+
+- (BOOL)control:(NSControl*)control
+               textView:(NSTextView*)textView
+    doCommandBySelector:(SEL)commandSelector {
+  if (commandSelector == @selector(insertTab:) ||
+      commandSelector == @selector(insertNewline:)) {
+    [self saveProfileName];
+    return YES;
+  }
+  return NO;
 }
 
 @end
@@ -1208,6 +1225,7 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
       subView = [self buildSwitchUserView];
       break;
     case profiles::BUBBLE_VIEW_MODE_PROFILE_CHOOSER:
+    case profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER:
     case profiles::BUBBLE_VIEW_MODE_ACCOUNT_MANAGEMENT:
       subView = [self buildProfileChooserView];
       break;
@@ -1240,6 +1258,8 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
       [[NSMutableArray alloc] init]);
   // Local and guest profiles cannot lock their profile.
   bool displayLock = false;
+  bool isFastProfileChooser =
+      viewMode_ == profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER;
 
   // Loop over the profiles in reverse, so that they are sorted by their
   // y-coordinate, and separate them into active and "other" profiles.
@@ -1275,19 +1295,21 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
   // overlap the bubble's rounded corners.
   CGFloat yOffset = 1;
 
-  // Option buttons.
-  NSRect rect = NSMakeRect(0, yOffset, kFixedMenuWidth, 0);
-  NSView* optionsView = [self createOptionsViewWithRect:rect
-                                            displayLock:displayLock];
-  [container addSubview:optionsView];
-  rect.origin.y = NSMaxY([optionsView frame]);
+  if (!isFastProfileChooser) {
+    // Option buttons.
+    NSRect rect = NSMakeRect(0, yOffset, kFixedMenuWidth, 0);
+    NSView* optionsView = [self createOptionsViewWithRect:rect
+                                              displayLock:displayLock];
+    [container addSubview:optionsView];
+    rect.origin.y = NSMaxY([optionsView frame]);
 
-  NSBox* separator = [self horizontalSeparatorWithFrame:rect];
-  [container addSubview:separator];
-  yOffset = NSMaxY([separator frame]);
+    NSBox* separator = [self horizontalSeparatorWithFrame:rect];
+    [container addSubview:separator];
+    yOffset = NSMaxY([separator frame]);
+  }
 
-  if (viewMode_ == profiles::BUBBLE_VIEW_MODE_PROFILE_CHOOSER &&
-      switches::IsFastUserSwitching()) {
+  if ((viewMode_ == profiles::BUBBLE_VIEW_MODE_PROFILE_CHOOSER &&
+       switches::IsFastUserSwitching()) || isFastProfileChooser) {
     // Other profiles switcher. The profiles have already been sorted
     // by their y-coordinate, so they can be added in the existing order.
     for (NSView *otherProfileView in otherProfiles.get()) {
@@ -1330,14 +1352,14 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
   }
 
   // Active profile card.
-  if (currentProfileView) {
+  if (!isFastProfileChooser && currentProfileView) {
     yOffset += kVerticalSpacing;
     [currentProfileView setFrameOrigin:NSMakePoint(0, yOffset)];
     [container addSubview:currentProfileView];
     yOffset = NSMaxY([currentProfileView frame]) + kVerticalSpacing;
   }
 
-  if (tutorialView) {
+  if (!isFastProfileChooser && tutorialView) {
     [tutorialView setFrameOrigin:NSMakePoint(0, yOffset)];
     [container addSubview:tutorialView];
     yOffset = NSMaxY([tutorialView frame]);
@@ -1599,7 +1621,7 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
 
   // Profile name, centered.
   bool editingAllowed = !isGuestSession_ &&
-                        !browser_->profile()->IsSupervised();
+                        !browser_->profile()->IsLegacySupervised();
   base::scoped_nsobject<EditableProfileNameButton> profileName(
       [[EditableProfileNameButton alloc]
           initWithFrame:NSMakeRect(xOffset,
@@ -1635,7 +1657,7 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
         [[NSImageView alloc] initWithFrame:NSZeroRect]);
     int imageId = browser_->profile()->IsChild()
         ? IDR_ICON_PROFILES_MENU_CHILD
-        : IDR_ICON_PROFILES_MENU_SUPERVISED;
+        : IDR_ICON_PROFILES_MENU_LEGACY_SUPERVISED;
     ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
     [supervisedIcon setImage:rb->GetNativeImageNamed(imageId).ToNSImage()];
     NSSize size = [[supervisedIcon image] size];
@@ -1781,14 +1803,31 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
       imageTitleSpacing:kImageTitleSpacing
         backgroundColor:GetDialogBackgroundColor()]);
   [profileButton setTitle:base::SysUTF16ToNSString(item.name)];
+
+  // Use the low-res, small default avatars in the fast user switcher, like
+  // we do in the menu bar.
+  gfx::Image itemIcon;
+  bool isRectangle;
+  AvatarMenu::GetImageForMenuButton(item.profile_path, &itemIcon, &isRectangle);
+
   [profileButton setDefaultImage:CreateProfileImage(
-      item.icon, kSmallImageSide).ToNSImage()];
+      itemIcon, kSmallImageSide).ToNSImage()];
   [profileButton setImagePosition:NSImageLeft];
   [profileButton setAlignment:NSLeftTextAlignment];
   [profileButton setBordered:NO];
   [profileButton setTag:itemIndex];
   [profileButton setTarget:self];
   [profileButton setAction:@selector(switchToProfile:)];
+
+  NSSize textSize = [[profileButton title] sizeWithAttributes:@{
+    NSFontAttributeName : [profileButton font]
+  }];
+
+  CGFloat availableWidth = rect.size.width - kSmallImageSide -
+                           kImageTitleSpacing - kHorizontalSpacing;
+
+  if (std::ceil(textSize.width) > availableWidth)
+    [profileButton setToolTip:[profileButton title]];
 
   return profileButton.autorelease();
 }

@@ -1,6 +1,6 @@
 /*
  * libjingle
- * Copyright 2014, Google Inc.
+ * Copyright 2014 Google Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -52,7 +52,6 @@ import android.widget.TextView;
 
 import org.json.JSONArray;
 import org.json.JSONException;
-import org.webrtc.MediaCodecVideoEncoder;
 
 import java.util.ArrayList;
 import java.util.Random;
@@ -61,13 +60,6 @@ import java.util.Random;
  * Handles the initial setup where the user selects which room to join.
  */
 public class ConnectActivity extends Activity {
-
-  public static final String EXTRA_ROOMNAME = "org.appspot.apprtc.ROOMNAME";
-  public static final String EXTRA_LOOPBACK = "org.appspot.apprtc.LOOPBACK";
-  public static final String EXTRA_CMDLINE = "org.appspot.apprtc.CMDLINE";
-  public static final String EXTRA_RUNTIME = "org.appspot.apprtc.RUNTIME";
-  public static final String EXTRA_BITRATE = "org.appspot.apprtc.BITRATE";
-  public static final String EXTRA_HWCODEC = "org.appspot.apprtc.HWCODEC";
   private static final String TAG = "ConnectActivity";
   private static final int CONNECTION_REQUEST = 1;
   private static boolean commandLineRun = false;
@@ -79,12 +71,18 @@ public class ConnectActivity extends Activity {
   private EditText roomEditText;
   private ListView roomListView;
   private SharedPreferences sharedPref;
+  private String keyprefVideoCallEnabled;
   private String keyprefResolution;
   private String keyprefFps;
-  private String keyprefBitrateType;
-  private String keyprefBitrateValue;
-  private String keyprefHwCodec;
+  private String keyprefVideoBitrateType;
+  private String keyprefVideoBitrateValue;
+  private String keyprefVideoCodec;
+  private String keyprefAudioBitrateType;
+  private String keyprefAudioBitrateValue;
+  private String keyprefAudioCodec;
+  private String keyprefHwCodecAcceleration;
   private String keyprefCpuUsageDetection;
+  private String keyprefDisplayHud;
   private String keyprefRoomServerUrl;
   private String keyprefRoom;
   private String keyprefRoomList;
@@ -98,12 +96,18 @@ public class ConnectActivity extends Activity {
     // Get setting keys.
     PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
     sharedPref = PreferenceManager.getDefaultSharedPreferences(this);
+    keyprefVideoCallEnabled = getString(R.string.pref_videocall_key);
     keyprefResolution = getString(R.string.pref_resolution_key);
     keyprefFps = getString(R.string.pref_fps_key);
-    keyprefBitrateType = getString(R.string.pref_startbitrate_key);
-    keyprefBitrateValue = getString(R.string.pref_startbitratevalue_key);
-    keyprefHwCodec = getString(R.string.pref_hwcodec_key);
+    keyprefVideoBitrateType = getString(R.string.pref_startvideobitrate_key);
+    keyprefVideoBitrateValue = getString(R.string.pref_startvideobitratevalue_key);
+    keyprefVideoCodec = getString(R.string.pref_videocodec_key);
+    keyprefHwCodecAcceleration = getString(R.string.pref_hwcodec_key);
+    keyprefAudioBitrateType = getString(R.string.pref_startaudiobitrate_key);
+    keyprefAudioBitrateValue = getString(R.string.pref_startaudiobitratevalue_key);
+    keyprefAudioCodec = getString(R.string.pref_audiocodec_key);
     keyprefCpuUsageDetection = getString(R.string.pref_cpu_usage_detection_key);
+    keyprefDisplayHud = getString(R.string.pref_displayhud_key);
     keyprefRoomServerUrl = getString(R.string.pref_room_server_url_key);
     keyprefRoom = getString(R.string.pref_room_key);
     keyprefRoomList = getString(R.string.pref_room_list_key);
@@ -143,8 +147,10 @@ public class ConnectActivity extends Activity {
     if ("android.intent.action.VIEW".equals(intent.getAction())
         && !commandLineRun) {
       commandLineRun = true;
-      boolean loopback = intent.getBooleanExtra(EXTRA_LOOPBACK, false);
-      int runTimeMs = intent.getIntExtra(EXTRA_RUNTIME, 0);
+      boolean loopback = intent.getBooleanExtra(
+          CallActivity.EXTRA_LOOPBACK, false);
+      int runTimeMs = intent.getIntExtra(
+          CallActivity.EXTRA_RUNTIME, 0);
       String room = sharedPref.getString(keyprefRoom, "");
       roomEditText.setText(room);
       connectToRoom(loopback, runTimeMs);
@@ -213,6 +219,7 @@ public class ConnectActivity extends Activity {
     if (requestCode == CONNECTION_REQUEST && commandLineRun) {
       Log.d(TAG, "Return: " + resultCode);
       setResult(resultCode);
+      commandLineRun = false;
       finish();
     }
   }
@@ -229,100 +236,85 @@ public class ConnectActivity extends Activity {
     }
   };
 
-  private String appendQueryParameter(String url, String parameter) {
-    String newUrl = url;
-    if (newUrl.contains("?")) {
-      newUrl += "&" + parameter;
-    } else {
-      newUrl += "?" + parameter;
-    }
-    return newUrl;
-  }
-
   private void connectToRoom(boolean loopback, int runTimeMs) {
     // Get room name (random for loopback).
-    String roomName;
+    String roomId;
     if (loopback) {
-      roomName = Integer.toString((new Random()).nextInt(100000000));
+      roomId = Integer.toString((new Random()).nextInt(100000000));
     } else {
-      roomName = getSelectedItem();
-      if (roomName == null) {
-        roomName = roomEditText.getText().toString();
+      roomId = getSelectedItem();
+      if (roomId == null) {
+        roomId = roomEditText.getText().toString();
       }
     }
 
-    String url = sharedPref.getString(
+    String roomUrl = sharedPref.getString(
         keyprefRoomServerUrl,
         getString(R.string.pref_room_server_url_default));
-    url = url + "/register/" + roomName;
+
+    // Video call enabled flag.
+    boolean videoCallEnabled = sharedPref.getBoolean(keyprefVideoCallEnabled,
+        Boolean.valueOf(getString(R.string.pref_videocall_default)));
+
+    // Get default codecs.
+    String videoCodec = sharedPref.getString(keyprefVideoCodec,
+        getString(R.string.pref_videocodec_default));
+    String audioCodec = sharedPref.getString(keyprefAudioCodec,
+        getString(R.string.pref_audiocodec_default));
 
     // Check HW codec flag.
-    boolean hwCodec = sharedPref.getBoolean(keyprefHwCodec,
+    boolean hwCodec = sharedPref.getBoolean(keyprefHwCodecAcceleration,
         Boolean.valueOf(getString(R.string.pref_hwcodec_default)));
 
-    // Add video resolution constraints.
-    String parametersResolution = null;
-    String parametersFps = null;
+    // Get video resolution from settings.
+    int videoWidth = 0;
+    int videoHeight = 0;
     String resolution = sharedPref.getString(keyprefResolution,
         getString(R.string.pref_resolution_default));
     String[] dimensions = resolution.split("[ x]+");
     if (dimensions.length == 2) {
       try {
-        int maxWidth = Integer.parseInt(dimensions[0]);
-        int maxHeight = Integer.parseInt(dimensions[1]);
-        if (maxWidth > 0 && maxHeight > 0) {
-          parametersResolution = "minHeight=" + maxHeight + ",maxHeight="
-              + maxHeight + ",minWidth=" + maxWidth + ",maxWidth=" + maxWidth;
-        }
+        videoWidth = Integer.parseInt(dimensions[0]);
+        videoHeight = Integer.parseInt(dimensions[1]);
       } catch (NumberFormatException e) {
+        videoWidth = 0;
+        videoHeight = 0;
         Log.e(TAG, "Wrong video resolution setting: " + resolution);
       }
     }
 
-    // Add camera fps constraints.
+    // Get camera fps from settings.
+    int cameraFps = 0;
     String fps = sharedPref.getString(keyprefFps,
         getString(R.string.pref_fps_default));
     String[] fpsValues = fps.split("[ x]+");
     if (fpsValues.length == 2) {
       try {
-        int cameraFps = Integer.parseInt(fpsValues[0]);
-        if (cameraFps > 0) {
-          parametersFps = "minFrameRate=" + cameraFps
-              + ",maxFrameRate=" + cameraFps;
-        }
+        cameraFps = Integer.parseInt(fpsValues[0]);
       } catch (NumberFormatException e) {
         Log.e(TAG, "Wrong camera fps setting: " + fps);
       }
     }
 
-    // Modify connection URL.
-    if (parametersResolution != null || parametersFps != null) {
-      String urlVideoParameters = "video=";
-      if (parametersResolution != null) {
-        urlVideoParameters += parametersResolution;
-        if (parametersFps != null) {
-          urlVideoParameters += ",";
-        }
-      }
-      if (parametersFps != null) {
-        urlVideoParameters += parametersFps;
-      }
-      url = appendQueryParameter(url, urlVideoParameters);
-    } else {
-      if (hwCodec && MediaCodecVideoEncoder.isPlatformSupported()) {
-        url = appendQueryParameter(url, "hd=true");
-      }
-    }
-
-    // Get start bitrate.
-    int startBitrate = 0;
-    String bitrateTypeDefault = getString(R.string.pref_startbitrate_default);
+    // Get video and audio start bitrate.
+    int videoStartBitrate = 0;
+    String bitrateTypeDefault = getString(
+        R.string.pref_startvideobitrate_default);
     String bitrateType = sharedPref.getString(
-        keyprefBitrateType, bitrateTypeDefault);
+        keyprefVideoBitrateType, bitrateTypeDefault);
     if (!bitrateType.equals(bitrateTypeDefault)) {
-      String bitrateValue = sharedPref.getString(keyprefBitrateValue,
-          getString(R.string.pref_startbitratevalue_default));
-      startBitrate = Integer.parseInt(bitrateValue);
+      String bitrateValue = sharedPref.getString(keyprefVideoBitrateValue,
+          getString(R.string.pref_startvideobitratevalue_default));
+      videoStartBitrate = Integer.parseInt(bitrateValue);
+    }
+    int audioStartBitrate = 0;
+    bitrateTypeDefault = getString(R.string.pref_startaudiobitrate_default);
+    bitrateType = sharedPref.getString(
+        keyprefAudioBitrateType, bitrateTypeDefault);
+    if (!bitrateType.equals(bitrateTypeDefault)) {
+      String bitrateValue = sharedPref.getString(keyprefAudioBitrateValue,
+          getString(R.string.pref_startaudiobitratevalue_default));
+      audioStartBitrate = Integer.parseInt(bitrateValue);
     }
 
     // Test if CpuOveruseDetection should be disabled. By default is on.
@@ -330,22 +322,34 @@ public class ConnectActivity extends Activity {
         keyprefCpuUsageDetection,
         Boolean.valueOf(
             getString(R.string.pref_cpu_usage_detection_default)));
-    if (!cpuOveruseDetection) {
-      url = appendQueryParameter(url, "googCpuOveruseDetection=false");
-    }
+
+    // Check statistics display option.
+    boolean displayHud = sharedPref.getBoolean(keyprefDisplayHud,
+        Boolean.valueOf(getString(R.string.pref_displayhud_default)));
 
     // Start AppRTCDemo activity.
-    Log.d(TAG, "Connecting to room " + roomName + " at URL " + url);
-    if (validateUrl(url)) {
-      Uri uri = Uri.parse(url);
-      Intent intent = new Intent(this, AppRTCDemoActivity.class);
+    Log.d(TAG, "Connecting to room " + roomId + " at URL " + roomUrl);
+    if (validateUrl(roomUrl)) {
+      Uri uri = Uri.parse(roomUrl);
+      Intent intent = new Intent(this, CallActivity.class);
       intent.setData(uri);
-      intent.putExtra(EXTRA_ROOMNAME, roomName);
-      intent.putExtra(EXTRA_LOOPBACK, loopback);
-      intent.putExtra(EXTRA_CMDLINE, commandLineRun);
-      intent.putExtra(EXTRA_RUNTIME, runTimeMs);
-      intent.putExtra(EXTRA_BITRATE, startBitrate);
-      intent.putExtra(EXTRA_HWCODEC, hwCodec);
+      intent.putExtra(CallActivity.EXTRA_ROOMID, roomId);
+      intent.putExtra(CallActivity.EXTRA_LOOPBACK, loopback);
+      intent.putExtra(CallActivity.EXTRA_VIDEO_CALL, videoCallEnabled);
+      intent.putExtra(CallActivity.EXTRA_VIDEO_WIDTH, videoWidth);
+      intent.putExtra(CallActivity.EXTRA_VIDEO_HEIGHT, videoHeight);
+      intent.putExtra(CallActivity.EXTRA_VIDEO_FPS, cameraFps);
+      intent.putExtra(CallActivity.EXTRA_VIDEO_BITRATE, videoStartBitrate);
+      intent.putExtra(CallActivity.EXTRA_VIDEOCODEC, videoCodec);
+      intent.putExtra(CallActivity.EXTRA_HWCODEC_ENABLED, hwCodec);
+      intent.putExtra(CallActivity.EXTRA_AUDIO_BITRATE, audioStartBitrate);
+      intent.putExtra(CallActivity.EXTRA_AUDIOCODEC, audioCodec);
+      intent.putExtra(CallActivity.EXTRA_CPUOVERUSE_DETECTION,
+          cpuOveruseDetection);
+      intent.putExtra(CallActivity.EXTRA_DISPLAY_HUD, displayHud);
+      intent.putExtra(CallActivity.EXTRA_CMDLINE, commandLineRun);
+      intent.putExtra(CallActivity.EXTRA_RUNTIME, runTimeMs);
+
       startActivityForResult(intent, CONNECTION_REQUEST);
     }
   }

@@ -10,12 +10,12 @@
 namespace blink {
 
 class Element;
-class RenderStyle;
+class ComputedStyle;
 
 class HTMLImageFallbackHelper {
 public:
     static void createAltTextShadowTree(Element&);
-    static PassRefPtr<RenderStyle> customStyleForAltText(Element&, PassRefPtr<RenderStyle> newStyle);
+    static PassRefPtr<ComputedStyle> customStyleForAltText(Element&, PassRefPtr<ComputedStyle> newStyle);
 };
 
 } // namespace blink

@@ -7,13 +7,15 @@
 #ifndef TestDictionaryDerivedImplementedAs_h
 #define TestDictionaryDerivedImplementedAs_h
 
+#include "bindings/core/v8/Nullable.h"
 #include "bindings/tests/idls/core/TestDictionary.h"
+#include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
-class TestDictionaryDerivedImplementedAs : public TestDictionary {
+class CORE_EXPORT TestDictionaryDerivedImplementedAs : public TestDictionary {
     ALLOW_ONLY_INLINE_ALLOCATION();
 public:
     TestDictionaryDerivedImplementedAs();
@@ -26,11 +28,16 @@ public:
     String derivedStringMemberWithDefault() const { return m_derivedStringMemberWithDefault; }
     void setDerivedStringMemberWithDefault(String value) { m_derivedStringMemberWithDefault = value; }
 
-    virtual void trace(Visitor*);
+    bool hasRequiredLongMember() const { return !m_requiredLongMember.isNull(); }
+    int requiredLongMember() const { return m_requiredLongMember.get(); }
+    void setRequiredLongMember(int value) { m_requiredLongMember = value; }
+
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     String m_derivedStringMember;
     String m_derivedStringMemberWithDefault;
+    Nullable<int> m_requiredLongMember;
 
     friend class V8TestDictionaryDerivedImplementedAs;
 };

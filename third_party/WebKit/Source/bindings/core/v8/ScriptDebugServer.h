@@ -31,7 +31,7 @@
 #ifndef ScriptDebugServer_h
 #define ScriptDebugServer_h
 
-#include "bindings/core/v8/ScopedPersistent.h"
+#include "bindings/core/v8/V8PersistentValueMap.h"
 #include "core/inspector/ScriptBreakpoint.h"
 #include "core/inspector/ScriptCallStack.h"
 #include "core/inspector/ScriptDebugListener.h"
@@ -48,12 +48,23 @@ class ScriptSourceCode;
 class ScriptValue;
 class JavaScriptCallFrame;
 
-class ScriptDebugServer {
+class ScriptDebugServer : public NoBaseWillBeGarbageCollectedFinalized<ScriptDebugServer> {
     WTF_MAKE_NONCOPYABLE(ScriptDebugServer);
 public:
+    virtual ~ScriptDebugServer();
+    DECLARE_VIRTUAL_TRACE();
+
+    void enable();
+    void disable();
+
+    static void setContextDebugData(v8::Local<v8::Context>, const String& contextDebugData);
+    // Each script inherits debug data from v8::Context where it has been compiled.
+    // Only scripts whose debug data contains |contextDebugDataSubstring| substring will be reported.
+    // Passing empty string will result in reporting all scripts.
+    void reportCompiledScripts(const String& contextDebugDataSubstring, ScriptDebugListener*);
+
     String setBreakpoint(const String& sourceID, const ScriptBreakpoint&, int* actualLineNumber, int* actualColumnNumber, bool interstatementLocation);
     void removeBreakpoint(const String& breakpointId);
-    void clearBreakpoints();
     void setBreakpointsActivated(bool activated);
 
     enum PauseOnExceptionsState {
@@ -87,74 +98,74 @@ public:
         virtual ~Task() { }
         virtual void run() = 0;
     };
-    static void interruptAndRun(v8::Isolate*, PassOwnPtr<Task>);
+    // This method can be called on any thread. It is caller's responsibility to make sure that
+    // this ScriptDebugServer and corresponding v8::Isolate exist while this method is running.
+    void interruptAndRun(PassOwnPtr<Task>);
     void runPendingTasks();
 
     bool isPaused();
 
-    v8::Local<v8::Value> functionScopes(v8::Handle<v8::Function>);
-    v8::Local<v8::Value> generatorObjectDetails(v8::Handle<v8::Object>&);
-    v8::Local<v8::Value> collectionEntries(v8::Handle<v8::Object>&);
-    v8::Local<v8::Value> getInternalProperties(v8::Handle<v8::Object>&);
-    v8::Handle<v8::Value> setFunctionVariableValue(v8::Handle<v8::Value> functionValue, int scopeNumber, const String& variableName, v8::Handle<v8::Value> newValue);
-    v8::Local<v8::Value> callDebuggerMethod(const char* functionName, int argc, v8::Handle<v8::Value> argv[]);
+    v8::Local<v8::Value> functionScopes(v8::Local<v8::Function>);
+    v8::Local<v8::Value> generatorObjectDetails(v8::Local<v8::Object>&);
+    v8::Local<v8::Value> collectionEntries(v8::Local<v8::Object>&);
+    v8::Local<v8::Value> getInternalProperties(v8::Local<v8::Object>&);
+    v8::Local<v8::Value> setFunctionVariableValue(v8::Local<v8::Value> functionValue, int scopeNumber, const String& variableName, v8::Local<v8::Value> newValue);
+    v8::Local<v8::Value> callDebuggerMethod(const char* functionName, int argc, v8::Local<v8::Value> argv[]);
 
-    virtual void compileScript(ScriptState*, const String& expression, const String& sourceURL, String* scriptId, String* exceptionDetailsText, int* lineNumber, int* columnNumber, RefPtrWillBeRawPtr<ScriptCallStack>* stackTrace);
-    virtual void clearCompiledScripts();
+    virtual void compileScript(ScriptState*, const String& expression, const String& sourceURL, bool persistScript, String* scriptId, String* exceptionDetailsText, int* lineNumber, int* columnNumber, RefPtrWillBeRawPtr<ScriptCallStack>* stackTrace);
     virtual void runScript(ScriptState*, const String& scriptId, ScriptValue* result, bool* wasThrown, String* exceptionDetailsText, int* lineNumber, int* columnNumber, RefPtrWillBeRawPtr<ScriptCallStack>* stackTrace);
-    virtual void setPreprocessorSource(const String&) { }
-    virtual void preprocessBeforeCompile(const v8::Debug::EventDetails&) { }
-    virtual PassOwnPtr<ScriptSourceCode> preprocess(LocalFrame*, const ScriptSourceCode&);
-    virtual String preprocessEventListener(LocalFrame*, const String& source, const String& url, const String& functionName);
-    virtual void clearPreprocessor() { }
 
     virtual void muteWarningsAndDeprecations() { }
     virtual void unmuteWarningsAndDeprecations() { }
 
+    v8::Isolate* isolate() const { return m_isolate; }
+
 protected:
     explicit ScriptDebugServer(v8::Isolate*);
-    virtual ~ScriptDebugServer();
 
-    virtual ScriptDebugListener* getDebugListenerForContext(v8::Handle<v8::Context>) = 0;
-    virtual void runMessageLoopOnPause(v8::Handle<v8::Context>) = 0;
+    virtual void clearCompiledScripts();
+
+    virtual ScriptDebugListener* getDebugListenerForContext(v8::Local<v8::Context>) = 0;
+    virtual void runMessageLoopOnPause(v8::Local<v8::Context>) = 0;
     virtual void quitMessageLoopOnPause() = 0;
 
-    static void breakProgramCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-    void handleProgramBreak(ScriptState* pausedScriptState, v8::Handle<v8::Object> executionState, v8::Handle<v8::Value> exception, v8::Handle<v8::Array> hitBreakpoints, bool isPromiseRejection = false);
-
-    static void v8DebugEventCallback(const v8::Debug::EventDetails& eventDetails);
-    void handleV8DebugEvent(const v8::Debug::EventDetails& eventDetails);
-
-    void dispatchDidParseSource(ScriptDebugListener*, v8::Handle<v8::Object> sourceObject, CompileResult);
-
-    void ensureDebuggerScriptCompiled();
-    void discardDebuggerScript();
-
-    PauseOnExceptionsState m_pauseOnExceptionsState;
-    ScopedPersistent<v8::Object> m_debuggerScript;
-    v8::Local<v8::Object> m_executionState;
-    RefPtr<ScriptState> m_pausedScriptState;
-    bool m_breakpointsActivated;
-    ScopedPersistent<v8::FunctionTemplate> m_breakProgramCallbackTemplate;
-    HashMap<String, OwnPtr<ScopedPersistent<v8::Script> > > m_compiledScripts;
-    v8::Isolate* m_isolate;
-
 private:
+    bool enabled() const;
+    void ensureDebuggerScriptCompiled();
+    v8::Local<v8::Object> debuggerScriptLocal() const;
+    void clearBreakpoints();
+
+    void dispatchDidParseSource(ScriptDebugListener*, v8::Local<v8::Object> sourceObject, CompileResult);
+
+    static void breakProgramCallback(const v8::FunctionCallbackInfo<v8::Value>&);
+    void handleProgramBreak(ScriptState* pausedScriptState, v8::Local<v8::Object> executionState, v8::Local<v8::Value> exception, v8::Local<v8::Array> hitBreakpoints, bool isPromiseRejection = false);
+    static void v8InterruptCallback(v8::Isolate*, void*);
+    static void v8DebugEventCallback(const v8::Debug::EventDetails&);
+    v8::Local<v8::Value> callInternalGetterFunction(v8::Local<v8::Object>, const char* functionName);
+    void handleV8DebugEvent(const v8::Debug::EventDetails&);
+
+    v8::Local<v8::String> v8InternalizedString(const char*) const;
+
     enum ScopeInfoDetails {
         AllScopes,
         FastAsyncScopes,
         NoScopes // Should be the last option.
     };
-
     ScriptValue currentCallFramesInner(ScopeInfoDetails);
-
     PassRefPtrWillBeRawPtr<JavaScriptCallFrame> wrapCallFrames(int maximumLimit, ScopeInfoDetails);
+    void handleV8AsyncTaskEvent(ScriptDebugListener*, ScriptState* pausedScriptState, v8::Local<v8::Object> executionState, v8::Local<v8::Object> eventData);
+    void handleV8PromiseEvent(ScriptDebugListener*, ScriptState* pausedScriptState, v8::Local<v8::Object> executionState, v8::Local<v8::Object> eventData);
 
-    void handleV8AsyncTaskEvent(ScriptDebugListener*, ScriptState* pausedScriptState, v8::Handle<v8::Object> executionState, v8::Handle<v8::Object> eventData);
-
-    void handleV8PromiseEvent(ScriptDebugListener*, ScriptState* pausedScriptState, v8::Handle<v8::Object> executionState, v8::Handle<v8::Object> eventData);
-
+    v8::Isolate* m_isolate;
+    bool m_breakpointsActivated;
+    V8PersistentValueMap<String, v8::Script, false> m_compiledScripts;
+    v8::UniquePersistent<v8::FunctionTemplate> m_breakProgramCallbackTemplate;
+    v8::UniquePersistent<v8::Object> m_debuggerScript;
+    v8::Local<v8::Object> m_executionState;
+    RefPtr<ScriptState> m_pausedScriptState;
     bool m_runningNestedMessageLoop;
+    class ThreadSafeTaskQueue;
+    OwnPtr<ThreadSafeTaskQueue> m_taskQueue;
 };
 
 } // namespace blink

@@ -24,7 +24,7 @@ LLVM_WIN_REVISION = 'HEAD'
 # in bringup. Use a pinned revision to make it slightly more stable.
 if (re.search(r'\b(asan)=1', os.environ.get('GYP_DEFINES', '')) and
     not 'LLVM_FORCE_HEAD_REVISION' in os.environ):
-  LLVM_WIN_REVISION = '217738'
+  LLVM_WIN_REVISION = '233530'
 
 # Path constants. (All of these should be absolute paths.)
 THIS_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -37,6 +37,7 @@ CLANG_DIR = os.path.join(LLVM_DIR, 'tools', 'clang')
 LLD_DIR = os.path.join(LLVM_DIR, 'tools', 'lld')
 COMPILER_RT_DIR = os.path.join(LLVM_DIR, 'projects', 'compiler-rt')
 STAMP_FILE = os.path.join(LLVM_BUILD_DIR, 'cr_build_revision')
+VERSION = '3.7.0'
 
 LLVM_REPO_URL='https://llvm.org/svn/llvm-project'
 if 'LLVM_REPO_URL' in os.environ:
@@ -216,20 +217,14 @@ def UpdateClang():
               '-DLLVM_ENABLE_ASSERTIONS=ON', LLVM_DIR])
   RunCommand(GetVSVersion().SetupScript('x86') + ['&&', 'ninja', 'compiler-rt'])
 
-  # TODO(hans): Make this (and the .gypi file) version number independent.
+  # TODO(hans): Make this (and the .gypi and .isolate files) version number
+  # independent.
   asan_rt_lib_src_dir = os.path.join(COMPILER_RT_BUILD_DIR, 'lib', 'clang',
-                                     '3.6.0', 'lib', 'windows')
+                                     VERSION, 'lib', 'windows')
   asan_rt_lib_dst_dir = os.path.join(LLVM_BUILD_DIR, 'lib', 'clang',
-                                     '3.6.0', 'lib', 'windows')
+                                     VERSION, 'lib', 'windows')
   CopyDirectoryContents(asan_rt_lib_src_dir, asan_rt_lib_dst_dir,
                         r'^.*-i386\.lib$')
-
-  # TODO(hans): Remove when LLVM_WIN_REVISION is updated.
-  # Old versions of compiler-rt will leave the asan dll in bin/
-  asan_rt_bin_src_dir = os.path.join(COMPILER_RT_BUILD_DIR, 'bin')
-  CopyDirectoryContents(asan_rt_bin_src_dir, asan_rt_lib_dst_dir,
-                        r'^.*-i386\.dll$')
-
   CopyDirectoryContents(asan_rt_lib_src_dir, asan_rt_lib_dst_dir,
                         r'^.*-i386\.dll$')
 
@@ -238,10 +233,10 @@ def UpdateClang():
 
   # Make an extra copy of the sanitizer headers, to be put on the include path
   # of the fallback compiler.
-  sanitizer_include_dir = os.path.join(LLVM_BUILD_DIR, 'lib', 'clang', '3.6.0',
+  sanitizer_include_dir = os.path.join(LLVM_BUILD_DIR, 'lib', 'clang', VERSION,
                                        'include', 'sanitizer')
   aux_sanitizer_include_dir = os.path.join(LLVM_BUILD_DIR, 'lib', 'clang',
-                                           '3.6.0', 'include_sanitizer',
+                                           VERSION, 'include_sanitizer',
                                            'sanitizer')
   if not os.path.exists(aux_sanitizer_include_dir):
     os.makedirs(aux_sanitizer_include_dir)

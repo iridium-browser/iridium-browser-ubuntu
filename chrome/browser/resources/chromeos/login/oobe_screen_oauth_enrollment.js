@@ -23,15 +23,40 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
     signInUrl_: null,
 
     /**
+     * Gaia auth params for sign in frame.
+     */
+    signInParams_: {},
+
+    /**
      * The current step. This is the last value passed to showStep().
      */
     currentStep_: null,
 
     /**
-     * Opaque token used to correlate request and response while retrieving the
-     * authenticated user's e-mail address from GAIA.
+     * The help topic to show when the user clicks the learn more link.
      */
-    attemptToken_: null,
+    learnMoreHelpTopicID_: null,
+
+    /**
+     * We block esc, back button and cancel button until gaia is loaded to
+     * prevent multiple cancel events.
+     */
+    isCancelDisabled_: null,
+
+    get isCancelDisabled() { return this.isCancelDisabled_ },
+    set isCancelDisabled(disabled) {
+      if (disabled == this.isCancelDisabled)
+        return;
+      this.isCancelDisabled_ = disabled;
+
+      $('oauth-enroll-back-button').disabled = disabled;
+      $('oauth-enroll-back-button').
+          classList.toggle('preserve-disabled-state', disabled);
+
+      $('oauth-enroll-cancel-button').disabled = disabled;
+      $('oauth-enroll-cancel-button').
+          classList.toggle('preserve-disabled-state', disabled);
+    },
 
     /** @override */
     decorate: function() {
@@ -40,10 +65,7 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
       $('oauth-enroll-error-retry').addEventListener('click',
                                                      this.doRetry_.bind(this));
       $('oauth-enroll-learn-more-link').addEventListener(
-          'click',
-          function() {
-            chrome.send('launchHelpApp', [HELP_TOPIC_ENROLLMENT]);
-          });
+          'click', this.launchLearnMoreHelp_.bind(this));
 
       this.updateLocalizedContent();
     },
@@ -99,19 +121,9 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
           ['oauth-enroll-focus-on-error'],
           loadTimeData.getString('oauthEnrollBack'),
           function() {
-            $('oauth-enroll-back-button').disabled = true;
-
-            $('oauth-enroll-back-button').
-                classList.add('preserve-disabled-state');
-
+            this.isCancelDisabled = true;
             chrome.send('oauthEnrollClose', ['cancel']);
-          });
-
-      makeButton(
-          'oauth-enroll-retry-button',
-          ['oauth-enroll-focus-on-error'],
-          loadTimeData.getString('oauthEnrollRetry'),
-          this.doRetry_.bind(this));
+          }.bind(this));
 
       makeButton(
           'oauth-enroll-done-button',
@@ -130,18 +142,19 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
      * URL.
      */
     onBeforeShow: function(data) {
-      var url = data.signin_url;
-      url += '?gaiaUrl=' + encodeURIComponent(data.gaiaUrl);
-      url += '&needPassword=0';
-      this.signInUrl_ = url;
+      this.signInParams_ = {};
+      this.signInParams_['gaiaUrl'] = data.gaiaUrl;
+      this.signInParams_['needPassword'] = false;
+      this.signInUrl_ = data.signin_url;
       var modes = ['manual', 'forced', 'recovery'];
       for (var i = 0; i < modes.length; ++i) {
         this.classList.toggle('mode-' + modes[i],
                               data.enrollment_mode == modes[i]);
       }
       this.managementDomain_ = data.management_domain;
-      $('oauth-enroll-signin-frame').contentWindow.location.href =
-          this.signInUrl_;
+      this.isCancelDisabled = true;
+      this.doReload();
+      this.learnMoreHelpTopicID_ = data.learn_more_help_topic_id;
       this.updateLocalizedContent();
       this.showStep(STEP_SIGNIN);
     },
@@ -150,6 +163,9 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
      * Cancels enrollment and drops the user back to the login screen.
      */
     cancel: function() {
+      if (this.isCancelDisabled)
+        return;
+      this.isCancelDisabled = true;
       chrome.send('oauthEnrollClose', ['cancel']);
     },
 
@@ -184,8 +200,16 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
     },
 
     doReload: function() {
-      $('oauth-enroll-signin-frame').contentWindow.location.href =
-          this.signInUrl_;
+      var signInFrame = $('oauth-enroll-signin-frame');
+
+      var sendParamsOnLoad = function() {
+        signInFrame.removeEventListener('load', sendParamsOnLoad);
+        signInFrame.contentWindow.postMessage(this.signInParams_,
+            'chrome-extension://mfffpogegjflfpflabcdkioaeobkgjik');
+      }.bind(this);
+
+      signInFrame.addEventListener('load', sendParamsOnLoad);
+      signInFrame.contentWindow.location.href = this.signInUrl_;
     },
 
     /**
@@ -221,7 +245,8 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
 
       if (msg.method == 'completeLogin') {
         // A user has successfully authenticated via regular GAIA or SAML.
-        chrome.send('oauthEnrollCompleteLogin', [msg.email]);
+        chrome.send('oauthEnrollCompleteLogin', [msg.email,
+                                                 '' /* auth_code */]);
       }
 
       if (msg.method == 'authPageLoaded' && this.currentStep_ == STEP_SIGNIN) {
@@ -238,11 +263,7 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
       }
 
       if (msg.method == 'loginUILoaded' && this.currentStep_ == STEP_SIGNIN) {
-        $('oauth-enroll-back-button').disabled = false;
-
-        $('oauth-enroll-back-button').
-            classList.remove('preserve-disabled-state');
-
+        this.isCancelDisabled = false;
         chrome.send('frameLoadingCompleted', [0]);
       }
 
@@ -256,6 +277,15 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
         this.showError(
             loadTimeData.getString('fatalEnrollmentError'),
             false);
+      }
+    },
+
+    /**
+     * Opens the learn more help topic.
+     */
+    launchLearnMoreHelp_: function() {
+      if (this.learnMoreHelpTopicID_) {
+        chrome.send('launchHelpApp', [this.learnMoreHelpTopicID_]);
       }
     }
   };

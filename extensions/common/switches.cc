@@ -16,10 +16,6 @@ const char kAllowHTTPBackgroundPage[] = "allow-http-background-page";
 const char kAllowLegacyExtensionManifests[] =
     "allow-legacy-extension-manifests";
 
-// Disables the App Info dialog from being launched from the chrome://extensions
-// page (reverts to the old-style permissions dialog instead).
-const char kDisableExtensionInfoDialog[] = "disable-extension-info-dialog";
-
 // Enables extension options to be embedded in chrome://extensions rather than
 // a new tab.
 const char kEmbeddedExtensionOptions[] = "embedded-extension-options";
@@ -100,6 +96,10 @@ const char kWhitelistedExtensionID[] = "whitelisted-extension-id";
 
 // Pass launch source to platform apps.
 const char kTraceAppSource[] = "enable-trace-app-source";
+
+// Enable package hash check: the .crx file sha256 hash sum should be equal to
+// the one received from update manifest.
+const char kEnableCrxHashCheck[] = "enable-crx-hash-check";
 
 }  // namespace switches
 

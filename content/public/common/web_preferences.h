@@ -43,15 +43,21 @@ enum V8CacheOptions {
   V8_CACHE_OPTIONS_PARSE_MEMORY,
   V8_CACHE_OPTIONS_HEURISTICS,
   V8_CACHE_OPTIONS_HEURISTICS_MOBILE,
-  V8_CACHE_OPTIONS_LAST = V8_CACHE_OPTIONS_HEURISTICS_MOBILE
+  V8_CACHE_OPTIONS_HEURISTICS_DEFAULT,
+  V8_CACHE_OPTIONS_HEURISTICS_DEFAULT_MOBILE,
+  V8_CACHE_OPTIONS_RECENT,
+  V8_CACHE_OPTIONS_RECENT_SMALL,
+  V8_CACHE_OPTIONS_LAST = V8_CACHE_OPTIONS_RECENT_SMALL
 };
 
-enum V8ScriptStreamingMode {
-  V8_SCRIPT_STREAMING_MODE_ALL,
-  V8_SCRIPT_STREAMING_MODE_ONLY_ASYNC_AND_DEFER,
-  V8_SCRIPT_STREAMING_MODE_ALL_PLUS_BLOCK_PARSER_BLOCKING,
-  V8_SCRIPT_STREAMING_MODE_LAST =
-      V8_SCRIPT_STREAMING_MODE_ALL_PLUS_BLOCK_PARSER_BLOCKING
+// ImageAnimationPolicy is used for controlling image animation
+// when image frame is rendered for animation.
+// See third_party/WebKit/Source/platform/graphics/ImageAnimationPolicy.h
+// for information on the options.
+enum ImageAnimationPolicy {
+  IMAGE_ANIMATION_POLICY_ALLOWED,
+  IMAGE_ANIMATION_POLICY_ANIMATION_ONCE,
+  IMAGE_ANIMATION_POLICY_NO_ANIMATION
 };
 
 // The ISO 15924 script code for undetermined script aka Common. It's the
@@ -77,6 +83,7 @@ struct CONTENT_EXPORT WebPreferences {
   int minimum_font_size;
   int minimum_logical_font_size;
   std::string default_encoding;
+  bool context_menu_on_mouse_up;
   bool javascript_enabled;
   bool web_security_enabled;
   bool javascript_can_open_windows_automatically;
@@ -130,10 +137,16 @@ struct CONTENT_EXPORT WebPreferences {
   bool text_blobs_enabled;
   bool allow_displaying_insecure_content;
   bool allow_running_insecure_content;
+  // If true, taints all <canvas> elements, regardless of origin.
+  bool disable_reading_from_canvas;
   // Strict mixed content checking disables both displaying and running insecure
   // mixed content, and disables embedder notifications that such content was
   // requested (thereby preventing user override).
   bool strict_mixed_content_checking;
+  // Strict powerful feature restrictions block insecure usage of powerful
+  // features (like geolocation) that we haven't yet disabled for the web at
+  // large.
+  bool strict_powerful_feature_restrictions;
   bool password_echo_enabled;
   bool should_print_backgrounds;
   bool should_clear_document_background;
@@ -166,12 +179,9 @@ struct CONTENT_EXPORT WebPreferences {
   bool spatial_navigation_enabled;
   bool pinch_virtual_viewport_enabled;
   int pinch_overlay_scrollbar_thickness;
-  bool rubber_banding_on_compositor_thread;
   bool use_solid_color_scrollbars;
   bool navigate_on_drag_drop;
   V8CacheOptions v8_cache_options;
-  bool v8_script_streaming_enabled;
-  V8ScriptStreamingMode v8_script_streaming_mode;
   bool slimming_paint_enabled;
 
   // This flags corresponds to a Page's Settings' setCookieEnabled state. It
@@ -184,6 +194,8 @@ struct CONTENT_EXPORT WebPreferences {
   // This flag indicates whether H/W accelerated video decode is enabled for
   // pepper plugins. Defaults to false.
   bool pepper_accelerated_video_decode_enabled;
+
+  ImageAnimationPolicy animation_policy;
 
 #if defined(OS_ANDROID)
   bool text_autosizing_enabled;
@@ -207,6 +219,12 @@ struct CONTENT_EXPORT WebPreferences {
   bool ignore_main_frame_overflow_hidden_quirk;
   bool report_screen_size_in_physical_pixels_quirk;
 #endif
+
+  // Default (used if the page or UA doesn't override these) values for page
+  // scale limits. These are set directly on the WebView so there's no analogue
+  // in WebSettings.
+  float default_minimum_page_scale_factor;
+  float default_maximum_page_scale_factor;
 
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for

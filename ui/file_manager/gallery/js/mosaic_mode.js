@@ -7,7 +7,7 @@
  * @param {!ErrorBanner} errorBanner Error banner.
  * @param {!cr.ui.ArrayDataModel} dataModel Data model.
  * @param {!cr.ui.ListSelectionModel} selectionModel Selection model.
- * @param {!VolumeManager} volumeManager Volume manager.
+ * @param {!VolumeManagerWrapper} volumeManager Volume manager.
  * @param {function(Event=)} toggleMode Function to switch to the Slide mode.
  * @constructor
  * @struct
@@ -68,6 +68,13 @@ MosaicMode.prototype.onKeyDown = function(event) {
   this.mosaic_.onKeyDown(event);
 };
 
+/**
+ * Enters the debug mode.
+ */
+MosaicMode.prototype.debugMe = function() {
+  this.mosaic_.debugMe();
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
@@ -77,7 +84,7 @@ MosaicMode.prototype.onKeyDown = function(event) {
  * @param {!ErrorBanner} errorBanner Error banner.
  * @param {!cr.ui.ArrayDataModel} dataModel Data model.
  * @param {!cr.ui.ListSelectionModel} selectionModel Selection model.
- * @param {!VolumeManager} volumeManager Volume manager.
+ * @param {!VolumeManagerWrapper} volumeManager Volume manager.
  * @return {!Element} Mosaic element.
  * @constructor
  * @struct
@@ -112,7 +119,7 @@ function Mosaic(document, errorBanner, dataModel, selectionModel,
   this.selectionModel_ = selectionModel;
 
   /**
-   * @type {!VolumeManager}
+   * @type {!VolumeManagerWrapper}
    * @private
    */
   this.volumeManager_ = volumeManager;
@@ -310,7 +317,7 @@ Mosaic.prototype.animatedScrollTo = function(targetPosition) {
       this.scrollLeft = newScrollLeft;
 
     if (step === 0 || this.scrollLeft !== newScrollLeft) {
-      this.scrollAnimation_ = null;
+      this.scrollAnimation_ = 0;
       // Release the hovering lock after a safe delay to avoid hovering
       // a tile because of altering |this.scrollLeft|.
       setTimeout(function() {
@@ -540,7 +547,7 @@ Mosaic.prototype.onContentChange_ = function(event) {
   if (!this.tiles_)
     return;
 
-  if (!event.metadata)
+  if (!event.thumbnailChanged)
     return; // Thumbnail unchanged, nothing to do.
 
   var index = this.dataModel_.indexOf(event.item);
@@ -731,6 +738,13 @@ Mosaic.prototype.transform = function(tileRect, imageRect, opt_instant) {
  */
 Mosaic.prototype.getItemCount_ = function() {
   return this.dataModel_.length;
+};
+
+/**
+ * Enters the debug me.
+ */
+Mosaic.prototype.debugMe = function() {
+  this.classList.add('debug-me');
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2040,7 +2054,6 @@ Mosaic.Tile.prototype.markUnloaded = function() {
  * target dimensions using metadata.
  */
 Mosaic.Tile.prototype.init = function() {
-  var metadata = this.getItem().getMetadata();
   this.markUnloaded();
   this.left_ = null;  // Mark as not laid out.
 
@@ -2051,7 +2064,7 @@ Mosaic.Tile.prototype.init = function() {
   this.thumbnailLoader_ = new ThumbnailLoader(
       this.getItem().getEntry(),
       ThumbnailLoader.LoaderType.CANVAS,
-      metadata,
+      this.getItem().getThumbnailMetadataItem(),
       undefined,  // Media type.
       [
         ThumbnailLoader.LoadTarget.EXTERNAL_METADATA,
@@ -2065,7 +2078,7 @@ Mosaic.Tile.prototype.init = function() {
     this.thumbnailPreloader_ = new ThumbnailLoader(
         this.getItem().getEntry(),
         ThumbnailLoader.LoaderType.CANVAS,
-        metadata,
+        this.getItem().getThumbnailMetadataItem(),
         undefined,  // Media type.
         [
           ThumbnailLoader.LoadTarget.CONTENT_METADATA
@@ -2081,15 +2094,12 @@ Mosaic.Tile.prototype.init = function() {
   // extracted from headers. For Drive files, it is received via the Drive API.
   // If the dimensions are not available, then the fallback dimensions will be
   // used (same as for the generic icon).
+  var metadataItem = this.getItem().getMetadataItem();
   var width;
   var height;
-  if (metadata.media && metadata.media.width) {
-    width = metadata.media.width;
-    height = metadata.media.height;
-  } else if (metadata.external && metadata.external.imageWidth &&
-             metadata.external.imageHeight) {
-    width = metadata.external.imageWidth;
-    height = metadata.external.imageHeight;
+  if (metadataItem.imageWidth && metadataItem.imageHeight) {
+    width = metadataItem.imageWidth;
+    height = metadataItem.imageHeight;
   } else {
     // No dimensions in metadata, then use the generic dimensions.
     width = Mosaic.Tile.GENERIC_ICON_SIZE;
@@ -2138,8 +2148,25 @@ Mosaic.Tile.prototype.load = function(loadMode, onImageLoaded) {
       else
         this.wrapper_.classList.remove('animated');
     }
+
+    // Add debug mode classes.
+    this.wrapper_.classList.remove('load-target-content-metadata');
+    this.wrapper_.classList.remove('load-target-external-metadata');
+    this.wrapper_.classList.remove('load-target-file-entry');
+    switch (loader.getLoadTarget()) {
+      case ThumbnailLoader.LoadTarget.CONTENT_METADATA:
+        this.wrapper_.classList.add('load-target-content-metadata');
+        break;
+      case ThumbnailLoader.LoadTarget.EXTERNAL_METADATA:
+        this.wrapper_.classList.add('load-target-external-metadata');
+        break;
+      case ThumbnailLoader.LoadTarget.FILE_ENTRY:
+        this.wrapper_.classList.add('load-target-file-entry');
+        break;
+    }
     loader.attachImage(this.wrapper_, ThumbnailLoader.FillMode.OVER_FILL);
     onImageLoaded(success);
+
     switch (mode) {
       case Mosaic.Tile.LoadMode.LOW_DPI:
         this.imagePreloading_ = false;

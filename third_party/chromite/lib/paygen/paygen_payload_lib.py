@@ -4,8 +4,6 @@
 
 """Hold the functions that do the real work generating payloads."""
 
-# pylint: disable=bad-continuation
-
 from __future__ import print_function
 
 import base64
@@ -15,11 +13,10 @@ import json
 import logging
 import os
 import shutil
+import sys
 import tempfile
 
-import fixup_path
-fixup_path.FixupPath()
-
+from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import osutils
 from chromite.lib.paygen import dryrun_lib
@@ -29,8 +26,12 @@ from chromite.lib.paygen import signer_payloads_client
 from chromite.lib.paygen import urilib
 from chromite.lib.paygen import utils
 
+# Needed for the dev.host.lib import below.
+sys.path.insert(0, os.path.join(constants.SOURCE_ROOT, 'src', 'platform'))
+
 
 DESCRIPTION_FILE_VERSION = 1
+
 
 class Error(Exception):
   """Base class for payload generation errors."""
@@ -46,13 +47,6 @@ class PayloadVerificationError(Error):
 
 class _PaygenPayload(object):
   """Class to manage the process of generating and signing a payload."""
-
-  # GeneratorUri uses these to ensure we don't use generators that are too
-  # old to be supported.
-  MINIMUM_GENERATOR_VERSION = '6351.0.0'
-  MINIMUM_GENERATOR_URI = (
-      'gs://chromeos-releases/canary-channel/x86-mario/%s/au-generator.zip' %
-      MINIMUM_GENERATOR_VERSION)
 
   # What keys do we sign payloads with, and what size are they?
   PAYLOAD_SIGNATURE_KEYSETS = ('update_signer',)
@@ -132,36 +126,15 @@ class _PaygenPayload(object):
     """Given a payload uri, find the uri for the json payload description."""
     return uri + '.json'
 
-  def _GeneratorUri(self):
-    """Find the URI for the au-generator.zip to use to generate this payload.
-
-    The intent is to always find a generator compatible with the version
-    that will process the update generated. Notice that Full updates must
-    be compatible with all versions, no matter how old.
-
-    Returns:
-      URI of an au-generator.zip in string form.
-    """
-    if self._au_generator_uri_override:
-      return self._au_generator_uri_override
-
-    if (self.payload.src_image and
-        gspaths.VersionGreater(self.payload.src_image.version,
-                               self.MINIMUM_GENERATOR_VERSION)):
-      # If we are a delta, and newer than the minimum delta age,
-      # Use the generator from the src.
-      return gspaths.ChromeosReleases.GeneratorUri(
-          self.payload.src_image.channel,
-          self.payload.src_image.board,
-          self.payload.src_image.version)
-    else:
-      # If we are a full update, or a delta from older than minimum, use
-      # the minimum generator version.
-      return self.MINIMUM_GENERATOR_URI
-
   def _PrepareGenerator(self):
     """Download, and extract au-generate.zip into self.generator_dir."""
-    generator_uri = self._GeneratorUri()
+    if self._au_generator_uri_override:
+      generator_uri = self._au_generator_uri_override
+    else:
+      generator_uri = gspaths.ChromeosReleases.GeneratorUri(
+          self.payload.tgt_image.channel,
+          self.payload.tgt_image.board,
+          self.payload.tgt_image.version)
 
     logging.info('Preparing au-generate.zip from %s.', generator_uri)
 
@@ -304,8 +277,7 @@ class _PaygenPayload(object):
            '--image', self.tgt_image_file,
            '--channel', tgt_image.channel,
            '--board', tgt_image.board,
-           '--version', tgt_image.version,
-          ]
+           '--version', tgt_image.version]
     cmd += self._BuildArg('--key', tgt_image, 'key', default='test')
     cmd += self._BuildArg('--build_channel', tgt_image, 'image_channel',
                           default=tgt_image.channel)
@@ -317,8 +289,7 @@ class _PaygenPayload(object):
       cmd += ['--src_image', self.src_image_file,
               '--src_channel', src_image.channel,
               '--src_board', src_image.board,
-              '--src_version', src_image.version,
-             ]
+              '--src_version', src_image.version]
       cmd += self._BuildArg('--src_key', src_image, 'key', default='test')
       cmd += self._BuildArg('--src_build_channel', src_image, 'image_channel',
                             default=src_image.channel)
@@ -519,12 +490,12 @@ class _PaygenPayload(object):
     # Bundle it up in a map matching the Json format.
     # Increment DESCRIPTION_FILE_VERSION, if changing this map.
     payload_map = {
-      'version': DESCRIPTION_FILE_VERSION,
-      'sha1_hex': sha1_hex,
-      'sha256_hex': sha256_hex,
-      'md5_hex': md5_hex,
-      'metadata_size': self._MetadataSize(),
-      'metadata_signature': metadata_signature,
+        'version': DESCRIPTION_FILE_VERSION,
+        'sha1_hex': sha1_hex,
+        'sha256_hex': sha256_hex,
+        'md5_hex': md5_hex,
+        'metadata_size': self._MetadataSize(),
+        'metadata_signature': metadata_signature,
     }
 
     # Convert to Json.
@@ -595,7 +566,6 @@ class _PaygenPayload(object):
 
     # Store hash and signatures json.
     self._StorePayloadJson(metadata_signatures)
-
 
   def _CheckPayloadIntegrity(self, payload, is_delta, metadata_sig_file_name):
     """Checks the integrity of a generated payload.

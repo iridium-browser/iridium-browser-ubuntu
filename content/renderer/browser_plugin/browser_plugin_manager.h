@@ -47,14 +47,13 @@ class CONTENT_EXPORT BrowserPluginManager : public RenderProcessObserver {
   void RemoveBrowserPlugin(int browser_plugin_instance_id);
   BrowserPlugin* GetBrowserPlugin(int browser_plugin_instance_id) const;
 
-  void UpdateDeviceScaleFactor();
   void UpdateFocusState();
 
   // Returns a new instance ID to be used by BrowserPlugin. Instance IDs are
   // unique per process.
   int GetNextInstanceID();
 
-  void DidCommitCompositorFrame(int render_view_routing_id);
+  void DidCommitCompositorFrame(int render_frame_routing_id);
   bool Send(IPC::Message* msg);
 
   // RenderProcessObserver override.
@@ -72,4 +71,4 @@ class CONTENT_EXPORT BrowserPluginManager : public RenderProcessObserver {
 
 }  // namespace content
 
-#endif //  CONTENT_RENDERER_BROWSER_PLUGIN_BROWSER_PLUGIN_MANAGER_H_
+#endif  // CONTENT_RENDERER_BROWSER_PLUGIN_BROWSER_PLUGIN_MANAGER_H_

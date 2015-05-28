@@ -5,11 +5,13 @@
 package org.chromium.chrome.browser.appmenu;
 
 import android.animation.Animator;
+import android.animation.Animator.AnimatorListener;
 import android.animation.AnimatorSet;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -22,9 +24,12 @@ import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemClickListener;
 import android.widget.ImageButton;
 import android.widget.ListPopupWindow;
+import android.widget.ListView;
 import android.widget.PopupWindow;
 import android.widget.PopupWindow.OnDismissListener;
 
+import org.chromium.base.AnimationFrameTimeHistogram;
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.SysUtils;
 import org.chromium.chrome.R;
 
@@ -51,6 +56,9 @@ public class AppMenu implements OnItemClickListener, OnKeyListener {
     private AppMenuHandler mHandler;
     private int mCurrentScreenRotation = -1;
     private boolean mIsByHardwareButton;
+    private AnimatorSet mMenuItemEnterAnimator;
+    private AnimatorListener mAnimationHistogramRecorder = AnimationFrameTimeHistogram
+            .getAnimatorRecorder("WrenchMenu.OpeningAnimationFrameTimes");
 
     /**
      * Creates and sets up the App Menu.
@@ -78,6 +86,44 @@ public class AppMenu implements OnItemClickListener, OnKeyListener {
     }
 
     /**
+     * Notifies the menu that the contents of the menu item specified by {@code menuRowId} have
+     * changed.  This should be called if icons, titles, etc. are changing for a particular menu
+     * item while the menu is open.
+     * @param menuRowId The id of the menu item to change.  This must be a row id and not a child
+     *                  id.
+     */
+    public void menuItemContentChanged(int menuRowId) {
+        // Make sure we have all the valid state objects we need.
+        if (mAdapter == null || mMenu == null || mPopup == null || mPopup.getListView() == null) {
+            return;
+        }
+
+        // Calculate the item index.
+        int index = -1;
+        int menuSize = mMenu.size();
+        for (int i = 0; i < menuSize; i++) {
+            if (mMenu.getItem(i).getItemId() == menuRowId) {
+                index = i;
+                break;
+            }
+        }
+        if (index == -1) return;
+
+        // Check if the item is visible.
+        ListView list = mPopup.getListView();
+        int startIndex = list.getFirstVisiblePosition();
+        int endIndex = list.getLastVisiblePosition();
+        if (index < startIndex || index > endIndex) return;
+
+        // Grab the correct View.
+        View view = list.getChildAt(index - startIndex);
+        if (view == null) return;
+
+        // Cause the Adapter to re-populate the View.
+        list.getAdapter().getView(index, view, list);
+    }
+
+    /**
      * Creates and shows the app menu anchored to the specified view.
      *
      * @param context The context of the AppMenu (ensure the proper theme is set on this context).
@@ -100,6 +146,10 @@ public class AppMenu implements OnItemClickListener, OnKeyListener {
                 if (mPopup.getAnchorView() instanceof ImageButton) {
                     ((ImageButton) mPopup.getAnchorView()).setSelected(false);
                 }
+
+                if (mMenuItemEnterAnimator != null) mMenuItemEnterAnimator.cancel();
+
+                mHandler.appMenuDismissed();
                 mHandler.onMenuVisibilityChanged(false);
             }
         });
@@ -112,10 +162,11 @@ public class AppMenu implements OnItemClickListener, OnKeyListener {
         // Need to explicitly set the background here.  Relying on it being set in the style caused
         // an incorrectly drawn background.
         if (isByHardwareButton) {
-            mPopup.setBackgroundDrawable(context.getResources().getDrawable(R.drawable.menu_bg));
-        } else {
             mPopup.setBackgroundDrawable(
-                    context.getResources().getDrawable(R.drawable.edge_menu_bg));
+                    ApiCompatibilityUtils.getDrawable(context.getResources(), R.drawable.menu_bg));
+        } else {
+            mPopup.setBackgroundDrawable(ApiCompatibilityUtils.getDrawable(
+                    context.getResources(), R.drawable.edge_menu_bg));
             mPopup.setAnimationStyle(R.style.OverflowMenuAnim);
         }
 
@@ -171,7 +222,8 @@ public class AppMenu implements OnItemClickListener, OnKeyListener {
         }
 
         // Don't animate the menu items for low end devices.
-        if (!SysUtils.isLowEndDevice()) {
+        if (!SysUtils.isLowEndDevice()
+                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
             mPopup.getListView().addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
                 @Override
                 public void onLayoutChange(View v, int left, int top, int right, int bottom,
@@ -258,7 +310,6 @@ public class AppMenu implements OnItemClickListener, OnKeyListener {
      * Dismisses the app menu and cancels the drag-to-scroll if it is taking place.
      */
     void dismiss() {
-        mHandler.appMenuDismissed();
         if (isShowing()) {
             mPopup.dismiss();
         }
@@ -320,7 +371,7 @@ public class AppMenu implements OnItemClickListener, OnKeyListener {
     }
 
     private void runMenuItemEnterAnimations() {
-        AnimatorSet animation = new AnimatorSet();
+        mMenuItemEnterAnimator = new AnimatorSet();
         AnimatorSet.Builder builder = null;
 
         ViewGroup list = mPopup.getListView();
@@ -329,13 +380,14 @@ public class AppMenu implements OnItemClickListener, OnKeyListener {
             Object animatorObject = view.getTag(R.id.menu_item_enter_anim_id);
             if (animatorObject != null) {
                 if (builder == null) {
-                    builder = animation.play((Animator) animatorObject);
+                    builder = mMenuItemEnterAnimator.play((Animator) animatorObject);
                 } else {
                     builder.with((Animator) animatorObject);
                 }
             }
         }
 
-        animation.start();
+        mMenuItemEnterAnimator.addListener(mAnimationHistogramRecorder);
+        mMenuItemEnterAnimator.start();
     }
 }

@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
+#include "base/profiler/scoped_tracker.h"
 #include "components/sync_driver/generic_change_processor_factory.h"
 #include "components/sync_driver/shared_change_processor_ref.h"
 #include "sync/api/sync_error.h"
@@ -96,10 +97,8 @@ void UIDataTypeController::StartAssociating(
 
   start_callback_ = start_callback;
   state_ = ASSOCIATING;
-  Associate();
-  // It's possible StartDone(..) resulted in a Stop() call, or that association
-  // failed, so we just verify that the state has moved foward.
-  DCHECK_NE(state_, ASSOCIATING);
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(&UIDataTypeController::Associate, this));
 }
 
 bool UIDataTypeController::StartModels() {
@@ -110,11 +109,22 @@ bool UIDataTypeController::StartModels() {
 }
 
 void UIDataTypeController::Associate() {
-  DCHECK_EQ(state_, ASSOCIATING);
+  if (state_ != ASSOCIATING) {
+    // Stop() must have been called while Associate() task have been waiting.
+    DCHECK_EQ(state_, NOT_RUNNING);
+    return;
+  }
+
   syncer::SyncMergeResult local_merge_result(type());
   syncer::SyncMergeResult syncer_merge_result(type());
   base::WeakPtrFactory<syncer::SyncMergeResult> weak_ptr_factory(
       &syncer_merge_result);
+
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/471403 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "471403 UIDataTypeController::Associate1"));
 
   // Connect |shared_change_processor_| to the syncer and get the
   // syncer::SyncableService associated with type().
@@ -137,6 +147,11 @@ void UIDataTypeController::Associate() {
     return;
   }
 
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/471403 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "471403 UIDataTypeController::Associate2"));
   if (!shared_change_processor_->CryptoReadyIfNecessary()) {
     syncer::SyncError error(FROM_HERE,
                             syncer::SyncError::CRYPTO_ERROR,
@@ -149,6 +164,11 @@ void UIDataTypeController::Associate() {
     return;
   }
 
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/471403 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "471403 UIDataTypeController::Associate3"));
   bool sync_has_nodes = false;
   if (!shared_change_processor_->SyncModelHasUserCreatedNodes(
           &sync_has_nodes)) {
@@ -163,6 +183,11 @@ void UIDataTypeController::Associate() {
     return;
   }
 
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/471403 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "471403 UIDataTypeController::Associate4"));
   base::TimeTicks start_time = base::TimeTicks::Now();
   syncer::SyncDataList initial_sync_data;
   syncer::SyncError error =
@@ -176,12 +201,22 @@ void UIDataTypeController::Associate() {
     return;
   }
 
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/471403 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile5(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "471403 UIDataTypeController::Associate5"));
   std::string datatype_context;
   if (shared_change_processor_->GetDataTypeContext(&datatype_context)) {
     local_service_->UpdateDataTypeContext(
         type(), syncer::SyncChangeProcessor::NO_REFRESH, datatype_context);
   }
 
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/471403 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile6(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "471403 UIDataTypeController::Associate6"));
   syncer_merge_result.set_num_items_before_association(
       initial_sync_data.size());
   // Passes a reference to |shared_change_processor_|.
@@ -200,6 +235,11 @@ void UIDataTypeController::Associate() {
     return;
   }
 
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/471403 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile7(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "471403 UIDataTypeController::Associate7"));
   syncer_merge_result.set_num_items_after_association(
       shared_change_processor_->GetSyncCount());
 
@@ -232,6 +272,12 @@ void UIDataTypeController::StartDone(
     const syncer::SyncMergeResult& local_merge_result,
     const syncer::SyncMergeResult& syncer_merge_result) {
   DCHECK(ui_thread_->BelongsToCurrentThread());
+
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/471403 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "471403 UIDataTypeController::StartDone"));
 
   if (!IsSuccessfulResult(start_result)) {
     StopModels();

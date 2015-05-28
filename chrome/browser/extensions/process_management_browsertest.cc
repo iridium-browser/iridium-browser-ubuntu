@@ -67,8 +67,7 @@ IN_PROC_BROWSER_TEST_F(ProcessManagementTest, MAYBE_ProcessOverflow) {
   GURL base_url = embedded_test_server()->GetURL(
       "/extensions/");
   GURL::Replacements replace_host;
-  std::string host_str("localhost");  // Must stay in scope with replace_host.
-  replace_host.SetHostStr(host_str);
+  replace_host.SetHostStr("localhost");
   base_url = base_url.ReplaceComponents(replace_host);
 
   // Load an extension before adding tabs.
@@ -200,8 +199,7 @@ IN_PROC_BROWSER_TEST_F(ProcessManagementTest, MAYBE_ExtensionProcessBalancing) {
   GURL base_url = embedded_test_server()->GetURL(
       "/extensions/");
   GURL::Replacements replace_host;
-  std::string host_str("localhost");  // Must stay in scope with replace_host.
-  replace_host.SetHostStr(host_str);
+  replace_host.SetHostStr("localhost");
   base_url = base_url.ReplaceComponents(replace_host);
 
   ASSERT_TRUE(LoadExtension(
@@ -228,11 +226,8 @@ IN_PROC_BROWSER_TEST_F(ProcessManagementTest, MAYBE_ExtensionProcessBalancing) {
   std::set<int> process_ids;
   Profile* profile = browser()->profile();
   extensions::ProcessManager* epm = extensions::ProcessManager::Get(profile);
-  for (extensions::ProcessManager::const_iterator iter =
-           epm->background_hosts().begin();
-       iter != epm->background_hosts().end(); ++iter) {
-    process_ids.insert((*iter)->render_process_host()->GetID());
-  }
+  for (extensions::ExtensionHost* host : epm->background_hosts())
+    process_ids.insert(host->render_process_host()->GetID());
 
   // We've loaded 5 extensions with background pages, 1 extension without
   // background page, and one isolated app. We expect only 2 unique processes

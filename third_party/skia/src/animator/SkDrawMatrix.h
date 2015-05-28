@@ -21,25 +21,25 @@ class SkDrawMatrix : public SkADrawable {
     DECLARE_DRAW_MEMBER_INFO(Matrix);
     SkDrawMatrix();
     virtual ~SkDrawMatrix();
-    virtual bool addChild(SkAnimateMaker& , SkDisplayable* child) SK_OVERRIDE;
-    virtual bool childrenNeedDisposing() const SK_OVERRIDE;
-    virtual void dirty() SK_OVERRIDE;
-    virtual bool draw(SkAnimateMaker& ) SK_OVERRIDE;
+    bool addChild(SkAnimateMaker& , SkDisplayable* child) override;
+    bool childrenNeedDisposing() const override;
+    void dirty() override;
+    bool draw(SkAnimateMaker& ) override;
 #ifdef SK_DUMP_ENABLED
-    virtual void dump(SkAnimateMaker* ) SK_OVERRIDE;
+    void dump(SkAnimateMaker* ) override;
 #endif
     SkMatrix& getMatrix();
-    virtual bool getProperty(int index, SkScriptValue* value) const SK_OVERRIDE;
-    virtual void initialize() SK_OVERRIDE;
-    virtual void onEndElement(SkAnimateMaker& ) SK_OVERRIDE;
-    virtual void setChildHasID() SK_OVERRIDE;
-    virtual bool setProperty(int index, SkScriptValue& ) SK_OVERRIDE;
+    bool getProperty(int index, SkScriptValue* value) const override;
+    void initialize() override;
+    void onEndElement(SkAnimateMaker& ) override;
+    void setChildHasID() override;
+    bool setProperty(int index, SkScriptValue& ) override;
 
     void concat(SkMatrix& inMatrix) {
         fConcat.preConcat(inMatrix);
     }
 
-    virtual SkDisplayable* deepCopy(SkAnimateMaker* ) SK_OVERRIDE;
+    SkDisplayable* deepCopy(SkAnimateMaker* ) override;
 
 
     void rotate(SkScalar degrees, SkPoint& center) {

@@ -4,7 +4,7 @@
 
 #include "ui/ozone/platform/caca/caca_window_manager.h"
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "ui/gfx/skia_util.h"
@@ -100,7 +100,7 @@ void CacaSurface::PresentCanvas(const gfx::Rect& damage) {
 }
 
 scoped_ptr<gfx::VSyncProvider> CacaSurface::CreateVSyncProvider() {
-  return scoped_ptr<gfx::VSyncProvider>();
+  return nullptr;
 }
 
 }  // namespace

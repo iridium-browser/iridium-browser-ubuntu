@@ -144,10 +144,11 @@ void URLRequestAdapter::OnInitiateConnection() {
           << url_.possibly_invalid_spec().c_str()
           << " priority: " << RequestPriorityToString(priority_);
   url_request_ = context_->GetURLRequestContext()->CreateRequest(
-      url_, net::DEFAULT_PRIORITY, this, NULL);
-  url_request_->SetLoadFlags(net::LOAD_DISABLE_CACHE |
-                             net::LOAD_DO_NOT_SAVE_COOKIES |
-                             net::LOAD_DO_NOT_SEND_COOKIES);
+      url_, net::DEFAULT_PRIORITY, this);
+  int flags = net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES;
+  if (context_->load_disable_cache())
+    flags |= net::LOAD_DISABLE_CACHE;
+  url_request_->SetLoadFlags(flags);
   url_request_->set_method(method_);
   url_request_->SetExtraRequestHeaders(headers_);
   if (!headers_.HasHeader(net::HttpRequestHeaders::kUserAgent)) {

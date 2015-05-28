@@ -10,11 +10,11 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "crypto/signature_verifier.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/cert/asn1_util.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/cert_verifier.h"
@@ -23,6 +23,7 @@
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
 #include "net/http/transport_security_state.h"
+#include "net/log/net_log.h"
 #include "net/quic/crypto/crypto_protocol.h"
 #include "net/ssl/ssl_config_service.h"
 
@@ -278,6 +279,11 @@ int ProofVerifierChromium::Job::DoVerifyCertComplete(int result) {
 bool ProofVerifierChromium::Job::VerifySignature(const string& signed_data,
                                                  const string& signature,
                                                  const string& cert) {
+  // TODO(rtenneti): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 ProofVerifierChromium::Job::VerifySignature"));
+
   StringPiece spki;
   if (!asn1::ExtractSPKIFromDERCert(cert, &spki)) {
     DLOG(WARNING) << "ExtractSPKIFromDERCert failed";

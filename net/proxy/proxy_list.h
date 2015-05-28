@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "net/base/net_export.h"
-#include "net/base/net_log.h"
+#include "net/log/net_log.h"
 #include "net/proxy/proxy_retry_info.h"
 
 namespace base {
@@ -62,6 +62,9 @@ class NET_EXPORT_PRIVATE ProxyList {
   // Returns the first proxy server in the list. It is only valid to call
   // this if !IsEmpty().
   const ProxyServer& Get() const;
+
+  // Returns all proxy servers in the list.
+  const std::vector<ProxyServer>& GetAll() const;
 
   // Sets the list by parsing the pac result |pac_string|.
   // Some examples for |pac_string|:

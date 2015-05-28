@@ -48,13 +48,27 @@ void ValidateLoadedFonts(SkTDArray<FontFamily*> fontFamilies, const char* firstE
             REPORTER_ASSERT(reporter, isALPHA(c) || isDIGIT(c) || '-' == c);
         }
     }
+
+    // All file names in the test configuration files start with a capital letter.
+    // This is not a general requirement, but it is true of all the test configuration data.
+    // Verifying ensures the filenames have been read sanely and have not been 'sliced'.
+    for (int i = 0; i < fontFamilies.count(); ++i) {
+        FontFamily& family = *fontFamilies[i];
+        for (int j = 0; j < family.fFonts.count(); ++j) {
+            FontFileInfo& file = family.fFonts[j];
+            REPORTER_ASSERT(reporter, !file.fFileName.isEmpty() &&
+                                      file.fFileName[0] >= 'A' &&
+                                      file.fFileName[0] <= 'Z');
+        }
+    }
 }
 
-void DumpLoadedFonts(SkTDArray<FontFamily*> fontFamilies) {
+void DumpLoadedFonts(SkTDArray<FontFamily*> fontFamilies, const char* label) {
     if (!FLAGS_verboseFontMgr) {
         return;
     }
 
+    SkDebugf("\n--- Dumping %s\n", label);
     for (int i = 0; i < fontFamilies.count(); ++i) {
         SkDebugf("Family %d:\n", i);
         switch(fontFamilies[i]->fVariant) {
@@ -62,6 +76,7 @@ void DumpLoadedFonts(SkTDArray<FontFamily*> fontFamilies) {
             case kCompact_FontVariant: SkDebugf("  compact\n"); break;
             default: break;
         }
+        SkDebugf("  basePath %s\n", fontFamilies[i]->fBasePath.c_str());
         if (!fontFamilies[i]->fLanguage.getTag().isEmpty()) {
             SkDebugf("  language %s\n", fontFamilies[i]->fLanguage.getTag().c_str());
         }
@@ -81,7 +96,8 @@ DEF_TEST(FontConfigParserAndroid, reporter) {
     bool resourcesMissing = false;
 
     SkTDArray<FontFamily*> preV17FontFamilies;
-    SkFontConfigParser::GetTestFontFamilies(preV17FontFamilies,
+    SkFontConfigParser::GetCustomFontFamilies(preV17FontFamilies,
+        SkString("/custom/font/path/"),
         GetResourcePath("android_fonts/pre_v17/system_fonts.xml").c_str(),
         GetResourcePath("android_fonts/pre_v17/fallback_fonts.xml").c_str());
 
@@ -89,7 +105,7 @@ DEF_TEST(FontConfigParserAndroid, reporter) {
         REPORTER_ASSERT(reporter, preV17FontFamilies.count() == 14);
         REPORTER_ASSERT(reporter, CountFallbacks(preV17FontFamilies) == 10);
 
-        DumpLoadedFonts(preV17FontFamilies);
+        DumpLoadedFonts(preV17FontFamilies, "pre version 17");
         ValidateLoadedFonts(preV17FontFamilies, "Roboto-Regular.ttf", reporter);
     } else {
         resourcesMissing = true;
@@ -97,7 +113,8 @@ DEF_TEST(FontConfigParserAndroid, reporter) {
 
 
     SkTDArray<FontFamily*> v17FontFamilies;
-    SkFontConfigParser::GetTestFontFamilies(v17FontFamilies,
+    SkFontConfigParser::GetCustomFontFamilies(v17FontFamilies,
+        SkString("/custom/font/path/"),
         GetResourcePath("android_fonts/v17/system_fonts.xml").c_str(),
         GetResourcePath("android_fonts/v17/fallback_fonts.xml").c_str(),
         GetResourcePath("android_fonts/v17").c_str());
@@ -106,7 +123,7 @@ DEF_TEST(FontConfigParserAndroid, reporter) {
         REPORTER_ASSERT(reporter, v17FontFamilies.count() == 56);
         REPORTER_ASSERT(reporter, CountFallbacks(v17FontFamilies) == 46);
 
-        DumpLoadedFonts(v17FontFamilies);
+        DumpLoadedFonts(v17FontFamilies, "version 17");
         ValidateLoadedFonts(v17FontFamilies, "Roboto-Regular.ttf", reporter);
     } else {
         resourcesMissing = true;
@@ -114,7 +131,8 @@ DEF_TEST(FontConfigParserAndroid, reporter) {
 
 
     SkTDArray<FontFamily*> v22FontFamilies;
-    SkFontConfigParser::GetTestFontFamilies(v22FontFamilies,
+    SkFontConfigParser::GetCustomFontFamilies(v22FontFamilies,
+        SkString("/custom/font/path/"),
         GetResourcePath("android_fonts/v22/fonts.xml").c_str(),
         NULL);
 
@@ -122,7 +140,7 @@ DEF_TEST(FontConfigParserAndroid, reporter) {
         REPORTER_ASSERT(reporter, v22FontFamilies.count() == 53);
         REPORTER_ASSERT(reporter, CountFallbacks(v22FontFamilies) == 42);
 
-        DumpLoadedFonts(v22FontFamilies);
+        DumpLoadedFonts(v22FontFamilies, "version 22");
         ValidateLoadedFonts(v22FontFamilies, "Roboto-Thin.ttf", reporter);
     } else {
         resourcesMissing = true;

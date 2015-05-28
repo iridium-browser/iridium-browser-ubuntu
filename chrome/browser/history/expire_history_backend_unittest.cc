@@ -12,19 +12,19 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/history/expire_history_backend.h"
-#include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_details.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/test/base/testing_profile.h"
-#include "chrome/tools/profiles/thumbnail-inl.h"
+#include "components/history/core/browser/expire_history_backend.h"
 #include "components/history/core/browser/history_backend_notifier.h"
+#include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/thumbnail_database.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/history/core/common/thumbnail_score.h"
 #include "components/history/core/test/history_client_fake_bookmarks.h"
+#include "components/history/core/test/test_history_database.h"
+#include "components/history/core/test/thumbnail-inl.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -62,7 +62,7 @@ class ExpireHistoryTest : public testing::Test,
   // Add visits with source information.
   void AddExampleSourceData(const GURL& url, URLID* id);
 
-  // Returns true if the given favicon/thumanil has an entry in the DB.
+  // Returns true if the given favicon/thumbnail has an entry in the DB.
   bool HasFavicon(favicon_base::FaviconID favicon_id);
   bool HasThumbnail(URLID url_id);
 
@@ -80,7 +80,6 @@ class ExpireHistoryTest : public testing::Test,
 
   // Clears the list of notifications received.
   void ClearLastNotifications() {
-    STLDeleteValues(&notifications_);
     urls_modified_notifications_.clear();
     urls_deleted_notifications_.clear();
   }
@@ -106,17 +105,9 @@ class ExpireHistoryTest : public testing::Test,
   scoped_ptr<HistoryDatabase> main_db_;
   scoped_ptr<ThumbnailDatabase> thumb_db_;
   TestingProfile profile_;
-  scoped_refptr<TopSites> top_sites_;
 
   // Time at the beginning of the test, so everybody agrees what "now" is.
   const Time now_;
-
-  // Notifications intended to be broadcast, we can check these values to make
-  // sure that the deletor is doing the correct broadcasts. We own the details
-  // pointers.
-  typedef std::vector< std::pair<int, HistoryDetails*> >
-      NotificationList;
-  NotificationList notifications_;
 
   typedef std::vector<URLRows> URLsModifiedNotificationList;
   URLsModifiedNotificationList urls_modified_notifications_;
@@ -129,7 +120,7 @@ class ExpireHistoryTest : public testing::Test,
     ASSERT_TRUE(tmp_dir_.CreateUniqueTempDir());
 
     base::FilePath history_name = path().Append(kHistoryFile);
-    main_db_.reset(new HistoryDatabase);
+    main_db_.reset(new TestHistoryDatabase);
     if (main_db_->Init(history_name) != sql::INIT_OK)
       main_db_.reset();
 
@@ -141,11 +132,9 @@ class ExpireHistoryTest : public testing::Test,
     expirer_.SetDatabases(main_db_.get(), thumb_db_.get());
     profile_.CreateTopSites();
     profile_.BlockUntilTopSitesLoaded();
-    top_sites_ = profile_.GetTopSites();
   }
 
   void TearDown() override {
-    top_sites_ = NULL;
 
     ClearLastNotifications();
 
@@ -229,9 +218,11 @@ void ExpireHistoryTest::AddExampleData(URLID url_ids[3], Time visit_times[4]) {
 
   Time time;
   GURL gurl;
-  top_sites_->SetPageThumbnail(url_row1.url(), thumbnail, score);
-  top_sites_->SetPageThumbnail(url_row2.url(), thumbnail, score);
-  top_sites_->SetPageThumbnail(url_row3.url(), thumbnail, score);
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(&profile_);
+  top_sites->SetPageThumbnail(url_row1.url(), thumbnail, score);
+  top_sites->SetPageThumbnail(url_row2.url(), thumbnail, score);
+  top_sites->SetPageThumbnail(url_row3.url(), thumbnail, score);
 
   // Four visits.
   VisitRow visit_row1;
@@ -311,7 +302,9 @@ bool ExpireHistoryTest::HasThumbnail(URLID url_id) {
     return false;
   GURL url = info.url();
   scoped_refptr<base::RefCountedMemory> data;
-  return top_sites_->GetPageThumbnail(url, false, &data);
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(&profile_);
+  return top_sites->GetPageThumbnail(url, false, &data);
 }
 
 void ExpireHistoryTest::EnsureURLInfoGone(const URLRow& row, bool expired) {
@@ -333,7 +326,7 @@ void ExpireHistoryTest::EnsureURLInfoGone(const URLRow& row, bool expired) {
   // EXPECT_FALSE(HasThumbnail(row.id()));
 
   bool found_delete_notification = false;
-  for (const std::pair<bool, URLRows>& pair : urls_deleted_notifications_) {
+  for (const auto& pair : urls_deleted_notifications_) {
     EXPECT_EQ(expired, pair.first);
     const history::URLRows& rows(pair.second);
     history::URLRows::const_iterator it_row = std::find_if(

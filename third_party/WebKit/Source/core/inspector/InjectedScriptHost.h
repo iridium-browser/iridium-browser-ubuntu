@@ -32,6 +32,8 @@
 
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "core/InspectorTypeBuilder.h"
+#include "wtf/Functional.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/RefCounted.h"
 #include "wtf/Vector.h"
@@ -40,7 +42,9 @@
 namespace blink {
 
 class EventTarget;
-class InstrumentingAgents;
+class InspectorConsoleAgent;
+class InspectorDebuggerAgent;
+class InspectorInspectorAgent;
 class JSONValue;
 class Node;
 class ScriptDebugServer;
@@ -58,11 +62,15 @@ class InjectedScriptHost : public RefCountedWillBeGarbageCollectedFinalized<Inje
 public:
     static PassRefPtrWillBeRawPtr<InjectedScriptHost> create();
     ~InjectedScriptHost();
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
-    void init(InstrumentingAgents* instrumentingAgents, ScriptDebugServer* scriptDebugServer)
+    using InspectCallback = Function<void(PassRefPtr<TypeBuilder::Runtime::RemoteObject>, PassRefPtr<JSONObject>)>;
+
+    void init(InspectorConsoleAgent* consoleAgent, InspectorDebuggerAgent* debuggerAgent, PassOwnPtr<InspectCallback> inspectCallback, ScriptDebugServer* scriptDebugServer)
     {
-        m_instrumentingAgents = instrumentingAgents;
+        m_consoleAgent = consoleAgent;
+        m_debuggerAgent = debuggerAgent;
+        m_inspectCallback = inspectCallback;
         m_scriptDebugServer = scriptDebugServer;
     }
 
@@ -72,7 +80,7 @@ public:
     void disconnect();
 
     class InspectableObject {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_FAST_ALLOCATED(InspectableObject);
     public:
         virtual ScriptValue get(ScriptState*);
         virtual ~InspectableObject() { }
@@ -95,8 +103,10 @@ public:
 private:
     InjectedScriptHost();
 
-    RawPtrWillBeMember<InstrumentingAgents> m_instrumentingAgents;
-    ScriptDebugServer* m_scriptDebugServer;
+    RawPtrWillBeMember<InspectorConsoleAgent> m_consoleAgent;
+    RawPtrWillBeMember<InspectorDebuggerAgent> m_debuggerAgent;
+    OwnPtr<InspectCallback> m_inspectCallback;
+    RawPtrWillBeMember<ScriptDebugServer> m_scriptDebugServer;
     Vector<OwnPtr<InspectableObject> > m_inspectedObjects;
     OwnPtr<InspectableObject> m_defaultInspectableObject;
 };

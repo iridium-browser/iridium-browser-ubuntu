@@ -4,7 +4,7 @@
 
 #include "cc/resources/tile_priority.h"
 
-#include "base/debug/trace_event_argument.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "base/values.h"
 #include "cc/base/math_util.h"
 
@@ -48,7 +48,7 @@ std::string TilePriorityBinToString(TilePriority::PriorityBin bin) {
   return "<unknown TilePriority::PriorityBin value>";
 }
 
-void TilePriority::AsValueInto(base::debug::TracedValue* state) const {
+void TilePriority::AsValueInto(base::trace_event::TracedValue* state) const {
   state->SetString("resolution", TileResolutionToString(resolution));
   state->SetString("priority_bin", TilePriorityBinToString(priority_bin));
   state->SetDouble("distance_to_visible",
@@ -86,7 +86,7 @@ std::string TreePriorityToString(TreePriority prio) {
 }
 
 void GlobalStateThatImpactsTilePriority::AsValueInto(
-    base::debug::TracedValue* state) const {
+    base::trace_event::TracedValue* state) const {
   state->SetString("memory_limit_policy",
                    TileMemoryLimitPolicyToString(memory_limit_policy));
   state->SetInteger("soft_memory_limit_in_bytes", soft_memory_limit_in_bytes);

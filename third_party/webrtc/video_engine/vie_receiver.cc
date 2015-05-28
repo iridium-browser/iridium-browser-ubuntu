@@ -16,6 +16,7 @@
 #include "webrtc/modules/rtp_rtcp/interface/fec_receiver.h"
 #include "webrtc/modules/rtp_rtcp/interface/receive_statistics.h"
 #include "webrtc/modules/rtp_rtcp/interface/remote_ntp_time_estimator.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_cvo.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_header_parser.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_payload_registry.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_receiver.h"
@@ -24,6 +25,7 @@
 #include "webrtc/modules/video_coding/main/interface/video_coding.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/logging.h"
+#include "webrtc/system_wrappers/interface/metrics.h"
 #include "webrtc/system_wrappers/interface/tick_util.h"
 #include "webrtc/system_wrappers/interface/timestamp_extrapolator.h"
 #include "webrtc/system_wrappers/interface/trace.h"
@@ -57,15 +59,30 @@ ViEReceiver::ViEReceiver(const int32_t channel_id,
       receiving_(false),
       restored_packet_in_use_(false),
       receiving_ast_enabled_(false),
+      receiving_cvo_enabled_(false),
       last_packet_log_ms_(-1) {
   assert(remote_bitrate_estimator);
 }
 
 ViEReceiver::~ViEReceiver() {
+  UpdateHistograms();
   if (rtp_dump_) {
     rtp_dump_->Stop();
     RtpDump::DestroyRtpDump(rtp_dump_);
     rtp_dump_ = NULL;
+  }
+}
+
+void ViEReceiver::UpdateHistograms() {
+  FecPacketCounter counter = fec_receiver_->GetPacketCounter();
+  if (counter.num_packets > 0) {
+    RTC_HISTOGRAM_PERCENTAGE("WebRTC.Video.ReceivedFecPacketsInPercent",
+        counter.num_fec_packets * 100 / counter.num_packets);
+  }
+  if (counter.num_fec_packets > 0) {
+    RTC_HISTOGRAM_PERCENTAGE(
+        "WebRTC.Video.RecoveredMediaPacketsInPercentOfFec",
+            counter.num_recovered_packets * 100 / counter.num_fec_packets);
   }
 }
 
@@ -112,6 +129,10 @@ void ViEReceiver::SetRtxSsrc(uint32_t ssrc) {
 
 bool ViEReceiver::GetRtxSsrc(uint32_t* ssrc) const {
   return rtp_payload_registry_->GetRtxSsrc(ssrc);
+}
+
+bool ViEReceiver::IsFecEnabled() const {
+  return rtp_payload_registry_->ulpfec_payload_type() > -1;
 }
 
 uint32_t ViEReceiver::GetRemoteSsrc() const {
@@ -165,6 +186,22 @@ bool ViEReceiver::SetReceiveAbsoluteSendTimeStatus(bool enable, int id) {
     receiving_ast_enabled_ = false;
     return rtp_header_parser_->DeregisterRtpHeaderExtension(
         kRtpExtensionAbsoluteSendTime);
+  }
+}
+
+bool ViEReceiver::SetReceiveVideoRotationStatus(bool enable, int id) {
+  if (enable) {
+    if (rtp_header_parser_->RegisterRtpHeaderExtension(
+            kRtpExtensionVideoRotation, id)) {
+      receiving_cvo_enabled_ = true;
+      return true;
+    } else {
+      return false;
+    }
+  } else {
+    receiving_cvo_enabled_ = false;
+    return rtp_header_parser_->DeregisterRtpHeaderExtension(
+        kRtpExtensionVideoRotation);
   }
 }
 
@@ -303,8 +340,11 @@ bool ViEReceiver::ParseAndHandleEncapsulatingHeader(const uint8_t* packet,
                                                     const RTPHeader& header) {
   if (rtp_payload_registry_->IsRed(header)) {
     int8_t ulpfec_pt = rtp_payload_registry_->ulpfec_payload_type();
-    if (packet[header.headerLength] == ulpfec_pt)
-      rtp_receive_statistics_->FecPacketReceived(header.ssrc);
+    if (packet[header.headerLength] == ulpfec_pt) {
+      rtp_receive_statistics_->FecPacketReceived(header, packet_length);
+      // Notify vcm about received FEC packets to avoid NACKing these packets.
+      NotifyReceiverOfFecPacket(header);
+    }
     if (fec_receiver_->AddReceivedRedPacket(
             header, packet, packet_length, ulpfec_pt) != 0) {
       return false;
@@ -341,6 +381,33 @@ bool ViEReceiver::ParseAndHandleEncapsulatingHeader(const uint8_t* packet,
   return false;
 }
 
+void ViEReceiver::NotifyReceiverOfFecPacket(const RTPHeader& header) {
+  int8_t last_media_payload_type =
+      rtp_payload_registry_->last_received_media_payload_type();
+  if (last_media_payload_type < 0) {
+    LOG(LS_WARNING) << "Failed to get last media payload type.";
+    return;
+  }
+  // Fake an empty media packet.
+  WebRtcRTPHeader rtp_header = {};
+  rtp_header.header = header;
+  rtp_header.header.payloadType = last_media_payload_type;
+  rtp_header.header.paddingLength = 0;
+  PayloadUnion payload_specific;
+  if (!rtp_payload_registry_->GetPayloadSpecifics(last_media_payload_type,
+                                                  &payload_specific)) {
+    LOG(LS_WARNING) << "Failed to get payload specifics.";
+    return;
+  }
+  rtp_header.type.Video.codec = payload_specific.Video.videoCodecType;
+  rtp_header.type.Video.rotation = kVideoRotation_0;
+  if (header.extension.hasVideoRotation) {
+    rtp_header.type.Video.rotation =
+        ConvertCVOByteToVideoRotation(header.extension.videoRotation);
+  }
+  OnReceivedPayloadData(NULL, 0, &rtp_header);
+}
+
 int ViEReceiver::InsertRTCPPacket(const uint8_t* rtcp_packet,
                                   size_t rtcp_packet_length) {
   {
@@ -365,7 +432,7 @@ int ViEReceiver::InsertRTCPPacket(const uint8_t* rtcp_packet,
     return ret;
   }
 
-  uint16_t rtt = 0;
+  int64_t rtt = 0;
   rtp_rtcp_->RTT(rtp_receiver_->SSRC(), &rtt, NULL, NULL, NULL);
   if (rtt == 0) {
     // Waiting for valid rtt.
@@ -427,11 +494,6 @@ int ViEReceiver::StopRTPDump() {
   return 0;
 }
 
-void ViEReceiver::GetReceiveBandwidthEstimatorStats(
-    ReceiveBandwidthEstimatorStats* output) const {
-  remote_bitrate_estimator_->GetStats(output);
-}
-
 ReceiveStatistics* ViEReceiver::GetReceiveStatistics() const {
   return rtp_receive_statistics_.get();
 }
@@ -454,7 +516,7 @@ bool ViEReceiver::IsPacketRetransmitted(const RTPHeader& header,
   if (!statistician)
     return false;
   // Check if this is a retransmission.
-  uint16_t min_rtt = 0;
+  int64_t min_rtt = 0;
   rtp_rtcp_->RTT(rtp_receiver_->SSRC(), NULL, NULL, &min_rtt, NULL);
   return !in_order &&
       statistician->IsRetransmitOfOldPacket(header, min_rtt);

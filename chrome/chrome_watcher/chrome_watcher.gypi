@@ -36,19 +36,40 @@
       ],
     },
     {
+      # Users of the watcher link this target.
+      'target_name': 'chrome_watcher_client',
+      'type': 'static_library',
+      'sources': [
+        'chrome_watcher_main_api.cc',
+        'chrome_watcher_main_api.h',
+      ],
+      'dependencies': [
+        '../base/base.gyp:base',
+      ],
+    },
+    {
       'target_name': 'chrome_watcher',
       'type': 'loadable_module',
       'include_dirs': [
         '../..',
       ],
       'sources': [
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_watcher/chrome_watcher_version.rc',
         'chrome_watcher.def',
         'chrome_watcher_main.cc',
-        '<(SHARED_INTERMEDIATE_DIR)/chrome_watcher/chrome_watcher_version.rc',
       ],
       'dependencies': [
+        'chrome_watcher_client',
         'chrome_watcher_resources',
+        '../base/base.gyp:base',
         '../components/components.gyp:browser_watcher',
+      ],
+      'conditions': [
+        ['kasko==1', {
+          'dependencies': [
+            'kasko_dll',
+          ],
+        }],
       ],
       'msvs_settings': {
         'VCLinkerTool': {

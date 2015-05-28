@@ -82,7 +82,7 @@ void MockRenderProcessHost::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-void MockRenderProcessHost::ReceivedBadMessage() {
+void MockRenderProcessHost::ShutdownForBadMessage() {
   ++bad_msg_count_;
 }
 
@@ -196,18 +196,6 @@ IPC::ChannelProxy* MockRenderProcessHost::GetChannel() {
 void MockRenderProcessHost::AddFilter(BrowserMessageFilter* filter) {
 }
 
-int MockRenderProcessHost::GetActiveViewCount() {
-  int num_active_views = 0;
-  scoped_ptr<RenderWidgetHostIterator> widgets(
-      RenderWidgetHost::GetRenderWidgetHosts());
-  while (RenderWidgetHost* widget = widgets->GetNextHost()) {
-    // Count only RenderWidgetHosts in this process.
-    if (widget->GetProcess()->GetID() == GetID())
-      num_active_views++;
-  }
-  return num_active_views;
-}
-
 bool MockRenderProcessHost::FastShutdownForPageCount(size_t count) {
   if (static_cast<size_t>(GetActiveViewCount()) == count)
     return FastShutdownIfPossible();
@@ -247,6 +235,13 @@ void MockRenderProcessHost::OnRemoveSubscription(unsigned int target) {
 void MockRenderProcessHost::SendUpdateValueState(
     unsigned int target, const gpu::ValueState& state) {
 }
+
+#if defined(ENABLE_BROWSER_CDMS)
+media::BrowserCdm* MockRenderProcessHost::GetBrowserCdm(int render_frame_id,
+                                                        int cdm_id) const {
+  return nullptr;
+}
+#endif
 
 void MockRenderProcessHost::FilterURL(bool empty_allowed, GURL* url) {
   RenderProcessHostImpl::FilterURL(this, empty_allowed, url);

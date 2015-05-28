@@ -30,7 +30,7 @@
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "bindings/core/v8/Nullable.h"
 #include "bindings/core/v8/SerializedScriptValue.h"
-#include "bindings/modules/v8/IDBBindingUtilities.h"
+#include "bindings/modules/v8/V8BindingForModules.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/events/EventQueue.h"
 #include "core/inspector/ScriptCallStack.h"
@@ -91,7 +91,7 @@ IDBDatabase::~IDBDatabase()
         m_backend->close();
 }
 
-void IDBDatabase::trace(Visitor* visitor)
+DEFINE_TRACE(IDBDatabase)
 {
     visitor->trace(m_versionChangeTransaction);
     visitor->trace(m_transactions);
@@ -107,15 +107,8 @@ int64_t IDBDatabase::nextTransactionId()
 {
     // Only keep a 32-bit counter to allow ports to use the other 32
     // bits of the id.
-    AtomicallyInitializedStatic(int, currentTransactionId = 0);
+    static int currentTransactionId = 0;
     return atomicIncrement(&currentTransactionId);
-}
-
-void IDBDatabase::ackReceivedBlobs(const Vector<String>& uuids)
-{
-    if (!m_backend)
-        return;
-    m_backend->ackReceivedBlobs(uuids);
 }
 
 void IDBDatabase::indexCreated(int64_t objectStoreId, const IDBIndexMetadata& metadata)

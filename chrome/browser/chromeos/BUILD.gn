@@ -4,14 +4,13 @@
 
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
-import("//components/nacl/nacl_defines.gni")
 import("//media/media_options.gni")
 import("//third_party/protobuf/proto_library.gni")
 
 gypi_values = exec_script("//build/gypi_to_gn.py",
                           [ rebase_path("../../chrome_browser_chromeos.gypi") ],
                           "scope",
-                          [ "chrome_browser_chromeos.gypi" ])
+                          [ "../../chrome_browser_chromeos.gypi" ])
 
 source_set("chromeos") {
   assert(enable_extensions, "ChromeOS Chrome has to be built with extensions")
@@ -62,7 +61,6 @@ source_set("chromeos") {
     "//chromeos:cryptohome_proto",
     "//chromeos:cryptohome_signkey_proto",
     "//chromeos:power_manager_proto",
-    "//components/history/core/browser:proto",
     "//components/onc",
     "//components/ownership",
     "//components/pairing",
@@ -73,6 +71,7 @@ source_set("chromeos") {
     # be generated before code in this target can start building.
     "//components/strings",
     "//components/variations",
+    "//components/webui_generator",
     "//content/public/browser",
     "//content/public/common",
     "//crypto",
@@ -81,7 +80,7 @@ source_set("chromeos") {
     "//device/hid",
     "//media",
     "//net",
-    "//ppapi:ppapi_ipc",  # For PpapiMsg_LoadPlugin
+    "//ppapi/proxy:ipc",  # For PpapiMsg_LoadPlugin
 
     # TODO: care about enable_basic_printing and enable_print_preview.
     "//printing",
@@ -110,10 +109,13 @@ source_set("chromeos") {
     "//ui/chromeos:ui_chromeos",
     "//ui/compositor",
     "//ui/display",
+    "//ui/events/devices",
     "//ui/events/platform",
     "//ui/events:dom4_keycode_converter",
     "//ui/file_manager",
     "//ui/message_center",
+    "//ui/oobe:oobe",
+    "//ui/oobe:oobe_gen",
     "//ui/surface",
     "//ui/views",
     "//ui/views/controls/webview",
@@ -125,24 +127,12 @@ source_set("chromeos") {
     ":drive_proto",
   ]
 
-  defines = nacl_defines
+  defines = []
 
   sources = rebase_path(gypi_values.browser_chromeos_sources, ".", "//chrome") +
             rebase_path(gypi_values.browser_chromeos_extension_sources,
                         ".",
                         "//chrome")
-  if (use_athena) {
-    defines += [ "USE_ATHENA=1" ]
-  } else {
-    sources +=
-        rebase_path(gypi_values.browser_chromeos_non_athena_sources,
-                    ".",
-                    "//chrome") +
-        rebase_path(gypi_values.browser_chromeos_extension_non_athena_sources,
-                    ".",
-                    "//chrome")
-  }
-
   if (use_x11) {
     configs += [ "//build/config/linux:x11" ]
     deps += [ "//ui/events/devices" ]

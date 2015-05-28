@@ -38,9 +38,10 @@
     DoNotCheckConstants,
     ImplementedAs=TestInterfaceImplementation,
     Iterable,
+    Measure,
     RuntimeEnabled=FeatureName,
     SetWrapperReferenceTo(TestInterface referencedName),
-    TypeChecking=(Interface,Unrestricted),
+    TypeChecking=Interface,
     Exposed=(Worker,Window),
 ] interface TestInterface : TestInterfaceEmpty {
     // members needed to test [ImplementedAs], as this affect attribute
@@ -49,17 +50,23 @@
     const unsigned long UNSIGNED_LONG = 0;
     [Reflect=CONST_CPP] const short CONST_JAVASCRIPT = 1;
 
-    attribute TestInterface testInterfaceAttribute; // Self-referential interface type with [ImplementedAs]
+    [Measure] attribute TestInterface testInterfaceAttribute; // Self-referential interface type with [ImplementedAs]
     attribute TestInterfaceConstructor testInterfaceConstructorAttribute;
+    attribute TestInterfaceConstructor TestInterface;
+    attribute TestInterface2Constructor TestInterface2;
     attribute double doubleAttribute;
     attribute float floatAttribute;
     attribute unrestricted double unrestrictedDoubleAttribute;
     attribute unrestricted float unrestrictedFloatAttribute;
+    attribute TestEnum testEnumAttribute;
+    attribute DOMStringOrDouble stringOrDoubleAttribute;
     static attribute DOMString staticStringAttribute;
+    [LegacyInterfaceTypeChecking] attribute TestInterfaceEmpty legacyInterfaceTypeCheckingAttribute;
 
     void voidMethodTestInterfaceEmptyArg(TestInterfaceEmpty testInterfaceEmptyArg);
     void voidMethodDoubleArgFloatArg(double doubleArg, float floatArg);
     void voidMethodUnrestrictedDoubleArgUnrestrictedFloatArg(unrestricted double unrestrictedDoubleArg, unrestricted float unrestrictedFloatArg);
+    void voidMethodTestEnumArg(TestEnum testEnumArg);
     [PerWorldBindings] void voidMethod();
 
     // Anonymous indexed property operations
@@ -73,6 +80,7 @@
     deleter boolean (DOMString name);
 
     [NotEnumerable] stringifier;
+    [NotEnumerable, RaisesException] serializer;
 
     // Per-method [Exposed] annotation support.
     void alwaysExposedMethod();
@@ -103,6 +111,8 @@
     Promise promiseMethodPartialOverload();
     Promise promiseMethodPartialOverload(Window window);
     static Promise staticPromiseMethodPartialOverload();
+
+    [LegacyInterfaceTypeChecking] void legacyInterfaceTypeCheckingMethod(TestInterfaceEmpty testInterfaceEmptyArg);
 };
 
 TestInterface implements TestImplements;

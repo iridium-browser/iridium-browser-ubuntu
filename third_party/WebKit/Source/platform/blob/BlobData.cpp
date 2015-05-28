@@ -143,10 +143,6 @@ void BlobData::appendBytes(const void* bytes, size_t length)
     m_items.append(BlobDataItem(data.release()));
 }
 
-void BlobData::swapItems(BlobDataItemList& items)
-{
-    m_items.swap(items);
-}
 
 long long BlobData::length() const
 {

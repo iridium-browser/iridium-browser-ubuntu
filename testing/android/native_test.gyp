@@ -12,15 +12,10 @@
           'message': 'building native pieces of native test package',
           'type': 'static_library',
           'sources': [
+            'native_test_jni_onload.cc',
             'native_test_launcher.cc',
+            'native_test_launcher.h',
           ],
-          'direct_dependent_settings': {
-            'ldflags!': [
-              # JNI_OnLoad is implemented in a .a and we need to
-              # re-export in the .so.
-              '-Wl,--exclude-libs=ALL',
-            ],
-          },
           'dependencies': [
             '../../base/base.gyp:base',
             '../../base/base.gyp:test_support_base',

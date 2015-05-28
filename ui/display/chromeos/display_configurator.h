@@ -42,19 +42,7 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
 
   typedef base::Callback<void(bool)> ConfigurationCallback;
 
-  struct DisplayState {
-    DisplayState();
-
-    DisplaySnapshot* display;  // Not owned.
-
-    // User-selected mode for the display.
-    const DisplayMode* selected_mode;
-
-    // Mode used when displaying the same desktop on multiple displays.
-    const DisplayMode* mirror_mode;
-  };
-
-  typedef std::vector<DisplayState> DisplayStateList;
+  typedef std::vector<DisplaySnapshot*> DisplayStateList;
 
   class Observer {
    public:
@@ -65,11 +53,13 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
     // when this method is called, so the actual configuration could've changed
     // already.
     virtual void OnDisplayModeChanged(
-        const std::vector<DisplayState>& displays) {}
+        const DisplayStateList& displays) {}
 
-    // Called after a display mode change attempt failed. |failed_new_state| is
-    // the new state which the system failed to enter.
+    // Called after a display mode change attempt failed. |displays| contains
+    // displays that are detected when failed.
+    // |failed_new_state| is the new state which the system failed to enter.
     virtual void OnDisplayModeChangeFailed(
+        const DisplayStateList& displays,
         MultipleDisplayState failed_new_state) {}
   };
 
@@ -114,20 +104,12 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
     // Returns the current power state.
     virtual chromeos::DisplayPowerState GetPowerState() const = 0;
 
-    // Parses the |displays| into a list of DisplayStates. This effectively adds
-    // |mirror_mode| and |selected_mode| to the returned results.
-    // TODO(dnicoara): This operation doesn't depend on state and could be done
-    // directly in |GetDisplayLayout()|. Though I need to make sure that there
-    // are no uses for those fields outside DisplayConfigurator.
-    virtual std::vector<DisplayState> ParseDisplays(
-        const std::vector<DisplaySnapshot*>& displays) const = 0;
-
     // Based on the given |displays|, display state and power state, it will
     // create display configuration requests which will then be used to
     // configure the hardware. The requested configuration is stored in
     // |requests| and |framebuffer_size|.
     virtual bool GetDisplayLayout(
-        const std::vector<DisplayState>& displays,
+        const std::vector<DisplaySnapshot*>& displays,
         MultipleDisplayState new_display_state,
         chromeos::DisplayPowerState new_power_state,
         std::vector<DisplayConfigureRequest>* requests,
@@ -174,14 +156,14 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
       const gfx::Size& size);
 
   DisplayConfigurator();
-  virtual ~DisplayConfigurator();
+  ~DisplayConfigurator() override;
 
   MultipleDisplayState display_state() const { return current_display_state_; }
   chromeos::DisplayPowerState requested_power_state() const {
     return requested_power_state_;
   }
   const gfx::Size framebuffer_size() const { return framebuffer_size_; }
-  const std::vector<DisplayState>& cached_displays() const {
+  const std::vector<DisplaySnapshot*>& cached_displays() const {
     return cached_displays_;
   }
 
@@ -237,15 +219,16 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   void SetDisplayMode(MultipleDisplayState new_state);
 
   // NativeDisplayDelegate::Observer overrides:
-  virtual void OnConfigurationChanged() override;
+  void OnConfigurationChanged() override;
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
   // Sets all the displays into pre-suspend mode; usually this means
   // configure them for their resume state. This allows faster resume on
-  // machines where display configuration is slow.
-  void SuspendDisplays();
+  // machines where display configuration is slow. On completion of the display
+  // configuration |callback| is executed.
+  void SuspendDisplays(const ConfigurationCallback& callback);
 
   // Reprobes displays to handle changes made while the system was
   // suspended.
@@ -312,10 +295,6 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   MultipleDisplayState ChooseDisplayState(
       chromeos::DisplayPowerState power_state) const;
 
-  // Returns the ratio between mirrored mode area and native mode area:
-  // (mirror_mode_width * mirrow_mode_height) / (native_width * native_height)
-  float GetMirroredDisplayAreaRatio(const DisplayState& display);
-
   // Returns true if in either hardware or software mirroring mode.
   bool IsMirroring() const;
 
@@ -329,7 +308,7 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   // Callback for |configuration_taks_|. When the configuration process finishes
   // this is called with the result (|success|) and the updated display state.
   void OnConfigured(bool success,
-                    const std::vector<DisplayState>& displays,
+                    const std::vector<DisplaySnapshot*>& displays,
                     const gfx::Size& framebuffer_size,
                     MultipleDisplayState new_display_state,
                     chromeos::DisplayPowerState new_power_state);
@@ -354,8 +333,9 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   bool is_panel_fitting_enabled_;
 
   // This is detected by the constructor to determine whether or not we should
-  // be enabled.  If we aren't running on ChromeOS, we can't assume that the
-  // Xrandr X11 extension is supported.
+  // be enabled.  If we aren't running on Chrome OS, we can't assume that the
+  // Xrandr X11 extension or the Ozone underlying display hotplug system are
+  // supported.
   // If this flag is set to false, any attempts to change the display
   // configuration to immediately fail without changing the state.
   bool configure_display_;

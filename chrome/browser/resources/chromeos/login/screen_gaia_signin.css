@@ -13,6 +13,11 @@
   width: 522px;
 }
 
+.new-gaia-flow #gaia-signin {
+  padding: 0 0 0;
+  width: 522px;
+}
+
 #gaia-signin.full-width {
   padding: 75px 0 0;
 }
@@ -37,8 +42,58 @@
   }
 }
 
+.new-gaia-flow #signin-right,
 .no-right-panel #signin-right {
   display: none;
+}
+
+#close-button-item {
+  background: transparent none;
+  background-image: url(chrome://theme/IDR_LOGIN_CLOSE_BUTTTON);
+  background-position: center;
+  background-repeat: no-repeat;
+  height: 14px;
+  position: absolute;
+  right: 15px;
+  top: 15px;
+  width: 14px;
+  z-index: 1;
+}
+
+html[dir=rtl] #close-button-item {
+  left: 15px;
+  right: auto;
+}
+
+.loading #close-button-item {
+  background-image: url(chrome://theme/IDR_LOGIN_CLOSE_BUTTTON_ON_WHITE);
+}
+
+#close-button-item:disabled {
+  background-image: url(chrome://theme/IDR_LOGIN_CLOSE_BUTTTON_MASKED);
+}
+
+#back-button-item {
+  background: transparent none;
+  background-image: url(chrome://theme/IDR_LOGIN_BACK_BUTTTON);
+  background-position: center;
+  background-repeat: no-repeat;
+  height: 18px;
+  left: 14px;
+  position: absolute;
+  top: 14px;
+  width: 18px;
+  z-index: 1;
+}
+
+html[dir=rtl] #back-button-item {
+  -webkit-transform: scaleX(-1);
+  left: auto;
+  right: 14px;
+}
+
+#back-button-item:disabled {
+  background-image: url(chrome://theme/IDR_LOGIN_BACK_BUTTTON_MASKED);
 }
 
 .signin-text {
@@ -78,6 +133,8 @@
   width: 1px;
 }
 
+.gaia-signin .new-gaia-flow #step-logo,
+.gaia-signin .new-gaia-flow #gaia-signin-divider,
 .no-right-panel #gaia-signin-divider {
   display: none;
 }
@@ -87,6 +144,15 @@
   margin-left: -44px;
   vertical-align: top;
   width: 400px;
+}
+
+webview#signin-frame {
+  display: block;
+  height: 609px;
+  margin-left: 0;
+  overflow: hidden;
+  padding: 0;
+  width: 522px;
 }
 
 /* Simpler alignment if no right panel. */
@@ -109,6 +175,10 @@
   position: absolute;
   right: 0;
   text-align: center;
+}
+
+.new-gaia-flow #enterprise-info-container {
+  display: none;
 }
 
 #enterprise-info-container #enterprise-info {

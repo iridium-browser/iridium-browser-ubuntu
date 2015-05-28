@@ -5,16 +5,17 @@
 #include "chrome/browser/net/crl_set_fetcher.h"
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "components/component_updater/component_updater_service.h"
+#include "components/update_client/update_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/cert/crl_set.h"
 #include "net/cert/crl_set_storage.h"
@@ -138,7 +139,7 @@ static const uint8 kPublicKeySHA256[32] = {
 void CRLSetFetcher::RegisterComponent(uint32 sequence_of_loaded_crl) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  component_updater::CrxComponent component;
+  update_client::CrxComponent component;
   component.pk_hash.assign(kPublicKeySHA256,
                            kPublicKeySHA256 + sizeof(kPublicKeySHA256));
   component.installer = this;
@@ -237,6 +238,10 @@ bool CRLSetFetcher::Install(const base::DictionaryValue& manifest,
 
 bool CRLSetFetcher::GetInstalledFile(
     const std::string& file, base::FilePath* installed_file) {
+  return false;
+}
+
+bool CRLSetFetcher::Uninstall() {
   return false;
 }
 

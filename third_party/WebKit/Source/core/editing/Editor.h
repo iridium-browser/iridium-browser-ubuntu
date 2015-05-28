@@ -32,10 +32,9 @@
 #include "core/editing/EditingBehavior.h"
 #include "core/editing/FindOptions.h"
 #include "core/editing/FrameSelection.h"
-#include "core/editing/TextIterator.h"
 #include "core/editing/VisibleSelection.h"
 #include "core/editing/WritingDirection.h"
-#include "core/frame/FrameDestructionObserver.h"
+#include "core/editing/iterators/TextIterator.h"
 #include "platform/PasteMode.h"
 #include "platform/heap/Handle.h"
 
@@ -75,7 +74,6 @@ public:
 
     bool canDHTMLCut();
     bool canDHTMLCopy();
-    bool canDHTMLPaste();
 
     bool canCut() const;
     bool canCopy() const;
@@ -235,7 +233,7 @@ public:
     };
     friend class RevealSelectionScope;
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     RawPtrWillBeMember<LocalFrame> m_frame;
@@ -268,7 +266,7 @@ private:
     bool canSmartReplaceWithPasteboard(Pasteboard*);
     void pasteAsPlainTextWithPasteboard(Pasteboard*);
     void pasteWithPasteboard(Pasteboard*);
-    void writeSelectionToPasteboard(Pasteboard*, Range*, const String& plainText);
+    void writeSelectionToPasteboard();
     bool dispatchCPPEvent(const AtomicString&, DataTransferAccessPolicy, PasteMode = AllMimeTypes);
 
     void revealSelectionAfterEditingOperation(const ScrollAlignment& = ScrollAlignment::alignCenterIfNeeded, RevealExtentOption = DoNotRevealExtent);

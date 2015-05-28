@@ -463,12 +463,15 @@ static int rsa_md_to_mgf1(X509_ALGOR **palg, const EVP_MD *mgf1md) {
   stmp = NULL;
 
 err:
-  if (stmp)
+  if (stmp) {
     ASN1_STRING_free(stmp);
-  if (algtmp)
+  }
+  if (algtmp) {
     X509_ALGOR_free(algtmp);
-  if (*palg)
+  }
+  if (*palg) {
     return 1;
+  }
 
   return 0;
 }
@@ -518,8 +521,8 @@ static ASN1_STRING *rsa_ctx_to_pss(EVP_PKEY_CTX *pkctx) {
   EVP_PKEY *pk = EVP_PKEY_CTX_get0_pkey(pkctx);
   int saltlen, rv = 0;
 
-  if (EVP_PKEY_CTX_get_signature_md(pkctx, &sigmd) <= 0 ||
-      EVP_PKEY_CTX_get_rsa_mgf1_md(pkctx, &mgf1md) <= 0 ||
+  if (!EVP_PKEY_CTX_get_signature_md(pkctx, &sigmd) ||
+      !EVP_PKEY_CTX_get_rsa_mgf1_md(pkctx, &mgf1md) ||
       !EVP_PKEY_CTX_get_rsa_pss_saltlen(pkctx, &saltlen)) {
     goto err;
   }
@@ -560,12 +563,15 @@ static ASN1_STRING *rsa_ctx_to_pss(EVP_PKEY_CTX *pkctx) {
   rv = 1;
 
 err:
-  if (pss)
+  if (pss) {
     RSA_PSS_PARAMS_free(pss);
-  if (rv)
+  }
+  if (rv) {
     return os;
-  if (os)
+  }
+  if (os) {
     ASN1_STRING_free(os);
+  }
   return NULL;
 }
 
@@ -619,9 +625,9 @@ static int rsa_pss_to_ctx(EVP_MD_CTX *ctx, X509_ALGOR *sigalg, EVP_PKEY *pkey) {
   }
 
   if (!EVP_DigestVerifyInit(ctx, &pkctx, md, NULL, pkey) ||
-      EVP_PKEY_CTX_set_rsa_padding(pkctx, RSA_PKCS1_PSS_PADDING) <= 0 ||
-      EVP_PKEY_CTX_set_rsa_pss_saltlen(pkctx, saltlen) <= 0 ||
-      EVP_PKEY_CTX_set_rsa_mgf1_md(pkctx, mgf1md) <= 0) {
+      !EVP_PKEY_CTX_set_rsa_padding(pkctx, RSA_PKCS1_PSS_PADDING) ||
+      !EVP_PKEY_CTX_set_rsa_pss_saltlen(pkctx, saltlen) ||
+      !EVP_PKEY_CTX_set_rsa_mgf1_md(pkctx, mgf1md)) {
     goto err;
   }
 
@@ -653,7 +659,7 @@ static evp_digest_sign_algorithm_result_t rsa_digest_sign_algorithm(
     EVP_MD_CTX *ctx, X509_ALGOR *sigalg) {
   int pad_mode;
   EVP_PKEY_CTX *pkctx = ctx->pctx;
-  if (EVP_PKEY_CTX_get_rsa_padding(pkctx, &pad_mode) <= 0) {
+  if (!EVP_PKEY_CTX_get_rsa_padding(pkctx, &pad_mode)) {
     return EVP_DIGEST_SIGN_ALGORITHM_ERROR;
   }
   if (pad_mode == RSA_PKCS1_PSS_PADDING) {

@@ -7,18 +7,21 @@
 // BufferD3D.cpp Defines common functionality between the Buffer9 and Buffer11 classes.
 
 #include "libANGLE/renderer/d3d/BufferD3D.h"
-#include "libANGLE/renderer/d3d/VertexBuffer.h"
+
 #include "libANGLE/renderer/d3d/IndexBuffer.h"
+#include "libANGLE/renderer/d3d/VertexBuffer.h"
 
 namespace rx
 {
 
 unsigned int BufferD3D::mNextSerial = 1;
 
-BufferD3D::BufferD3D()
+BufferD3D::BufferD3D(BufferFactoryD3D *factory)
     : BufferImpl(),
-      mStaticVertexBuffer(NULL),
-      mStaticIndexBuffer(NULL)
+      mFactory(factory),
+      mStaticVertexBuffer(nullptr),
+      mStaticIndexBuffer(nullptr),
+      mUnmodifiedDataUse(0)
 {
     updateSerial();
 }
@@ -27,19 +30,6 @@ BufferD3D::~BufferD3D()
 {
     SafeDelete(mStaticVertexBuffer);
     SafeDelete(mStaticIndexBuffer);
-}
-
-BufferD3D *BufferD3D::makeBufferD3D(BufferImpl *buffer)
-{
-    ASSERT(HAS_DYNAMIC_TYPE(BufferD3D*, buffer));
-    return static_cast<BufferD3D*>(buffer);
-}
-
-BufferD3D *BufferD3D::makeFromBuffer(gl::Buffer *buffer)
-{
-    BufferImpl *impl = buffer->getImplementation();
-    ASSERT(impl);
-    return makeBufferD3D(impl);
 }
 
 void BufferD3D::updateSerial()
@@ -51,11 +41,11 @@ void BufferD3D::initializeStaticData()
 {
     if (!mStaticVertexBuffer)
     {
-        mStaticVertexBuffer = new StaticVertexBufferInterface(getRenderer());
+        mStaticVertexBuffer = new StaticVertexBufferInterface(mFactory);
     }
     if (!mStaticIndexBuffer)
     {
-        mStaticIndexBuffer = new StaticIndexBufferInterface(getRenderer());
+        mStaticIndexBuffer = new StaticIndexBufferInterface(mFactory);
     }
 }
 
@@ -65,6 +55,9 @@ void BufferD3D::invalidateStaticData()
     {
         SafeDelete(mStaticVertexBuffer);
         SafeDelete(mStaticIndexBuffer);
+
+        // Re-init static data to track that we're in a static buffer
+        initializeStaticData();
     }
 
     mUnmodifiedDataUse = 0;

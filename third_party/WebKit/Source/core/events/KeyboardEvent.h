@@ -53,26 +53,25 @@ public:
         return adoptRefWillBeNoop(new KeyboardEvent(platformEvent, view));
     }
 
-    static PassRefPtrWillBeRawPtr<KeyboardEvent> create(const AtomicString& type, const KeyboardEventInit& initializer)
-    {
-        return adoptRefWillBeNoop(new KeyboardEvent(type, initializer));
-    }
+    static PassRefPtrWillBeRawPtr<KeyboardEvent> create(ScriptState*, const AtomicString& type, const KeyboardEventInit&);
 
     static PassRefPtrWillBeRawPtr<KeyboardEvent> create(const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view,
-        const String& keyIdentifier, unsigned location,
+        const String& keyIdentifier, const String& code, unsigned location,
         bool ctrlKey, bool altKey, bool shiftKey, bool metaKey)
     {
-        return adoptRefWillBeNoop(new KeyboardEvent(type, canBubble, cancelable, view, keyIdentifier, location,
+        return adoptRefWillBeNoop(new KeyboardEvent(type, canBubble, cancelable, view, keyIdentifier, code, location,
         ctrlKey, altKey, shiftKey, metaKey));
     }
 
     virtual ~KeyboardEvent();
 
-    void initKeyboardEvent(const AtomicString& type, bool canBubble, bool cancelable, AbstractView*,
+    void initKeyboardEvent(ScriptState*, const AtomicString& type, bool canBubble, bool cancelable, AbstractView*,
         const String& keyIdentifier, unsigned location,
         bool ctrlKey, bool altKey, bool shiftKey, bool metaKey);
 
     const String& keyIdentifier() const { return m_keyIdentifier; }
+    const String& code() const { return m_code; }
+
     unsigned location() const { return m_location; }
 
     bool getModifierState(const String& keyIdentifier) const;
@@ -87,18 +86,19 @@ public:
     virtual bool isKeyboardEvent() const override;
     virtual int which() const override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     KeyboardEvent();
     KeyboardEvent(const PlatformKeyboardEvent&, AbstractView*);
     KeyboardEvent(const AtomicString&, const KeyboardEventInit&);
     KeyboardEvent(const AtomicString& type, bool canBubble, bool cancelable, AbstractView*,
-        const String& keyIdentifier, unsigned location,
+        const String& keyIdentifier, const String& code, unsigned location,
         bool ctrlKey, bool altKey, bool shiftKey, bool metaKey);
 
     OwnPtr<PlatformKeyboardEvent> m_keyEvent;
     String m_keyIdentifier;
+    String m_code;
     unsigned m_location;
     bool m_isAutoRepeat : 1;
 };

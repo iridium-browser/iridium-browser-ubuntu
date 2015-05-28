@@ -5,11 +5,11 @@
 #include "cc/scheduler/begin_frame_source.h"
 
 #include "base/auto_reset.h"
-#include "base/debug/trace_event.h"
-#include "base/debug/trace_event_argument.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "cc/scheduler/delay_based_time_source.h"
 #include "cc/scheduler/scheduler.h"
 #include "ui/gfx/frame_time.h"
@@ -53,7 +53,7 @@ void BeginFrameObserverMixIn::OnBeginFrame(const BeginFrameArgs& args) {
 }
 
 void BeginFrameObserverMixIn::AsValueInto(
-    base::debug::TracedValue* dict) const {
+    base::trace_event::TracedValue* dict) const {
   dict->BeginDictionary("last_begin_frame_args_");
   last_begin_frame_args_.AsValueInto(dict);
   dict->EndDictionary();
@@ -117,7 +117,8 @@ void BeginFrameSourceMixIn::CallOnBeginFrame(const BeginFrameArgs& args) {
 }
 
 // Tracing support
-void BeginFrameSourceMixIn::AsValueInto(base::debug::TracedValue* dict) const {
+void BeginFrameSourceMixIn::AsValueInto(
+    base::trace_event::TracedValue* dict) const {
   // As the observer might try to trace the source, prevent an infinte loop
   // from occuring.
   if (inside_as_value_into_) {
@@ -198,7 +199,7 @@ void BackToBackBeginFrameSource::DidFinishFrame(size_t remaining_frames) {
 
 // Tracing support
 void BackToBackBeginFrameSource::AsValueInto(
-    base::debug::TracedValue* dict) const {
+    base::trace_event::TracedValue* dict) const {
   dict->SetString("type", "BackToBackBeginFrameSource");
   BeginFrameSourceMixIn::AsValueInto(dict);
   dict->SetBoolean("send_begin_frame_posted_", send_begin_frame_posted_);
@@ -264,13 +265,9 @@ void SyntheticBeginFrameSource::OnNeedsBeginFramesChange(
   }
 }
 
-bool SyntheticBeginFrameSource::NeedsBeginFrames() const {
-  return time_source_->Active();
-}
-
 // Tracing support
 void SyntheticBeginFrameSource::AsValueInto(
-    base::debug::TracedValue* dict) const {
+    base::trace_event::TracedValue* dict) const {
   dict->SetString("type", "SyntheticBeginFrameSource");
   BeginFrameSourceMixIn::AsValueInto(dict);
 
@@ -314,11 +311,8 @@ void BeginFrameSourceMultiplexer::SetMinimumInterval(
 }
 
 void BeginFrameSourceMultiplexer::AddSource(BeginFrameSource* new_source) {
-  DEBUG_FRAMES("BeginFrameSourceMultiplexer::AddSource",
-               "current active",
-               active_source_,
-               "source to remove",
-               new_source);
+  DEBUG_FRAMES("BeginFrameSourceMultiplexer::AddSource", "current active",
+               active_source_, "source to be added", new_source);
   DCHECK(new_source);
   DCHECK(!HasSource(new_source));
 
@@ -331,11 +325,8 @@ void BeginFrameSourceMultiplexer::AddSource(BeginFrameSource* new_source) {
 
 void BeginFrameSourceMultiplexer::RemoveSource(
     BeginFrameSource* existing_source) {
-  DEBUG_FRAMES("BeginFrameSourceMultiplexer::RemoveSource",
-               "current active",
-               active_source_,
-               "source to remove",
-               existing_source);
+  DEBUG_FRAMES("BeginFrameSourceMultiplexer::RemoveSource", "current active",
+               active_source_, "source to be removed", existing_source);
   DCHECK(existing_source);
   DCHECK(HasSource(existing_source));
   DCHECK_NE(existing_source, active_source_);
@@ -406,19 +397,10 @@ const BeginFrameArgs BeginFrameSourceMultiplexer::LastUsedBeginFrameArgs()
 }
 
 // BeginFrameSource support
-bool BeginFrameSourceMultiplexer::NeedsBeginFrames() const {
-  if (active_source_) {
-    return active_source_->NeedsBeginFrames();
-  } else {
-    return false;
-  }
-}
-
-void BeginFrameSourceMultiplexer::SetNeedsBeginFrames(bool needs_begin_frames) {
-  DEBUG_FRAMES("BeginFrameSourceMultiplexer::SetNeedsBeginFrames",
-               "active_source",
-               active_source_,
-               "needs_begin_frames",
+void BeginFrameSourceMultiplexer::OnNeedsBeginFramesChange(
+    bool needs_begin_frames) {
+  DEBUG_FRAMES("BeginFrameSourceMultiplexer::OnNeedsBeginFramesChange",
+               "active_source", active_source_, "needs_begin_frames",
                needs_begin_frames);
   if (active_source_) {
     active_source_->SetNeedsBeginFrames(needs_begin_frames);
@@ -440,7 +422,7 @@ void BeginFrameSourceMultiplexer::DidFinishFrame(size_t remaining_frames) {
 
 // Tracing support
 void BeginFrameSourceMultiplexer::AsValueInto(
-    base::debug::TracedValue* dict) const {
+    base::trace_event::TracedValue* dict) const {
   dict->SetString("type", "BeginFrameSourceMultiplexer");
 
   dict->SetInteger("minimum_interval_us", minimum_interval_.InMicroseconds());

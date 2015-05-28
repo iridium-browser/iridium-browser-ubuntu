@@ -35,8 +35,10 @@ class TestRenderFrameHostCreationObserver : public WebContentsObserver {
 class TestRenderFrameHost : public RenderFrameHostImpl,
                             public RenderFrameHostTester {
  public:
-  TestRenderFrameHost(RenderViewHostImpl* render_view_host,
+  TestRenderFrameHost(SiteInstance* site_instance,
+                      RenderViewHostImpl* render_view_host,
                       RenderFrameHostDelegate* delegate,
+                      RenderWidgetHostDelegate* rwh_delegate,
                       FrameTree* frame_tree,
                       FrameTreeNode* frame_tree_node,
                       int routing_id,
@@ -83,7 +85,11 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
       int response_code,
       const base::FilePath* file_path_for_history_item,
       const std::vector<GURL>& redirects);
-  void SendBeginNavigationWithURL(const GURL& url);
+
+  // With the current navigation logic this method is a no-op.
+  // PlzNavigate: this method simulates receiving a BeginNavigation IPC.
+  void SendRendererInitiatedNavigationRequest(const GURL& url,
+                                              bool has_user_gesture);
 
   void DidDisownOpener();
 
@@ -100,7 +106,13 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
   // this simulates a BeforeUnload ACK from the renderer.
   // PlzNavigate: this simulates a BeforeUnload ACK from the renderer, and the
   // interaction with the IO thread up until the response is ready to commit.
-  void PrepareForCommit(const GURL& url);
+  void PrepareForCommit();
+
+  // This method does the same as PrepareForCommit.
+  // PlzNavigate: Beyond doing the same as PrepareForCommit, this method will
+  // also simulate a server redirect to |redirect_url|. If the URL is empty the
+  // redirect step is ignored.
+  void PrepareForCommitWithServerRedirect(const GURL& redirect_url);
 
  private:
   TestRenderFrameHostCreationObserver child_creation_observer_;

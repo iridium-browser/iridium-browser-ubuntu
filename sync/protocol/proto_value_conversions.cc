@@ -175,6 +175,7 @@ base::DictionaryValue* SessionTabToValue(const sync_pb::SessionTab& proto) {
   SET_BYTES(favicon);
   SET_ENUM(favicon_type, GetFaviconTypeString);
   SET_STR(favicon_source);
+  SET_REP(variation_id, MakeInt64Value);
   return value;
 }
 
@@ -326,6 +327,8 @@ base::DictionaryValue* AutofillProfileSpecificsToValue(
   base::DictionaryValue* value = new base::DictionaryValue();
   SET_STR(guid);
   SET_STR(origin);
+  SET_INT64(use_count);
+  SET_INT64(use_date);
 
   SET_STR_REP(name_first);
   SET_STR_REP(name_middle);
@@ -347,6 +350,21 @@ base::DictionaryValue* AutofillProfileSpecificsToValue(
   SET_STR(address_home_language_code);
 
   SET_STR_REP(phone_home_whole_number);
+  return value;
+}
+
+base::DictionaryValue* AutofillWalletSpecificsToValue(
+    const sync_pb::AutofillWalletSpecifics& proto) {
+  base::DictionaryValue* value = new base::DictionaryValue();
+
+  SET_ENUM(type, GetWalletInfoTypeString);
+  if (proto.type() == sync_pb::AutofillWalletSpecifics::MASKED_CREDIT_CARD) {
+    value->Set("masked_card",
+               WalletMaskedCreditCardToValue(proto.masked_card()));
+  } else if (proto.type() == sync_pb::AutofillWalletSpecifics::POSTAL_ADDRESS) {
+    value->Set("masked_card",
+               WalletPostalAddressToValue(proto.address()));
+  }
   return value;
 }
 
@@ -400,14 +418,6 @@ base::DictionaryValue* FaviconSyncFlagsToValue(
   return value;
 }
 
-base::DictionaryValue* EnhancedBookmarksFlagsToValue(
-    const sync_pb::EnhancedBookmarksFlags& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_BOOL(enabled);
-  SET_STR(extension_id);
-  return value;
-}
-
 }  // namespace
 
 base::DictionaryValue* ExperimentsSpecificsToValue(
@@ -419,8 +429,8 @@ base::DictionaryValue* ExperimentsSpecificsToValue(
   SET_EXPERIMENT_ENABLED_FIELD(pre_commit_update_avoidance);
   SET(favicon_sync, FaviconSyncFlagsToValue);
   SET_EXPERIMENT_ENABLED_FIELD(gcm_channel);
-  SET(enhanced_bookmarks, EnhancedBookmarksFlagsToValue);
   SET_EXPERIMENT_ENABLED_FIELD(gcm_invalidations);
+  SET_EXPERIMENT_ENABLED_FIELD(wallet_sync);
   return value;
 }
 
@@ -443,6 +453,7 @@ base::DictionaryValue* ExtensionSpecificsToValue(
   SET_BOOL(incognito_enabled);
   SET_BOOL(remote_install);
   SET_BOOL(installed_by_custodian);
+  SET_BOOL(all_urls_enabled);
   SET_STR(name);
   return value;
 }
@@ -664,6 +675,37 @@ base::DictionaryValue* TypedUrlSpecificsToValue(
   return value;
 }
 
+base::DictionaryValue* WalletMaskedCreditCardToValue(
+    const sync_pb::WalletMaskedCreditCard& proto) {
+  base::DictionaryValue* value = new base::DictionaryValue();
+  SET_STR(id);
+  SET_ENUM(status, GetWalletCardStatusString);
+  SET_STR(name_on_card);
+  SET_ENUM(type, GetWalletCardTypeString);
+  SET_STR(last_four);
+  SET_INT32(exp_month);
+  SET_INT32(exp_year);
+  return value;
+}
+
+base::DictionaryValue* WalletPostalAddressToValue(
+    const sync_pb::WalletPostalAddress& proto) {
+  base::DictionaryValue* value = new base::DictionaryValue();
+  SET_STR(recipient_name);
+  SET_STR(company_name);
+  SET_STR_REP(street_address);
+  SET_STR(address_1);
+  SET_STR(address_2);
+  SET_STR(address_3);
+  SET_STR(address_4);
+  SET_STR(postal_code);
+  SET_STR(sorting_code);
+  SET_STR(country_code);
+  SET_STR(phone_number);
+  SET_STR(language_code);
+  return value;
+}
+
 base::DictionaryValue* WifiCredentialSpecificsToValue(
     const sync_pb::WifiCredentialSpecifics& proto) {
   base::DictionaryValue* value = new base::DictionaryValue();
@@ -683,6 +725,7 @@ base::DictionaryValue* EntitySpecificsToValue(
   SET_FIELD(article, ArticleSpecificsToValue);
   SET_FIELD(autofill, AutofillSpecificsToValue);
   SET_FIELD(autofill_profile, AutofillProfileSpecificsToValue);
+  SET_FIELD(autofill_wallet, AutofillWalletSpecificsToValue);
   SET_FIELD(bookmark, BookmarkSpecificsToValue);
   SET_FIELD(device_info, DeviceInfoSpecificsToValue);
   SET_FIELD(dictionary, DictionarySpecificsToValue);

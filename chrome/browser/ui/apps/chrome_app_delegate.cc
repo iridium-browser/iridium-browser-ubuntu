@@ -26,6 +26,7 @@
 #include "components/ui/zoom/zoom_controller.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -202,6 +203,24 @@ void ChromeAppDelegate::InitWebContents(content::WebContents* web_contents) {
     ui_zoom::ZoomController::CreateForWebContents(web_contents);
 }
 
+void ChromeAppDelegate::RenderViewCreated(
+    content::RenderViewHost* render_view_host) {
+  if (!chrome::IsRunningInForcedAppMode()) {
+    // Due to a bug in the way apps reacted to default zoom changes, some apps
+    // can incorrectly have host level zoom settings. These aren't wanted as
+    // apps cannot be zoomed, so are removed. This should be removed if apps
+    // can be made to zoom again.
+    // See http://crbug.com/446759 for more details.
+    content::WebContents* web_contents =
+        content::WebContents::FromRenderViewHost(render_view_host);
+    DCHECK(web_contents);
+    content::HostZoomMap* zoom_map =
+        content::HostZoomMap::GetForWebContents(web_contents);
+    DCHECK(zoom_map);
+    zoom_map->SetZoomLevelForHost(web_contents->GetURL().host(), 0);
+  }
+}
+
 void ChromeAppDelegate::ResizeWebContents(content::WebContents* web_contents,
                                           const gfx::Size& size) {
   ::ResizeWebContents(web_contents, size);
@@ -217,7 +236,7 @@ content::WebContents* ChromeAppDelegate::OpenURLFromTab(
 void ChromeAppDelegate::AddNewContents(content::BrowserContext* context,
                                        content::WebContents* new_contents,
                                        WindowOpenDisposition disposition,
-                                       const gfx::Rect& initial_pos,
+                                       const gfx::Rect& initial_rect,
                                        bool user_gesture,
                                        bool* was_blocked) {
   if (!disable_external_open_for_testing_) {
@@ -238,7 +257,7 @@ void ChromeAppDelegate::AddNewContents(content::BrowserContext* context,
                          NULL,
                          new_contents,
                          disposition,
-                         initial_pos,
+                         initial_rect,
                          user_gesture,
                          was_blocked);
 }

@@ -66,8 +66,7 @@ size_t GetGroupIndex(size_t domain_index, PrefService* pref_service) {
     ListPrefUpdate group_indices_updater(
         pref_service, prefs::kPasswordManagerGroupsForDomains);
     // This value has not been generated yet.
-    result =
-        base::checked_cast<int>(base::RandGenerator(kGroupsPerDomain));
+    result = base::checked_cast<int>(base::RandGenerator(kGroupsPerDomain));
     group_indices_updater->Set(domain_index, new FundamentalValue(result));
   }
   return base::checked_cast<size_t>(result);
@@ -83,17 +82,6 @@ size_t MonitoredDomainGroupId(const std::string& url_host,
       return kDomainMapping[i].group_ids[GetGroupIndex(i, pref_service)];
   }
   return 0;
-}
-
-void LogAllowToCollectURLBubbleUIDismissalReason(UIDismissalReason reason) {
-  AllowToCollectURLBubbleUIDismissalReason dismissal_reason = NO_INTERACTION;
-  if (reason == CLICKED_COLLECT_URL)
-    dismissal_reason = COLLECT_URL;
-  else if (reason == CLICKED_DO_NOT_COLLECT_URL)
-    dismissal_reason = DO_NOT_COLLECT_URL;
-  UMA_HISTOGRAM_ENUMERATION(
-      "PasswordManager.AllowToCollectURLBubble.UIDismissalReason",
-      dismissal_reason, NUM_ALLOW_TO_COLLECT_BUBBLE_DISMISSAL_REASON);
 }
 
 void LogUMAHistogramEnumeration(const std::string& name,
@@ -114,11 +102,9 @@ void LogUMAHistogramEnumeration(const std::string& name,
 
 void LogUMAHistogramBoolean(const std::string& name, bool sample) {
   // Note: This leaks memory, which is expected behavior.
-  base::HistogramBase* histogram =
-      base::BooleanHistogram::FactoryGet(
-          name,
-          base::Histogram::kUmaTargetedHistogramFlag);
-          histogram->AddBoolean(sample);
+  base::HistogramBase* histogram = base::BooleanHistogram::FactoryGet(
+      name, base::Histogram::kUmaTargetedHistogramFlag);
+  histogram->AddBoolean(sample);
 }
 
 std::string GroupIdToString(size_t group_id) {
@@ -160,6 +146,11 @@ void LogUIDisplayDisposition(UIDisplayDisposition disposition) {
   UMA_HISTOGRAM_ENUMERATION("PasswordBubble.DisplayDisposition",
                             disposition,
                             NUM_DISPLAY_DISPOSITIONS);
+}
+
+void LogFormDataDeserializationStatus(FormDeserializationStatus status) {
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.FormDataDeserializationStatus",
+                            status, NUM_DESERIALIZATION_STATUSES);
 }
 
 }  // namespace metrics_util

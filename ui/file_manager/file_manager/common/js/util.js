@@ -589,7 +589,7 @@ Object.freeze(util.EntryChangedKind);
 
 /**
  * Obtains whether an entry is fake or not.
- * @param {(Entry|Object)} entry Entry or a fake entry.
+ * @param {(!Entry|!FakeEntry)} entry Entry or a fake entry.
  * @return {boolean} True if the given entry is fake.
  */
 util.isFakeEntry = function(entry) {
@@ -633,8 +633,8 @@ util.UserDOMError.prototype = {
 
 /**
  * Compares two entries.
- * @param {Entry|Object} entry1 The entry to be compared. Can be a fake.
- * @param {Entry|Object} entry2 The entry to be compared. Can be a fake.
+ * @param {Entry|FakeEntry} entry1 The entry to be compared. Can be a fake.
+ * @param {Entry|FakeEntry} entry2 The entry to be compared. Can be a fake.
  * @return {boolean} True if the both entry represents a same file or
  *     directory. Returns true if both entries are null.
  */
@@ -692,7 +692,7 @@ util.comparePath = function(entry1, entry2) {
  * Checks if {@code entry} is an immediate child of {@code directory}.
  *
  * @param {Entry} entry The presumptive child.
- * @param {DirectoryEntry} directory The presumptive parent.
+ * @param {DirectoryEntry|FakeEntry} directory The presumptive parent.
  * @return {!Promise.<boolean>} Resolves with true if {@code directory} is
  *     parent of {@code entry}.
  */
@@ -715,9 +715,9 @@ util.isChildEntry = function(entry, directory) {
  * Checks if the child entry is a descendant of another entry. If the entries
  * point to the same file or directory, then returns false.
  *
- * @param {!DirectoryEntry|!Object} ancestorEntry The ancestor directory entry.
- *     Can be a fake.
- * @param {!Entry|!Object} childEntry The child entry. Can be a fake.
+ * @param {!DirectoryEntry|!FakeEntry} ancestorEntry The ancestor directory
+ *     entry. Can be a fake.
+ * @param {!Entry|!FakeEntry} childEntry The child entry. Can be a fake.
  * @return {boolean} True if the child entry is contained in the ancestor path.
  */
 util.isDescendantEntry = function(ancestorEntry, childEntry) {
@@ -762,12 +762,15 @@ util.getCurrentLocaleOrDefault = function() {
 
 /**
  * Converts array of entries to an array of corresponding URLs.
- * @param {Array.<Entry>} entries Input array of entries.
- * @return {Array.<string>} Output array of URLs.
+ * @param {Array<Entry>} entries Input array of entries.
+ * @return {!Array<string>} Output array of URLs.
  */
 util.entriesToURLs = function(entries) {
   return entries.map(function(entry) {
-    return entry.toURL();
+    // When building background.js, cachedUrl is not refered other than here.
+    // Thus closure compiler raises an error if we refer the property like
+    // entry.cachedUrl.
+    return entry['cachedUrl'] || entry.toURL();
   });
 };
 
@@ -775,7 +778,7 @@ util.entriesToURLs = function(entries) {
  * Converts array of URLs to an array of corresponding Entries.
  *
  * @param {Array.<string>} urls Input array of URLs.
- * @param {function(Array.<Entry>, Array.<URL>)=} opt_callback Completion
+ * @param {function(!Array.<!Entry>, !Array.<!URL>)=} opt_callback Completion
  *     callback with array of success Entries and failure URLs.
  * @return {Promise} Promise fulfilled with the object that has entries property
  *     and failureUrls property. The promise is never rejected.
@@ -924,6 +927,36 @@ util.splitExtension = function(path) {
 };
 
 /**
+ * Returns the localized name of the root type.
+ * @param {!EntryLocation} locationInfo Location info.
+ * @return {string} The localized name.
+ */
+util.getRootTypeLabel = function(locationInfo) {
+  switch (locationInfo.rootType) {
+    case VolumeManagerCommon.RootType.DOWNLOADS:
+      return str('DOWNLOADS_DIRECTORY_LABEL');
+    case VolumeManagerCommon.RootType.DRIVE:
+      return str('DRIVE_MY_DRIVE_LABEL');
+    case VolumeManagerCommon.RootType.DRIVE_OFFLINE:
+      return str('DRIVE_OFFLINE_COLLECTION_LABEL');
+    case VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME:
+      return str('DRIVE_SHARED_WITH_ME_COLLECTION_LABEL');
+    case VolumeManagerCommon.RootType.DRIVE_RECENT:
+      return str('DRIVE_RECENT_COLLECTION_LABEL');
+    case VolumeManagerCommon.RootType.DRIVE_OTHER:
+    case VolumeManagerCommon.RootType.DOWNLOADS:
+    case VolumeManagerCommon.RootType.ARCHIVE:
+    case VolumeManagerCommon.RootType.REMOVABLE:
+    case VolumeManagerCommon.RootType.MTP:
+    case VolumeManagerCommon.RootType.PROVIDED:
+      return locationInfo.volumeInfo.label;
+    default:
+      console.error('Unsupported root type: ' + locationInfo.rootType);
+      return locationInfo.volumeInfo.label;
+  }
+}
+
+/**
  * Returns the localized name of the entry.
  *
  * @param {EntryLocation} locationInfo
@@ -931,32 +964,10 @@ util.splitExtension = function(path) {
  * @return {?string} The localized name.
  */
 util.getEntryLabel = function(locationInfo, entry) {
-  if (locationInfo && locationInfo.isRootEntry) {
-    switch (locationInfo.rootType) {
-      case VolumeManagerCommon.RootType.DOWNLOADS:
-        return str('DOWNLOADS_DIRECTORY_LABEL');
-      case VolumeManagerCommon.RootType.DRIVE:
-        return str('DRIVE_MY_DRIVE_LABEL');
-      case VolumeManagerCommon.RootType.DRIVE_OFFLINE:
-        return str('DRIVE_OFFLINE_COLLECTION_LABEL');
-      case VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME:
-        return str('DRIVE_SHARED_WITH_ME_COLLECTION_LABEL');
-      case VolumeManagerCommon.RootType.DRIVE_RECENT:
-        return str('DRIVE_RECENT_COLLECTION_LABEL');
-      case VolumeManagerCommon.RootType.DRIVE_OTHER:
-      case VolumeManagerCommon.RootType.DOWNLOADS:
-      case VolumeManagerCommon.RootType.ARCHIVE:
-      case VolumeManagerCommon.RootType.REMOVABLE:
-      case VolumeManagerCommon.RootType.MTP:
-      case VolumeManagerCommon.RootType.PROVIDED:
-        return locationInfo.volumeInfo.label;
-      default:
-        console.error('Unsupported root type: ' + locationInfo.rootType);
-        return locationInfo.volumeInfo.label;
-    }
-  }
-
-  return entry.name;
+  if (locationInfo && locationInfo.isRootEntry)
+    return util.getRootTypeLabel(locationInfo);
+  else
+    return entry.name;
 };
 
 /**

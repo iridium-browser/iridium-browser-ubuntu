@@ -715,7 +715,7 @@ IN_PROC_BROWSER_TEST_F(PreferencesBrowserTest,
 class ManagedPreferencesBrowserTest : public PreferencesBrowserTest {
  protected:
   // PreferencesBrowserTest implementation:
-  virtual void SetUpInProcessBrowserTestFixture() override {
+  void SetUpInProcessBrowserTestFixture() override {
     // Set up fake install attributes.
     scoped_ptr<policy::StubEnterpriseInstallAttributes> attributes(
         new policy::StubEnterpriseInstallAttributes());
@@ -813,7 +813,7 @@ const char* kUserProfilePath = "user_profile";
 
 class ProxyPreferencesBrowserTest : public PreferencesBrowserTest {
  public:
-  virtual void SetUpOnMainThread() override {
+  void SetUpOnMainThread() override {
     SetupNetworkEnvironment();
     content::RunAllPendingInMessageLoop();
 
@@ -829,7 +829,7 @@ class ProxyPreferencesBrowserTest : public PreferencesBrowserTest {
 
     std::string url = base::StringPrintf("%s?network=%s",
                                          chrome::kChromeUIProxySettingsURL,
-                                         network->path().c_str());
+                                         network->guid().c_str());
 
     ui_test_utils::NavigateToURL(browser(), GURL(url));
     SetUpPrefs();

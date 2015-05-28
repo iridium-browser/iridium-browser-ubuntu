@@ -11,7 +11,7 @@
 #include "base/memory/weak_ptr.h"
 #include "ui/app_list/app_list_export.h"
 #include "ui/app_list/app_list_model.h"
-#include "ui/views/view.h"
+#include "ui/app_list/views/app_list_page.h"
 
 namespace app_list {
 
@@ -20,23 +20,37 @@ class AppListViewDelegate;
 class SearchResultContainerView;
 
 // The start page for the experimental app list.
-class APP_LIST_EXPORT SearchResultPageView : public views::View {
+class APP_LIST_EXPORT SearchResultPageView : public AppListPage {
  public:
   SearchResultPageView();
   ~SearchResultPageView() override;
 
   int selected_index() { return selected_index_; }
+  void SetSelection(bool select);  // Set or unset result selection.
 
   void AddSearchResultContainerView(
       AppListModel::SearchResults* result_model,
       SearchResultContainerView* result_container);
 
+  const std::vector<SearchResultContainerView*>& result_container_views() {
+    return result_container_views_;
+  }
+
   // Overridden from views::View:
   bool OnKeyPressed(const ui::KeyEvent& event) override;
   void ChildPreferredSizeChanged(views::View* child) override;
 
+  // AppListPage overrides:
+  gfx::Rect GetPageBoundsForState(AppListModel::State state) const override;
+  void OnAnimationUpdated(double progress,
+                          AppListModel::State from_state,
+                          AppListModel::State to_state) override;
+  int GetSearchBoxZHeight() const override;
+
  private:
-  void SetSelectedIndex(int index);
+  // |directional_movement| is true if the navigation was caused by directional
+  // controls (eg, arrow keys), as opposed to linear controls (eg, Tab).
+  void SetSelectedIndex(int index, bool directional_movement);
   bool IsValidSelectionIndex(int index);
 
   // The SearchResultContainerViews that compose the search page. All owned by

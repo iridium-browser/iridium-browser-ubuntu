@@ -12,7 +12,6 @@ import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.contextmenu.ChromeContextMenuPopulator;
 import org.chromium.chrome.browser.contextmenu.ContextMenuPopulator;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
-import org.chromium.content.browser.ContentVideoView;
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
@@ -40,7 +39,7 @@ public class ChromeShellTab extends Tab {
     public ChromeShellTab(Context context, LoadUrlParams params, WindowAndroid window,
             ContentViewClient contentViewClient, TabManager tabManager) {
         super(false, context, window);
-        initialize(0, null, false);
+        initialize(null, null, false);
         mTabManager = tabManager;
         setContentViewClient(contentViewClient);
         loadUrl(params);
@@ -98,12 +97,12 @@ public class ChromeShellTab extends Tab {
         return new ChromeContextMenuPopulator(new TabChromeContextMenuItemDelegate() {
             @Override
             public void onOpenInNewTab(String url, Referrer referrer) {
-                mTabManager.createTab(url, TabLaunchType.FROM_LINK);
+                mTabManager.createTab(url, TabLaunchType.FROM_LONGPRESS_FOREGROUND);
             }
 
             @Override
             public void onOpenImageInNewTab(String url, Referrer referrer) {
-                mTabManager.createTab(url, TabLaunchType.FROM_LINK);
+                mTabManager.createTab(url, TabLaunchType.FROM_LONGPRESS_FOREGROUND);
             }
         });
     }
@@ -127,12 +126,6 @@ public class ChromeShellTab extends Tab {
         public void toggleFullscreenModeForTab(boolean enterFullscreen) {
             mIsFullscreen = enterFullscreen;
             super.toggleFullscreenModeForTab(enterFullscreen);
-
-            if (!mIsFullscreen) {
-                ContentVideoView videoView = ContentVideoView.getContentVideoView();
-                if (videoView != null) videoView.exitFullscreen(false);
-            }
-
         }
 
         @Override
@@ -141,8 +134,8 @@ public class ChromeShellTab extends Tab {
         }
 
         @Override
-        public void webContentsCreated(long sourceWebContents, long openerRenderFrameId,
-                String frameName, String targetUrl, long newWebContents) {
+        public void webContentsCreated(WebContents sourceWebContents, long openerRenderFrameId,
+                String frameName, String targetUrl, WebContents newWebContents) {
             mTabManager.createTab(targetUrl, TabLaunchType.FROM_LINK);
             super.webContentsCreated(
                     sourceWebContents, openerRenderFrameId, frameName, targetUrl, newWebContents);

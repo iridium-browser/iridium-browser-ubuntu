@@ -16,33 +16,29 @@
 namespace gl
 {
 
-Error::Error(GLenum errorCode)
-    : mCode(errorCode),
-      mMessage()
-{
-}
-
 Error::Error(GLenum errorCode, const char *msg, ...)
     : mCode(errorCode),
-      mMessage()
+      mMessage(nullptr)
 {
     va_list vararg;
     va_start(vararg, msg);
-    mMessage = FormatString(msg, vararg);
+    createMessageString();
+    *mMessage = FormatString(msg, vararg);
     va_end(vararg);
 }
 
-Error::Error(const Error &other)
-    : mCode(other.mCode),
-      mMessage(other.mMessage)
+void Error::createMessageString() const
 {
+    if (mMessage == nullptr)
+    {
+        mMessage = new std::string();
+    }
 }
 
-Error &Error::operator=(const Error &other)
+const std::string &Error::getMessage() const
 {
-    mCode = other.mCode;
-    mMessage = other.mMessage;
-    return *this;
+    createMessageString();
+    return *mMessage;
 }
 
 }
@@ -50,33 +46,41 @@ Error &Error::operator=(const Error &other)
 namespace egl
 {
 
-Error::Error(EGLint errorCode)
-    : mCode(errorCode),
-      mMessage()
-{
-}
-
 Error::Error(EGLint errorCode, const char *msg, ...)
     : mCode(errorCode),
-    mMessage()
+      mID(0),
+      mMessage(nullptr)
 {
     va_list vararg;
     va_start(vararg, msg);
-    mMessage = FormatString(msg, vararg);
+    createMessageString();
+    *mMessage = FormatString(msg, vararg);
     va_end(vararg);
 }
 
-Error::Error(const Error &other)
-    : mCode(other.mCode),
-    mMessage(other.mMessage)
+Error::Error(EGLint errorCode, EGLint id, const char *msg, ...)
+    : mCode(errorCode),
+      mID(id),
+      mMessage(nullptr)
 {
+    va_list vararg;
+    va_start(vararg, msg);
+    createMessageString();
+    *mMessage = FormatString(msg, vararg);
+    va_end(vararg);
+}
+void Error::createMessageString() const
+{
+    if (mMessage == nullptr)
+    {
+        mMessage = new std::string();
+    }
 }
 
-Error &Error::operator=(const Error &other)
+const std::string &Error::getMessage() const
 {
-    mCode = other.mCode;
-    mMessage = other.mMessage;
-    return *this;
+    createMessageString();
+    return *mMessage;
 }
 
 }

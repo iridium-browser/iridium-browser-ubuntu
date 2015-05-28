@@ -13,9 +13,9 @@
 #include "base/prefs/pref_change_registrar.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow_delegate.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "components/favicon/core/favicon_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -86,6 +86,9 @@ class AppLauncherHandler
   // Handles the "createAppShortcut" message with |args| containing
   // [extension_id].
   void HandleCreateAppShortcut(const base::ListValue* args);
+
+  // Handles the "showAppInfo" message with |args| containing [extension_id].
+  void HandleShowAppInfo(const base::ListValue* args);
 
   // Handles the "reorderApps" message with |args| containing [dragged_app_id,
   // app_order].

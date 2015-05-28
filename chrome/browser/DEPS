@@ -3,6 +3,7 @@ include_rules = [
   "+ash",
   "+athena/content/public",
   "+chrome/app",
+  "+chrome/chrome_watcher",
   "+chrome/grit",  # For generated headers
   "+chrome/installer",
   "+chrome_elf/blacklist",
@@ -11,14 +12,18 @@ include_rules = [
   "+chrome_elf/dll_hash",
   "+chromeos",
   "+components/app_modal",
+  "+components/audio_modem/public",
+  "+components/audio_modem/test",
   "+components/autofill/content/browser",
   "+components/autofill/content/common",
   "+components/autofill/core/browser",
   "+components/autofill/core/common",
   "+components/bookmarks/browser",
   "+components/bookmarks/common",
+  "+components/bookmarks/managed",
   "+components/bookmarks/test",
   "+components/browser_watcher",
+  "+components/browsing_data",
   "+components/cdm/browser",
   "+components/cloud_devices/common",
   "+components/component_updater",
@@ -27,10 +32,12 @@ include_rules = [
   "+components/crash",
   "+components/crx_file",
   "+components/data_reduction_proxy",
-  "+components/dns_prefetch",
+  "+components/network_hints",
+  "+components/device_event_log",
   "+components/dom_distiller",
   "+components/domain_reliability",
   "+components/enhanced_bookmarks",
+  "+components/favicon",
   "+components/favicon_base",
   "+components/feedback",
   "+components/gcm_driver",
@@ -57,6 +64,7 @@ include_rules = [
   "+components/power",
   "+components/precache",
   "+components/pref_registry",
+  "+components/printing/common",
   "+components/proximity_auth",
   "+components/query_parser",
   "+components/rappor",
@@ -105,6 +113,7 @@ include_rules = [
   "+grit",  # TODO(thestig) Remove. For generated headers
   "+installer_util_strings",  # For generated headers
   "+jni",
+  "+media/audio", # For media audio hang monitor.
   "+media/base",  # For media switches
   "+policy",  # For generated headers and source
   "+ppapi/c",  # For various types.
@@ -120,6 +129,7 @@ include_rules = [
   "+sync/internal_api/public/attachments",  # Needed for tests.
   "+sync/protocol",  # Sync protobuf files.
   "+sync/util",  # Sync utilities like GetSessionName.
+  "+syzygy/kasko",
   "+third_party/cros_system_api",
   "+win8/util",
 
@@ -159,19 +169,15 @@ include_rules = [
   # No inclusion of WebKit from the browser, other than strictly enum/POD,
   # header-only types, and some selected common code.
   "-third_party/WebKit",
-  "+third_party/WebKit/public/platform/WebCursorInfo.h",
-  "+third_party/WebKit/public/platform/WebNotificationPermission.h",
-  "+third_party/WebKit/public/platform/WebPushPermissionStatus.h",
-  "+third_party/WebKit/public/platform/WebRect.h",
   "+third_party/WebKit/public/platform/WebReferrerPolicy.h",
-  "+third_party/WebKit/public/platform/WebScreenInfo.h",
   "+third_party/WebKit/public/platform/WebScreenOrientationLockType.h",
+  "+third_party/WebKit/public/platform/modules/app_banner/WebAppBannerPromptReply.h",
+  "+third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h",
   "+third_party/WebKit/public/web/WebCache.h",
   "+third_party/WebKit/public/web/WebContextMenuData.h",
   "+third_party/WebKit/public/web/WebFindOptions.h",
   "+third_party/WebKit/public/web/WebInputEvent.h",
   "+third_party/WebKit/public/web/WebMediaPlayerAction.h",
-  "+third_party/WebKit/public/web/WebPageVisibilityState.h",
   "+third_party/WebKit/public/web/WebPluginAction.h",
   "+third_party/WebKit/public/web/WebTextDirection.h",
   "+third_party/WebKit/public/web/WebWindowFeatures.h",

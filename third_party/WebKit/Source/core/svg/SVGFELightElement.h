@@ -61,18 +61,17 @@ public:
     SVGAnimatedNumber* limitingConeAngle() { return m_limitingConeAngle.get(); }
     const SVGAnimatedNumber* limitingConeAngle() const { return m_limitingConeAngle.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     SVGFELightElement(const QualifiedName&, Document&);
 
 private:
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override final;
     virtual void svgAttributeChanged(const QualifiedName&) override final;
     virtual void childrenChanged(const ChildrenChange&) override final;
 
-    virtual bool rendererIsNeeded(const RenderStyle&) override { return false; }
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override { return false; }
 
     RefPtrWillBeMember<SVGAnimatedNumber> m_azimuth;
     RefPtrWillBeMember<SVGAnimatedNumber> m_elevation;

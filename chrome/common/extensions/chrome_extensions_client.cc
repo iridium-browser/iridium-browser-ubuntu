@@ -205,9 +205,6 @@ void ChromeExtensionsClient::FilterHostPermissions(
       // We should not add any additional "host" here.
       if (GURL(chrome::kChromeUIFaviconURL).host() != i->host())
         continue;
-      // TODO(sashab): Add the rule
-      // kFavicon -> IDS_EXTENSION_PROMPT_WARNING_FAVICON
-      // to ChromePermissionMessageProvider.
       permissions->insert(APIPermission::kFavicon);
     } else {
       new_hosts->AddPattern(*i);
@@ -308,8 +305,8 @@ void ChromeExtensionsClient::RegisterAPISchemaResources(
 }
 
 bool ChromeExtensionsClient::ShouldSuppressFatalErrors() const {
-  // Suppress fatal errors only on beta and stable channels.
-  return GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV;
+  // Suppress fatal on all release branches.
+  return GetCurrentChannel() > chrome::VersionInfo::CHANNEL_CANARY;
 }
 
 std::string ChromeExtensionsClient::GetWebstoreBaseURL() const {

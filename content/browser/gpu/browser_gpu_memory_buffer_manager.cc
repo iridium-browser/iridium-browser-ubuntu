@@ -6,10 +6,10 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/gpu/client/gpu_memory_buffer_factory_host.h"
 #include "content/common/gpu/client/gpu_memory_buffer_impl.h"
 #include "content/common/gpu/client/gpu_memory_buffer_impl_shared_memory.h"
@@ -126,7 +126,7 @@ void BrowserGpuMemoryBufferManager::AllocateGpuMemoryBufferForChildProcess(
     base::ProcessHandle child_process_handle,
     int child_client_id,
     const AllocationCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   gfx::GpuMemoryBufferId new_id = g_next_gpu_memory_buffer_id.GetNext();
 
@@ -139,6 +139,7 @@ void BrowserGpuMemoryBufferManager::AllocateGpuMemoryBufferForChildProcess(
           format, usage)) {
     // Early out if we cannot fallback to shared memory buffer.
     if (!GpuMemoryBufferImplSharedMemory::IsFormatSupported(format) ||
+        !GpuMemoryBufferImplSharedMemory::IsSizeValidForFormat(size, format) ||
         usage != gfx::GpuMemoryBuffer::MAP) {
       callback.Run(gfx::GpuMemoryBufferHandle());
       return;
@@ -181,7 +182,7 @@ void BrowserGpuMemoryBufferManager::ChildProcessDeletedGpuMemoryBuffer(
     base::ProcessHandle child_process_handle,
     int child_client_id,
     uint32 sync_point) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(clients_.find(child_client_id) != clients_.end());
 
   BufferMap& buffers = clients_[child_client_id];
@@ -213,7 +214,7 @@ void BrowserGpuMemoryBufferManager::ChildProcessDeletedGpuMemoryBuffer(
 void BrowserGpuMemoryBufferManager::ProcessRemoved(
     base::ProcessHandle process_handle,
     int client_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   ClientMap::iterator client_it = clients_.find(client_id);
   if (client_it == clients_.end())
@@ -252,7 +253,7 @@ void BrowserGpuMemoryBufferManager::AllocateGpuMemoryBufferOnIO(
 void BrowserGpuMemoryBufferManager::GpuMemoryBufferAllocatedOnIO(
     AllocateGpuMemoryBufferRequest* request,
     const gfx::GpuMemoryBufferHandle& handle) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   // Early out if factory failed to allocate the buffer.
   if (handle.is_null()) {
@@ -285,7 +286,7 @@ void BrowserGpuMemoryBufferManager::GpuMemoryBufferAllocatedForChildProcess(
     int child_client_id,
     const AllocationCallback& callback,
     const gfx::GpuMemoryBufferHandle& handle) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   ClientMap::iterator client_it = clients_.find(child_client_id);
 

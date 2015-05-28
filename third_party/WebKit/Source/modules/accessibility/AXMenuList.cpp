@@ -26,30 +26,53 @@
 #include "config.h"
 #include "modules/accessibility/AXMenuList.h"
 
-#include "core/rendering/RenderMenuList.h"
+#include "core/layout/LayoutMenuList.h"
 #include "modules/accessibility/AXMenuListPopup.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 
 namespace blink {
 
-AXMenuList::AXMenuList(RenderMenuList* renderer, AXObjectCacheImpl* axObjectCache)
-    : AXRenderObject(renderer, axObjectCache)
+AXMenuList::AXMenuList(LayoutMenuList* layoutObject, AXObjectCacheImpl* axObjectCache)
+    : AXLayoutObject(layoutObject, axObjectCache)
 {
 }
 
-PassRefPtr<AXMenuList> AXMenuList::create(RenderMenuList* renderer, AXObjectCacheImpl* axObjectCache)
+PassRefPtr<AXMenuList> AXMenuList::create(LayoutMenuList* layoutObject, AXObjectCacheImpl* axObjectCache)
 {
-    return adoptRef(new AXMenuList(renderer, axObjectCache));
+    return adoptRef(new AXMenuList(layoutObject, axObjectCache));
+}
+
+AccessibilityRole AXMenuList::roleValue() const
+{
+    AccessibilityRole ariaRole = ariaRoleAttribute();
+    if (ariaRole != UnknownRole)
+        return ariaRole;
+    return PopUpButtonRole;
 }
 
 bool AXMenuList::press() const
 {
-    RenderMenuList* menuList = toRenderMenuList(m_renderer);
+    if (!m_layoutObject)
+        return false;
+
+    LayoutMenuList* menuList = toLayoutMenuList(m_layoutObject);
     if (menuList->popupIsVisible())
         menuList->hidePopup();
     else
         menuList->showPopup();
     return true;
+}
+
+void AXMenuList::clearChildren()
+{
+    if (m_children.isEmpty())
+        return;
+
+    // There's no reason to clear our AXMenuListPopup child. If we get a
+    // call to clearChildren, it's because the options might have changed,
+    // so call it on our popup.
+    ASSERT(m_children.size() == 1);
+    m_children[0]->clearChildren();
 }
 
 void AXMenuList::addChildren()
@@ -84,7 +107,12 @@ void AXMenuList::childrenChanged()
 
 bool AXMenuList::isCollapsed() const
 {
-    return !toRenderMenuList(m_renderer)->popupIsVisible();
+    // Collapsed is the "default" state, so if the LayoutObject doesn't exist
+    // this makes slightly more sense than returning false.
+    if (!m_layoutObject)
+        return true;
+
+    return !toLayoutMenuList(m_layoutObject)->popupIsVisible();
 }
 
 AccessibilityExpanded AXMenuList::isExpanded() const
@@ -105,10 +133,7 @@ bool AXMenuList::canSetFocusAttribute() const
 
 void AXMenuList::didUpdateActiveOption(int optionIndex)
 {
-    RefPtrWillBeRawPtr<Document> document(m_renderer->document());
-    AXObjectCacheImpl* cache = toAXObjectCacheImpl(document->axObjectCache());
-
-    const AccessibilityChildrenVector& childObjects = children();
+    const auto& childObjects = children();
     if (!childObjects.isEmpty()) {
         ASSERT(childObjects.size() == 1);
         ASSERT(childObjects[0]->isMenuListPopup());
@@ -119,7 +144,28 @@ void AXMenuList::didUpdateActiveOption(int optionIndex)
         }
     }
 
-    cache->postNotification(this, document.get(), AXObjectCacheImpl::AXMenuListValueChanged, true);
+    axObjectCache()->postNotification(this, AXObjectCacheImpl::AXMenuListValueChanged);
+}
+
+void AXMenuList::didShowPopup()
+{
+    if (children().size() != 1)
+        return;
+
+    AXMenuListPopup* popup = toAXMenuListPopup(children()[0].get());
+    popup->didShow();
+}
+
+void AXMenuList::didHidePopup()
+{
+    if (children().size() != 1)
+        return;
+
+    AXMenuListPopup* popup = toAXMenuListPopup(children()[0].get());
+    popup->didHide();
+
+    if (node() && node()->focused())
+        axObjectCache()->postNotification(this, AXObjectCacheImpl::AXFocusedUIElementChanged);
 }
 
 } // namespace blink

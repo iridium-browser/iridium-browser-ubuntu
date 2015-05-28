@@ -279,8 +279,7 @@ public class ChildProcessLauncher {
             sLinkerInitialized = true;
         }
 
-        if (sLinkerLoadAddress == 0)
-            return null;
+        if (sLinkerLoadAddress == 0) return null;
 
         // Always wait for the shared RELROs in service processes.
         final boolean waitForSharedRelros = true;
@@ -350,6 +349,9 @@ public class ChildProcessLauncher {
     // Map from surface texture id to Surface.
     private static Map<Pair<Integer, Integer>, Surface> sSurfaceTextureSurfaceMap =
             new ConcurrentHashMap<Pair<Integer, Integer>, Surface>();
+
+    // Whether the main application is currently brought to the foreground.
+    private static boolean sApplicationInForeground = true;
 
     @VisibleForTesting
     public static void setBindingManagerForTesting(BindingManager manager) {
@@ -433,6 +435,7 @@ public class ChildProcessLauncher {
      * Called when the embedding application is sent to background.
      */
     public static void onSentToBackground() {
+        sApplicationInForeground = false;
         sBindingManager.onSentToBackground();
     }
 
@@ -440,7 +443,15 @@ public class ChildProcessLauncher {
      * Called when the embedding application is brought to foreground.
      */
     public static void onBroughtToForeground() {
+        sApplicationInForeground = true;
         sBindingManager.onBroughtToForeground();
+    }
+
+    /**
+     * Returns whether the application is currently in the foreground.
+     */
+    static boolean isApplicationInForeground() {
+        return sApplicationInForeground;
     }
 
     /**

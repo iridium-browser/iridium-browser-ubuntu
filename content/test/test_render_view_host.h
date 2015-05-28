@@ -13,6 +13,7 @@
 #include "build/build_config.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
+#include "content/public/common/web_preferences.h"
 #include "content/public/test/test_renderer_host.h"
 #include "ui/base/ime/dummy_text_input_client.h"
 #include "ui/base/layout.h"
@@ -69,6 +70,8 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   void Show() override;
   void Hide() override;
   bool IsShowing() override;
+  void WasUnOccluded() override;
+  void WasOccluded() override;
   gfx::Rect GetViewBounds() const override;
 #if defined(OS_MACOSX)
   void SetActive(bool active) override;
@@ -85,10 +88,8 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
 
   // RenderWidgetHostViewBase implementation.
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
-                   const gfx::Rect& pos) override {}
+                   const gfx::Rect& bounds) override {}
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override {}
-  void WasShown() override {}
-  void WasHidden() override {}
   void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override {
   }
   void Focus() override {}
@@ -124,8 +125,8 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
       const NativeWebKeyboardEvent& event) override;
 #endif
 #if defined(OS_ANDROID)
-  virtual void LockCompositingSurface() override {}
-  virtual void UnlockCompositingSurface() override {}
+  void LockCompositingSurface() override {}
+  void UnlockCompositingSurface() override {}
 #endif
   void GetScreenInfo(blink::WebScreenInfo* results) override {}
   gfx::Rect GetBoundsInRootWindow() override;
@@ -139,6 +140,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
 #endif
 
   bool is_showing() const { return is_showing_; }
+  bool is_occluded() const { return is_occluded_; }
   bool did_swap_compositor_frame() const { return did_swap_compositor_frame_; }
 
  protected:
@@ -146,6 +148,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
 
  private:
   bool is_showing_;
+  bool is_occluded_;
   bool did_swap_compositor_frame_;
   ui::DummyTextInputClient text_input_client_;
 };
@@ -208,6 +211,7 @@ class TestRenderViewHost
   // RenderViewHostImpl, see below.
   void SimulateWasHidden() override;
   void SimulateWasShown() override;
+  WebPreferences TestComputeWebkitPrefs() override;
 
   void TestOnUpdateStateWithFile(
       int page_id, const base::FilePath& file_path);

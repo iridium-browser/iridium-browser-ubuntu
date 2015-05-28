@@ -13,18 +13,15 @@ namespace skiagm {
 
 class HairlinesGM : public GM {
 protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
 
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("hairlines");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE { return SkISize::Make(1250, 1250); }
+    SkISize onISize() override { return SkISize::Make(1250, 1250); }
 
-    virtual void onOnceBeforeDraw() SK_OVERRIDE {
+    void onOnceBeforeDraw() override {
         {
             SkPath* lineAnglesPath = &fPaths.push_back();
             enum {
@@ -164,7 +161,7 @@ protected:
         }
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         static const SkAlpha kAlphaValue[] = { 0xFF, 0x40 };
         static const SkScalar kWidths[] = { 0, 0.5f, 1.5f };
 

@@ -30,6 +30,7 @@ enum UIDisplayDisposition {
   MANUAL_BLACKLISTED,
   AUTOMATIC_GENERATED_PASSWORD_CONFIRMATION,
   AUTOMATIC_CREDENTIAL_REQUEST,
+  AUTOMATIC_SIGNIN_TOAST,
   NUM_DISPLAY_DISPOSITIONS
 };
 
@@ -46,8 +47,8 @@ enum UIDismissalReason {
   CLICKED_UNBLACKLIST,
   CLICKED_OK,
   CLICKED_CREDENTIAL,
-  CLICKED_COLLECT_URL,
-  CLICKED_DO_NOT_COLLECT_URL,
+  AUTO_SIGNIN_TOAST_TIMEOUT,
+  AUTO_SIGNIN_TOAST_CLICKED,
   NUM_UI_RESPONSES,
 
   // If we add the omnibox icon _without_ intending to display the bubble,
@@ -56,12 +57,14 @@ enum UIDismissalReason {
   NOT_DISPLAYED
 };
 
-// Metrics: "PasswordManager.AllowToCollectURLBubble.UIDismissalReason"
-enum AllowToCollectURLBubbleUIDismissalReason {
-  NO_INTERACTION = 0,
-  COLLECT_URL,
-  DO_NOT_COLLECT_URL,
-  NUM_ALLOW_TO_COLLECT_BUBBLE_DISMISSAL_REASON,
+enum FormDeserializationStatus {
+  LOGIN_DATABASE_SUCCESS,
+  LOGIN_DATABASE_FAILURE,
+  LIBSECRET_SUCCESS,
+  LIBSECRET_FAILURE,
+  GNOME_SUCCESS,
+  GNOME_FAILURE,
+  NUM_DESERIALIZATION_STATUSES
 };
 
 // We monitor the performance of the save password heuristic for a handful of
@@ -79,9 +82,6 @@ const size_t kGroupsPerDomain = 10u;
 // returns 0. |pref_service| needs to be the profile preference service.
 size_t MonitoredDomainGroupId(const std::string& url_host,
                               PrefService* pref_service);
-
-// Log the |reason| a user dismissed the "Allow to collect URL?" bubble.
-void LogAllowToCollectURLBubbleUIDismissalReason(UIDismissalReason reason);
 
 // A version of the UMA_HISTOGRAM_ENUMERATION macro that allows the |name|
 // to vary over the program's runtime.
@@ -111,6 +111,9 @@ void LogUIDismissalReason(ResponseType type);
 
 // Log the appropriate display disposition.
 void LogUIDisplayDisposition(UIDisplayDisposition disposition);
+
+// Log if a saved FormData was deserialized correctly.
+void LogFormDataDeserializationStatus(FormDeserializationStatus status);
 
 }  // namespace metrics_util
 

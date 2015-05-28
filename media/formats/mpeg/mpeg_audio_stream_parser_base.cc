@@ -221,16 +221,14 @@ int MPEGAudioStreamParserBase::ParseFrame(const uint8* data,
     timestamp_helper_->SetBaseTimestamp(base_timestamp);
 
     VideoDecoderConfig video_config;
-    bool success = config_cb_.Run(config_, video_config, TextTrackConfigMap());
+    if (!config_cb_.Run(config_, video_config, TextTrackConfigMap()))
+      return -1;
 
     if (!init_cb_.is_null()) {
       InitParameters params(kInfiniteDuration());
       params.auto_update_timestamp_offset = true;
-      base::ResetAndReturn(&init_cb_).Run(success, params);
+      base::ResetAndReturn(&init_cb_).Run(params);
     }
-
-    if (!success)
-      return -1;
   }
 
   if (metadata_frame)
@@ -264,7 +262,7 @@ int MPEGAudioStreamParserBase::ParseIcecastHeader(const uint8* data, int size) {
   int offset = LocateEndOfHeaders(data, locate_size, 4);
   if (offset < 0) {
     if (locate_size == kMaxIcecastHeaderSize) {
-      MEDIA_LOG(log_cb_) << "Icecast header is too large.";
+      MEDIA_LOG(ERROR, log_cb_) << "Icecast header is too large.";
       return -1;
     }
 
@@ -325,7 +323,7 @@ bool MPEGAudioStreamParserBase::ParseSyncSafeInt(BitReader* reader,
   for (int i = 0; i < 4; ++i) {
     uint8 tmp;
     if (!reader->ReadBits(1, &tmp) || tmp != 0) {
-      MEDIA_LOG(log_cb_) << "ID3 syncsafe integer byte MSb is not 0!";
+      MEDIA_LOG(ERROR, log_cb_) << "ID3 syncsafe integer byte MSb is not 0!";
       return false;
     }
 

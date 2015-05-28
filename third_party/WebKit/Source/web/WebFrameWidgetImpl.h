@@ -38,6 +38,7 @@
 #include "public/web/WebFrameWidget.h"
 #include "public/web/WebInputEvent.h"
 #include "web/PageWidgetDelegate.h"
+#include "wtf/HashSet.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/RefCounted.h"
 
@@ -46,8 +47,9 @@ class Frame;
 class Element;
 class LocalFrame;
 class Page;
-class RenderLayerCompositor;
+class DeprecatedPaintLayerCompositor;
 class UserGestureToken;
+class WebCompositorAnimationTimeline;
 class WebLayer;
 class WebLayerTreeView;
 class WebLocalFrameImpl;
@@ -60,6 +62,7 @@ class WebFrameWidgetImpl final : public WebFrameWidget
     , public RefCounted<WebFrameWidgetImpl> {
 public:
     static WebFrameWidgetImpl* create(WebWidgetClient*, WebLocalFrame*);
+    static HashSet<WebFrameWidgetImpl*>& allInstances();
 
     // WebWidget functions:
     void close() override;
@@ -82,15 +85,9 @@ public:
     void setCursorVisibilityState(bool isVisible) override;
     bool hasTouchEventHandlersAt(const WebPoint&) override;
 
-    // FIXME(bokan): Old pinch path only - This should be removed once old pinch
-    // is removed.
     void applyViewportDeltas(
-        const WebSize& scrollDelta,
-        float pageScaleDelta,
-        float topControlsDelta) override;
-    void applyViewportDeltas(
-        const WebSize& pinchViewportDelta,
-        const WebSize& mainFrameDelta,
+        const WebFloatSize& pinchViewportDelta,
+        const WebFloatSize& mainFrameDelta,
         const WebFloatSize& elasticOverscrollDelta,
         float pageScaleDelta,
         float topControlsDelta) override;
@@ -124,14 +121,20 @@ public:
 
     void scheduleAnimation();
 
-    RenderLayerCompositor* compositor() const;
+    DeprecatedPaintLayerCompositor* compositor() const;
     void suppressInvalidations(bool enable);
     void setRootGraphicsLayer(GraphicsLayer*);
+    void attachCompositorAnimationTimeline(WebCompositorAnimationTimeline*);
+    void detachCompositorAnimationTimeline(WebCompositorAnimationTimeline*);
+
+    void setVisibilityState(WebPageVisibilityState, bool) override;
 
     // Exposed for the purpose of overriding device metrics.
     void sendResizeEventAndRepaint();
 
     void updateMainFrameLayoutSize();
+
+    void setIgnoreInputEvents(bool newValue);
 
     // Returns the page object associated with this widget. This may be null when
     // the page is shutting down, but will be valid at all other times.
@@ -207,4 +210,3 @@ private:
 } // namespace blink
 
 #endif
-

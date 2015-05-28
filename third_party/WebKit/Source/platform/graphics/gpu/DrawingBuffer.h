@@ -46,6 +46,12 @@
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
 
+namespace WTF {
+
+class ArrayBufferContents;
+
+} // namespace WTF
+
 namespace blink {
 
 class Extensions3DUtil;
@@ -54,15 +60,6 @@ class WebExternalBitmap;
 class WebExternalTextureLayer;
 class WebGraphicsContext3D;
 class WebLayer;
-
-// Abstract interface to allow basic context eviction management
-class PLATFORM_EXPORT ContextEvictionManager : public RefCounted<ContextEvictionManager> {
-public:
-    virtual ~ContextEvictionManager() {};
-
-    virtual void forciblyLoseOldestContext(const String& reason) = 0;
-    virtual IntSize oldestContextSize() = 0;
-};
 
 // Manages a rendering target (framebuffer + attachment) for a canvas.  Can publish its rendering
 // results to a WebLayer for compositing.
@@ -95,7 +92,7 @@ public:
         Discard
     };
 
-    static PassRefPtr<DrawingBuffer> create(PassOwnPtr<WebGraphicsContext3D>, const IntSize&, PreserveDrawingBuffer, WebGraphicsContext3D::Attributes requestedAttributes, PassRefPtr<ContextEvictionManager>);
+    static PassRefPtr<DrawingBuffer> create(PassOwnPtr<WebGraphicsContext3D>, const IntSize&, PreserveDrawingBuffer, WebGraphicsContext3D::Attributes requestedAttributes);
 
     virtual ~DrawingBuffer();
 
@@ -113,7 +110,7 @@ public:
     IntSize size() const { return m_size; }
 
     // Copies the multisample color buffer to the normal color buffer and leaves m_fbo bound.
-    void commit(long x = 0, long y = 0, long width = -1, long height = -1);
+    void commit();
 
     // commit should copy the full multisample buffer, and not respect the
     // current scissor bounds. Track the state of the scissor test so that it
@@ -142,7 +139,7 @@ public:
     void setBufferClearNeeded(bool);
     bool bufferClearNeeded() const;
     void setIsHidden(bool);
-    void setFilterLevel(SkPaint::FilterLevel);
+    void setFilterQuality(SkFilterQuality);
 
     WebLayer* platformLayer();
 
@@ -163,7 +160,7 @@ public:
     void setPackAlignment(GLint param);
 
     void paintRenderingResultsToCanvas(ImageBuffer*);
-    PassRefPtr<Uint8ClampedArray> paintRenderingResultsToImageData(int&, int&, SourceDrawingBuffer);
+    bool paintRenderingResultsToImageData(int&, int&, SourceDrawingBuffer, WTF::ArrayBufferContents&);
 
     int sampleCount() const { return m_sampleCount; }
     bool explicitResolveOfMultisampleData() const { return m_multisampleMode == ExplicitResolve; };
@@ -176,8 +173,7 @@ protected: // For unittests
         bool packedDepthStencilExtensionSupported,
         bool discardFramebufferSupported,
         PreserveDrawingBuffer,
-        WebGraphicsContext3D::Attributes requestedAttributes,
-        PassRefPtr<ContextEvictionManager>);
+        WebGraphicsContext3D::Attributes requestedAttributes);
 
     bool initialize(const IntSize&);
 
@@ -191,7 +187,7 @@ private:
     bool resizeMultisampleFramebuffer(const IntSize&);
     void resizeDepthStencil(const IntSize&);
 
-    // Bind to the m_framebufferBinding if it's not 0.
+    // Bind to the m_framebufferBinding if it's not 0. Otherwise, bind to the default FBO.
     void restoreFramebufferBinding();
 
     void clearPlatformLayer();
@@ -203,13 +199,6 @@ private:
 
     // Updates the current size of the buffer, ensuring that s_currentResourceUsePixels is updated.
     void setSize(const IntSize& size);
-
-    // Calculates the difference in pixels between the current buffer size and the proposed size.
-    static int pixelDelta(const IntSize& newSize, const IntSize& curSize);
-
-    // Given the desired buffer size, provides the largest dimensions that will fit in the pixel budget
-    // Returns true if the buffer will only fit if the oldest WebGL context is forcibly lost
-    IntSize adjustSizeWithContextEviction(const IntSize&, bool& evictContext);
 
     void paintFramebufferToCanvas(int framebuffer, int width, int height, bool premultiplyAlpha, ImageBuffer*);
 
@@ -290,16 +279,14 @@ private:
     int m_packAlignment;
     bool m_destructionInProgress;
     bool m_isHidden;
-    SkPaint::FilterLevel m_filterLevel;
+    SkFilterQuality m_filterQuality;
 
     OwnPtr<WebExternalTextureLayer> m_layer;
 
     // All of the mailboxes that this DrawingBuffer has ever created.
-    Vector<RefPtr<MailboxInfo> > m_textureMailboxes;
+    Vector<RefPtr<MailboxInfo>> m_textureMailboxes;
     // Mailboxes that were released by the compositor can be used again by this DrawingBuffer.
     Deque<WebExternalTextureMailbox> m_recycledMailboxQueue;
-
-    RefPtr<ContextEvictionManager> m_contextEvictionManager;
 
     // If the width and height of the Canvas's backing store don't
     // match those that we were given in the most recent call to

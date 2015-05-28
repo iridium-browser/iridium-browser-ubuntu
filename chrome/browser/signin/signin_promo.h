@@ -27,26 +27,6 @@ const char kSignInPromoQueryKeyConstrained[] = "constrained";
 const char kSignInPromoQueryKeyShowAccountManagement[] =
     "showAccountManagement";
 
-// Enum values used for Android signin promo actions.
-enum AndroidSigninPromoAction {
-  // The promo was enabled.
-  HISTOGRAM_ANDROID_SIGNIN_PROMO_ENABLED = 0,
-
-  // The promo was shown.
-  HISTOGRAM_ANDROID_SIGNIN_PROMO_SHOWN,
-
-  // The promo was declined.
-  HISTOGRAM_ANDROID_SIGNIN_PROMO_DECLINED,
-
-  // The promo was accepted.
-  HISTOGRAM_ANDROID_SIGNIN_PROMO_ACCEPTED,
-
-  // The promo was accepted and user clicked the settings link.
-  HISTOGRAM_ANDROID_SIGNIN_PROMO_ACCEPTED_WITH_ADVANCED,
-
-  HISTOGRAM_ANDROID_SIGNIN_PROMO_MAX,
-};
-
 // Returns true if the sign in promo should be visible.
 // |profile| is the profile of the tab the promo would be shown on.
 bool ShouldShowPromo(Profile* profile);
@@ -94,11 +74,6 @@ bool IsAutoCloseEnabledInURL(const GURL& url);
 // Returns true if the showAccountManagement parameter in the given url is set
 // to true.
 bool ShouldShowAccountManagement(const GURL& url);
-
-// Returns true if the given URL is the standard continue URL used with the
-// sync promo when the web-based flow is enabled.  The query parameters
-// of the URL are ignored for this comparison.
-bool IsContinueUrlForWebBasedSigninFlow(const GURL& url);
 
 // Forces UseWebBasedSigninFlow() to return true when set; used in tests only.
 void ForceWebBasedSigninFlowForTesting(bool force);

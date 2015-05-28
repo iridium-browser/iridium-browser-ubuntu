@@ -86,10 +86,10 @@ void ContentAutofillDriver::PingRenderer() {
       new AutofillMsg_Ping(render_frame_host_->GetRoutingID()));
 }
 
-void ContentAutofillDriver::DetectAccountCreationForms(
+void ContentAutofillDriver::PropagateAutofillPredictions(
     const std::vector<FormStructure*>& forms) {
-  autofill_manager_->client()->DetectAccountCreationForms(render_frame_host_,
-                                                          forms);
+  autofill_manager_->client()->PropagateAutofillPredictions(render_frame_host_,
+                                                            forms);
 }
 
 void ContentAutofillDriver::SendAutofillTypePredictionsToRenderer(
@@ -101,8 +101,8 @@ void ContentAutofillDriver::SendAutofillTypePredictionsToRenderer(
   if (!RendererIsAvailable())
     return;
 
-  std::vector<FormDataPredictions> type_predictions;
-  FormStructure::GetFieldTypePredictions(forms, &type_predictions);
+  std::vector<FormDataPredictions> type_predictions =
+      FormStructure::GetFieldTypePredictions(forms);
   render_frame_host_->Send(new AutofillMsg_FieldTypePredictionsAvailable(
       render_frame_host_->GetRoutingID(), type_predictions));
 }
@@ -145,6 +145,13 @@ void ContentAutofillDriver::RendererShouldPreviewFieldWithValue(
       render_frame_host_->GetRoutingID(), value));
 }
 
+void ContentAutofillDriver::PopupHidden() {
+  // If the unmask prompt is showing, keep showing the preview. The preview
+  // will be cleared when the prompt closes.
+  if (!autofill_manager_->IsShowingUnmaskPrompt())
+    RendererShouldClearPreviewedForm();
+}
+
 bool ContentAutofillDriver::HandleMessage(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ContentAutofillDriver, message)
@@ -153,6 +160,8 @@ bool ContentAutofillDriver::HandleMessage(const IPC::Message& message) {
   IPC_MESSAGE_FORWARD(AutofillHostMsg_FormsSeen,
                       autofill_manager_.get(),
                       AutofillManager::OnFormsSeen)
+  IPC_MESSAGE_FORWARD(AutofillHostMsg_WillSubmitForm, autofill_manager_.get(),
+                      AutofillManager::OnWillSubmitForm)
   IPC_MESSAGE_FORWARD(AutofillHostMsg_FormSubmitted,
                       autofill_manager_.get(),
                       AutofillManager::OnFormSubmitted)

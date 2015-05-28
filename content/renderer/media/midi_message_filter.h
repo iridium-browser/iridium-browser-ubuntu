@@ -44,6 +44,14 @@ class CONTENT_EXPORT MidiMessageFilter : public IPC::MessageFilter {
     return io_message_loop_;
   }
 
+  static blink::WebMIDIAccessorClient::MIDIPortState ToBlinkState(
+      media::MidiPortState state) {
+    // "open" status is separately managed by blink per MIDIAccess instance.
+    if (state == media::MIDI_PORT_OPENED)
+      state = media::MIDI_PORT_CONNECTED;
+    return static_cast<blink::WebMIDIAccessorClient::MIDIPortState>(state);
+  }
+
  protected:
   ~MidiMessageFilter() override;
 
@@ -77,6 +85,12 @@ class CONTENT_EXPORT MidiMessageFilter : public IPC::MessageFilter {
   void OnAddInputPort(media::MidiPortInfo info);
   void OnAddOutputPort(media::MidiPortInfo info);
 
+  // These functions are called to notify the recipient that a device that is
+  // notified via OnAddInputPort() or OnAddOutputPort() gets disconnected, or
+  // connected again.
+  void OnSetInputPortState(uint32 port, media::MidiPortState state);
+  void OnSetOutputPortState(uint32 port, media::MidiPortState state);
+
   // Called when the browser process has sent MIDI data containing one or
   // more messages.
   void OnDataReceived(uint32 port,
@@ -93,6 +107,8 @@ class CONTENT_EXPORT MidiMessageFilter : public IPC::MessageFilter {
 
   void HandleAddInputPort(media::MidiPortInfo info);
   void HandleAddOutputPort(media::MidiPortInfo info);
+  void HandleSetInputPortState(uint32 port, media::MidiPortState state);
+  void HandleSetOutputPortState(uint32 port, media::MidiPortState state);
 
   void HandleDataReceived(uint32 port,
                           const std::vector<uint8>& data,
@@ -113,11 +129,15 @@ class CONTENT_EXPORT MidiMessageFilter : public IPC::MessageFilter {
    * Notice: Following members are designed to be accessed only on
    * |main_message_loop_|.
    */
-  // Keeps track of all MIDI clients.
+  // Keeps track of all MIDI clients. This should be std::set so that various
+  // for-loops work correctly. To change the type, make sure that the new type
+  // is safe to modify the container inside for-loops.
   typedef std::set<blink::WebMIDIAccessorClient*> ClientsSet;
   ClientsSet clients_;
 
   // Represents clients that are waiting for a session being open.
+  // Note: std::vector is not safe to invoke callbacks inside iterator based
+  // for-loops.
   typedef std::vector<blink::WebMIDIAccessorClient*> ClientsQueue;
   ClientsQueue clients_waiting_session_queue_;
 

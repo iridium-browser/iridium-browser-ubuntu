@@ -117,12 +117,15 @@ function write_target_definition {
   fi
   echo "      'cflags': [ '-m$4', ]," >> "$2"
   echo "      'xcode_settings': { 'OTHER_CFLAGS': [ '-m$4' ] }," >> "$2"
-  if [[ $4 == avx* ]]; then
+  if [[ $4 == avx2 ]]; then
   echo "      'msvs_settings': {" >> "$2"
   echo "        'VCCLCompilerTool': {" >> "$2"
-  echo "          'EnableEnhancedInstructionSet': '3', # /arch:AVX" >> "$2"
+  echo "          'EnableEnhancedInstructionSet': '5', # /arch:AVX2" >> "$2"
   echo "        }," >> "$2"
   echo "      }," >> "$2"
+  echo "      # TODO(pcc): Remove this once we properly support subtarget specific" >> "$2"
+  echo "      # code generation in LLVM (http://llvm.org/PR19416)." >> "$2"
+  echo "      'cflags!': [ '-flto', '-fsanitize=cfi-vptr', ]," >> "$2"
   elif [[ $4 == ssse3 || $4 == sse4.1 ]]; then
   echo "      'conditions': [" >> "$2"
   echo "        ['OS==\"win\" and clang==1', {" >> "$2"
@@ -188,9 +191,7 @@ function write_intrinsics_gypi {
     exit 1
   fi
   if [ 0 -ne ${#avx2_sources} ]; then
-    #write_target_definition avx2_sources[@] "$2" libvpx_intrinsics_avx2 avx2
-    echo "ERROR: Uncomment avx2 sections in libvpx.gyp"
-    exit 1
+    write_target_definition avx2_sources[@] "$2" libvpx_intrinsics_avx2 avx2
   fi
 
   # arm neon
@@ -343,7 +344,6 @@ function gen_rtcd_header {
     --arch=$2 \
     --sym=vp8_rtcd \
     --config=$BASE_DIR/$TEMP_DIR/libvpx.config \
-    --disable-avx2 \
     $BASE_DIR/$LIBVPX_SRC_DIR/vp8/common/rtcd_defs.pl \
     > $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vp8_rtcd.h
 
@@ -351,7 +351,6 @@ function gen_rtcd_header {
     --arch=$2 \
     --sym=vp9_rtcd \
     --config=$BASE_DIR/$TEMP_DIR/libvpx.config \
-    --disable-avx2 \
     $BASE_DIR/$LIBVPX_SRC_DIR/vp9/common/vp9_rtcd_defs.pl \
     > $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vp9_rtcd.h
 
@@ -359,7 +358,6 @@ function gen_rtcd_header {
     --arch=$2 \
     --sym=vpx_scale_rtcd \
     --config=$BASE_DIR/$TEMP_DIR/libvpx.config \
-    --disable-avx2 \
     $BASE_DIR/$LIBVPX_SRC_DIR/vpx_scale/vpx_scale_rtcd.pl \
     > $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vpx_scale_rtcd.h
 
@@ -394,8 +392,7 @@ cp -R $LIBVPX_SRC_DIR $TEMP_DIR
 cd $TEMP_DIR
 
 echo "Generate config files."
-# TODO(joeyparrish) Enable AVX2 when broader VS2013 support is available
-all_platforms="--enable-external-build --enable-postproc --disable-install-srcs --enable-multi-res-encoding --enable-temporal-denoising --disable-unit-tests --disable-install-docs --disable-examples --disable-avx2"
+all_platforms="--enable-external-build --enable-postproc --disable-install-srcs --enable-multi-res-encoding --enable-temporal-denoising --disable-unit-tests --disable-install-docs --disable-examples --enable-vp9-temporal-denoising --enable-vp9-postproc --size-limit=16384x16384"
 gen_config_files linux/ia32 "--target=x86-linux-gcc --disable-ccache --enable-pic --enable-realtime-only ${all_platforms}"
 gen_config_files linux/x64 "--target=x86_64-linux-gcc --disable-ccache --enable-pic --enable-realtime-only ${all_platforms}"
 gen_config_files linux/arm "--target=armv6-linux-gcc --enable-pic --enable-realtime-only --disable-install-bins --disable-install-libs --disable-edsp ${all_platforms}"

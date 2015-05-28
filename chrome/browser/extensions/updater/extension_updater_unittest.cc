@@ -34,6 +34,8 @@
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
+#include "chrome/test/base/scoped_testing_local_state.h"
+#include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/crx_file/id_util.h"
 #include "components/update_client/update_query_params.h"
@@ -145,13 +147,14 @@ class MockExtensionDownloaderDelegate : public ExtensionDownloaderDelegate {
                                                Error,
                                                const PingResult&,
                                                const std::set<int>&));
-  MOCK_METHOD7(OnExtensionDownloadFinished, void(const std::string&,
-                                                 const base::FilePath&,
-                                                 bool,
-                                                 const GURL&,
-                                                 const std::string&,
-                                                 const PingResult&,
-                                                 const std::set<int>&));
+  MOCK_METHOD7(OnExtensionDownloadFinished,
+               void(const extensions::CRXFileInfo&,
+                    bool,
+                    const GURL&,
+                    const std::string&,
+                    const PingResult&,
+                    const std::set<int>&,
+                    const InstallCallback&));
   MOCK_METHOD2(GetPingDataForExtension,
                bool(const std::string&, ManifestFetchData::PingData*));
   MOCK_METHOD1(GetUpdateUrlData, std::string(const std::string&));
@@ -176,8 +179,9 @@ class MockExtensionDownloaderDelegate : public ExtensionDownloaderDelegate {
         .WillByDefault(Invoke(delegate,
             &ExtensionDownloaderDelegate::OnExtensionDownloadFailed));
     ON_CALL(*this, OnExtensionDownloadFinished(_, _, _, _, _, _, _))
-        .WillByDefault(Invoke(delegate,
-            &ExtensionDownloaderDelegate::OnExtensionDownloadFinished));
+        .WillByDefault(
+            Invoke(delegate,
+                   &ExtensionDownloaderDelegate::OnExtensionDownloadFinished));
     ON_CALL(*this, GetPingDataForExtension(_, _))
         .WillByDefault(Invoke(delegate,
             &ExtensionDownloaderDelegate::GetPingDataForExtension));
@@ -499,15 +503,14 @@ class ServiceForDownloadTests : public MockService {
     fake_crx_installers_[id] = crx_installer;
   }
 
-  bool UpdateExtension(const std::string& id,
-                       const base::FilePath& extension_path,
+  bool UpdateExtension(const CRXFileInfo& file,
                        bool file_ownership_passed,
                        CrxInstaller** out_crx_installer) override {
-    extension_id_ = id;
-    install_path_ = extension_path;
+    extension_id_ = file.extension_id;
+    install_path_ = file.path;
 
-    if (ContainsKey(fake_crx_installers_, id)) {
-      *out_crx_installer = fake_crx_installers_[id];
+    if (ContainsKey(fake_crx_installers_, extension_id_)) {
+      *out_crx_installer = fake_crx_installers_[extension_id_];
       return true;
     }
 
@@ -639,7 +642,8 @@ class ExtensionUpdaterTest : public testing::Test {
  public:
   ExtensionUpdaterTest()
       : thread_bundle_(
-            content::TestBrowserThreadBundle::IO_MAINLOOP) {
+            content::TestBrowserThreadBundle::IO_MAINLOOP),
+        testing_local_state_(TestingBrowserProcess::GetGlobal()) {
   }
 
   void SetUp() override {
@@ -1221,7 +1225,8 @@ class ExtensionUpdaterTest : public testing::Test {
       fetcher->set_response_code(200);
       fetcher->SetResponseFilePath(extension_file_path);
       EXPECT_CALL(delegate, OnExtensionDownloadFinished(
-          id, _, _, _, version.GetString(), _, requests));
+                                CRXFileInfo(id, extension_file_path, hash), _,
+                                _, version.GetString(), _, requests, _));
     }
     fetcher->delegate()->OnURLFetchComplete(fetcher);
 
@@ -1779,7 +1784,7 @@ class ExtensionUpdaterTest : public testing::Test {
     UpdateManifest::Results results;
     results.daystart_elapsed_seconds = 750;
 
-    updater.downloader_->HandleManifestResults(*fetch_data, &results);
+    updater.downloader_->HandleManifestResults(fetch_data.get(), &results);
     Time last_ping_day =
         service.extension_prefs()->LastPingDay(extension->id());
     EXPECT_FALSE(last_ping_day.is_null());
@@ -1904,6 +1909,7 @@ class ExtensionUpdaterTest : public testing::Test {
  private:
   content::TestBrowserThreadBundle thread_bundle_;
   content::InProcessUtilityThreadHelper in_process_utility_thread_helper_;
+  ScopedTestingLocalState testing_local_state_;
 
 #if defined OS_CHROMEOS
   chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;

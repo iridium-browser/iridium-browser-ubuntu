@@ -13,7 +13,7 @@
 namespace printing {
 
 PrintingContextSytemDialogWin::PrintingContextSytemDialogWin(Delegate* delegate)
-    : PrintingContextWin(delegate), dialog_box_(NULL) {
+    : PrintingContextWin(delegate) {
 }
 
 PrintingContextSytemDialogWin::~PrintingContextSytemDialogWin() {
@@ -25,7 +25,6 @@ void PrintingContextSytemDialogWin::AskUserForSettings(
     bool is_scripted,
     const PrintSettingsCallback& callback) {
   DCHECK(!in_print_job_);
-  dialog_box_dismissed_ = false;
 
   HWND window = GetRootWindow(delegate_->GetParentView());
   DCHECK(window);
@@ -70,18 +69,11 @@ void PrintingContextSytemDialogWin::AskUserForSettings(
   if (ShowPrintDialog(&dialog_options) != S_OK) {
     ResetSettings();
     callback.Run(FAILED);
+    return;
   }
 
   // TODO(maruel):  Support PD_PRINTTOFILE.
   callback.Run(ParseDialogResultEx(dialog_options));
-}
-
-void PrintingContextSytemDialogWin::Cancel() {
-  PrintingContextWin::Cancel();
-  if (dialog_box_) {
-    DestroyWindow(dialog_box_);
-    dialog_box_dismissed_ = true;
-  }
 }
 
 HRESULT PrintingContextSytemDialogWin::ShowPrintDialog(PRINTDLGEX* options) {

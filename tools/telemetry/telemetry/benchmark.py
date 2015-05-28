@@ -9,16 +9,16 @@ import shutil
 import sys
 import zipfile
 
-from telemetry import decorators
-from telemetry import page
 from telemetry.core import browser_finder
 from telemetry.core import command_line
 from telemetry.core import util
-from telemetry.user_story import user_story_runner
+from telemetry import decorators
+from telemetry import page
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.page import test_expectations
 from telemetry.results import results_options
+from telemetry.user_story import user_story_runner
 from telemetry.util import cloud_storage
 from telemetry.util import exception_formatter
 from telemetry.web_perf import timeline_based_measurement
@@ -33,9 +33,10 @@ class InvalidOptionsError(Exception):
 
 
 class BenchmarkMetadata(object):
-  def __init__(self, name, description=''):
+  def __init__(self, name, description='', rerun_options=None):
     self._name = name
     self._description = description
+    self._rerun_options = rerun_options
 
   @property
   def name(self):
@@ -44,6 +45,10 @@ class BenchmarkMetadata(object):
   @property
   def description(self):
       return self._description
+
+  @property
+  def rerun_options(self):
+      return self._rerun_options
 
 
 class Benchmark(command_line.Command):
@@ -77,19 +82,47 @@ class Benchmark(command_line.Command):
 
   @classmethod
   def Name(cls):
-    name = cls.__module__.split('.')[-1]
-    if hasattr(cls, 'tag'):
-      name += '.' + cls.tag
-    if hasattr(cls, 'page_set'):
-      name += '.' + cls.page_set.Name()
-    return name
+    return '%s.%s' % (cls.__module__.split('.')[-1], cls.__name__)
 
   @classmethod
   def AddCommandLineArgs(cls, parser):
+    group = optparse.OptionGroup(parser, '%s test options' % cls.Name())
     if hasattr(cls, 'AddBenchmarkCommandLineArgs'):
-      group = optparse.OptionGroup(parser, '%s test options' % cls.Name())
       cls.AddBenchmarkCommandLineArgs(group)
+
+    if cls.HasTraceRerunDebugOption():
+      group.add_option(
+          '--rerun-with-debug-trace',
+          action='store_true',
+          help='Rerun option that enables more extensive tracing.')
+
+    if group.option_list:
       parser.add_option_group(group)
+
+  @classmethod
+  def HasTraceRerunDebugOption(cls):
+    if hasattr(cls, 'HasBenchmarkTraceRerunDebugOption'):
+      if cls.HasBenchmarkTraceRerunDebugOption():
+        return True
+    return False
+
+  def GetTraceRerunCommands(self):
+    if self.HasTraceRerunDebugOption():
+      return [['Debug Trace', '--rerun-with-debug-trace']]
+    return []
+
+  def SetupTraceRerunOptions(self, browser_options, tbm_options):
+    if self.HasTraceRerunDebugOption():
+      if browser_options.rerun_with_debug_trace:
+        self.SetupBenchmarkDebugTraceRerunOptions(tbm_options)
+      else:
+        self.SetupBenchmarkDefaultTraceRerunOptions(tbm_options)
+
+  def SetupBenchmarkDefaultTraceRerunOptions(self, tbm_options):
+    """Setup tracing categories associated with default trace option."""
+
+  def SetupBenchmarkDebugTraceRerunOptions(self, tbm_options):
+    """Setup tracing categories associated with debug trace option."""
 
   @classmethod
   def SetArgumentDefaults(cls, parser):
@@ -105,11 +138,31 @@ class Benchmark(command_line.Command):
   def ProcessCommandLineArgs(cls, parser, args):
     pass
 
+  # pylint: disable=unused-argument
+  @classmethod
+  def ValueCanBeAddedPredicate(cls, value, is_first_result):
+    """Returns whether |value| can be added to the test results.
+
+    Override this method to customize the logic of adding values to test
+    results.
+
+    Args:
+      value: a value.Value instance.
+      is_first_result: True if |value| is the first result for its
+          corresponding user story.
+
+    Returns:
+      True if |value| should be added to the test results.
+      Otherwise, it returns False.
+    """
+    return True
+
   def CustomizeBrowserOptions(self, options):
     """Add browser options that are required by this benchmark."""
 
   def GetMetadata(self):
-    return BenchmarkMetadata(self.Name(), self.__doc__)
+    return BenchmarkMetadata(
+        self.Name(), self.__doc__, self.GetTraceRerunCommands())
 
   def Run(self, finder_options):
     """Run this test with the given options.
@@ -141,21 +194,23 @@ class Benchmark(command_line.Command):
     self._DownloadGeneratedProfileArchive(finder_options)
 
     benchmark_metadata = self.GetMetadata()
-    results = results_options.CreateResults(benchmark_metadata, finder_options)
-    try:
-      user_story_runner.Run(pt, us, expectations, finder_options, results,
-                            max_failures=self._max_failures)
-      return_code = min(254, len(results.failures))
-    except Exception:
-      exception_formatter.PrintFormattedException()
-      return_code = 255
+    with results_options.CreateResults(
+        benchmark_metadata, finder_options,
+        self.ValueCanBeAddedPredicate) as results:
+      try:
+        user_story_runner.Run(pt, us, expectations, finder_options, results,
+                              max_failures=self._max_failures)
+        return_code = min(254, len(results.failures))
+      except Exception:
+        exception_formatter.PrintFormattedException()
+        return_code = 255
 
-    bucket = cloud_storage.BUCKET_ALIASES[finder_options.upload_bucket]
-    if finder_options.upload_results:
-      results.UploadTraceFilesToCloud(bucket)
-      results.UploadProfilingFilesToCloud(bucket)
+      bucket = cloud_storage.BUCKET_ALIASES[finder_options.upload_bucket]
+      if finder_options.upload_results:
+        results.UploadTraceFilesToCloud(bucket)
+        results.UploadProfilingFilesToCloud(bucket)
 
-    results.PrintSummary()
+      results.PrintSummary()
     return return_code
 
   def _DownloadGeneratedProfileArchive(self, options):
@@ -175,6 +230,8 @@ class Benchmark(command_line.Command):
 
     # Download profile directory from cloud storage.
     found_browser = browser_finder.FindBrowser(options)
+    if found_browser.IsRemote():
+      return
     test_data_dir = os.path.join(util.GetChromiumSrcDir(), 'tools', 'perf',
         'generated_profiles',
         found_browser.target_os)
@@ -253,8 +310,10 @@ class Benchmark(command_line.Command):
           'Cannot override CreateTimelineBasedMeasurementOptions '
           'with a PageTest.')
       return self.test()  # pylint: disable=no-value-for-parameter
-    return timeline_based_measurement.TimelineBasedMeasurement(
-        self.CreateTimelineBasedMeasurementOptions())
+
+    opts = self.CreateTimelineBasedMeasurementOptions()
+    self.SetupTraceRerunOptions(options, opts)
+    return timeline_based_measurement.TimelineBasedMeasurement(opts)
 
   def CreatePageSet(self, options):  # pylint: disable=unused-argument
     """Get the page set this test will run on.

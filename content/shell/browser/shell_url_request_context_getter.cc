@@ -74,7 +74,7 @@ ShellURLRequestContextGetter::ShellURLRequestContextGetter(
       net_log_(net_log),
       request_interceptors_(request_interceptors.Pass()) {
   // Must first be created on the UI thread.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   std::swap(protocol_handlers_, *protocol_handlers);
 
@@ -103,7 +103,7 @@ net::ProxyService* ShellURLRequestContextGetter::GetProxyService() {
 }
 
 net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (!url_request_context_) {
     const base::CommandLine& command_line =
@@ -116,9 +116,9 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     storage_.reset(
         new net::URLRequestContextStorage(url_request_context_.get()));
     storage_->set_cookie_store(CreateCookieStore(CookieStoreConfig()));
-    storage_->set_channel_id_service(new net::ChannelIDService(
-        new net::DefaultChannelIDStore(NULL),
-        base::WorkerPool::GetTaskRunner(true)));
+    storage_->set_channel_id_service(make_scoped_ptr(
+        new net::ChannelIDService(new net::DefaultChannelIDStore(NULL),
+                                  base::WorkerPool::GetTaskRunner(true))));
     storage_->set_http_user_agent_settings(
         new net::StaticHttpUserAgentSettings(
             "en-us,en", GetShellUserAgent()));

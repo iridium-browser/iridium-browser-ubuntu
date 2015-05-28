@@ -116,17 +116,17 @@ WebInspector.CPUProfilerModel.prototype = {
     },
 
     /**
-     * @return {!Promise.<!ProfilerAgent.CPUProfile>}
+     * @return {!Promise.<?ProfilerAgent.CPUProfile>}
      */
     stopRecording: function()
     {
         /**
-         * @param {!{profile: !ProfilerAgent.CPUProfile}} value
-         * @return {!ProfilerAgent.CPUProfile}
+         * @param {?{profile: !ProfilerAgent.CPUProfile}} value
+         * @return {?ProfilerAgent.CPUProfile}
          */
         function extractProfile(value)
         {
-            return value.profile;
+            return value && value.profile;
         }
         this._isRecording = false;
         this.dispatchEventToListeners(WebInspector.CPUProfilerModel.EventTypes.ProfileStopped);
@@ -141,8 +141,3 @@ WebInspector.CPUProfilerModel.prototype = {
 
     __proto__: WebInspector.SDKModel.prototype
 }
-
-/**
- * @type {!WebInspector.CPUProfilerModel}
- */
-WebInspector.cpuProfilerModel;

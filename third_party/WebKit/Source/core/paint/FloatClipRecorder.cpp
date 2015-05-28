@@ -5,7 +5,7 @@
 #include "config.h"
 #include "core/paint/FloatClipRecorder.h"
 
-#include "core/rendering/PaintPhase.h"
+#include "core/layout/PaintPhase.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/DisplayItemList.h"
@@ -13,49 +13,30 @@
 
 namespace blink {
 
-FloatClipRecorder::FloatClipRecorder(GraphicsContext& context, DisplayItemClient client, const PaintPhase& paintPhase, const FloatRect& clipRect)
+FloatClipRecorder::FloatClipRecorder(GraphicsContext& context, const DisplayItemClientWrapper& client, PaintPhase paintPhase, const FloatRect& clipRect)
     : m_context(context)
     , m_client(client)
+    , m_clipType(DisplayItem::paintPhaseToFloatClipType(paintPhase))
 {
-    DisplayItem::Type type = paintPhaseToFloatClipType(paintPhase);
-    OwnPtr<FloatClipDisplayItem> clipDisplayItem = FloatClipDisplayItem::create(m_client, type, clipRect);
-
     if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
         ASSERT(m_context.displayItemList());
-        m_context.displayItemList()->add(clipDisplayItem.release());
+        m_context.displayItemList()->add(FloatClipDisplayItem::create(m_client, m_clipType, clipRect));
     } else {
-        clipDisplayItem->replay(&m_context);
+        FloatClipDisplayItem clipDisplayItem(m_client, m_clipType, clipRect);
+        clipDisplayItem.replay(m_context);
     }
 }
 
 FloatClipRecorder::~FloatClipRecorder()
 {
-    OwnPtr<EndFloatClipDisplayItem> endClipDisplayItem = EndFloatClipDisplayItem::create(m_client);
+    DisplayItem::Type endType = DisplayItem::floatClipTypeToEndFloatClipType(m_clipType);
     if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
         ASSERT(m_context.displayItemList());
-        m_context.displayItemList()->add(endClipDisplayItem.release());
+        m_context.displayItemList()->add(EndFloatClipDisplayItem::create(m_client, endType));
     } else {
-        endClipDisplayItem->replay(&m_context);
+        EndFloatClipDisplayItem endClipDisplayItem(m_client, endType);
+        endClipDisplayItem.replay(m_context);
     }
-}
-
-DisplayItem::Type FloatClipRecorder::paintPhaseToFloatClipType(PaintPhase paintPhase)
-{
-    switch (paintPhase) {
-    case PaintPhaseForeground:
-        return DisplayItem::FloatClipForeground;
-        break;
-    case PaintPhaseSelection:
-        return DisplayItem::FloatClipSelection;
-        break;
-    case PaintPhaseSelfOutline:
-        return DisplayItem::FloatClipSelfOutline;
-        break;
-    default:
-        ASSERT_NOT_REACHED();
-    }
-    // This should never happen.
-    return DisplayItem::FloatClipForeground;
 }
 
 } // namespace blink

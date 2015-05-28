@@ -5,9 +5,11 @@
 #include "config.h"
 #include "core/paint/LayerClipRecorder.h"
 
-#include "core/rendering/RenderView.h"
-#include "core/rendering/RenderingTestHelper.h"
-#include "core/rendering/compositing/RenderLayerCompositor.h"
+#include "core/layout/LayoutTestHelper.h"
+#include "core/layout/LayoutView.h"
+#include "core/layout/compositing/DeprecatedPaintLayerCompositor.h"
+#include "core/paint/DeprecatedPaintLayer.h"
+#include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/paint/DisplayItemList.h"
@@ -18,11 +20,11 @@ namespace {
 
 class LayerClipRecorderTest : public RenderingTest {
 public:
-    LayerClipRecorderTest() : m_renderView(nullptr) { }
+    LayerClipRecorderTest() : m_layoutView(nullptr) { }
 
 protected:
-    RenderView* renderView() { return m_renderView; }
-    DisplayItemList& rootDisplayItemList() { return *renderView()->layer()->graphicsLayerBacking()->displayItemList(); }
+    LayoutView& layoutView() { return *m_layoutView; }
+    DisplayItemList& rootDisplayItemList() { return *layoutView().layer()->graphicsLayerBacking()->displayItemList(); }
 
 private:
     virtual void SetUp() override
@@ -32,28 +34,53 @@ private:
         RenderingTest::SetUp();
         enableCompositing();
 
-        m_renderView = document().view()->renderView();
-        ASSERT_TRUE(m_renderView);
+        m_layoutView = document().view()->layoutView();
+        ASSERT_TRUE(m_layoutView);
     }
 
-    RenderView* m_renderView;
+    LayoutView* m_layoutView;
 };
 
-void drawClip(GraphicsContext* context, RenderView* renderer, PaintPhase phase, const FloatRect& bound)
+void drawEmptyClip(GraphicsContext& context, LayoutView& layoutView, PaintPhase phase, const FloatRect& bound)
 {
-    IntRect rect(1, 1, 9, 9);
+    LayoutRect rect(1, 1, 9, 9);
     ClipRect clipRect(rect);
-    LayerClipRecorder LayerClipRecorder(renderer->compositor()->rootRenderLayer()->renderer(), context, DisplayItem::ClipLayerForeground, clipRect, 0, LayoutPoint(), PaintLayerFlags());
+    LayerClipRecorder LayerClipRecorder(context, *layoutView.compositor()->rootLayer()->layoutObject(), DisplayItem::ClipLayerForeground, clipRect, 0, LayoutPoint(), PaintLayerFlags());
 }
 
-TEST_F(LayerClipRecorderTest, LayerClipRecorderTest_Single)
+void drawRectInClip(GraphicsContext& context, LayoutView& layoutView, PaintPhase phase, const FloatRect& bound)
+{
+    IntRect rect(1, 1, 9, 9);
+    ClipRect clipRect((LayoutRect(rect)));
+    LayerClipRecorder LayerClipRecorder(context, *layoutView.compositor()->rootLayer()->layoutObject(), DisplayItem::ClipLayerForeground, clipRect, 0, LayoutPoint(), PaintLayerFlags());
+    LayoutObjectDrawingRecorder drawingRecorder(context, layoutView, phase, bound);
+    if (!drawingRecorder.canUseCachedDrawing())
+        context.drawRect(rect);
+}
+
+TEST_F(LayerClipRecorderTest, Single)
 {
     GraphicsContext context(nullptr, &rootDisplayItemList());
-    FloatRect bound = renderView()->viewRect();
-    EXPECT_EQ((size_t)0, rootDisplayItemList().paintList().size());
+    FloatRect bound = layoutView().viewRect();
+    EXPECT_EQ((size_t)0, rootDisplayItemList().displayItems().size());
 
-    drawClip(&context, renderView(), PaintPhaseForeground, bound);
-    EXPECT_EQ((size_t)2, rootDisplayItemList().paintList().size());
+    drawRectInClip(context, layoutView(), PaintPhaseForeground, bound);
+    rootDisplayItemList().commitNewDisplayItems();
+    EXPECT_EQ((size_t)3, rootDisplayItemList().displayItems().size());
+    EXPECT_TRUE(rootDisplayItemList().displayItems()[0]->isClip());
+    EXPECT_TRUE(rootDisplayItemList().displayItems()[1]->isDrawing());
+    EXPECT_TRUE(rootDisplayItemList().displayItems()[2]->isEndClip());
+}
+
+TEST_F(LayerClipRecorderTest, Empty)
+{
+    GraphicsContext context(nullptr, &rootDisplayItemList());
+    FloatRect bound = layoutView().viewRect();
+    EXPECT_EQ((size_t)0, rootDisplayItemList().displayItems().size());
+
+    drawEmptyClip(context, layoutView(), PaintPhaseForeground, bound);
+    rootDisplayItemList().commitNewDisplayItems();
+    EXPECT_EQ((size_t)0, rootDisplayItemList().displayItems().size());
 }
 
 }

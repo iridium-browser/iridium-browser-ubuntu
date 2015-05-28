@@ -13,7 +13,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/metrics/stats_counters.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
@@ -41,7 +40,7 @@ using base::TimeTicks;
 
 namespace {
 
-const char* kIndexName = "index";
+const char kIndexName[] = "index";
 
 // Seems like ~240 MB correspond to less than 50k entries for 99% of the people.
 // Note that the actual target is to keep the index table load factor under 55%
@@ -354,6 +353,9 @@ int BackendImpl::SyncDoomEntry(const std::string& key) {
 }
 
 int BackendImpl::SyncDoomAllEntries() {
+  if (disabled_)
+    return net::ERR_FAILED;
+
   // This is not really an error, but it is an interesting condition.
   ReportError(ERR_CACHE_DOOMED);
   stats_.OnEvent(Stats::DOOM_CACHE);
@@ -505,7 +507,6 @@ EntryImpl* BackendImpl::OpenEntryImpl(const std::string& key) {
             static_cast<base::HistogramBase::Sample>(use_hours));
   stats_.OnEvent(Stats::OPEN_HIT);
   web_fonts_histogram::RecordCacheHit(cache_entry);
-  SIMPLE_STATS_COUNTER("disk_cache.hit");
   return cache_entry;
 }
 
@@ -601,7 +602,6 @@ EntryImpl* BackendImpl::CreateEntryImpl(const std::string& key) {
 
   CACHE_UMA(AGE_MS, "CreateTime", 0, start);
   stats_.OnEvent(Stats::CREATE_HIT);
-  SIMPLE_STATS_COUNTER("disk_cache.miss");
   Trace("create entry hit ");
   FlushIndex();
   cache_entry->AddRef();
@@ -677,7 +677,8 @@ EntryImpl* BackendImpl::OpenNextEntryImpl(Rankings::Iterator* iterator) {
 }
 
 bool BackendImpl::SetMaxSize(int max_bytes) {
-  COMPILE_ASSERT(sizeof(max_bytes) == sizeof(max_size_), unsupported_int_model);
+  static_assert(sizeof(max_bytes) == sizeof(max_size_),
+                "unsupported int model");
   if (max_bytes < 0)
     return false;
 

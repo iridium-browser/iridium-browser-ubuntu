@@ -68,7 +68,7 @@ std::string GetHistogramName(Origin origin, uint8 experiment_id,
     default:
       NOTREACHED();
       break;
-  };
+  }
 
   // Dummy return value to make the compiler happy.
   NOTREACHED();
@@ -396,46 +396,6 @@ void PrerenderHistograms::RecordFinalStatus(
         "FinalStatusMatchComplete", origin, experiment_id,
         UMA_HISTOGRAM_ENUMERATION(name, final_status, FINAL_STATUS_MAX));
   }
-}
-
-void PrerenderHistograms::RecordEvent(Origin origin, uint8 experiment_id,
-                                      PrerenderEvent event) const {
-  DCHECK_LT(event, PRERENDER_EVENT_MAX);
-  PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(
-      "Event", origin, experiment_id,
-      UMA_HISTOGRAM_ENUMERATION(name, event, PRERENDER_EVENT_MAX));
-}
-
-void PrerenderHistograms::RecordCookieStatus(Origin origin,
-                                             uint8 experiment_id,
-                                             int cookie_status) const {
-  DCHECK_GE(cookie_status, 0);
-  DCHECK_LT(cookie_status, PrerenderContents::kNumCookieStatuses);
-  PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(
-      "CookieStatus", origin, experiment_id,
-      UMA_HISTOGRAM_ENUMERATION(name, cookie_status,
-                                PrerenderContents::kNumCookieStatuses));
-}
-
-void PrerenderHistograms::RecordCookieSendType(
-    Origin origin,
-    uint8 experiment_id,
-    int cookie_send_type) const {
-  DCHECK_GE(cookie_send_type, 0);
-  DCHECK_LT(cookie_send_type, PrerenderContents::kNumCookieSendTypes);
-  PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(
-      "CookieSendType", origin, experiment_id,
-      UMA_HISTOGRAM_ENUMERATION(name, cookie_send_type,
-                                PrerenderContents::kNumCookieSendTypes));
-}
-
-void PrerenderHistograms::RecordPrerenderPageVisitedStatus(
-    Origin origin,
-    uint8 experiment_id,
-    bool visited_before) const {
-  PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(
-      "PageVisitedStatus", origin, experiment_id,
-      UMA_HISTOGRAM_BOOLEAN(name, visited_before));
 }
 
 void PrerenderHistograms::RecordNetworkBytes(Origin origin,

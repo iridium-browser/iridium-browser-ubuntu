@@ -10,6 +10,7 @@
 #include "base/process/kill.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
@@ -240,9 +241,8 @@ scoped_ptr<net::test_server::HttpResponse> CrossSiteRedirectResponseHandler(
     return scoped_ptr<net::test_server::HttpResponse>();
 
   // Replace the host of the URL with the one passed in the URL.
-  std::string host = params.substr(0, slash);
   GURL::Replacements replace_host;
-  replace_host.SetHostStr(host);
+  replace_host.SetHostStr(base::StringPiece(params).substr(0, slash));
   GURL redirect_server = server_base_url.ReplaceComponents(replace_host);
 
   // Append the real part of the path to the new URL.
@@ -348,7 +348,22 @@ void WaitForResizeComplete(WebContents* web_contents) {
     resize_observer.Wait();
   }
 }
-#endif  // USE_AURA
+#elif defined(OS_ANDROID)
+bool IsResizeComplete(RenderWidgetHostImpl* widget_host) {
+  return !widget_host->resize_ack_pending_for_testing();
+}
+
+void WaitForResizeComplete(WebContents* web_contents) {
+  RenderWidgetHostImpl* widget_host =
+      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  if (!IsResizeComplete(widget_host)) {
+    WindowedNotificationObserver resize_observer(
+        NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
+        base::Bind(IsResizeComplete, widget_host));
+    resize_observer.Wait();
+  }
+}
+#endif
 
 void SimulateMouseClick(WebContents* web_contents,
                         int modifiers,
@@ -393,6 +408,20 @@ void SimulateTapAt(WebContents* web_contents, const gfx::Point& point) {
   tap.type = blink::WebGestureEvent::GestureTap;
   tap.x = point.x();
   tap.y = point.y();
+  tap.modifiers = blink::WebInputEvent::ControlKey;
+  RenderWidgetHostImpl* widget_host =
+      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  widget_host->ForwardGestureEvent(tap);
+}
+
+void SimulateTapWithModifiersAt(WebContents* web_contents,
+                                unsigned modifiers,
+                                const gfx::Point& point) {
+  blink::WebGestureEvent tap;
+  tap.type = blink::WebGestureEvent::GestureTap;
+  tap.x = point.x();
+  tap.y = point.y();
+  tap.modifiers = modifiers;
   RenderWidgetHostImpl* widget_host =
       RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
   widget_host->ForwardGestureEvent(tap);
@@ -723,6 +752,28 @@ void RunTaskAndWaitForInterstitialDetach(content::WebContents* web_contents,
   loop_runner->Run();
 }
 
+bool WaitForRenderFrameReady(RenderFrameHost* rfh) {
+  if (!rfh)
+    return false;
+  std::string result;
+  EXPECT_TRUE(
+      content::ExecuteScriptAndExtractString(
+          rfh,
+          "(function() {"
+          "  var done = false;"
+          "  function checkState() {"
+          "    if (!done && document.readyState == 'complete') {"
+          "      done = true;"
+          "      window.domAutomationController.send('pageLoadComplete');"
+          "    }"
+          "  }"
+          "  checkState();"
+          "  document.addEventListener('readystatechange', checkState);"
+          "})();",
+          &result));
+  return result == "pageLoadComplete";
+}
+
 TitleWatcher::TitleWatcher(WebContents* web_contents,
                            const base::string16& expected_title)
     : WebContentsObserver(web_contents),
@@ -744,7 +795,7 @@ const base::string16& TitleWatcher::WaitAndGetTitle() {
   return observed_title_;
 }
 
-void TitleWatcher::DidStopLoading(RenderViewHost* render_view_host) {
+void TitleWatcher::DidStopLoading() {
   // When navigating through the history, the restored NavigationEntry's title
   // will be used. If the entry ends up having the same title after we return
   // to it, as will usually be the case, then WebContentsObserver::TitleSet

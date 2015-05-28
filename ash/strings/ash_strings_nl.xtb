@@ -3,11 +3,13 @@
 <translation id="6895424601869865703">Een account toevoegen voor <ph name="GIVEN_NAME"/></translation>
 <translation id="1270290102613614947">Schermtoetsenbord uitgeschakeld</translation>
 <translation id="1057289296854808272">Rotatie aan (Tik hier om te wijzigen)</translation>
+<translation id="5548285847212963613">Met de extensie '<ph name="EXTENSION_NAME"/>' kun je verbinding maken met dit netwerk.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> en <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">Overloopknop</translation>
 <translation id="7904094684485781019">De beheerder van dit account heeft toegang tot meerdere accounts niet toegestaan.</translation>
 <translation id="8673028979667498656">270°</translation>
 <translation id="5571066253365925590">Bluetooth ingeschakeld</translation>
+<translation id="5895138241574237353">Opnieuw starten</translation>
 <translation id="6310121235600822547"><ph name="DISPLAY_NAME"/> is gedraaid naar <ph name="ROTATION"/></translation>
 <translation id="9074739597929991885">Bluetooth</translation>
 <translation id="2268130516524549846">Bluetooth uitgeschakeld</translation>
@@ -58,7 +60,9 @@ Druk op Shift + Alt om te schakelen.j</translation>
 <translation id="8676770494376880701">Laag-vermogen-lader aangesloten</translation>
 <translation id="5238774010593222950">Kan niet inloggen op een ander account.</translation>
 <translation id="1723752762323179280">Sessie sluiten</translation>
+<translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">Ja</translation>
+<translation id="4804818685124855865">Verbinding verbreken</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">Uitloggen</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -77,7 +81,6 @@ Druk op Shift + Alt om te schakelen.j</translation>
 <translation id="5825747213122829519">Je invoermethode is gewijzigd in <ph name="INPUT_METHOD_ID"/>.
 Druk op Shift + Alt om te schakelen.</translation>
 <translation id="2562916301614567480">Privénetwerk</translation>
-<translation id="2982222131142145681"><ph name="DEVICE_NAME"/> (HDMI)</translation>
 <translation id="4250680216510889253">Nee</translation>
 <translation id="4379753398862151997">Het lijkt erop dat dit niet werkt. Het beeldscherm wordt niet ondersteund.</translation>
 <translation id="6426039856985689743">Mobiele gegevens uitschakelen</translation>
@@ -159,6 +162,7 @@ Druk op Shift + Alt om te schakelen.</translation>
 <translation id="9201131092683066720">De accu is <ph name="PERCENTAGE"/>% vol.</translation>
 <translation id="2983818520079887040">Instellingen...</translation>
 <translation id="6452181791372256707">Weigeren</translation>
+<translation id="1330145147221172764">Schermtoetsenbord inschakelen</translation>
 <translation id="1195412055398077112">overscan</translation>
 <translation id="607652042414456612">Je computer is vindbaar voor Bluetooth-apparaten in de buurt en wordt weergegeven als '<ph name="NAME"/>' met adres <ph name="ADDRESS"/></translation>
 <translation id="112308213915226829">Plank automatisch verbergen</translation>
@@ -190,15 +194,18 @@ Druk op Zoeken of Shift om te annuleren.</translation>
 <translation id="7097613348211027502">ChromeVox (gesproken feedback) is ingeschakeld.
 Druk op Ctrl+Alt+Z om uit te schakelen.</translation>
 <translation id="5045002648206642691">Instellingen voor Google Drive...</translation>
+<translation id="1510238584712386396">Opstartprogramma</translation>
 <translation id="7209101170223508707">CAPS LOCK is ingeschakeld.
 Druk op Alt+Zoeken of Shift om te annuleren.</translation>
 <translation id="8940956008527784070">Accu is bijna leeg (<ph name="PERCENTAGE"/>%)</translation>
 <translation id="4918086044614829423">Accepteren</translation>
 <translation id="5102001756192215136"><ph name="HOUR"/>:<ph name="MINUTE"/> resterend</translation>
 <translation id="3009178788565917040">Uitgang</translation>
+<translation id="3147142846278915599">Launcher (apps synchroniseren...)</translation>
 <translation id="6911468394164995108">Verbinding met ander netwerk maken...</translation>
 <translation id="3678715477168044796"><ph name="DISPLAY_NAME"/>: <ph name="ANNOTATION"/></translation>
 <translation id="412065659894267608"><ph name="HOUR"/>u <ph name="MINUTE"/>m tot volledig opgeladen</translation>
 <translation id="3077734595579995578">shift</translation>
 <translation id="6359806961507272919">Sms van <ph name="PHONE_NUMBER"/></translation>
+<translation id="4053612967614057854">Schermtoetsenbord uitschakelen</translation>
 </translationbundle>

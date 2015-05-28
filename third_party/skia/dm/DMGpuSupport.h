@@ -1,3 +1,10 @@
+/*
+ * Copyright 2014 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
 #ifndef DMGpuSupport_DEFINED
 #define DMGpuSupport_DEFINED
 
@@ -41,6 +48,12 @@ enum GrGLStandard {
     kGLES_GrGLStandard
 };
 static const int kGrGLStandardCnt = 3;
+
+class GrContext {
+public:
+    void dumpCacheStats(SkString*) const {}
+    void dumpGpuStats(SkString*) const {}
+};
 
 class GrContextFactory {
 public:

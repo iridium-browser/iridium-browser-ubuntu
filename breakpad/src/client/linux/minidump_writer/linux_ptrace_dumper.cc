@@ -130,7 +130,7 @@ bool LinuxPtraceDumper::BuildProcPath(char* path, pid_t pid,
   return true;
 }
 
-void LinuxPtraceDumper::CopyFromProcess(void* dest, pid_t child,
+bool LinuxPtraceDumper::CopyFromProcess(void* dest, pid_t child,
                                         const void* src, size_t length) {
   unsigned long tmp = 55;
   size_t done = 0;
@@ -146,6 +146,7 @@ void LinuxPtraceDumper::CopyFromProcess(void* dest, pid_t child,
     my_memcpy(local + done, &tmp, l);
     done += l;
   }
+  return true;
 }
 
 // Read thread info from /proc/$pid/status.
@@ -282,8 +283,10 @@ bool LinuxPtraceDumper::ThreadsSuspend() {
       // If the thread either disappeared before we could attach to it, or if
       // it was part of the seccomp sandbox's trusted code, it is OK to
       // silently drop it from the minidump.
-      my_memmove(&threads_[i], &threads_[i+1],
-                 (threads_.size() - i - 1) * sizeof(threads_[i]));
+      if (i < threads_.size() - 1) {
+        my_memmove(&threads_[i], &threads_[i + 1],
+                   (threads_.size() - i - 1) * sizeof(threads_[i]));
+      }
       threads_.resize(threads_.size() - 1);
       --i;
     }

@@ -12,6 +12,7 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScope.h"
+#include "platform/LayoutTestSupport.h"
 #include "platform/NotImplemented.h"
 #include "public/platform/WebServiceWorkerEventResult.h"
 #include "wtf/Assertions.h"
@@ -20,6 +21,21 @@
 #include <v8.h>
 
 namespace blink {
+
+namespace {
+
+// Timeout before a service worker that was given window interaction
+// permission loses them. The unit is seconds.
+const unsigned kWindowInteractionTimeout = 10;
+const unsigned kWindowInteractionTimeoutForTest = 1;
+
+unsigned windowInteractionTimeout()
+{
+    return LayoutTestSupport::isRunningLayoutTest()
+        ? kWindowInteractionTimeoutForTest : kWindowInteractionTimeout;
+}
+
+} // anonymous namespace
 
 class WaitUntilObserver::ThenFunction final : public ScriptFunction {
 public:
@@ -34,7 +50,7 @@ public:
         return self->bindToV8Function();
     }
 
-    virtual void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_observer);
         ScriptFunction::trace(visitor);
@@ -70,6 +86,14 @@ WaitUntilObserver* WaitUntilObserver::create(ExecutionContext* context, EventTyp
 
 void WaitUntilObserver::willDispatchEvent()
 {
+    // When handling a notificationclick event, we want to allow one window to
+    // be focused or opened. These calls are allowed between the call to
+    // willDispatchEvent() and the last call to decrementPendingActivity(). If
+    // waitUntil() isn't called, that means between willDispatchEvent() and
+    // didDispatchEvent().
+    if (m_type == NotificationClick)
+        executionContext()->allowWindowInteraction();
+
     incrementPendingActivity();
 }
 
@@ -92,11 +116,12 @@ void WaitUntilObserver::waitUntil(ScriptState* scriptState, const ScriptValue& v
         return;
 
     // When handling a notificationclick event, we want to allow one window to
-    // be focused. Regardless of whether one window was focused,
-    // |consumeWindowFocus| will be called when all the pending activities will
-    // be resolved.
+    // be focused or opened. See comments in ::willDispatchEvent(). When
+    // waitUntil() is being used, opening or closing a window must happen in a
+    // timeframe specified by windowInteractionTimeout(), otherwise the calls
+    // will fail.
     if (m_type == NotificationClick)
-        executionContext()->allowWindowFocus();
+        m_consumeWindowInteractionTimer.startOneShot(windowInteractionTimeout(), FROM_HERE);
 
     incrementPendingActivity();
     ScriptPromise::cast(scriptState, value).then(
@@ -111,6 +136,7 @@ WaitUntilObserver::WaitUntilObserver(ExecutionContext* context, EventType type, 
     , m_pendingActivity(0)
     , m_hasError(false)
     , m_eventDispatched(false)
+    , m_consumeWindowInteractionTimer(this, &WaitUntilObserver::consumeWindowInteraction)
 {
 }
 
@@ -144,16 +170,24 @@ void WaitUntilObserver::decrementPendingActivity()
         break;
     case NotificationClick:
         client->didHandleNotificationClickEvent(m_eventID, result);
-        executionContext()->consumeWindowFocus();
+        m_consumeWindowInteractionTimer.stop();
+        consumeWindowInteraction(nullptr);
         break;
     case Push:
         client->didHandlePushEvent(m_eventID, result);
         break;
     }
-    observeContext(0);
+    setContext(nullptr);
 }
 
-void WaitUntilObserver::trace(Visitor* visitor)
+void WaitUntilObserver::consumeWindowInteraction(Timer<WaitUntilObserver>*)
+{
+    if (!executionContext())
+        return;
+    executionContext()->consumeWindowInteraction();
+}
+
+DEFINE_TRACE(WaitUntilObserver)
 {
     ContextLifecycleObserver::trace(visitor);
 }

@@ -32,9 +32,12 @@
 #include "web/WebPagePopupImpl.h"
 
 #include "core/dom/ContextFeatures.h"
+#include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/PinchViewport.h"
 #include "core/frame/Settings.h"
+#include "core/layout/LayoutView.h"
 #include "core/loader/EmptyClients.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/Chrome.h"
@@ -43,11 +46,11 @@
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/page/PagePopupClient.h"
-#include "core/rendering/RenderView.h"
 #include "modules/accessibility/AXObject.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/LayoutTestSupport.h"
+#include "platform/ScriptForbiddenScope.h"
 #include "platform/TraceEvent.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebCompositeAndReadbackAsyncCallback.h"
@@ -65,7 +68,7 @@ namespace blink {
 
 class PagePopupChromeClient : public EmptyChromeClient {
     WTF_MAKE_NONCOPYABLE(PagePopupChromeClient);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(PagePopupChromeClient);
 
 public:
     explicit PagePopupChromeClient(WebPagePopupImpl* popup)
@@ -74,24 +77,24 @@ public:
         ASSERT(m_popup->widgetClient());
     }
 
+    virtual void setWindowRect(const IntRect& rect) override
+    {
+        m_popup->m_windowRectInScreen = rect;
+        m_popup->widgetClient()->setWindowRect(m_popup->m_windowRectInScreen);
+    }
+
 private:
     virtual void closeWindowSoon() override
     {
         m_popup->closePopup();
     }
 
-    virtual FloatRect windowRect() override
+    virtual IntRect windowRect() override
     {
-        return FloatRect(m_popup->m_windowRectInScreen.x, m_popup->m_windowRectInScreen.y, m_popup->m_windowRectInScreen.width, m_popup->m_windowRectInScreen.height);
+        return IntRect(m_popup->m_windowRectInScreen.x, m_popup->m_windowRectInScreen.y, m_popup->m_windowRectInScreen.width, m_popup->m_windowRectInScreen.height);
     }
 
-    virtual void setWindowRect(const FloatRect& rect) override
-    {
-        m_popup->m_windowRectInScreen = IntRect(rect);
-        m_popup->widgetClient()->setWindowRect(m_popup->m_windowRectInScreen);
-    }
-
-    virtual IntRect rootViewToScreen(const IntRect& rect) const override
+    virtual IntRect viewportToScreen(const IntRect& rect) const override
     {
         IntRect rectInScreen(rect);
         rectInScreen.move(m_popup->m_windowRectInScreen.x, m_popup->m_windowRectInScreen.y);
@@ -136,9 +139,9 @@ private:
         return m_popup->m_webView;
     }
 
-    virtual FloatSize minimumWindowSize() const override
+    virtual IntSize minimumWindowSize() const override
     {
-        return FloatSize(0, 0);
+        return IntSize(0, 0);
     }
 
     virtual void setCursor(const Cursor& cursor) override
@@ -173,6 +176,12 @@ private:
             m_popup->m_webView->client()->postAccessibilityEvent(WebAXObject(obj), static_cast<WebAXEvent>(notification));
     }
 
+    virtual void setToolTip(const String& tooltipText, TextDirection dir) override
+    {
+        if (m_popup->m_webView->client())
+            m_popup->m_webView->client()->setToolTipText(tooltipText, toWebTextDirection(dir));
+    }
+
     WebPagePopupImpl* m_popup;
 };
 
@@ -205,7 +214,7 @@ WebPagePopupImpl::~WebPagePopupImpl()
     ASSERT(!m_page);
 }
 
-bool WebPagePopupImpl::initialize(WebViewImpl* webView, PagePopupClient* popupClient, const IntRect&)
+bool WebPagePopupImpl::initialize(WebViewImpl* webView, PagePopupClient* popupClient)
 {
     ASSERT(webView);
     ASSERT(popupClient);
@@ -236,6 +245,7 @@ bool WebPagePopupImpl::initializePage()
     m_page->settings().setDeviceSupportsTouch(m_webView->page()->settings().deviceSupportsTouch());
     // FIXME: Should we support enabling a11y while a popup is shown?
     m_page->settings().setAccessibilityEnabled(m_webView->page()->settings().accessibilityEnabled());
+    m_page->settings().setScrollAnimatorEnabled(m_webView->page()->settings().scrollAnimatorEnabled());
 
     provideContextFeaturesTo(*m_page, adoptPtr(new PagePopupFeaturesClient()));
     static FrameLoaderClient* emptyFrameLoaderClient = new EmptyFrameLoaderClient();
@@ -249,13 +259,23 @@ bool WebPagePopupImpl::initializePage()
         cache->childrenChanged(&m_popupClient->ownerElement());
 
     ASSERT(frame->localDOMWindow());
-    DOMWindowPagePopup::install(*frame->localDOMWindow(), m_popupClient);
+    DOMWindowPagePopup::install(*frame->localDOMWindow(), *this, m_popupClient);
     ASSERT(m_popupClient->ownerElement().document().existingAXObjectCache() == frame->document()->existingAXObjectCache());
 
     RefPtr<SharedBuffer> data = SharedBuffer::create();
     m_popupClient->writeDocument(data.get());
     frame->loader().load(FrameLoadRequest(0, blankURL(), SubstituteData(data, "text/html", "UTF-8", KURL(), ForceSynchronousLoad)));
+
     return true;
+}
+
+void WebPagePopupImpl::postMessage(const String& message)
+{
+    if (!m_page)
+        return;
+    ScriptForbiddenScope::AllowUserAgentScript allowScript;
+    if (LocalDOMWindow* window = toLocalFrame(m_page->mainFrame())->localDOMWindow())
+        window->dispatchEvent(MessageEvent::create(message));
 }
 
 void WebPagePopupImpl::destroyPage()
@@ -276,7 +296,12 @@ AXObject* WebPagePopupImpl::rootAXObject()
         return 0;
     AXObjectCache* cache = document->axObjectCache();
     ASSERT(cache);
-    return toAXObjectCacheImpl(cache)->getOrCreate(document->renderView());
+    return toAXObjectCacheImpl(cache)->getOrCreate(document->layoutView());
+}
+
+void WebPagePopupImpl::setWindowRect(const IntRect& rect)
+{
+    m_chromeClient->setWindowRect(rect);
 }
 
 void WebPagePopupImpl::setRootGraphicsLayer(GraphicsLayer* layer)
@@ -348,7 +373,7 @@ void WebPagePopupImpl::layout()
 void WebPagePopupImpl::paint(WebCanvas* canvas, const WebRect& rect)
 {
     if (!m_closing)
-        PageWidgetDelegate::paint(*m_page, 0, canvas, rect, PageWidgetDelegate::Opaque, *m_page->deprecatedLocalMainFrame());
+        PageWidgetDelegate::paint(*m_page, 0, canvas, rect, *m_page->deprecatedLocalMainFrame());
 }
 
 void WebPagePopupImpl::resize(const WebSize& newSize)
@@ -356,23 +381,22 @@ void WebPagePopupImpl::resize(const WebSize& newSize)
     m_windowRectInScreen = WebRect(m_windowRectInScreen.x, m_windowRectInScreen.y, newSize.width, newSize.height);
     m_widgetClient->setWindowRect(m_windowRectInScreen);
 
-    if (m_page)
+    if (m_page) {
         toLocalFrame(m_page->mainFrame())->view()->resize(newSize);
+        m_page->frameHost().pinchViewport().setSize(newSize);
+    }
+
     m_widgetClient->didInvalidateRect(WebRect(0, 0, newSize.width, newSize.height));
 }
 
-bool WebPagePopupImpl::handleKeyEvent(const WebKeyboardEvent&)
+bool WebPagePopupImpl::handleKeyEvent(const WebKeyboardEvent& event)
 {
-    // The main WebView receives key events and forward them to this via handleKeyEvent().
-    ASSERT_NOT_REACHED();
-    return false;
+    return handleKeyEvent(PlatformKeyboardEventBuilder(event));
 }
 
-bool WebPagePopupImpl::handleCharEvent(const WebKeyboardEvent&)
+bool WebPagePopupImpl::handleCharEvent(const WebKeyboardEvent& event)
 {
-    // The main WebView receives key events and forward them to this via handleKeyEvent().
-    ASSERT_NOT_REACHED();
-    return false;
+    return handleKeyEvent(PlatformKeyboardEventBuilder(event));
 }
 
 bool WebPagePopupImpl::handleGestureEvent(const WebGestureEvent& event)
@@ -381,6 +405,27 @@ bool WebPagePopupImpl::handleGestureEvent(const WebGestureEvent& event)
         return false;
     LocalFrame& frame = *toLocalFrame(m_page->mainFrame());
     return frame.eventHandler().handleGestureEvent(PlatformGestureEventBuilder(frame.view(), event));
+}
+
+void WebPagePopupImpl::handleMouseDown(LocalFrame& mainFrame, const WebMouseEvent& event)
+{
+    if (isMouseEventInWindow(event))
+        PageWidgetEventHandler::handleMouseDown(mainFrame, event);
+    else
+        cancel();
+}
+
+bool WebPagePopupImpl::handleMouseWheel(LocalFrame& mainFrame, const WebMouseWheelEvent& event)
+{
+    if (isMouseEventInWindow(event))
+        return PageWidgetEventHandler::handleMouseWheel(mainFrame, event);
+    cancel();
+    return false;
+}
+
+bool WebPagePopupImpl::isMouseEventInWindow(const WebMouseEvent& event)
+{
+    return IntRect(0, 0, m_windowRectInScreen.width, m_windowRectInScreen.height).contains(IntPoint(event.x, event.y));
 }
 
 bool WebPagePopupImpl::handleInputEvent(const WebInputEvent& event)
@@ -454,6 +499,12 @@ WebPoint WebPagePopupImpl::positionRelativeToOwner()
 {
     WebRect windowRect = m_webView->client()->rootWindowRect();
     return WebPoint(m_windowRectInScreen.x - windowRect.x, m_windowRectInScreen.y - windowRect.y);
+}
+
+void WebPagePopupImpl::cancel()
+{
+    if (m_popupClient)
+        m_popupClient->closePopup();
 }
 
 // WebPagePopup ----------------------------------------------------------------

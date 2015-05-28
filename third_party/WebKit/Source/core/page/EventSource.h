@@ -54,7 +54,7 @@ class EventSource final : public EventTargetWithInlineData, public RefCountedWil
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(EventSource);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(EventSource);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(EventSource);
 public:
     static PassRefPtrWillBeRawPtr<EventSource> create(ExecutionContext*, const String& url, const EventSourceInit&, ExceptionState&);
     virtual ~EventSource();
@@ -90,7 +90,7 @@ public:
 
     virtual bool hasPendingActivity() const override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     EventSource(ExecutionContext*, const KURL&, const EventSourceInit&);

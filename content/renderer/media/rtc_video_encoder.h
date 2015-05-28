@@ -18,15 +18,11 @@
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
-
 class MessageLoopProxy;
-
 }  // namespace base
 
 namespace media {
-
 class GpuVideoAcceleratorFactories;
-
 }  // namespace media
 
 namespace content {
@@ -62,7 +58,7 @@ class CONTENT_EXPORT RTCVideoEncoder
   int32_t RegisterEncodeCompleteCallback(
       webrtc::EncodedImageCallback* callback) override;
   int32_t Release() override;
-  int32_t SetChannelParameters(uint32_t packet_loss, int rtt) override;
+  int32_t SetChannelParameters(uint32_t packet_loss, int64_t rtt) override;
   int32_t SetRates(uint32_t new_bit_rate, uint32_t frame_rate) override;
 
  private:
@@ -85,7 +81,7 @@ class CONTENT_EXPORT RTCVideoEncoder
   const webrtc::VideoCodecType video_codec_type_;
 
   // Factory for creating VEAs, shared memory buffers, etc.
-  scoped_refptr<media::GpuVideoAcceleratorFactories> gpu_factories_;
+  const scoped_refptr<media::GpuVideoAcceleratorFactories> gpu_factories_;
 
   // webrtc::VideoEncoder encode complete callback.
   webrtc::EncodedImageCallback* encoded_image_callback_;

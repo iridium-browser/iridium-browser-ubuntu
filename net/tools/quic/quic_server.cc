@@ -12,7 +12,6 @@
 #include <sys/socket.h>
 
 #include "net/base/ip_endpoint.h"
-#include "net/quic/congestion_control/tcp_receiver.h"
 #include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/crypto/quic_random.h"
 #include "net/quic/quic_clock.h"
@@ -20,10 +19,18 @@
 #include "net/quic/quic_data_reader.h"
 #include "net/quic/quic_protocol.h"
 #include "net/tools/quic/quic_dispatcher.h"
+#include "net/tools/quic/quic_epoll_clock.h"
+#include "net/tools/quic/quic_epoll_connection_helper.h"
 #include "net/tools/quic/quic_in_memory_cache.h"
+#include "net/tools/quic/quic_packet_reader.h"
 #include "net/tools/quic/quic_socket_utils.h"
 
+// TODO(rtenneti): Add support for MMSG_MORE.
 #define MMSG_MORE 0
+// If true, QuicListener uses the QuicPacketReader to read packets instead of
+// QuicServer.
+// TODO(rtenneti): Enable this flag after MMSG_MORE is set to 1.
+#define FLAGS_quic_use_optimized_packet_reader false
 
 #ifndef SO_RXQ_OVFL
 #define SO_RXQ_OVFL 40
@@ -31,8 +38,12 @@
 
 namespace net {
 namespace tools {
-
 namespace {
+
+// Specifies the directory used during QuicInMemoryCache
+// construction to seed the cache. Cache directory can be
+// generated using `wget -p --save-headers <url>`
+std::string FLAGS_quic_in_memory_cache_dir = "";
 
 const int kEpollFlags = EPOLLIN | EPOLLOUT | EPOLLET;
 const char kSourceAddressTokenSecret[] = "secret";
@@ -46,7 +57,8 @@ QuicServer::QuicServer()
       overflow_supported_(false),
       use_recvmmsg_(false),
       crypto_config_(kSourceAddressTokenSecret, QuicRandom::GetInstance()),
-      supported_versions_(QuicSupportedVersions()) {
+      supported_versions_(QuicSupportedVersions()),
+      packet_reader_(new QuicPacketReader()) {
   Initialize();
 }
 
@@ -59,7 +71,8 @@ QuicServer::QuicServer(const QuicConfig& config,
       use_recvmmsg_(false),
       config_(config),
       crypto_config_(kSourceAddressTokenSecret, QuicRandom::GetInstance()),
-      supported_versions_(supported_versions) {
+      supported_versions_(supported_versions),
+      packet_reader_(new QuicPacketReader()) {
   Initialize();
 }
 
@@ -84,8 +97,11 @@ void QuicServer::Initialize() {
   }
 
   epoll_server_.set_timeout_in_us(50 * 1000);
-  // Initialize the in memory cache now.
-  QuicInMemoryCache::GetInstance();
+
+  if (!FLAGS_quic_in_memory_cache_dir.empty()) {
+    QuicInMemoryCache::GetInstance()->InitializeFromDirectory(
+        FLAGS_quic_in_memory_cache_dir);
+  }
 
   QuicEpollClock clock(&epoll_server_);
 
@@ -130,12 +146,11 @@ bool QuicServer::Listen(const IPEndPoint& address) {
   // because the default usage of QuicServer is as a test server with one or
   // two clients.  Adjust higher for use with many clients.
   if (!QuicSocketUtils::SetReceiveBufferSize(fd_,
-                                             TcpReceiver::kReceiveWindowTCP)) {
+                                             kDefaultSocketReceiveBuffer)) {
     return false;
   }
 
-  if (!QuicSocketUtils::SetSendBufferSize(fd_,
-                                          TcpReceiver::kReceiveWindowTCP)) {
+  if (!QuicSocketUtils::SetSendBufferSize(fd_, kDefaultSocketReceiveBuffer)) {
     return false;
   }
 
@@ -166,18 +181,22 @@ bool QuicServer::Listen(const IPEndPoint& address) {
 
   epoll_server_.RegisterFD(fd_, this, kEpollFlags);
   dispatcher_.reset(CreateQuicDispatcher());
-  dispatcher_->Initialize(fd_);
+  dispatcher_->InitializeWithWriter(CreateWriter(fd_));
 
   return true;
+}
+
+QuicDefaultPacketWriter* QuicServer::CreateWriter(int fd) {
+  return new QuicDefaultPacketWriter(fd);
 }
 
 QuicDispatcher* QuicServer::CreateQuicDispatcher() {
   return new QuicDispatcher(
       config_,
-      crypto_config_,
+      &crypto_config_,
       supported_versions_,
       new QuicDispatcher::DefaultPacketWriterFactory(),
-      &epoll_server_);
+      new QuicEpollConnectionHelper(&epoll_server_));
 }
 
 void QuicServer::WaitForEvents() {
@@ -201,9 +220,34 @@ void QuicServer::OnEvent(int fd, EpollEvent* event) {
     DVLOG(1) << "EPOLLIN";
     bool read = true;
     while (read) {
-        read = ReadAndDispatchSinglePacket(
-            fd_, port_, dispatcher_.get(),
-            overflow_supported_ ? &packets_dropped_ : nullptr);
+      if (use_recvmmsg_) {
+        if (FLAGS_quic_use_optimized_packet_reader) {
+          read = packet_reader_->ReadAndDispatchPackets(
+              fd_, port_, dispatcher_.get(),
+              overflow_supported_ ? &packets_dropped_ : nullptr);
+        } else {
+// TODO(rtenneti): Add support for ReadAndDispatchPackets.
+#if 0
+          read = ReadAndDispatchPackets(
+              fd_, port_, dispatcher_.get(),
+              overflow_supported_ ? &packets_dropped_ : nullptr);
+#else
+          read = ReadAndDispatchSinglePacket(
+              fd_, port_, dispatcher_.get(),
+              overflow_supported_ ? &packets_dropped_ : nullptr);
+#endif
+        }
+      } else {
+        if (FLAGS_quic_use_optimized_packet_reader) {
+          read = QuicPacketReader::ReadAndDispatchSinglePacket(
+              fd_, port_, dispatcher_.get(),
+              overflow_supported_ ? &packets_dropped_ : nullptr);
+        } else {
+          read = ReadAndDispatchSinglePacket(
+              fd_, port_, dispatcher_.get(),
+              overflow_supported_ ? &packets_dropped_ : nullptr);
+        }
+      }
     }
   }
   if (event->in_events & EPOLLOUT) {
@@ -241,6 +285,8 @@ bool QuicServer::ReadAndDispatchSinglePacket(int fd,
   IPEndPoint server_address(server_ip, port);
   processor->ProcessPacket(server_address, client_address, packet);
 
+  // The socket read was successful, so return true even if packet dispatch
+  // failed.
   return true;
 }
 

@@ -30,7 +30,7 @@
 #define AXObjectCacheImpl_h
 
 #include "core/dom/AXObjectCache.h"
-#include "core/rendering/RenderText.h"
+#include "core/layout/LayoutText.h"
 #include "modules/accessibility/AXObject.h"
 #include "platform/Timer.h"
 #include "wtf/Forward.h"
@@ -54,8 +54,10 @@ struct TextMarkerData {
 
 // This class should only be used from inside the accessibility directory.
 class AXObjectCacheImpl : public AXObjectCache {
-    WTF_MAKE_NONCOPYABLE(AXObjectCacheImpl); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(AXObjectCacheImpl); WTF_MAKE_FAST_ALLOCATED(AXObjectCacheImpl);
 public:
+    static AXObjectCache* create(Document&);
+
     explicit AXObjectCacheImpl(Document&);
     ~AXObjectCacheImpl();
 
@@ -63,18 +65,20 @@ public:
 
     virtual void selectionChanged(Node*) override;
     virtual void childrenChanged(Node*) override;
-    virtual void childrenChanged(RenderObject*) override;
+    virtual void childrenChanged(LayoutObject*) override;
     virtual void checkedStateChanged(Node*) override;
-    virtual void selectedChildrenChanged(Node*) override;
+    virtual void listboxOptionStateChanged(HTMLOptionElement*);
+    virtual void listboxSelectedChildrenChanged(HTMLSelectElement*);
+    virtual void listboxActiveIndexChanged(HTMLSelectElement*);
 
-    virtual void remove(RenderObject*) override;
+    virtual void remove(LayoutObject*) override;
     virtual void remove(Node*) override;
     virtual void remove(Widget*) override;
 
     virtual const Element* rootAXEditableElement(const Node*) override;
 
     // Called by a node when text or a text equivalent (e.g. alt) attribute is changed.
-    virtual void textChanged(RenderObject*) override;
+    virtual void textChanged(LayoutObject*) override;
     // Called when a node has just been attached, so we can make sure we have the right subclass of AXObject.
     virtual void updateCacheAfterNodeIsAttached(Node*) override;
 
@@ -84,7 +88,9 @@ public:
     virtual void handleTextFormControlChanged(Node*) override;
     virtual void handleEditableTextContentChanged(Node*) override;
     virtual void handleValueChanged(Node*) override;
-    virtual void handleUpdateActiveMenuOption(RenderMenuList*, int optionIndex) override;
+    virtual void handleUpdateActiveMenuOption(LayoutMenuList*, int optionIndex) override;
+    virtual void didShowMenuListPopup(LayoutMenuList*) override;
+    virtual void didHideMenuListPopup(LayoutMenuList*) override;
     virtual void handleLoadComplete(Document*) override;
     virtual void handleLayoutComplete(Document*) override;
 
@@ -92,15 +98,15 @@ public:
 
     virtual void clearWeakMembers(Visitor*) override;
 
-    virtual void inlineTextBoxesUpdated(RenderObject* renderer) override;
+    virtual void inlineTextBoxesUpdated(LayoutObject*) override;
 
     // Called when the scroll offset changes.
     virtual void handleScrollPositionChanged(FrameView*) override;
-    virtual void handleScrollPositionChanged(RenderObject*) override;
+    virtual void handleScrollPositionChanged(LayoutObject*) override;
 
     // Called when scroll bars are added / removed (as the view resizes).
     void handleScrollbarUpdate(FrameView*) override;
-    void handleLayoutComplete(RenderObject*) override;
+    void handleLayoutComplete(LayoutObject*) override;
     void handleScrolledToAnchor(const Node* anchorNode) override;
 
     virtual const AtomicString& computedRoleForNode(Node*) override;
@@ -114,14 +120,14 @@ public:
 
     // used for objects without backing elements
     AXObject* getOrCreate(AccessibilityRole);
-    AXObject* getOrCreate(RenderObject*);
+    AXObject* getOrCreate(LayoutObject*);
     AXObject* getOrCreate(Widget*);
     AXObject* getOrCreate(Node*);
     AXObject* getOrCreate(AbstractInlineTextBox*);
 
     // will only return the AXObject if it already exists
     AXObject* get(Node*);
-    AXObject* get(RenderObject*);
+    AXObject* get(LayoutObject*);
     AXObject* get(Widget*);
     AXObject* get(AbstractInlineTextBox*);
 
@@ -131,13 +137,13 @@ public:
     void remove(AbstractInlineTextBox*);
 
     void childrenChanged(AXObject*);
-    void selectedChildrenChanged(RenderObject*);
 
     void handleActiveDescendantChanged(Node*);
     void handleAriaRoleChanged(Node*);
     void handleAriaExpandedChange(Node*);
+    void handleAriaSelectedChanged(Node*);
 
-    void recomputeIsIgnored(RenderObject* renderer);
+    void recomputeIsIgnored(LayoutObject*);
 
     bool accessibilityEnabled();
     bool inlineTextBoxAccessibilityEnabled();
@@ -151,9 +157,9 @@ public:
     // as long as the modification count hasn't changed.
     int modificationCount() const { return m_modificationCount; }
 
-    void postNotification(RenderObject*, AXNotification, bool postToElement);
-    void postNotification(Node*, AXNotification, bool postToElement);
-    void postNotification(AXObject*, Document*, AXNotification, bool postToElement);
+    void postNotification(LayoutObject*, AXNotification);
+    void postNotification(Node*, AXNotification);
+    void postNotification(AXObject*, AXNotification);
 
 protected:
     void postPlatformNotification(AXObject*, AXNotification);
@@ -165,14 +171,14 @@ protected:
     void removeNodeForUse(Node* n) { m_textMarkerNodes.remove(n); }
     bool isNodeInUse(Node* n) { return m_textMarkerNodes.contains(n); }
 
-    PassRefPtr<AXObject> createFromRenderer(RenderObject*);
+    PassRefPtr<AXObject> createFromRenderer(LayoutObject*);
     PassRefPtr<AXObject> createFromNode(Node*);
     PassRefPtr<AXObject> createFromInlineTextBox(AbstractInlineTextBox*);
 
 private:
     Document& m_document;
-    HashMap<AXID, RefPtr<AXObject> > m_objects;
-    HashMap<RenderObject*, AXID> m_renderObjectMapping;
+    HashMap<AXID, RefPtr<AXObject>> m_objects;
+    HashMap<LayoutObject*, AXID> m_layoutObjectMapping;
     HashMap<Widget*, AXID> m_widgetObjectMapping;
     HashMap<Node*, AXID> m_nodeObjectMapping;
     HashMap<AbstractInlineTextBox*, AXID> m_inlineTextBoxObjectMapping;
@@ -182,7 +188,7 @@ private:
     HashSet<AXID> m_idsInUse;
 
     Timer<AXObjectCacheImpl> m_notificationPostTimer;
-    Vector<pair<RefPtr<AXObject>, AXNotification> > m_notificationsToPost;
+    Vector<pair<RefPtr<AXObject>, AXNotification>> m_notificationsToPost;
     void notificationPostTimerFired(Timer<AXObjectCacheImpl>*);
 
     AXObject* focusedImageMapUIElement(HTMLAreaElement*);

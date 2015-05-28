@@ -39,9 +39,11 @@
 #include "sync/api/sync_error_factory.h"
 #include "ui/gfx/image/image_family.h"
 
+using extensions::AppSyncData;
 using extensions::Extension;
 using extensions::ExtensionPrefs;
 using extensions::ExtensionRegistry;
+using extensions::ExtensionSyncData;
 using extensions::FeatureSwitch;
 
 namespace {
@@ -58,6 +60,25 @@ void OnWebApplicationInfoLoaded(
   // Use the old icons if they exist.
   synced_info.icons = loaded_info.icons;
   CreateOrUpdateBookmarkApp(extension_service.get(), &synced_info);
+}
+
+// Returns the pref value for "all urls enabled" for the given extension id.
+ExtensionSyncData::OptionalBoolean GetAllowedOnAllUrlsOptionalBoolean(
+    const std::string& extension_id,
+    content::BrowserContext* context) {
+  bool allowed_on_all_urls =
+      extensions::util::AllowedScriptingOnAllUrls(extension_id, context);
+  // If the extension is not allowed on all urls (which is not the default),
+  // then we have to sync the preference.
+  if (!allowed_on_all_urls)
+    return ExtensionSyncData::BOOLEAN_FALSE;
+
+  // If the user has explicitly set a value, then we sync it.
+  if (extensions::util::HasSetAllowedScriptingOnAllUrls(extension_id, context))
+    return ExtensionSyncData::BOOLEAN_TRUE;
+
+  // Otherwise, unset.
+  return ExtensionSyncData::BOOLEAN_UNSET;
 }
 
 }  // namespace
@@ -88,8 +109,9 @@ ExtensionSyncService::ExtensionSyncService(Profile* profile,
 ExtensionSyncService::~ExtensionSyncService() {}
 
 // static
-ExtensionSyncService* ExtensionSyncService::Get(Profile* profile) {
-  return ExtensionSyncServiceFactory::GetForProfile(profile);
+ExtensionSyncService* ExtensionSyncService::Get(
+    content::BrowserContext* context) {
+  return ExtensionSyncServiceFactory::GetForBrowserContext(context);
 }
 
 syncer::SyncChange ExtensionSyncService::PrepareToSyncUninstallExtension(
@@ -240,10 +262,14 @@ syncer::SyncError ExtensionSyncService::ProcessSyncChanges(
       ++i) {
     syncer::ModelType type = i->sync_data().GetDataType();
     if (type == syncer::EXTENSIONS) {
-      extension_sync_bundle_.ProcessSyncChange(
-          extensions::ExtensionSyncData(*i));
+      scoped_ptr<ExtensionSyncData> extension_data(
+          ExtensionSyncData::CreateFromSyncChange(*i));
+      if (extension_data.get())
+        extension_sync_bundle_.ProcessSyncChange(*extension_data);
     } else if (type == syncer::APPS) {
-      app_sync_bundle_.ProcessSyncChange(extensions::AppSyncData(*i));
+      scoped_ptr<AppSyncData> app_data(AppSyncData::CreateFromSyncChange(*i));
+      if (app_data.get())
+        app_sync_bundle_.ProcessSyncChange(*app_data);
     }
   }
 
@@ -252,33 +278,34 @@ syncer::SyncError ExtensionSyncService::ProcessSyncChanges(
   return syncer::SyncError();
 }
 
-extensions::ExtensionSyncData ExtensionSyncService::GetExtensionSyncData(
+ExtensionSyncData ExtensionSyncService::GetExtensionSyncData(
     const Extension& extension) const {
-  return extensions::ExtensionSyncData(
-      extension,
-      extension_service_->IsExtensionEnabled(extension.id()),
-      extensions::util::IsIncognitoEnabled(extension.id(), profile_),
-      extension_prefs_->HasDisableReason(extension.id(),
-                                         Extension::DISABLE_REMOTE_INSTALL));
-}
-
-extensions::AppSyncData ExtensionSyncService::GetAppSyncData(
-    const Extension& extension) const {
-  return extensions::AppSyncData(
+  return ExtensionSyncData(
       extension,
       extension_service_->IsExtensionEnabled(extension.id()),
       extensions::util::IsIncognitoEnabled(extension.id(), profile_),
       extension_prefs_->HasDisableReason(extension.id(),
                                          Extension::DISABLE_REMOTE_INSTALL),
+      GetAllowedOnAllUrlsOptionalBoolean(extension.id(), profile_));
+}
+
+AppSyncData ExtensionSyncService::GetAppSyncData(
+    const Extension& extension) const {
+  return AppSyncData(
+      extension, extension_service_->IsExtensionEnabled(extension.id()),
+      extensions::util::IsIncognitoEnabled(extension.id(), profile_),
+      extension_prefs_->HasDisableReason(extension.id(),
+                                         Extension::DISABLE_REMOTE_INSTALL),
+      GetAllowedOnAllUrlsOptionalBoolean(extension.id(), profile_),
       extension_prefs_->app_sorting()->GetAppLaunchOrdinal(extension.id()),
       extension_prefs_->app_sorting()->GetPageOrdinal(extension.id()),
       extensions::GetLaunchTypePrefValue(extension_prefs_, extension.id()));
 }
 
-std::vector<extensions::ExtensionSyncData>
-  ExtensionSyncService::GetExtensionSyncDataList() const {
+std::vector<ExtensionSyncData>
+    ExtensionSyncService::GetExtensionSyncDataList() const {
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
-  std::vector<extensions::ExtensionSyncData> extension_sync_list;
+  std::vector<ExtensionSyncData> extension_sync_list;
   extension_sync_bundle_.GetExtensionSyncDataListHelper(
       registry->enabled_extensions(), &extension_sync_list);
   extension_sync_bundle_.GetExtensionSyncDataListHelper(
@@ -286,7 +313,7 @@ std::vector<extensions::ExtensionSyncData>
   extension_sync_bundle_.GetExtensionSyncDataListHelper(
       registry->terminated_extensions(), &extension_sync_list);
 
-  std::vector<extensions::ExtensionSyncData> pending_extensions =
+  std::vector<ExtensionSyncData> pending_extensions =
       extension_sync_bundle_.GetPendingData();
   extension_sync_list.insert(extension_sync_list.begin(),
                              pending_extensions.begin(),
@@ -295,10 +322,9 @@ std::vector<extensions::ExtensionSyncData>
   return extension_sync_list;
 }
 
-std::vector<extensions::AppSyncData> ExtensionSyncService::GetAppSyncDataList()
-    const {
+std::vector<AppSyncData> ExtensionSyncService::GetAppSyncDataList() const {
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
-  std::vector<extensions::AppSyncData> app_sync_list;
+  std::vector<AppSyncData> app_sync_list;
   app_sync_bundle_.GetAppSyncDataListHelper(
       registry->enabled_extensions(), &app_sync_list);
   app_sync_bundle_.GetAppSyncDataListHelper(
@@ -306,8 +332,7 @@ std::vector<extensions::AppSyncData> ExtensionSyncService::GetAppSyncDataList()
   app_sync_bundle_.GetAppSyncDataListHelper(
       registry->terminated_extensions(), &app_sync_list);
 
-  std::vector<extensions::AppSyncData> pending_apps =
-      app_sync_bundle_.GetPendingData();
+  std::vector<AppSyncData> pending_apps = app_sync_bundle_.GetPendingData();
   app_sync_list.insert(app_sync_list.begin(),
                        pending_apps.begin(),
                        pending_apps.end());
@@ -316,7 +341,7 @@ std::vector<extensions::AppSyncData> ExtensionSyncService::GetAppSyncDataList()
 }
 
 bool ExtensionSyncService::ProcessExtensionSyncData(
-    const extensions::ExtensionSyncData& extension_sync_data) {
+    const ExtensionSyncData& extension_sync_data) {
   if (!ProcessExtensionSyncDataHelper(extension_sync_data,
                                       syncer::EXTENSIONS)) {
     extension_sync_bundle_.AddPendingExtension(extension_sync_data.id(),
@@ -329,7 +354,7 @@ bool ExtensionSyncService::ProcessExtensionSyncData(
 }
 
 bool ExtensionSyncService::ProcessAppSyncData(
-    const extensions::AppSyncData& app_sync_data) {
+    const AppSyncData& app_sync_data) {
   const std::string& id = app_sync_data.id();
 
   if (app_sync_data.app_launch_ordinal().IsValid() &&
@@ -346,8 +371,7 @@ bool ExtensionSyncService::ProcessAppSyncData(
   // is in AppSyncData::PopulateAppSpecifics.
   if (app_sync_data.launch_type() >= extensions::LAUNCH_TYPE_FIRST &&
       app_sync_data.launch_type() < extensions::NUM_LAUNCH_TYPES) {
-    extensions::SetLaunchType(extension_service_, id,
-                              app_sync_data.launch_type());
+    extensions::SetLaunchType(profile_, id, app_sync_data.launch_type());
   }
 
   if (!app_sync_data.bookmark_app_url().empty())
@@ -364,7 +388,7 @@ bool ExtensionSyncService::ProcessAppSyncData(
 }
 
 void ExtensionSyncService::ProcessBookmarkAppSyncData(
-    const extensions::AppSyncData& app_sync_data) {
+    const AppSyncData& app_sync_data) {
   // Process bookmark app sync if necessary.
   GURL bookmark_app_url(app_sync_data.bookmark_app_url());
   if (!bookmark_app_url.is_valid() ||
@@ -443,7 +467,7 @@ bool ExtensionSyncService::IsPendingEnable(
 }
 
 bool ExtensionSyncService::ProcessExtensionSyncDataHelper(
-    const extensions::ExtensionSyncData& extension_sync_data,
+    const ExtensionSyncData& extension_sync_data,
     syncer::ModelType type) {
   const std::string& id = extension_sync_data.id();
   const Extension* extension = extension_service_->GetInstalledExtension(id);
@@ -511,6 +535,14 @@ bool ExtensionSyncService::ProcessExtensionSyncDataHelper(
   extensions::util::SetIsIncognitoEnabled(
       id, profile_, extension_sync_data.incognito_enabled());
   extension = NULL;  // No longer safe to use.
+
+  // Update the all urls flag.
+  if (extension_sync_data.all_urls_enabled() !=
+          ExtensionSyncData::BOOLEAN_UNSET) {
+    bool allowed = extension_sync_data.all_urls_enabled() ==
+        ExtensionSyncData::BOOLEAN_TRUE;
+    extensions::util::SetAllowedScriptingOnAllUrls(id, profile_, allowed);
+  }
 
   if (extension_installed) {
     // If the extension is already installed, check if it's outdated.

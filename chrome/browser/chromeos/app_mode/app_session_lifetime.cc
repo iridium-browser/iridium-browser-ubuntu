@@ -42,7 +42,7 @@ namespace {
 class AppWindowHandler : public AppWindowRegistry::Observer {
  public:
   AppWindowHandler() : window_registry_(NULL) {}
-  virtual ~AppWindowHandler() {}
+  ~AppWindowHandler() override {}
 
   void Init(Profile* profile, const std::string& app_id) {
     DCHECK(!window_registry_);
@@ -54,7 +54,7 @@ class AppWindowHandler : public AppWindowRegistry::Observer {
 
  private:
   // extensions::AppWindowRegistry::Observer overrides:
-  virtual void OnAppWindowRemoved(AppWindow* app_window) override {
+  void OnAppWindowRemoved(AppWindow* app_window) override {
     if (window_registry_->GetAppWindowsForApp(app_id_).empty()) {
       if (DemoAppLauncher::IsDemoAppSession(
               user_manager::UserManager::Get()->GetActiveUser()->email())) {
@@ -89,9 +89,7 @@ class BrowserWindowHandler : public chrome::BrowserListObserver {
   BrowserWindowHandler() {
     BrowserList::AddObserver(this);
   }
-  virtual ~BrowserWindowHandler() {
-    BrowserList::RemoveObserver(this);
-  }
+  ~BrowserWindowHandler() override { BrowserList::RemoveObserver(this); }
 
  private:
   void HandleBrowser(Browser* browser) {
@@ -106,7 +104,7 @@ class BrowserWindowHandler : public chrome::BrowserListObserver {
   }
 
   // chrome::BrowserListObserver overrides:
-  virtual void OnBrowserAdded(Browser* browser) override {
+  void OnBrowserAdded(Browser* browser) override {
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&BrowserWindowHandler::HandleBrowser,

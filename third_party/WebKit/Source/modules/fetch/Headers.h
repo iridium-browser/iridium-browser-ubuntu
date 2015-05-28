@@ -5,6 +5,7 @@
 #ifndef Headers_h
 #define Headers_h
 
+#include "bindings/core/v8/Iterable.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/fetch/FetchHeaderList.h"
@@ -18,7 +19,7 @@ class ExceptionState;
 class Iterator;
 
 // http://fetch.spec.whatwg.org/#headers-class
-class Headers final : public GarbageCollected<Headers>, public ScriptWrappable {
+class Headers final : public GarbageCollected<Headers>, public ScriptWrappable, public PairIterable<String, String> {
     DEFINE_WRAPPERTYPEINFO();
 public:
     enum Guard { ImmutableGuard, RequestGuard, RequestNoCORSGuard, ResponseGuard, NoneGuard };
@@ -26,13 +27,13 @@ public:
     static Headers* create();
     static Headers* create(ExceptionState&);
     static Headers* create(const Headers*, ExceptionState&);
-    static Headers* create(const Vector<Vector<String> >&, ExceptionState&);
+    static Headers* create(const Vector<Vector<String>>&, ExceptionState&);
     static Headers* create(const Dictionary&, ExceptionState&);
 
     // Shares the FetchHeaderList. Called when creating a Request or Response.
     static Headers* create(FetchHeaderList*);
 
-    Headers* createCopy() const;
+    Headers* clone() const;
 
     // Headers.idl implementation.
     void append(const String& name, const String& value, ExceptionState&);
@@ -42,19 +43,16 @@ public:
     bool has(const String& key, ExceptionState&);
     void set(const String& key, const String& value, ExceptionState&);
 
-    // iterable<ByteString, ByteString>
-    Iterator* iterator(ScriptState*, ExceptionState&);
-
     void setGuard(Guard guard) { m_guard = guard; }
     Guard guard() const { return m_guard; }
 
     // These methods should only be called when size() would return 0.
     void fillWith(const Headers*, ExceptionState&);
-    void fillWith(const Vector<Vector<String> >&, ExceptionState&);
+    void fillWith(const Vector<Vector<String>>&, ExceptionState&);
     void fillWith(const Dictionary&, ExceptionState&);
 
     FetchHeaderList* headerList() const { return m_headerList; }
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     Headers();
@@ -63,6 +61,8 @@ private:
 
     Member<FetchHeaderList> m_headerList;
     Guard m_guard;
+
+    IterationSource* startIteration(ScriptState*, ExceptionState&) override;
 };
 
 } // namespace blink

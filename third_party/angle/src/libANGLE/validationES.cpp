@@ -92,7 +92,8 @@ bool ValidTexture2DDestinationTarget(const Context *context, GLenum target)
 
 bool ValidFramebufferTarget(GLenum target)
 {
-    META_ASSERT(GL_DRAW_FRAMEBUFFER_ANGLE == GL_DRAW_FRAMEBUFFER && GL_READ_FRAMEBUFFER_ANGLE == GL_READ_FRAMEBUFFER);
+    static_assert(GL_DRAW_FRAMEBUFFER_ANGLE == GL_DRAW_FRAMEBUFFER && GL_READ_FRAMEBUFFER_ANGLE == GL_READ_FRAMEBUFFER,
+                  "ANGLE framebuffer enums must equal the ES3 framebuffer enums.");
 
     switch (target)
     {
@@ -209,8 +210,8 @@ bool ValidCompressedImageSize(const Context *context, GLenum internalFormat, GLs
 
 bool ValidQueryType(const Context *context, GLenum queryType)
 {
-    META_ASSERT(GL_ANY_SAMPLES_PASSED == GL_ANY_SAMPLES_PASSED_EXT);
-    META_ASSERT(GL_ANY_SAMPLES_PASSED_CONSERVATIVE == GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT);
+    static_assert(GL_ANY_SAMPLES_PASSED == GL_ANY_SAMPLES_PASSED_EXT, "GL extension enums not equal.");
+    static_assert(GL_ANY_SAMPLES_PASSED_CONSERVATIVE == GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT, "GL extension enums not equal.");
 
     switch (queryType)
     {
@@ -524,7 +525,7 @@ bool ValidateBlitFramebufferParameters(gl::Context *context, GLint srcX0, GLint 
             GLenum readInternalFormat = readColorBuffer->getInternalFormat();
             const InternalFormat &readFormatInfo = GetInternalFormatInfo(readInternalFormat);
 
-            for (unsigned int i = 0; i < gl::IMPLEMENTATION_MAX_DRAW_BUFFERS; i++)
+            for (GLuint i = 0; i < context->getCaps().maxColorAttachments; i++)
             {
                 if (drawFramebuffer->isEnabledColorAttachment(i))
                 {
@@ -580,7 +581,7 @@ bool ValidateBlitFramebufferParameters(gl::Context *context, GLint srcX0, GLint 
                     return false;
                 }
 
-                for (unsigned int colorAttachment = 0; colorAttachment < gl::IMPLEMENTATION_MAX_DRAW_BUFFERS; colorAttachment++)
+                for (GLuint colorAttachment = 0; colorAttachment < context->getCaps().maxColorAttachments; ++colorAttachment)
                 {
                     if (drawFramebuffer->isEnabledColorAttachment(colorAttachment))
                     {
@@ -679,7 +680,8 @@ bool ValidateGetVertexAttribParameters(Context *context, GLenum pname)
       case GL_VERTEX_ATTRIB_ARRAY_DIVISOR:
         // Don't verify ES3 context because GL_VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE uses
         // the same constant.
-        META_ASSERT(GL_VERTEX_ATTRIB_ARRAY_DIVISOR == GL_VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE);
+        static_assert(GL_VERTEX_ATTRIB_ARRAY_DIVISOR == GL_VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE,
+                      "ANGLE extension enums not equal to GL enums.");
         return true;
 
       case GL_VERTEX_ATTRIB_ARRAY_INTEGER:
@@ -927,7 +929,7 @@ bool ValidateReadPixelsParameters(gl::Context *context, GLint x, GLint y, GLsize
     GLenum sizedInternalFormat = GetSizedInternalFormat(format, type);
     const InternalFormat &sizedFormatInfo = GetInternalFormatInfo(sizedInternalFormat);
 
-    GLsizei outputPitch = sizedFormatInfo.computeRowPitch(type, width, context->getState().getPackAlignment());
+    GLsizei outputPitch = sizedFormatInfo.computeRowPitch(type, width, context->getState().getPackAlignment(), 0);
     // sized query sanity check
     if (bufSize)
     {
@@ -1123,11 +1125,13 @@ bool ValidateStateQuery(gl::Context *context, GLenum pname, GLenum *nativeType, 
         return false;
     }
 
+    const Caps &caps = context->getCaps();
+
     if (pname >= GL_DRAW_BUFFER0 && pname <= GL_DRAW_BUFFER15)
     {
         unsigned int colorAttachment = (pname - GL_DRAW_BUFFER0);
 
-        if (colorAttachment >= context->getCaps().maxDrawBuffers)
+        if (colorAttachment >= caps.maxDrawBuffers)
         {
             context->recordError(Error(GL_INVALID_OPERATION));
             return false;
@@ -1140,7 +1144,7 @@ bool ValidateStateQuery(gl::Context *context, GLenum pname, GLenum *nativeType, 
       case GL_TEXTURE_BINDING_CUBE_MAP:
       case GL_TEXTURE_BINDING_3D:
       case GL_TEXTURE_BINDING_2D_ARRAY:
-        if (context->getState().getActiveSampler() >= context->getCaps().maxCombinedTextureImageUnits)
+        if (context->getState().getActiveSampler() >= caps.maxCombinedTextureImageUnits)
         {
             context->recordError(Error(GL_INVALID_OPERATION));
             return false;
@@ -1230,28 +1234,11 @@ bool ValidateCopyTexImageParametersBase(gl::Context* context, GLenum target, GLi
 
     const gl::Caps &caps = context->getCaps();
 
-    gl::Texture *texture = NULL;
-    GLenum textureInternalFormat = GL_NONE;
-    GLint textureLevelWidth = 0;
-    GLint textureLevelHeight = 0;
-    GLint textureLevelDepth = 0;
     GLuint maxDimension = 0;
-
     switch (target)
     {
       case GL_TEXTURE_2D:
-        {
-            gl::Texture2D *texture2d = context->getTexture2D();
-            if (texture2d)
-            {
-                textureInternalFormat = texture2d->getInternalFormat(level);
-                textureLevelWidth = texture2d->getWidth(level);
-                textureLevelHeight = texture2d->getHeight(level);
-                textureLevelDepth = 1;
-                texture = texture2d;
-                maxDimension = caps.max2DTextureSize;
-            }
-        }
+        maxDimension = caps.max2DTextureSize;
         break;
 
       case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
@@ -1260,48 +1247,15 @@ bool ValidateCopyTexImageParametersBase(gl::Context* context, GLenum target, GLi
       case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
       case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
       case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
-        {
-            gl::TextureCubeMap *textureCube = context->getTextureCubeMap();
-            if (textureCube)
-            {
-                textureInternalFormat = textureCube->getInternalFormat(target, level);
-                textureLevelWidth = textureCube->getWidth(target, level);
-                textureLevelHeight = textureCube->getHeight(target, level);
-                textureLevelDepth = 1;
-                texture = textureCube;
-                maxDimension = caps.maxCubeMapTextureSize;
-            }
-        }
+        maxDimension = caps.maxCubeMapTextureSize;
         break;
 
       case GL_TEXTURE_2D_ARRAY:
-        {
-            gl::Texture2DArray *texture2dArray = context->getTexture2DArray();
-            if (texture2dArray)
-            {
-                textureInternalFormat = texture2dArray->getInternalFormat(level);
-                textureLevelWidth = texture2dArray->getWidth(level);
-                textureLevelHeight = texture2dArray->getHeight(level);
-                textureLevelDepth = texture2dArray->getLayers(level);
-                texture = texture2dArray;
-                maxDimension = caps.max2DTextureSize;
-            }
-        }
+        maxDimension = caps.max2DTextureSize;
         break;
 
       case GL_TEXTURE_3D:
-        {
-            gl::Texture3D *texture3d = context->getTexture3D();
-            if (texture3d)
-            {
-                textureInternalFormat = texture3d->getInternalFormat(level);
-                textureLevelWidth = texture3d->getWidth(level);
-                textureLevelHeight = texture3d->getHeight(level);
-                textureLevelDepth = texture3d->getDepth(level);
-                texture = texture3d;
-                maxDimension = caps.max3DTextureSize;
-            }
-        }
+        maxDimension = caps.max3DTextureSize;
         break;
 
       default:
@@ -1309,6 +1263,7 @@ bool ValidateCopyTexImageParametersBase(gl::Context* context, GLenum target, GLi
         return false;
     }
 
+    gl::Texture *texture = context->getTargetTexture(IsCubeMapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
     if (!texture)
     {
         context->recordError(Error(GL_INVALID_OPERATION));
@@ -1329,21 +1284,17 @@ bool ValidateCopyTexImageParametersBase(gl::Context* context, GLenum target, GLi
         return false;
     }
 
-    if (formatInfo.compressed)
+    if (formatInfo.compressed && !ValidCompressedImageSize(context, internalformat, width, height))
     {
-        if (((width % formatInfo.compressedBlockWidth) != 0 && width != textureLevelWidth) ||
-            ((height % formatInfo.compressedBlockHeight) != 0 && height != textureLevelHeight))
-        {
-            context->recordError(Error(GL_INVALID_OPERATION));
-            return false;
-        }
+        context->recordError(Error(GL_INVALID_OPERATION));
+        return false;
     }
 
     if (isSubImage)
     {
-        if (xoffset + width > textureLevelWidth ||
-            yoffset + height > textureLevelHeight ||
-            zoffset >= textureLevelDepth)
+        if (static_cast<size_t>(xoffset + width) > texture->getWidth(target, level) ||
+            static_cast<size_t>(yoffset + height) > texture->getHeight(target, level) ||
+            static_cast<size_t>(zoffset) >= texture->getDepth(target, level))
         {
             context->recordError(Error(GL_INVALID_VALUE));
             return false;
@@ -1351,7 +1302,7 @@ bool ValidateCopyTexImageParametersBase(gl::Context* context, GLenum target, GLi
     }
     else
     {
-        if (IsCubemapTextureTarget(target) && width != height)
+        if (IsCubeMapTextureTarget(target) && width != height)
         {
             context->recordError(Error(GL_INVALID_VALUE));
             return false;
@@ -1371,7 +1322,7 @@ bool ValidateCopyTexImageParametersBase(gl::Context* context, GLenum target, GLi
         }
     }
 
-    *textureFormatOut = textureInternalFormat;
+    *textureFormatOut = texture->getInternalFormat(target, level);
     return true;
 }
 
@@ -1482,6 +1433,36 @@ static bool ValidateDrawBase(Context *context, GLenum mode, GLsizei count, GLsiz
                 context->recordError(Error(GL_INVALID_OPERATION, "An enabled vertex array has no buffer and no pointer."));
                 return false;
             }
+        }
+    }
+
+    // Uniform buffer validation
+    for (unsigned int uniformBlockIndex = 0; uniformBlockIndex < program->getActiveUniformBlockCount(); uniformBlockIndex++)
+    {
+        const gl::UniformBlock *uniformBlock = program->getUniformBlockByIndex(uniformBlockIndex);
+        GLuint blockBinding = program->getUniformBlockBinding(uniformBlockIndex);
+        const gl::Buffer *uniformBuffer = state.getIndexedUniformBuffer(blockBinding);
+
+        if (!uniformBuffer)
+        {
+            // undefined behaviour
+            context->recordError(Error(GL_INVALID_OPERATION, "It is undefined behaviour to have a used but unbound uniform buffer."));
+            return false;
+        }
+
+        size_t uniformBufferSize = state.getIndexedUniformBufferSize(blockBinding);
+
+        if (uniformBufferSize == 0)
+        {
+            // Bind the whole buffer.
+            uniformBufferSize = uniformBuffer->getSize();
+        }
+
+        if (uniformBufferSize < uniformBlock->dataSize)
+        {
+            // undefined behaviour
+            context->recordError(Error(GL_INVALID_OPERATION, "It is undefined behaviour to use a uniform buffer that is too small."));
+            return false;
         }
     }
 
@@ -1606,7 +1587,7 @@ bool ValidateDrawElements(Context *context, GLenum mode, GLsizei count, GLenum t
     }
 
     const gl::VertexArray *vao = state.getVertexArray();
-    const gl::Buffer *elementArrayBuffer = vao->getElementArrayBuffer();
+    gl::Buffer *elementArrayBuffer = vao->getElementArrayBuffer();
     if (!indices && !elementArrayBuffer)
     {
         context->recordError(Error(GL_INVALID_OPERATION));
@@ -1648,7 +1629,7 @@ bool ValidateDrawElements(Context *context, GLenum mode, GLsizei count, GLenum t
     if (elementArrayBuffer)
     {
         uintptr_t offset = reinterpret_cast<uintptr_t>(indices);
-        if (!elementArrayBuffer->getIndexRangeCache()->findRange(type, offset, count, indexRangeOut, NULL))
+        if (!elementArrayBuffer->getIndexRangeCache()->findRange(type, offset, count, indexRangeOut))
         {
             rx::BufferImpl *bufferImpl = elementArrayBuffer->getImplementation();
             const uint8_t *dataPointer = NULL;
@@ -1661,6 +1642,7 @@ bool ValidateDrawElements(Context *context, GLenum mode, GLsizei count, GLenum t
 
             const uint8_t *offsetPointer = dataPointer + offset;
             *indexRangeOut = rx::IndexRangeCache::ComputeRange(type, offsetPointer, count);
+            elementArrayBuffer->getIndexRangeCache()->addRange(type, offset, count, *indexRangeOut);
         }
     }
     else
@@ -1786,12 +1768,6 @@ bool ValidateFramebufferTexture2D(Context *context, GLenum target, GLenum attach
                     context->recordError(Error(GL_INVALID_OPERATION));
                     return false;
                 }
-                gl::Texture2D *tex2d = static_cast<gl::Texture2D *>(tex);
-                if (tex2d->isCompressed(level))
-                {
-                    context->recordError(Error(GL_INVALID_OPERATION));
-                    return false;
-                }
             }
             break;
 
@@ -1812,17 +1788,18 @@ bool ValidateFramebufferTexture2D(Context *context, GLenum target, GLenum attach
                     context->recordError(Error(GL_INVALID_OPERATION));
                     return false;
                 }
-                gl::TextureCubeMap *texcube = static_cast<gl::TextureCubeMap *>(tex);
-                if (texcube->isCompressed(textarget, level))
-                {
-                    context->recordError(Error(GL_INVALID_OPERATION));
-                    return false;
-                }
             }
             break;
 
           default:
             context->recordError(Error(GL_INVALID_ENUM));
+            return false;
+        }
+
+        const gl::InternalFormat &internalFormatInfo = gl::GetInternalFormatInfo(tex->getInternalFormat(textarget, level));
+        if (internalFormatInfo.compressed)
+        {
+            context->recordError(Error(GL_INVALID_OPERATION));
             return false;
         }
     }

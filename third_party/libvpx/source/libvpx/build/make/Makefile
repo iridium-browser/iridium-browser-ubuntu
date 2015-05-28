@@ -146,6 +146,7 @@ $(BUILD_PFX)%.c.d: %.c
 
 $(BUILD_PFX)%.c.o: %.c
 	$(if $(quiet),@echo "    [CC] $@")
+	$(qexec)$(if $(CONFIG_DEPENDENCY_TRACKING),,mkdir -p $(dir $@))
 	$(qexec)$(CC) $(INTERNAL_CFLAGS) $(CFLAGS) -c -o $@ $<
 
 $(BUILD_PFX)%.cc.d: %.cc
@@ -155,6 +156,7 @@ $(BUILD_PFX)%.cc.d: %.cc
 
 $(BUILD_PFX)%.cc.o: %.cc
 	$(if $(quiet),@echo "    [CXX] $@")
+	$(qexec)$(if $(CONFIG_DEPENDENCY_TRACKING),,mkdir -p $(dir $@))
 	$(qexec)$(CXX) $(INTERNAL_CFLAGS) $(CXXFLAGS) -c -o $@ $<
 
 $(BUILD_PFX)%.cpp.d: %.cpp
@@ -164,6 +166,7 @@ $(BUILD_PFX)%.cpp.d: %.cpp
 
 $(BUILD_PFX)%.cpp.o: %.cpp
 	$(if $(quiet),@echo "    [CXX] $@")
+	$(qexec)$(if $(CONFIG_DEPENDENCY_TRACKING),,mkdir -p $(dir $@))
 	$(qexec)$(CXX) $(INTERNAL_CFLAGS) $(CXXFLAGS) -c -o $@ $<
 
 $(BUILD_PFX)%.asm.d: %.asm
@@ -174,6 +177,7 @@ $(BUILD_PFX)%.asm.d: %.asm
 
 $(BUILD_PFX)%.asm.o: %.asm
 	$(if $(quiet),@echo "    [AS] $@")
+	$(qexec)$(if $(CONFIG_DEPENDENCY_TRACKING),,mkdir -p $(dir $@))
 	$(qexec)$(AS) $(ASFLAGS) -o $@ $<
 
 $(BUILD_PFX)%.s.d: %.s
@@ -184,12 +188,14 @@ $(BUILD_PFX)%.s.d: %.s
 
 $(BUILD_PFX)%.s.o: %.s
 	$(if $(quiet),@echo "    [AS] $@")
+	$(qexec)$(if $(CONFIG_DEPENDENCY_TRACKING),,mkdir -p $(dir $@))
 	$(qexec)$(AS) $(ASFLAGS) -o $@ $<
 
 .PRECIOUS: %.c.S
 %.c.S: CFLAGS += -DINLINE_ASM
 $(BUILD_PFX)%.c.S: %.c
 	$(if $(quiet),@echo "    [GEN] $@")
+	$(qexec)$(if $(CONFIG_DEPENDENCY_TRACKING),,mkdir -p $(dir $@))
 	$(qexec)$(CC) -S $(CFLAGS) -o $@ $<
 
 .PRECIOUS: %.asm.s
@@ -332,9 +338,11 @@ endif
 skip_deps := $(filter %clean,$(MAKECMDGOALS))
 skip_deps += $(findstring testdata,$(MAKECMDGOALS))
 ifeq ($(strip $(skip_deps)),)
-  # Older versions of make don't like -include directives with no arguments
-  ifneq ($(filter %.d,$(OBJS-yes:.o=.d)),)
-    -include $(filter %.d,$(OBJS-yes:.o=.d))
+  ifeq ($(CONFIG_DEPENDENCY_TRACKING),yes)
+    # Older versions of make don't like -include directives with no arguments
+    ifneq ($(filter %.d,$(OBJS-yes:.o=.d)),)
+      -include $(filter %.d,$(OBJS-yes:.o=.d))
+    endif
   endif
 endif
 
@@ -375,8 +383,8 @@ LIBS=$(call enabled,LIBS)
 .libs: $(LIBS)
 	@touch $@
 $(foreach lib,$(filter %_g.a,$(LIBS)),$(eval $(call archive_template,$(lib))))
-$(foreach lib,$(filter %so.$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH),$(LIBS)),$(eval $(call so_template,$(lib))))
-$(foreach lib,$(filter %$(VERSION_MAJOR).dylib,$(LIBS)),$(eval $(call dl_template,$(lib))))
+$(foreach lib,$(filter %so.$(SO_VERSION_MAJOR).$(SO_VERSION_MINOR).$(SO_VERSION_PATCH),$(LIBS)),$(eval $(call so_template,$(lib))))
+$(foreach lib,$(filter %$(SO_VERSION_MAJOR).dylib,$(LIBS)),$(eval $(call dl_template,$(lib))))
 
 INSTALL-LIBS=$(call cond_enabled,CONFIG_INSTALL_LIBS,INSTALL-LIBS)
 ifeq ($(MAKECMDGOALS),dist)

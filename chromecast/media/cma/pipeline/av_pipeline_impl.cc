@@ -19,6 +19,7 @@
 #include "chromecast/media/cma/base/decoder_buffer_base.h"
 #include "chromecast/media/cma/pipeline/decrypt_util.h"
 #include "media/base/audio_decoder_config.h"
+#include "media/base/bind_to_current_loop.h"
 #include "media/base/decrypt_config.h"
 
 namespace chromecast {
@@ -52,8 +53,6 @@ AvPipelineImpl::AvPipelineImpl(
 }
 
 AvPipelineImpl::~AvPipelineImpl() {
-  // If there are weak pointers in the wild, they must be invalidated
-  // on the right thread.
   DCHECK(thread_checker_.CalledOnValidThread());
   media_component_device_->SetClient(MediaComponentDevice::Client());
 

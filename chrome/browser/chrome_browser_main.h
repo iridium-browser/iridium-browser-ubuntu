@@ -13,7 +13,6 @@
 #include "chrome/browser/chrome_process_singleton.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/process_singleton.h"
-#include "chrome/browser/task_profiler/auto_tracking.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/common/main_function_params.h"
@@ -87,6 +86,9 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   const base::CommandLine& parsed_command_line() const {
     return parsed_command_line_;
   }
+  const base::FilePath& user_data_dir() const {
+    return user_data_dir_;
+  }
 
   Profile* profile() { return profile_; }
 
@@ -130,11 +132,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Please keep |shutdown_watcher| as the first object constructed, and hence
   // it is destroyed last.
   scoped_ptr<ShutdownWatcherHelper> shutdown_watcher_;
-
-  // Creating this object starts tracking the creation and deletion of Task
-  // instance. This MUST be done before main_message_loop, so that it is
-  // destroyed after the main_message_loop.
-  task_profiler::AutoTracking tracking_objects_;
 
   // Statistical testing infrastructure for the entire browser. NULL until
   // SetupMetricsAndFieldTrials is called.
@@ -181,10 +178,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   // Members needed across shutdown methods.
   bool restart_last_session_;
-
-  // Tests can set this to true to disable restricting cookie access in the
-  // network stack, as this can only be done once.
-  static bool disable_enforcing_cookie_policies_for_tests_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainParts);
 };

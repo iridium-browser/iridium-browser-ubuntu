@@ -24,7 +24,9 @@ class TestPageSet(unittest.TestCase):
       os.rmdir(directory_path)
 
     real_directory_path = os.path.realpath(directory_path)
-    expected_serving_dirs = set([os.path.join(real_directory_path, 'a', 'b')])
+    expected_serving_dirs = set([os.path.join(real_directory_path, 'a', 'b'),
+                                 os.path.join(real_directory_path, 'c'),
+                                 os.path.join(real_directory_path, 'd')])
     self.assertEquals(ps.serving_dirs, expected_serving_dirs)
     self.assertEquals(ps[0].serving_dir, os.path.join(real_directory_path, 'c'))
     self.assertEquals(ps[2].serving_dir, os.path.join(real_directory_path, 'd'))
@@ -41,24 +43,3 @@ class TestPageSet(unittest.TestCase):
                                               real_absolute_dir]))
     finally:
       os.rmdir(directory_path)
-
-  def testFormingPageSetFromSubPageSet(self):
-    page_set_a = page_set.PageSet()
-    pages = [
-        page.Page('http://foo.com', page_set_a),
-        page.Page('http://bar.com', page_set_a),
-        ]
-    for p in pages:
-      page_set_a.AddUserStory(p)
-
-    # Form page_set_b from sub page_set_a.
-    page_set_b = page_set.PageSet()
-    for p in pages:
-      p.TransferToPageSet(page_set_b)
-    page_set_b.AddUserStory(page.Page('http://baz.com', page_set_b))
-    self.assertEqual(0, len(page_set_a.pages))
-    self.assertEqual(
-        set(['http://foo.com', 'http://bar.com', 'http://baz.com']),
-        set(p.url for p in page_set_b.pages))
-    for p in page_set_b.pages:
-      self.assertIs(page_set_b, p.page_set)

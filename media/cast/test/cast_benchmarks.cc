@@ -32,6 +32,8 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/debug/profiler.h"
+#include "base/memory/weak_ptr.h"
+#include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -67,8 +69,6 @@ namespace {
 
 static const int64 kStartMillisecond = INT64_C(1245);
 static const int kAudioChannels = 2;
-static const int kVideoHdWidth = 1280;
-static const int kVideoHdHeight = 720;
 static const int kTargetPlayoutDelayMs = 300;
 
 // The tests are commonly implemented with |kFrameTimerMs| RunTask function;
@@ -81,12 +81,10 @@ void UpdateCastTransportStatus(CastTransportStatus status) {
   EXPECT_TRUE(result);
 }
 
-void AudioInitializationStatus(CastInitializationStatus status) {
-  EXPECT_EQ(STATUS_AUDIO_INITIALIZED, status);
-}
-
-void VideoInitializationStatus(CastInitializationStatus status) {
-  EXPECT_EQ(STATUS_VIDEO_INITIALIZED, status);
+void ExpectSuccessAndRunCallback(const base::Closure& done_cb,
+                                 OperationalStatus status) {
+  EXPECT_EQ(STATUS_INITIALIZED, status);
+  done_cb.Run();
 }
 
 void IgnoreRawEvents(const std::vector<PacketEvent>& packet_events,
@@ -249,12 +247,12 @@ class RunOneBenchmark {
     audio_sender_config_.bitrate = kDefaultAudioEncoderBitrate;
     audio_sender_config_.codec = audio_codec;
 
-    audio_receiver_config_.feedback_ssrc =
+    audio_receiver_config_.receiver_ssrc =
         audio_sender_config_.receiver_ssrc;
-    audio_receiver_config_.incoming_ssrc = audio_sender_config_.ssrc;
+    audio_receiver_config_.sender_ssrc = audio_sender_config_.ssrc;
     audio_receiver_config_.rtp_payload_type =
         audio_sender_config_.rtp_payload_type;
-    audio_receiver_config_.frequency = audio_sender_config_.frequency;
+    audio_receiver_config_.rtp_timebase = audio_sender_config_.frequency;
     audio_receiver_config_.channels = kAudioChannels;
     audio_receiver_config_.target_frame_rate = 100;
     audio_receiver_config_.codec = audio_sender_config_.codec;
@@ -266,8 +264,6 @@ class RunOneBenchmark {
         base::TimeDelta::FromMilliseconds(kTargetPlayoutDelayMs);
     video_sender_config_.rtp_payload_type = 97;
     video_sender_config_.use_external_encoder = false;
-    video_sender_config_.width = kVideoHdWidth;
-    video_sender_config_.height = kVideoHdHeight;
 #if 0
     video_sender_config_.max_bitrate = 10000000;  // 10Mbit max
     video_sender_config_.min_bitrate = 1000000;   // 1Mbit min
@@ -284,13 +280,13 @@ class RunOneBenchmark {
         max_number_of_video_buffers_used;
     video_sender_config_.codec = video_codec;
 
-    video_receiver_config_.feedback_ssrc =
+    video_receiver_config_.receiver_ssrc =
         video_sender_config_.receiver_ssrc;
-    video_receiver_config_.incoming_ssrc = video_sender_config_.ssrc;
+    video_receiver_config_.sender_ssrc = video_sender_config_.ssrc;
     video_receiver_config_.rtp_payload_type =
         video_sender_config_.rtp_payload_type;
     video_receiver_config_.codec = video_sender_config_.codec;
-    video_receiver_config_.frequency = kVideoFrequency;
+    video_receiver_config_.rtp_timebase = kVideoFrequency;
     video_receiver_config_.channels = 1;
     video_receiver_config_.target_frame_rate = 100;
     video_receiver_config_.rtp_max_delay_ms = kTargetPlayoutDelayMs;
@@ -346,13 +342,22 @@ class RunOneBenchmark {
     cast_sender_ =
         CastSender::Create(cast_environment_sender_, &transport_sender_);
 
-    // Initializing audio and video senders.
-    cast_sender_->InitializeAudio(audio_sender_config_,
-                                  base::Bind(&AudioInitializationStatus));
-    cast_sender_->InitializeVideo(video_sender_config_,
-                                  base::Bind(&VideoInitializationStatus),
-                                  CreateDefaultVideoEncodeAcceleratorCallback(),
-                                  CreateDefaultVideoEncodeMemoryCallback());
+    // Initializing audio and video senders.  The funny dance here is to
+    // synchronize on the asynchronous initialization process.
+    base::RunLoop run_loop;
+    base::WeakPtrFactory<RunOneBenchmark> weak_factory(this);
+    cast_sender_->InitializeAudio(
+        audio_sender_config_,
+        base::Bind(&ExpectSuccessAndRunCallback, run_loop.QuitClosure()));
+    run_loop.Run();  // Wait for quit closure to run.
+    weak_factory.InvalidateWeakPtrs();
+    cast_sender_->InitializeVideo(
+        video_sender_config_,
+        base::Bind(&ExpectSuccessAndRunCallback, run_loop.QuitClosure()),
+        CreateDefaultVideoEncodeAcceleratorCallback(),
+        CreateDefaultVideoEncodeMemoryCallback());
+    run_loop.Run();  // Wait for quit closure to run.
+    weak_factory.InvalidateWeakPtrs();
 
     receiver_to_sender_.Initialize(
         CreateSimplePipe(p).Pass(),

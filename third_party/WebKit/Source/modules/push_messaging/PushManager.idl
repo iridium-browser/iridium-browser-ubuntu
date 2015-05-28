@@ -5,10 +5,11 @@
 // https://w3c.github.io/push-api/#pushmanager-interface
 
 [
+    Exposed=(Window,ServiceWorker),
     GarbageCollected,
     RuntimeEnabled=PushMessaging,
 ] interface PushManager {
     [CallWith=ScriptState] Promise<PushSubscription> subscribe();
     [CallWith=ScriptState] Promise<PushSubscription?> getSubscription();
-    [CallWith=ScriptState] Promise hasPermission();
+    [RuntimeEnabled=PushMessagingHasPermission,CallWith=ScriptState] Promise hasPermission();
 };

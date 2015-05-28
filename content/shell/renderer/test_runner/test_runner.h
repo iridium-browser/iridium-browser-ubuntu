@@ -19,8 +19,8 @@ class GURL;
 class SkBitmap;
 
 namespace blink {
+class WebContentSettingsClient;
 class WebFrame;
-class WebPermissionClient;
 class WebString;
 class WebView;
 class WebURLResponse;
@@ -36,7 +36,7 @@ namespace content {
 class InvokeCallbackTask;
 class TestInterfaces;
 class TestPageOverlay;
-class WebPermissions;
+class WebContentSettings;
 class WebTestDelegate;
 class WebTestProxyBase;
 
@@ -67,7 +67,7 @@ class TestRunner : public WebTestRunner,
   bool ShouldDumpAsAudio() const override;
   void GetAudioData(std::vector<unsigned char>* buffer_view) const override;
   bool ShouldDumpBackForwardList() const override;
-  blink::WebPermissionClient* GetWebPermissions() const override;
+  blink::WebContentSettingsClient* GetWebContentSettings() const override;
 
   // Methods used by WebTestProxyBase.
   bool shouldDumpSelectionRect() const;
@@ -119,6 +119,8 @@ class TestRunner : public WebTestRunner,
   void RequestPointerUnlock();
   bool isPointerLocked();
   void setToolTipText(const blink::WebString&);
+  bool shouldDumpDragImage();
+  bool shouldDumpNavigationPolicy() const;
 
   bool midiAccessorResult();
 
@@ -242,7 +244,12 @@ class TestRunner : public WebTestRunner,
   void ForceRedSelectionColors();
 
   // Adds a style sheet to be injected into new documents.
+  // TODO(dcheng): This will be removed in a followup patch.
   void InjectStyleSheet(const std::string& source_code, bool all_frames);
+
+  // Add |source_code| as an injected stylesheet to the active document of the
+  // window of the current V8 context.
+  void InsertStyleSheet(const std::string& source_code);
 
   bool FindString(const std::string& search_text,
                   const std::vector<std::string>& options_array);
@@ -416,7 +423,7 @@ class TestRunner : public WebTestRunner,
   // that may be present.
   void DumpResourceResponseMIMETypes();
 
-  // WebPermissionClient related.
+  // WebContentSettingsClient related.
   void SetImagesAllowed(bool allowed);
   void SetMediaAllowed(bool allowed);
   void SetScriptsAllowed(bool allowed);
@@ -468,6 +475,16 @@ class TestRunner : public WebTestRunner,
   // Sets a flag that causes the test to be marked as completed when the
   // WebFrameClient receives a loadURLExternally() call.
   void WaitUntilExternalURLLoad();
+
+  // This function sets a flag which tells the WebTestProxy to dump the drag
+  // image when the next drag-and-drop is initiated. It is equivalent to
+  // DumpAsTextWithPixelResults but the pixel results will be the drag image
+  // instead of a snapshot of the page.
+  void DumpDragImage();
+
+  // Sets a flag that tells the WebTestProxy to dump the default navigation
+  // policy passed to the decidePolicyForNavigation callback.
+  void DumpNavigationPolicy();
 
   ///////////////////////////////////////////////////////////////////////////
   // Methods interacting with the WebTestProxy
@@ -739,6 +756,13 @@ class TestRunner : public WebTestRunner,
   // taking possible transforms of the selection rect into account.
   bool dump_selection_rect_;
 
+  // If true, the test_shell will dump the drag image as pixel results.
+  bool dump_drag_image_;
+
+  // If true, content_shell will dump the default navigation policy passed to
+  // WebFrameClient::decidePolicyForNavigation.
+  bool dump_navigation_policy_;
+
   // If true, pixel dump will be produced as a series of 1px-tall, view-wide
   // individual paints over the height of the view.
   bool test_repaint_;
@@ -777,8 +801,8 @@ class TestRunner : public WebTestRunner,
   // This is non-0 IFF a load is in progress.
   blink::WebFrame* top_loading_frame_;
 
-  // WebPermissionClient mock object.
-  scoped_ptr<WebPermissions> web_permissions_;
+  // WebContentSettingsClient mock object.
+  scoped_ptr<WebContentSettings> web_content_settings_;
 
   bool pointer_locked_;
   enum {

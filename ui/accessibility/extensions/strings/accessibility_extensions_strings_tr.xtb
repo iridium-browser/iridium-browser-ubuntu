@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="tr">
 <translation id="1408730541890277710">Resimleri &quot;alt&quot; metinleri ile değiştirme.</translation>
+<translation id="6017514345406065928">Yeşil</translation>
 <translation id="595639123821853262">Ters Gri Tonlaması</translation>
 <translation id="8260673944985561857">Caret Browsing Seçenekleri</translation>
 <translation id="3410969471888629217">Site özelleştirmelerini unut</translation>
 <translation id="6050189528197190982">Gri Tonlama</translation>
+<translation id="8261559421026395104">Şuna ilişkin algıyı iyileştir:</translation>
 <translation id="5094574508723441140">Artırılmış Kontrast</translation>
 <translation id="8609925175482059018">Caret Browsing'i etkinleştirmek için &lt;span class='key'&gt;F7&lt;/span&gt; tuşuna basın. Kapatmak için yine aynı tuşa basın.</translation>
 <translation id="3435896845095436175">Etkinleştir</translation>
@@ -14,6 +16,8 @@
 <translation id="2394933097471027016">Caret Browsing bu sayfada her zaman etkindir, hemen deneyin!</translation>
 <translation id="3622586652998721735">Varsayılan düzen olarak belirle</translation>
 <translation id="2179565792157161713">Uzun Açıklamayı Yeni Sekmede Aç</translation>
+<translation id="7942349550061667556">Kırmızı</translation>
+<translation id="1555130319947370107">Mavi</translation>
 <translation id="2471847333270902538"><ph name="SITE"/> için renk düzeni:</translation>
 <translation id="381767806621926835">&quot;longdesc&quot; veya &quot;aria-describedat&quot; özelliği olan herhangi bir şeyi sağ tıklayıp uzun açıklamasına erişin.</translation>
 <translation id="786423340267544509">aria-describedat veya longdesc özelliği olan öğelere sınır ekleyin.</translation>
@@ -31,6 +35,7 @@
 <translation id="4896660567607030658">Geri bildirim yok, sadece imleci göster.</translation>
 <translation id="5631241868147802353">Varsayılan renk düzeni:</translation>
 <translation id="5173942593318174089">İmleç konumunu bir animasyon ile vurgulama.</translation>
+<translation id="7379645913608427028">Derece</translation>
 <translation id="894241283505723656">İçerik Menüsünde Uzun Açıklamalar</translation>
 <translation id="5555153510860501336">Yüksek Kontrast Devre Dışı</translation>
 <translation id="1703735871906654364">Klavye Göz Atma</translation>
@@ -38,6 +43,7 @@
 <translation id="6550675742724504774">Seçenekler</translation>
 <translation id="5650358096585648000">Görsel Geri Bildirim</translation>
 <translation id="4388820049312272371">İmleç konumunu hızlı bir yanıp sönme ile vurgulama.</translation>
+<translation id="2223143012868735942">Renk algısını iyileştirmek için web sayfalarına uygulanan özelleştirilebilir bir renk filtresi.</translation>
 <translation id="4023902424053835668">Web sayfalarının metinlerine ok tuşlarını kullanarak göz atın.</translation>
 <translation id="2795227192542594043">Bu uzantı size web sayfasında hareket ettirilebilen bir imleç sunarak klavye ile seçim yapmanıza olanak sağlar.</translation>
 <translation id="4394049700291259645">Devre dışı bırak</translation>

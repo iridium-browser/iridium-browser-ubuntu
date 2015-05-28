@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -39,9 +40,8 @@ const char kAccelerometerScanIndexPath[] =
     "scan_elements/in_accel_%s_%s_index";
 
 // The names of the accelerometers. Matches up with the enum AccelerometerSource
-// in ui/accelerometer/accelerometer_types.h.
-const char kAccelerometerNames[ui::ACCELEROMETER_SOURCE_COUNT][5] = {
-    "lid", "base"};
+// in chromeos/accelerometer/accelerometer_types.h.
+const char kAccelerometerNames[ACCELEROMETER_SOURCE_COUNT][5] = {"lid", "base"};
 
 // The axes on each accelerometer.
 const char kAccelerometerAxes[][2] = {"y", "x", "z"};
@@ -51,9 +51,6 @@ const size_t kMaxAsciiUintLength = 21;
 
 // The size of individual values.
 const size_t kDataSize = 2;
-
-// The time to wait between reading the accelerometer.
-const int kDelayBetweenReadsMs = 100;
 
 // The mean acceleration due to gravity on Earth in m/s^2.
 const float kMeanGravity = 9.80665f;
@@ -120,15 +117,15 @@ bool DetectAndReadAccelerometerConfiguration(
   }
 
   // Adjust the directions of accelerometers to match the AccelerometerUpdate
-  // type specified in ui/accelerometer/accelerometer_types.h.
-  configuration->data.scale[ui::ACCELEROMETER_SOURCE_SCREEN][0] *= -1.0f;
+  // type specified in chromeos/accelerometer/accelerometer_types.h.
+  configuration->data.scale[ACCELEROMETER_SOURCE_SCREEN][0] *= -1.0f;
   for (int i = 0; i < 3; ++i) {
-    configuration->data.scale[ui::ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD][i] *=
+    configuration->data.scale[ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD][i] *=
         -1.0f;
   }
 
   // Verify indices are within bounds.
-  for (int i = 0; i < ui::ACCELEROMETER_SOURCE_COUNT; ++i) {
+  for (int i = 0; i < ACCELEROMETER_SOURCE_COUNT; ++i) {
     if (!configuration->data.has[i])
       continue;
     for (int j = 0; j < 3; ++j) {
@@ -169,9 +166,11 @@ bool ReadAccelerometer(
 
 }  // namespace
 
+const int AccelerometerReader::kDelayBetweenReadsMs = 100;
+
 AccelerometerReader::ConfigurationData::ConfigurationData()
     : count(0) {
-  for (int i = 0; i < ui::ACCELEROMETER_SOURCE_COUNT; ++i) {
+  for (int i = 0; i < ACCELEROMETER_SOURCE_COUNT; ++i) {
     has[i] = false;
     for (int j = 0; j < 3; ++j) {
       scale[i][j] = 0;
@@ -183,12 +182,9 @@ AccelerometerReader::ConfigurationData::ConfigurationData()
 AccelerometerReader::ConfigurationData::~ConfigurationData() {
 }
 
-AccelerometerReader::AccelerometerReader()
-    : configuration_(new AccelerometerReader::Configuration()),
-      weak_factory_(this) {
-}
-
-AccelerometerReader::~AccelerometerReader() {
+// static
+AccelerometerReader* AccelerometerReader::GetInstance() {
+  return Singleton<AccelerometerReader>::get();
 }
 
 void AccelerometerReader::Initialize(
@@ -205,11 +201,22 @@ void AccelerometerReader::Initialize(
 }
 
 void AccelerometerReader::AddObserver(Observer* observer) {
-  observers_.AddObserver(observer);
+  observers_->AddObserver(observer);
+  if (update_)
+    observer->OnAccelerometerUpdated(update_.get());
 }
 
 void AccelerometerReader::RemoveObserver(Observer* observer) {
-  observers_.RemoveObserver(observer);
+  observers_->RemoveObserver(observer);
+}
+
+AccelerometerReader::AccelerometerReader()
+    : configuration_(new AccelerometerReader::Configuration()),
+      observers_(new ObserverListThreadSafe<Observer>()),
+      weak_factory_(this) {
+}
+
+AccelerometerReader::~AccelerometerReader() {
 }
 
 void AccelerometerReader::OnInitialized(
@@ -239,20 +246,22 @@ void AccelerometerReader::OnDataRead(
   DCHECK(!task_runner_->RunsTasksOnCurrentThread());
 
   if (success) {
-    for (int i = 0; i < ui::ACCELEROMETER_SOURCE_COUNT; ++i) {
+    update_ = new AccelerometerUpdate();
+    for (int i = 0; i < ACCELEROMETER_SOURCE_COUNT; ++i) {
       if (!configuration_->data.has[i])
         continue;
 
       int16* values = reinterpret_cast<int16*>(reading->data);
-      update_.Set(static_cast<ui::AccelerometerSource>(i),
-                  values[configuration_->data.index[i][0]] *
-                      configuration_->data.scale[i][0],
-                  values[configuration_->data.index[i][1]] *
-                      configuration_->data.scale[i][1],
-                  values[configuration_->data.index[i][2]] *
-                      configuration_->data.scale[i][2]);
+      update_->Set(static_cast<AccelerometerSource>(i),
+                   values[configuration_->data.index[i][0]] *
+                       configuration_->data.scale[i][0],
+                   values[configuration_->data.index[i][1]] *
+                       configuration_->data.scale[i][1],
+                   values[configuration_->data.index[i][2]] *
+                       configuration_->data.scale[i][2]);
     }
-    FOR_EACH_OBSERVER(Observer, observers_, OnAccelerometerUpdated(update_));
+    // TODO(jonross): move this to the blocking thread (crbug.com/461433)
+    observers_->Notify(FROM_HERE, &Observer::OnAccelerometerUpdated, update_);
   }
 
   // Trigger another read after the current sampling delay.

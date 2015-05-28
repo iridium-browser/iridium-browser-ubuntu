@@ -6,6 +6,12 @@ found in the LICENSE file.
 -->
 <link rel="import" href="/base/ui.html">
 <link rel="import" href="/base/settings.html">
+<style>
+.labeled-checkbox {
+  display: flex;
+  white-space: nowrap;
+}
+</style>
 <script>
 'use strict';
 
@@ -144,7 +150,7 @@ tv.exportTo('tv.b.ui', function() {
     var initialValue = tv.b.Settings.get(settingsKey, defaultValue);
     for (var i = 0; i < items.length; ++i) {
       var item = items[i];
-      var id = 'category-preset-' + item.label.replace(/ /g,'-');
+      var id = 'category-preset-' + item.label.replace(/ /g, '-');
 
       var radioEl = document.createElement('input');
       radioEl.type = 'radio';

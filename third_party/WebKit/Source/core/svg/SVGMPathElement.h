@@ -43,7 +43,7 @@ public:
 
     void targetPathChanged();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGMPathElement(Document&);
@@ -53,10 +53,9 @@ private:
     virtual InsertionNotificationRequest insertedInto(ContainerNode*) override;
     virtual void removedFrom(ContainerNode*) override;
 
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
-    virtual bool rendererIsNeeded(const RenderStyle&) override { return false; }
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override { return false; }
     void notifyParentOfPathChange(ContainerNode*);
 
 };

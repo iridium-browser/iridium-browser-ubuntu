@@ -198,8 +198,8 @@ message OmniboxEventProto {
       CONTACT = 12;               // One of the user's contacts
       BOOKMARK_TITLE = 13;        // A bookmark whose title contains the input.
       SEARCH_SUGGEST_ENTITY = 14; // A suggested search for an entity.
-      SEARCH_SUGGEST_INFINITE = 15; // A suggested search to complete the tail
-                                    // of the query.
+      SEARCH_SUGGEST_TAIL = 15;   // A suggested search to complete the tail
+                                  // of the query.
       SEARCH_SUGGEST_PERSONALIZED = 16; // A personalized suggested search.
       SEARCH_SUGGEST_PROFILE = 17;  // A personalized suggested search for a
                                     // Google+ profile.
@@ -217,7 +217,10 @@ message OmniboxEventProto {
                                     // used by Android GSA for on-device
                                     // suggestion logging.
       NAVSUGGEST_PERSONALIZED = 21; // A personalized url.
-      SEARCH_SUGGEST_ANSWER   = 22; // A short result for a suggested search.
+      SEARCH_SUGGEST_ANSWER   = 22; // DEPRECATED. Answers no longer have their
+                                    // own type but instead can be attached to
+                                    // suggestions of any type.
+      CALCULATOR              = 23; // A calculator answer.
     }
     optional ResultType result_type = 2;
 

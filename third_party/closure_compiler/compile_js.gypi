@@ -19,6 +19,7 @@
         'depends%': [],
       },
       'inputs': [
+        'compile_js.gypi',
         '<(CLOSURE_DIR)/checker.py',
         '<(CLOSURE_DIR)/processor.py',
         '<(CLOSURE_DIR)/build/inputs.py',
@@ -37,6 +38,7 @@
         '--depends', '<@(depends)',
         '--externs', '<@(externs)',
         '--out_file', '<(out_file)',
+        # Add '--verbose', for glorious log spam.
       ],
       'message': 'Compiling <(source_file)',
     }

@@ -39,7 +39,6 @@ WebInspector.NetworkDataGridNode = function(parentView, request)
     WebInspector.SortableDataGridNode.call(this, {});
     this._parentView = parentView;
     this._request = request;
-    this._linkifier = new WebInspector.Linkifier();
     this._staleGraph = true;
     this._isNavigationRequest = false;
     this.selectable = true;
@@ -80,7 +79,6 @@ WebInspector.NetworkDataGridNode.prototype = {
         this._nameCell = null;
         this._timelineCell = null;
         this._initiatorCell = null;
-        this._expandTimelineButton = null;
 
         this._element.classList.toggle("network-error-row", this._isFailed());
         this._element.classList.toggle("network-navigation-row", this._isNavigationRequest);
@@ -109,7 +107,7 @@ WebInspector.NetworkDataGridNode.prototype = {
         case "cookies": cell.setTextAndTitle(this._arrayLength(this._request.requestCookies)); break;
         case "setCookies": cell.setTextAndTitle(this._arrayLength(this._request.responseCookies)); break;
         case "connectionId": cell.setTextAndTitle(this._request.connectionId); break;
-        case "type": cell.setTextAndTitle(this._request.mimeType || this._request.requestContentType() || ""); break;
+        case "type": this._renderTypeCell(cell); break;
         case "initiator": this._renderInitiatorCell(cell); break;
         case "size": this._renderSizeCell(cell); break;
         case "time": this._renderTimeCell(cell); break;
@@ -148,13 +146,14 @@ WebInspector.NetworkDataGridNode.prototype = {
 
     dispose: function()
     {
-        this._linkifier.reset();
+        if (this._linkifiedInitiatorAnchor)
+            this._parentView.linkifier.disposeAnchor(this._request.target(), this._linkifiedInitiatorAnchor);
     },
 
     select: function()
     {
-        this._parentView.dispatchEventToListeners(WebInspector.NetworkLogView.EventTypes.RequestSelected, this._request);
         WebInspector.SortableDataGridNode.prototype.select.apply(this, arguments);
+        this._parentView.dispatchEventToListeners(WebInspector.NetworkLogView.EventTypes.RequestSelected, this._request);
 
         WebInspector.notifications.dispatchEventToListeners(WebInspector.UserMetrics.UserAction, {
             action: WebInspector.UserMetrics.UserActionNames.NetworkRequestSelected,
@@ -254,7 +253,7 @@ WebInspector.NetworkDataGridNode.prototype = {
         iconElement.classList.add(this._request.resourceType().name());
 
         cell.appendChild(iconElement);
-        cell.createTextChild(this._request.name());
+        cell.createTextChild(this._request.target().decorateLabel(this._request.name()));
         this._appendSubtitle(cell, this._request.path());
         cell.title = this._request.url;
     },
@@ -292,6 +291,22 @@ WebInspector.NetworkDataGridNode.prototype = {
     /**
      * @param {!Element} cell
      */
+    _renderTypeCell: function(cell)
+    {
+        var mimeType = this._request.mimeType || this._request.requestContentType() || "";
+        var resourceType = this._request.resourceType();
+        var simpleType = resourceType.name();
+
+        if (resourceType == WebInspector.resourceTypes.Other
+            || resourceType == WebInspector.resourceTypes.Image)
+            simpleType = mimeType.replace(/^(application|image)\//, "");
+
+        cell.setTextAndTitle(simpleType);
+    },
+
+    /**
+     * @param {!Element} cell
+     */
     _renderInitiatorCell: function(cell)
     {
         this._initiatorCell = cell;
@@ -301,7 +316,8 @@ WebInspector.NetworkDataGridNode.prototype = {
         switch (initiator.type) {
         case WebInspector.NetworkRequest.InitiatorType.Parser:
             cell.title = initiator.url + ":" + initiator.lineNumber;
-            cell.appendChild(WebInspector.linkifyResourceAsNode(initiator.url, initiator.lineNumber - 1));
+            var uiSourceCode = WebInspector.networkMapping.uiSourceCodeForURLForAnyTarget(initiator.url);
+            cell.appendChild(WebInspector.linkifyResourceAsNode(initiator.url, initiator.lineNumber - 1, undefined, undefined, uiSourceCode ? uiSourceCode.displayName() : undefined));
             this._appendSubtitle(cell, WebInspector.UIString("Parser"));
             break;
 
@@ -315,7 +331,7 @@ WebInspector.NetworkDataGridNode.prototype = {
 
         case WebInspector.NetworkRequest.InitiatorType.Script:
             if (!this._linkifiedInitiatorAnchor) {
-                this._linkifiedInitiatorAnchor = this._linkifier.linkifyScriptLocation(request.target(), null, initiator.url, initiator.lineNumber - 1, initiator.columnNumber - 1);
+                this._linkifiedInitiatorAnchor = this._parentView.linkifier.linkifyScriptLocation(request.target(), null, initiator.url, initiator.lineNumber - 1, initiator.columnNumber - 1);
                 this._linkifiedInitiatorAnchor.title = "";
             }
             cell.appendChild(this._linkifiedInitiatorAnchor);
@@ -385,34 +401,11 @@ WebInspector.NetworkDataGridNode.prototype = {
             this.dataGrid.scheduleUpdate();
     },
 
-    /**
-     * @param {boolean} show
-     */
-    _showExpandTimelineButton: function(show)
-    {
-        if (show && !this._expandTimelineButton) {
-            this._expandTimelineButton = this._timelineCell.createChild("div", "network-expand-timeline-button");
-            this._expandTimelineButton.createChild("div", "network-expand-timeline-glyph");
-            this._expandTimelineButton.title = WebInspector.UIString("Show full timeline");
-            this._expandTimelineButton.addEventListener("mousedown", this._onExpandTimeline.bind(this));
-        } else if (!show && this._expandTimelineButton) {
-            this._expandTimelineButton.remove();
-            this._expandTimelineButton = null;
-        }
-    },
-
-    _onExpandTimeline: function(event)
-    {
-        this._parentView.expandTimeline();
-        event.consume();
-    },
-
     _updateTimingGraph: function()
     {
         var calculator = this._parentView.calculator();
         var timeRanges = WebInspector.RequestTimingView.calculateRequestTimeRanges(this._request);
         var right = timeRanges[0].end;
-        this._showExpandTimelineButton(right !== Number.MAX_VALUE && calculator.computePercentageFromEventTime(right) > 100);
 
         var container = this._barAreaElement;
         var nextBar = container.firstChild;
@@ -448,7 +441,6 @@ WebInspector.NetworkDataGridNode.prototype = {
         var calculator = this._parentView.calculator();
         var percentages = calculator.computeBarGraphPercentages(this._request);
         this._percentages = percentages;
-        this._showExpandTimelineButton(percentages.end > 100);
 
         this._barAreaElement.classList.remove("hidden");
 

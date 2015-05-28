@@ -2,19 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-if (is_android) {
-  import("//build/config/android/config.gni")
-  autofill_enable_sync = !is_android_webview_build
-} else {
-  autofill_enable_sync = true
-}
-
-config("autofill_browser_config") {
-  if (autofill_enable_sync) {
-    defines = [ "AUTOFILL_ENABLE_SYNC" ]
-  }
-}
-
 # GYP version: components/autofill.gyp:autofill_regexes
 action("regexes") {
   visibility = [ "//components/autofill/*" ]
@@ -46,6 +33,9 @@ static_library("browser") {
     "autocomplete_history_manager.cc",
     "autocomplete_history_manager.h",
     "autofill-inl.h",
+    "autofill_cc_infobar_delegate.cc",
+    "autofill_cc_infobar_delegate.h",
+    "autofill_client.h",
     "autofill_country.cc",
     "autofill_country.h",
     "autofill_data_model.cc",
@@ -53,6 +43,8 @@ static_library("browser") {
     "autofill_download_manager.cc",
     "autofill_download_manager.h",
     "autofill_driver.h",
+    "autofill_experiments.cc",
+    "autofill_experiments.h",
     "autofill_external_delegate.cc",
     "autofill_external_delegate.h",
     "autofill_field.cc",
@@ -61,7 +53,6 @@ static_library("browser") {
     "autofill_ie_toolbar_import_win.h",
     "autofill_manager.cc",
     "autofill_manager.h",
-    "autofill_client.h",
     "autofill_manager_test_delegate.h",
     "autofill_metrics.cc",
     "autofill_metrics.h",
@@ -81,12 +72,17 @@ static_library("browser") {
     "autofill_type.h",
     "autofill_xml_parser.cc",
     "autofill_xml_parser.h",
+    "card_unmask_delegate.cc",
+    "card_unmask_delegate.h",
     "contact_info.cc",
     "contact_info.h",
     "credit_card.cc",
     "credit_card.h",
     "credit_card_field.cc",
     "credit_card_field.h",
+    "detail_input.cc",
+    "detail_input.h",
+    "dialog_section.h",
     "email_field.cc",
     "email_field.h",
     "field_types.h",
@@ -111,12 +107,16 @@ static_library("browser") {
     "phone_number_i18n.cc",
     "phone_number_i18n.h",
     "popup_item_ids.h",
+    "server_field_types_util.cc",
+    "server_field_types_util.h",
     "state_names.cc",
     "state_names.h",
     "suggestion.cc",
     "suggestion.h",
     "validation.cc",
     "validation.h",
+    "wallet/real_pan_wallet_client.cc",
+    "wallet/real_pan_wallet_client.h",
     "webdata/autocomplete_syncable_service.cc",
     "webdata/autocomplete_syncable_service.h",
     "webdata/autofill_change.cc",
@@ -127,6 +127,8 @@ static_library("browser") {
     "webdata/autofill_profile_syncable_service.h",
     "webdata/autofill_table.cc",
     "webdata/autofill_table.h",
+    "webdata/autofill_wallet_syncable_service.cc",
+    "webdata/autofill_wallet_syncable_service.h",
     "webdata/autofill_webdata.h",
     "webdata/autofill_webdata_backend.h",
     "webdata/autofill_webdata_backend_impl.cc",
@@ -139,22 +141,30 @@ static_library("browser") {
   # Compile the generated regex file.
   sources += get_target_outputs(":regexes")
 
+  # Controls whether Wallet cards can be saved to the local instance of chrome.
+  if (!is_desktop_linux) {
+    defines = [ "ENABLE_SAVE_WALLET_CARDS_LOCALLY" ]
+  }
+
   deps = [
     ":regexes",
     "//base",
     "//base:i18n",
     "//base:prefs",
     "//components/autofill/core/common",
+    "//components/infobars/core",
     "//components/keyed_service/core",
     "//components/os_crypt",
     "//components/pref_registry",
     "//components/resources",
+    "//components/signin/core/common",
     "//components/strings",
     "//components/webdata/common",
     "//google_apis",
     "//net",
     "//skia",
     "//sql",
+    "//sync",
     "//third_party/fips181",
     "//third_party/icu",
     "//third_party/libaddressinput:util",
@@ -166,23 +176,7 @@ static_library("browser") {
     "//url",
   ]
 
-  public_configs = [ ":autofill_browser_config" ]
-
-  if (autofill_enable_sync) {
-    deps += [ "//sync" ]
-  } else {
-    sources -= [
-      "webdata/autocomplete_syncable_service.cc",
-      "webdata/autocomplete_syncable_service.h",
-      "webdata/autofill_profile_syncable_service.cc",
-      "webdata/autofill_profile_syncable_service.h",
-    ]
-  }
-
-  if (is_win) {
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4267" ]
-  }
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 }
 
 static_library("test_support") {
@@ -213,6 +207,7 @@ static_library("test_support") {
     "//components/autofill/core/common",
     "//components/os_crypt",
     "//components/pref_registry",
+    "//components/rappor",
     "//skia",
     "//testing/gtest",
   ]
@@ -262,6 +257,7 @@ source_set("unit_tests") {
     "//base/test:test_support",
     "//components/autofill/core/common",
     "//components/os_crypt",
+    "//components/rappor:test_support",
     "//components/resources",
     "//components/strings",
     "//components/webdata/common",

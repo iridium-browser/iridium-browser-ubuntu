@@ -4,6 +4,9 @@
 
 #include "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
 
+#include <map>
+#include <set>
+#include <string>
 #include <vector>
 
 #include "ash/desktop_background/desktop_background_controller.h"
@@ -17,11 +20,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -68,7 +73,9 @@ bool IsOEMDefaultWallpaper() {
 
 // Saves |data| as |file_name| to directory with |key|. Return false if the
 // directory can not be found/created or failed to write file.
-bool SaveData(int key, const std::string& file_name, const std::string& data) {
+bool SaveData(int key,
+              const std::string& file_name,
+              const std::vector<char>& data) {
   base::FilePath data_dir;
   CHECK(PathService::Get(key, &data_dir));
   if (!base::DirectoryExists(data_dir) &&
@@ -78,7 +85,7 @@ bool SaveData(int key, const std::string& file_name, const std::string& data) {
   base::FilePath file_path = data_dir.Append(file_name);
 
   return base::PathExists(file_path) ||
-         (base::WriteFile(file_path, data.c_str(), data.size()) != -1);
+         base::WriteFile(file_path, vector_as_array(&data), data.size()) != -1;
 }
 
 // Gets |file_name| from directory with |key|. Return false if the directory can
@@ -93,6 +100,18 @@ bool GetData(const base::FilePath& path, std::string* data) {
 
   return !base::PathExists(path) ||
          base::ReadFileToString(path, data);
+}
+
+// Gets the |User| for a given |BrowserContext|. The function will only return
+// valid objects.
+const user_manager::User* GetUserFromBrowserContext(
+    content::BrowserContext* context) {
+  Profile* profile = Profile::FromBrowserContext(context);
+  DCHECK(profile);
+  const user_manager::User* user =
+      chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
+  DCHECK(user);
+  return user;
 }
 
 // WindowStateManager remembers which windows have been minimized in order to
@@ -112,7 +131,7 @@ class WindowStateManager : public aura::WindowObserver {
  private:
   WindowStateManager();
 
-  virtual ~WindowStateManager();
+  ~WindowStateManager() override;
 
   // Store all unminimized windows except |active_window| and minimize them.
   // All the windows are saved in a map and the key value is |user_id_hash|.
@@ -127,7 +146,10 @@ class WindowStateManager : public aura::WindowObserver {
   void RemoveObserverIfUnreferenced(aura::Window* window);
 
   // aura::WindowObserver overrides.
-  virtual void OnWindowDestroyed(aura::Window* window) override;
+  void OnWindowDestroyed(aura::Window* window) override;
+
+  // aura::WindowObserver overrides.
+  void OnWindowStackingChanged(aura::Window* window) override;
 
   // Map of user id hash and associated list of minimized windows.
   UserIDHashWindowListMap user_id_hash_window_list_map_;
@@ -175,7 +197,8 @@ void WindowStateManager::BuildWindowListAndMinimizeInactiveForUser(
   std::set<aura::Window*>* results =
       &user_id_hash_window_list_map_[user_id_hash];
 
-  std::vector<aura::Window*> windows = ash::MruWindowTracker::BuildWindowList();
+  std::vector<aura::Window*> windows = ash::Shell::GetInstance()->
+      mru_window_tracker()->BuildWindowListIgnoreModal();
 
   for (std::vector<aura::Window*>::iterator iter = windows.begin();
        iter != windows.end(); ++iter) {
@@ -183,7 +206,6 @@ void WindowStateManager::BuildWindowListAndMinimizeInactiveForUser(
     if (*iter == active_window || ash::wm::GetWindowState(*iter)->IsMinimized())
       continue;
 
-    // TODO(bshe): Add WindowStateObserver too. http://crbug.com/323252
     if (!(*iter)->HasObserver(this))
       (*iter)->AddObserver(this);
 
@@ -234,6 +256,16 @@ void WindowStateManager::OnWindowDestroyed(aura::Window* window) {
   }
 }
 
+void WindowStateManager::OnWindowStackingChanged(aura::Window* window) {
+  // If user interacted with the |window| while wallpaper picker is opening,
+  // removes the |window| from observed list.
+  for (auto iter = user_id_hash_window_list_map_.begin();
+       iter != user_id_hash_window_list_map_.end(); ++iter) {
+    iter->second.erase(window);
+  }
+  window->RemoveObserver(this);
+}
+
 }  // namespace
 
 bool WallpaperPrivateGetStringsFunction::RunSync() {
@@ -269,7 +301,8 @@ bool WallpaperPrivateGetStringsFunction::RunSync() {
              IDS_CURRENT_WALLPAPER_SET_BY_MESSAGE);
 #undef SET_STRING
 
-  webui::SetFontAndTextDirection(dict);
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
+  webui::SetLoadTimeDataDefaults(app_locale, dict);
 
   chromeos::WallpaperManager* wallpaper_manager =
       chromeos::WallpaperManager::Get();
@@ -312,12 +345,12 @@ WallpaperPrivateSetWallpaperIfExistsFunction::
     ~WallpaperPrivateSetWallpaperIfExistsFunction() {}
 
 bool WallpaperPrivateSetWallpaperIfExistsFunction::RunAsync() {
-#if !defined(USE_ATHENA)
-  // TODO(bshe): Support wallpaper manager in Athena, crbug.com/408734.
   params = set_wallpaper_if_exists::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  user_id_ = user_manager::UserManager::Get()->GetActiveUser()->email();
+  // Gets email address from caller, ensuring multiprofile compatibility.
+  const user_manager::User* user = GetUserFromBrowserContext(browser_context());
+  user_id_ = user->email();
 
   base::FilePath wallpaper_path;
   base::FilePath fallback_path;
@@ -348,7 +381,6 @@ bool WallpaperPrivateSetWallpaperIfExistsFunction::RunAsync() {
           &WallpaperPrivateSetWallpaperIfExistsFunction::
               ReadFileAndInitiateStartDecode,
           this, wallpaper_path, fallback_path));
-#endif
   return true;
 }
 
@@ -357,17 +389,18 @@ void WallpaperPrivateSetWallpaperIfExistsFunction::
                                    const base::FilePath& fallback_path) {
   DCHECK(BrowserThread::GetBlockingPool()->IsRunningSequenceOnCurrentThread(
       sequence_token_));
-  std::string data;
   base::FilePath path = file_path;
 
   if (!base::PathExists(file_path))
     path = fallback_path;
 
+  std::string data;
   if (base::PathExists(path) &&
       base::ReadFileToString(path, &data)) {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
         base::Bind(&WallpaperPrivateSetWallpaperIfExistsFunction::StartDecode,
-                   this, data));
+                   this, std::vector<char>(data.begin(), data.end())));
     return;
   }
   std::string error = base::StringPrintf(
@@ -426,8 +459,9 @@ bool WallpaperPrivateSetWallpaperFunction::RunAsync() {
   params = set_wallpaper::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  // Gets email address while at UI thread.
-  user_id_ = user_manager::UserManager::Get()->GetActiveUser()->email();
+  // Gets email address from caller, ensuring multiprofile compatibility.
+  const user_manager::User* user = GetUserFromBrowserContext(browser_context());
+  user_id_ = user->email();
 
   StartDecode(params->wallpaper);
 
@@ -561,10 +595,10 @@ bool WallpaperPrivateSetCustomWallpaperFunction::RunAsync() {
   params = set_custom_wallpaper::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  // Gets email address and username hash while at UI thread.
-  user_id_ = user_manager::UserManager::Get()->GetActiveUser()->email();
-  user_id_hash_ =
-      user_manager::UserManager::Get()->GetActiveUser()->username_hash();
+  // Gets email address from caller, ensuring multiprofile compatibility.
+  const user_manager::User* user = GetUserFromBrowserContext(browser_context());
+  user_id_ = user->email();
+  user_id_hash_ = user->username_hash();
 
   StartDecode(params->wallpaper);
 
@@ -833,8 +867,8 @@ void WallpaperPrivateSaveThumbnailFunction::Success() {
   SendResponse(true);
 }
 
-void WallpaperPrivateSaveThumbnailFunction::Save(const std::string& data,
-                                          const std::string& file_name) {
+void WallpaperPrivateSaveThumbnailFunction::Save(const std::vector<char>& data,
+                                                 const std::string& file_name) {
   DCHECK(BrowserThread::GetBlockingPool()->IsRunningSequenceOnCurrentThread(
       sequence_token_));
   if (SaveData(chrome::DIR_CHROMEOS_WALLPAPER_THUMBNAILS, file_name, data)) {

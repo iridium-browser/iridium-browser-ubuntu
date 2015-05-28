@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright 2014 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -8,16 +7,12 @@
 from __future__ import print_function
 
 import httplib
-import os
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
+import mock
+import tempfile
 
 from chromite.cbuildbot import constants
 from chromite.lib import cros_test_lib
 from chromite.lib import gob_util
-
-import mock
 
 
 class FakeHTTPResponse(object):
@@ -79,6 +74,21 @@ class GobTest(cros_test_lib.MockTestCase):
       self.assertRaises(gob_util.InternalGOBError, gob_util.FetchUrl, '', '')
 
 
+class GetCookieTests(cros_test_lib.TestCase):
+  """Unittests for GetCookies()"""
+
+  def testSimple(self):
+    f = tempfile.NamedTemporaryFile()
+    f.write('.googlesource.com\tTRUE\t/f\tTRUE\t2147483647\to\tfoo=bar')
+    f.flush()
+    cookies = gob_util.GetCookies('foo.googlesource.com', '/foo', [f.name])
+    self.assertEqual(cookies, {'o': 'foo=bar'})
+    cookies = gob_util.GetCookies('google.com', '/foo', [f.name])
+    self.assertEqual(cookies, {})
+    cookies = gob_util.GetCookies('foo.googlesource.com', '/', [f.name])
+    self.assertEqual(cookies, {})
+
+
 @cros_test_lib.NetworkTest()
 class NetworkGobTest(cros_test_lib.TestCase):
   """Unittests that talk to real Gerrit."""
@@ -97,6 +107,6 @@ class NetworkGobTest(cros_test_lib.TestCase):
     self.assertEqual(ex.exception.http_status, 404)
 
 
-if __name__ == '__main__':
+def main(_argv):
   gob_util.TRY_LIMIT = 1
-  cros_test_lib.main()
+  cros_test_lib.main(module=__name__)

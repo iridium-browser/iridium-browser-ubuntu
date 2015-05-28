@@ -69,7 +69,7 @@ class DeviceDisablingTest
   void SetUpOnMainThread() override;
 
   // NetworkStateInformer::NetworkStateInformerObserver:
-  void UpdateState(ErrorScreenActor::ErrorReason reason) override;
+  void UpdateState(NetworkError::ErrorReason reason) override;
 
   FakeSessionManagerClient* fake_session_manager_client_;
   policy::DevicePolicyCrosTestHelper test_helper_;
@@ -131,7 +131,7 @@ void DeviceDisablingTest::SetUpOnMainThread() {
       SetupDefaultEnvironment();
 }
 
-void DeviceDisablingTest::UpdateState(ErrorScreenActor::ErrorReason reason) {
+void DeviceDisablingTest::UpdateState(NetworkError::ErrorReason reason) {
   network_state_change_wait_run_loop_.Quit();
 }
 

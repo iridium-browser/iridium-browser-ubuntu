@@ -39,24 +39,22 @@ class TestTransport : public Transport,
   void SetRTCPReceiver(RTCPReceiver* rtcp_receiver) {
     rtcp_receiver_ = rtcp_receiver;
   }
-  virtual int SendPacket(int /*ch*/,
-                         const void* /*data*/,
-                         size_t /*len*/) OVERRIDE {
+  int SendPacket(int /*ch*/, const void* /*data*/, size_t /*len*/) override {
     ADD_FAILURE();  // FAIL() gives a compile error.
     return -1;
   }
 
   // Injects an RTCP packet into the receiver.
-  virtual int SendRTCPPacket(int /* ch */,
-                             const void *packet,
-                             size_t packet_len) OVERRIDE {
+  int SendRTCPPacket(int /* ch */,
+                     const void* packet,
+                     size_t packet_len) override {
     ADD_FAILURE();
     return 0;
   }
 
-  virtual int OnReceivedPayloadData(const uint8_t* payloadData,
-                                    const size_t payloadSize,
-                                    const WebRtcRTPHeader* rtpHeader) OVERRIDE {
+  int OnReceivedPayloadData(const uint8_t* payloadData,
+                            const size_t payloadSize,
+                            const WebRtcRTPHeader* rtpHeader) override {
     ADD_FAILURE();
     return 0;
   }
@@ -86,7 +84,8 @@ class RtcpReceiverTest : public ::testing::Test {
     configuration.outgoing_transport = test_transport_;
     configuration.remote_bitrate_estimator = remote_bitrate_estimator_.get();
     rtp_rtcp_impl_ = new ModuleRtpRtcpImpl(configuration);
-    rtcp_receiver_ = new RTCPReceiver(0, &system_clock_, rtp_rtcp_impl_);
+    rtcp_receiver_ = new RTCPReceiver(0, &system_clock_, NULL, NULL, NULL,
+                                      rtp_rtcp_impl_);
     test_transport_->SetRTCPReceiver(rtcp_receiver_);
   }
   ~RtcpReceiverTest() {
@@ -142,7 +141,7 @@ class RtcpReceiverTest : public ::testing::Test {
   TestTransport* test_transport_;
   RTCPHelp::RTCPPacketInformation rtcp_packet_info_;
   MockRemoteBitrateObserver remote_bitrate_observer_;
-  scoped_ptr<RemoteBitrateEstimator> remote_bitrate_estimator_;
+  rtc::scoped_ptr<RemoteBitrateEstimator> remote_bitrate_estimator_;
 };
 
 
@@ -744,7 +743,7 @@ TEST_F(RtcpReceiverTest, InjectXrPacketWithUnknownReportBlock) {
 }
 
 TEST_F(RtcpReceiverTest, TestXrRrRttInitiallyFalse) {
-  uint16_t rtt_ms;
+  int64_t rtt_ms;
   EXPECT_FALSE(rtcp_receiver_->GetAndResetXrRrRtt(&rtt_ms));
 }
 
@@ -965,13 +964,13 @@ TEST_F(RtcpReceiverTest, Callbacks) {
     RtcpCallbackImpl() : RtcpStatisticsCallback(), ssrc_(0) {}
     virtual ~RtcpCallbackImpl() {}
 
-    virtual void StatisticsUpdated(const RtcpStatistics& statistics,
-                                   uint32_t ssrc) OVERRIDE {
+    void StatisticsUpdated(const RtcpStatistics& statistics,
+                           uint32_t ssrc) override {
       stats_ = statistics;
       ssrc_ = ssrc;
     }
 
-    virtual void CNameChanged(const char* cname, uint32_t ssrc) OVERRIDE {}
+    void CNameChanged(const char* cname, uint32_t ssrc) override {}
 
     bool Matches(uint32_t ssrc, uint32_t extended_max, uint8_t fraction_loss,
                  uint32_t cumulative_loss, uint32_t jitter) {

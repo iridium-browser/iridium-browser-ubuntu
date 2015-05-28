@@ -5,6 +5,7 @@
 #include "components/autofill/core/browser/autofill_field.h"
 
 #include "base/command_line.h"
+#include "base/i18n/string_compare.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/sha1.h"
@@ -248,26 +249,10 @@ bool FillYearSelectControl(const base::string16& value,
 // given |field|.
 bool FillCreditCardTypeSelectControl(const base::string16& value,
                                      FormFieldData* field) {
-  // Try stripping off spaces.
-  base::string16 value_stripped;
-  base::RemoveChars(base::StringToLowerASCII(value), base::kWhitespaceUTF16,
-                    &value_stripped);
-
-  for (size_t i = 0; i < field->option_values.size(); ++i) {
-    base::string16 option_value_lowercase;
-    base::RemoveChars(base::StringToLowerASCII(field->option_values[i]),
-                      base::kWhitespaceUTF16, &option_value_lowercase);
-    base::string16 option_contents_lowercase;
-    base::RemoveChars(base::StringToLowerASCII(field->option_contents[i]),
-                      base::kWhitespaceUTF16, &option_contents_lowercase);
-
-    // Perform a case-insensitive comparison; but fill the form with the
-    // original text, not the lowercased version.
-    if (value_stripped == option_value_lowercase ||
-        value_stripped == option_contents_lowercase) {
-      field->value = field->option_values[i];
-      return true;
-    }
+  size_t idx;
+  if (AutofillField::FindValueInSelectControl(*field, value, &idx)) {
+    field->value = field->option_values[idx];
+    return true;
   }
 
   // For American Express, also try filling as "AmEx".
@@ -385,7 +370,7 @@ void FillStreetAddress(const base::string16& value,
 
 std::string Hash32Bit(const std::string& str) {
   std::string hash_bin = base::SHA1HashString(str);
-  DCHECK_EQ(20U, hash_bin.length());
+  DCHECK_EQ(base::kSHA1Length, hash_bin.length());
 
   uint32 hash32 = ((hash_bin[0] & 0xFF) << 24) |
                   ((hash_bin[1] & 0xFF) << 16) |
@@ -393,6 +378,27 @@ std::string Hash32Bit(const std::string& str) {
                    (hash_bin[3] & 0xFF);
 
   return base::UintToString(hash32);
+}
+
+scoped_ptr<icu::Collator> CreateCaseInsensitiveCollator() {
+  UErrorCode error = U_ZERO_ERROR;
+  scoped_ptr<icu::Collator> collator(icu::Collator::createInstance(error));
+  DCHECK(U_SUCCESS(error));
+  collator->setStrength(icu::Collator::PRIMARY);
+  return collator;
+}
+
+base::string16 RemoveWhitespace(const base::string16& value) {
+  base::string16 stripped_value;
+  base::RemoveChars(value, base::kWhitespaceUTF16, &stripped_value);
+  return stripped_value;
+}
+
+bool StringsEqualWithCollator(const base::string16& lhs,
+                              const base::string16& rhs,
+                              icu::Collator* collator) {
+  return base::i18n::CompareString16WithCollator(collator, lhs, rhs) ==
+      UCOL_EQUAL;
 }
 
 }  // namespace
@@ -539,6 +545,35 @@ base::string16 AutofillField::GetPhoneNumberValue(
   }
 
   return number;
+}
+
+// static
+bool AutofillField::FindValueInSelectControl(const FormFieldData& field,
+                                             const base::string16& value,
+                                             size_t* index) {
+  scoped_ptr<icu::Collator> collator = CreateCaseInsensitiveCollator();
+
+  // Strip off spaces for all values in the comparisons.
+  const base::string16 value_stripped = RemoveWhitespace(value);
+
+  for (size_t i = 0; i < field.option_values.size(); ++i) {
+    base::string16 option_value = RemoveWhitespace(field.option_values[i]);
+    if (StringsEqualWithCollator(value_stripped, option_value,
+                                 collator.get())) {
+      if (index)
+        *index = i;
+      return true;
+    }
+
+    base::string16 option_contents = RemoveWhitespace(field.option_contents[i]);
+    if (StringsEqualWithCollator(value_stripped, option_contents,
+                                 collator.get())) {
+      if (index)
+        *index = i;
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace autofill

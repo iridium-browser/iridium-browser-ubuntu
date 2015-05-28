@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/variations/entropy_provider.h"
 #include "content/public/browser/navigation_controller.h"
@@ -22,7 +23,7 @@
 
 namespace chrome {
 
-typedef testing::Test ChromeContentBrowserClientTest;
+using ChromeContentBrowserClientTest = testing::Test;
 
 TEST_F(ChromeContentBrowserClientTest, ShouldAssignSiteForURL) {
   ChromeContentBrowserClient client;
@@ -30,6 +31,59 @@ TEST_F(ChromeContentBrowserClientTest, ShouldAssignSiteForURL) {
   EXPECT_TRUE(client.ShouldAssignSiteForURL(GURL("http://www.google.com")));
   EXPECT_TRUE(client.ShouldAssignSiteForURL(GURL("https://www.google.com")));
 }
+
+// BrowserWithTestWindowTest doesn't work on iOS and Android.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+
+using ChromeContentBrowserClientWindowTest = BrowserWithTestWindowTest;
+
+static void DidOpenURLForWindowTest(content::WebContents** target_contents,
+                                    content::WebContents* opened_contents) {
+  DCHECK(target_contents);
+
+  *target_contents = opened_contents;
+}
+
+// This test opens two URLs using ContentBrowserClient::OpenURL. It expects the
+// URLs to be opened in new tabs and activated, changing the active tabs after
+// each call and increasing the tab count by 2.
+TEST_F(ChromeContentBrowserClientWindowTest, OpenURL) {
+  ChromeContentBrowserClient client;
+
+  int previous_count = browser()->tab_strip_model()->count();
+
+  GURL urls[] = { GURL("https://www.google.com"),
+                  GURL("https://www.chromium.org") };
+
+  for (const GURL& url : urls) {
+    content::OpenURLParams params(url,
+                                  content::Referrer(),
+                                  NEW_FOREGROUND_TAB,
+                                  ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
+                                  false);
+    // TODO(peter): We should have more in-depth browser tests for the window
+    // opening functionality, which also covers Android. This test can currently
+    // only be ran on platforms where OpenURL is implemented synchronously.
+    // See https://crbug.com/457667.
+    content::WebContents* web_contents = nullptr;
+    client.OpenURL(browser()->profile(),
+                   params,
+                   base::Bind(&DidOpenURLForWindowTest, &web_contents));
+
+    EXPECT_TRUE(web_contents);
+
+    content::WebContents* active_contents = browser()->tab_strip_model()->
+        GetActiveWebContents();
+    EXPECT_EQ(web_contents, active_contents);
+    EXPECT_EQ(url, active_contents->GetVisibleURL());
+  }
+
+  EXPECT_EQ(previous_count + 2, browser()->tab_strip_model()->count());
+}
+
+#endif // !defined(OS_ANDROID) && !defined(OS_IOS)
+
+#if defined(ENABLE_WEBRTC)
 
 // NOTE: Any updates to the expectations in these tests should also be done in
 // the browser test WebRtcDisableEncryptionFlagBrowserTest.
@@ -85,6 +139,8 @@ TEST_F(DisableWebRtcEncryptionFlagTest, StableChannel) {
   MaybeCopyDisableWebRtcEncryptionSwitch(VersionInfo::CHANNEL_STABLE);
   EXPECT_FALSE(to_command_line_.HasSwitch(switches::kDisableWebRtcEncryption));
 }
+
+#endif  // ENABLE_WEBRTC
 
 }  // namespace chrome
 

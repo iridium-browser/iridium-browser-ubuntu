@@ -40,6 +40,8 @@ class NativeImageBuffer : public base::RefCountedThreadSafe<NativeImageBuffer> {
 // the underlying image buffer(s).
 class TextureDefinition {
  public:
+  static void AvoidEGLTargetTextureReuse();
+
   TextureDefinition();
   TextureDefinition(Texture* texture,
                     unsigned int version,
@@ -59,8 +61,10 @@ class TextureDefinition {
 
  private:
   bool SafeToRenderFrom() const;
+  void UpdateTextureInternal(Texture* texture) const;
 
   struct LevelInfo {
+    LevelInfo();
     LevelInfo(GLenum target,
               GLenum internal_format,
               GLsizei width,
@@ -83,8 +87,6 @@ class TextureDefinition {
     bool cleared;
   };
 
-  typedef std::vector<std::vector<LevelInfo> > LevelInfos;
-
   unsigned int version_;
   GLenum target_;
   scoped_refptr<NativeImageBuffer> image_buffer_;
@@ -94,7 +96,10 @@ class TextureDefinition {
   GLenum wrap_t_;
   GLenum usage_;
   bool immutable_;
-  LevelInfos level_infos_;
+  bool defined_;
+
+  // Only support textures with one face and one level.
+  LevelInfo level_info_;
 };
 
 }  // namespage gles2

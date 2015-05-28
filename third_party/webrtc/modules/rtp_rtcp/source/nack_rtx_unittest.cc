@@ -14,6 +14,7 @@
 #include <set>
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/common_types.h"
 #include "webrtc/modules/rtp_rtcp/interface/receive_statistics.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_header_parser.h"
@@ -21,7 +22,6 @@
 #include "webrtc/modules/rtp_rtcp/interface/rtp_receiver.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 using namespace webrtc;
 
@@ -38,10 +38,10 @@ class VerifyingRtxReceiver : public NullRtpData
  public:
   VerifyingRtxReceiver() {}
 
-  virtual int32_t OnReceivedPayloadData(
+  int32_t OnReceivedPayloadData(
       const uint8_t* data,
       const size_t size,
-      const webrtc::WebRtcRTPHeader* rtp_header) OVERRIDE {
+      const webrtc::WebRtcRTPHeader* rtp_header) override {
     if (!sequence_numbers_.empty())
       EXPECT_EQ(kTestSsrc, rtp_header->header.ssrc);
     sequence_numbers_.push_back(rtp_header->header.sequenceNumber);
@@ -55,8 +55,7 @@ class TestRtpFeedback : public NullRtpFeedback {
   TestRtpFeedback(RtpRtcp* rtp_rtcp) : rtp_rtcp_(rtp_rtcp) {}
   virtual ~TestRtpFeedback() {}
 
-  virtual void OnIncomingSSRCChanged(const int32_t id,
-                                     const uint32_t ssrc) OVERRIDE {
+  void OnIncomingSSRCChanged(const int32_t id, const uint32_t ssrc) override {
     rtp_rtcp_->SetRemoteSSRC(ssrc);
   }
 
@@ -95,7 +94,7 @@ class RtxLoopBackTransport : public webrtc::Transport {
     packet_loss_ = 0;
   }
 
-  virtual int SendPacket(int channel, const void *data, size_t len) OVERRIDE {
+  int SendPacket(int channel, const void* data, size_t len) override {
     count_++;
     const unsigned char* ptr = static_cast<const unsigned  char*>(data);
     uint32_t ssrc = (ptr[8] << 24) + (ptr[9] << 16) + (ptr[10] << 8) + ptr[11];
@@ -118,7 +117,7 @@ class RtxLoopBackTransport : public webrtc::Transport {
     uint8_t restored_packet[1500] = {0};
     uint8_t* restored_packet_ptr = restored_packet;
     RTPHeader header;
-    scoped_ptr<RtpHeaderParser> parser(RtpHeaderParser::Create());
+    rtc::scoped_ptr<RtpHeaderParser> parser(RtpHeaderParser::Create());
     if (!parser->Parse(ptr, len, &header)) {
       return -1;
     }
@@ -146,9 +145,7 @@ class RtxLoopBackTransport : public webrtc::Transport {
     return static_cast<int>(len);
   }
 
-  virtual int SendRTCPPacket(int channel,
-                             const void *data,
-                             size_t len) OVERRIDE {
+  int SendRTCPPacket(int channel, const void* data, size_t len) override {
     if (module_->IncomingRtcpPacket((const uint8_t*)data, len) == 0) {
       return static_cast<int>(len);
     }
@@ -177,7 +174,7 @@ class RtpRtcpRtxNackTest : public ::testing::Test {
         fake_clock(123456) {}
   ~RtpRtcpRtxNackTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     RtpRtcp::Configuration configuration;
     configuration.id = kTestId;
     configuration.audio = false;
@@ -259,7 +256,7 @@ class RtpRtcpRtxNackTest : public ::testing::Test {
 
   void RunRtxTest(RtxMode rtx_method, int loss) {
     rtp_payload_registry_.SetRtxSsrc(kTestSsrc + 1);
-    rtp_rtcp_module_->SetRTXSendStatus(rtx_method);
+    rtp_rtcp_module_->SetRtxSendStatus(rtx_method);
     rtp_rtcp_module_->SetRtxSsrc(kTestSsrc + 1);
     transport_.DropEveryNthPacket(loss);
     uint32_t timestamp = 3000;
@@ -271,10 +268,12 @@ class RtpRtcpRtxNackTest : public ::testing::Test {
                                                       timestamp / 90,
                                                       payload_data,
                                                       payload_data_length));
+      // Min required delay until retransmit = 5 + RTT ms (RTT = 0).
+      fake_clock.AdvanceTimeMilliseconds(5);
       int length = BuildNackList(nack_list);
       if (length > 0)
         rtp_rtcp_module_->SendNACK(nack_list, length);
-      fake_clock.AdvanceTimeMilliseconds(33);
+      fake_clock.AdvanceTimeMilliseconds(28);  //  33ms - 5ms delay.
       rtp_rtcp_module_->Process();
       // Prepare next frame.
       timestamp += 3000;
@@ -282,15 +281,13 @@ class RtpRtcpRtxNackTest : public ::testing::Test {
     receiver_.sequence_numbers_.sort();
   }
 
-  virtual void TearDown() OVERRIDE {
-    delete rtp_rtcp_module_;
-  }
+  void TearDown() override { delete rtp_rtcp_module_; }
 
-  scoped_ptr<ReceiveStatistics> receive_statistics_;
+  rtc::scoped_ptr<ReceiveStatistics> receive_statistics_;
   RTPPayloadRegistry rtp_payload_registry_;
-  scoped_ptr<RtpReceiver> rtp_receiver_;
+  rtc::scoped_ptr<RtpReceiver> rtp_receiver_;
   RtpRtcp* rtp_rtcp_module_;
-  scoped_ptr<TestRtpFeedback> rtp_feedback_;
+  rtc::scoped_ptr<TestRtpFeedback> rtp_feedback_;
   RtxLoopBackTransport transport_;
   VerifyingRtxReceiver receiver_;
   uint8_t  payload_data[65000];

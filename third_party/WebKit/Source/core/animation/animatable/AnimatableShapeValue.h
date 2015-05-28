@@ -32,7 +32,7 @@
 #define AnimatableShapeValue_h
 
 #include "core/animation/animatable/AnimatableValue.h"
-#include "core/rendering/style/ShapeValue.h"
+#include "core/style/ShapeValue.h"
 
 namespace blink {
 
@@ -45,7 +45,7 @@ public:
     }
     ShapeValue* shapeValue() const { return m_shape.get(); }
 
-    virtual void trace(Visitor* visitor) override { AnimatableValue::trace(visitor); }
+    DEFINE_INLINE_VIRTUAL_TRACE() { AnimatableValue::trace(visitor); }
 
 protected:
     virtual PassRefPtrWillBeRawPtr<AnimatableValue> interpolateTo(const AnimatableValue*, double fraction) const override;

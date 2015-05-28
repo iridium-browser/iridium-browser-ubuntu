@@ -84,7 +84,7 @@ static bool parseKeyTimes(const String& string, Vector<float>& result, bool veri
     Vector<String> parseList;
     string.split(';', true, parseList);
     for (unsigned n = 0; n < parseList.size(); ++n) {
-        String timeString = parseList[n];
+        String timeString = parseList[n].stripWhiteSpace();
         bool ok;
         float time = timeString.toFloat(&ok);
         if (!ok || time < 0 || time > 1)
@@ -272,8 +272,7 @@ void SVGAnimationElement::beginElement()
 
 void SVGAnimationElement::beginElementAt(float offset)
 {
-    if (!std::isfinite(offset))
-        return;
+    ASSERT(std::isfinite(offset));
     SMILTime elapsed = this->elapsed();
     addBeginTime(elapsed, elapsed + offset, SMILTimeWithOrigin::ScriptOrigin);
 }
@@ -285,8 +284,7 @@ void SVGAnimationElement::endElement()
 
 void SVGAnimationElement::endElementAt(float offset)
 {
-    if (!std::isfinite(offset))
-        return;
+    ASSERT(std::isfinite(offset));
     SMILTime elapsed = this->elapsed();
     addEndTime(elapsed, elapsed + offset, SMILTimeWithOrigin::ScriptOrigin);
 }
@@ -332,7 +330,7 @@ void SVGAnimationElement::setAttributeType(const AtomicString& attributeType)
         m_attributeType = AttributeTypeXML;
     else
         m_attributeType = AttributeTypeAuto;
-    checkInvalidCSSAttributeType(targetElement());
+    checkInvalidCSSAttributeType();
 }
 
 String SVGAnimationElement::toValue() const
@@ -368,18 +366,21 @@ bool SVGAnimationElement::isTargetAttributeCSSProperty(SVGElement* targetElement
 {
     ASSERT(targetElement);
 
-    return SVGElement::isAnimatableCSSProperty(attributeName);
+    return SVGElement::isAnimatableCSSProperty(attributeName) || targetElement->isPresentationAttribute(attributeName);
 }
 
 SVGAnimationElement::ShouldApplyAnimation SVGAnimationElement::shouldApplyAnimation(SVGElement* targetElement, const QualifiedName& attributeName)
 {
-    if (!hasValidAttributeType() || !targetElement || attributeName == anyQName())
+    if (!hasValidAttributeType() || !targetElement || attributeName == anyQName() || !targetElement->inActiveDocument())
         return DontApplyAnimation;
 
     // Always animate CSS properties, using the ApplyCSSAnimation code path, regardless of the attributeType value.
-    if (isTargetAttributeCSSProperty(targetElement, attributeName))
-        return ApplyCSSAnimation;
+    if (isTargetAttributeCSSProperty(targetElement, attributeName)) {
+        if (targetElement->isPresentationAttributeWithSVGDOM(attributeName))
+            return ApplyXMLandCSSAnimation;
 
+        return ApplyCSSAnimation;
+    }
     // If attributeType="CSS" and attributeName doesn't point to a CSS property, ignore the animation.
     if (attributeType() == AttributeTypeCSS)
         return DontApplyAnimation;
@@ -654,6 +655,9 @@ void SVGAnimationElement::updateAnimation(float percent, unsigned repeatCount, S
 void SVGAnimationElement::computeCSSPropertyValue(SVGElement* element, CSSPropertyID id, String& value)
 {
     ASSERT(element);
+    // FIXME: StyleEngine doesn't support document without a frame.
+    // Refer to comment in Element::computedStyle.
+    ASSERT(element->inActiveDocument());
 
     // Don't include any properties resulting from CSS Transitions/Animations or SMIL animations, as we want to retrieve the "base value".
     element->setUseOverrideComputedStyle(true);
@@ -700,18 +704,32 @@ void SVGAnimationElement::determinePropertyValueTypes(const String& from, const 
 void SVGAnimationElement::setTargetElement(SVGElement* target)
 {
     SVGSMILElement::setTargetElement(target);
-    checkInvalidCSSAttributeType(target);
+    checkInvalidCSSAttributeType();
 }
 
 void SVGAnimationElement::setAttributeName(const QualifiedName& attributeName)
 {
     SVGSMILElement::setAttributeName(attributeName);
-    checkInvalidCSSAttributeType(targetElement());
+    checkInvalidCSSAttributeType();
 }
 
-void SVGAnimationElement::checkInvalidCSSAttributeType(SVGElement* target)
+void SVGAnimationElement::checkInvalidCSSAttributeType()
 {
-    m_hasInvalidCSSAttributeType = target && hasValidAttributeName() && attributeType() == AttributeTypeCSS && !isTargetAttributeCSSProperty(target, attributeName());
+    bool hasInvalidCSSAttributeType = targetElement() && hasValidAttributeName() && attributeType() == AttributeTypeCSS && !isTargetAttributeCSSProperty(targetElement(), attributeName());
+
+    if (hasInvalidCSSAttributeType != m_hasInvalidCSSAttributeType) {
+        if (hasInvalidCSSAttributeType)
+            unscheduleIfScheduled();
+
+        m_hasInvalidCSSAttributeType = hasInvalidCSSAttributeType;
+
+        if (!hasInvalidCSSAttributeType)
+            schedule();
+    }
+
+    // Clear values that may depend on the previous target.
+    if (targetElement())
+        clearAnimatedType();
 }
 
 }

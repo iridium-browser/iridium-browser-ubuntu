@@ -8,17 +8,25 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/supervised_user/child_accounts/family_info_fetcher.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/account_service_flag_fetcher.h"
 #include "components/signin/core/browser/signin_manager_base.h"
+#include "net/base/backoff_entry.h"
 
 namespace base {
 class FilePath;
+}
+
+namespace user_prefs {
+class PrefRegistrySyncable;
 }
 
 class Profile;
@@ -33,6 +41,10 @@ class ChildAccountService : public KeyedService,
  public:
   ~ChildAccountService() override;
 
+  static bool IsChildAccountDetectionEnabled();
+
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+
   void Init();
 
   // Sets whether the signed-in account is a child account.
@@ -40,8 +52,14 @@ class ChildAccountService : public KeyedService,
   // happens outside of this class (like Android).
   void SetIsChildAccount(bool is_child_account);
 
+  // Responds whether at least one request for child status was successful.
+  // And we got answer whether the profile belongs to a child account or not.
+  bool IsChildAccountStatusKnown();
+
   // KeyedService:
   void Shutdown() override;
+
+  void AddChildStatusReceivedCallback(const base::Closure& callback);
 
  private:
   friend class ChildAccountServiceFactory;
@@ -67,10 +85,15 @@ class ChildAccountService : public KeyedService,
       const std::vector<FamilyInfoFetcher::FamilyMember>& members) override;
   void OnFailure(FamilyInfoFetcher::ErrorCode error) override;
 
-  void StartFetchingServiceFlags(const std::string& account_id);
+  void StartFetchingFamilyInfo();
+  void CancelFetchingFamilyInfo();
+  void ScheduleNextFamilyInfoUpdate(base::TimeDelta delay);
+
+  void StartFetchingServiceFlags();
   void CancelFetchingServiceFlags();
   void OnFlagsFetched(AccountServiceFlagFetcher::ResultCode,
                       const std::vector<std::string>& flags);
+  void ScheduleNextStatusFlagUpdate(base::TimeDelta delay);
 
   void PropagateChildStatusToUser(bool is_child);
 
@@ -92,8 +115,17 @@ class ChildAccountService : public KeyedService,
   std::string account_id_;
 
   scoped_ptr<AccountServiceFlagFetcher> flag_fetcher_;
+  // If fetching the account service flag fails, retry with exponential backoff.
+  base::OneShotTimer<ChildAccountService> flag_fetch_timer_;
+  net::BackoffEntry flag_fetch_backoff_;
 
   scoped_ptr<FamilyInfoFetcher> family_fetcher_;
+  // If fetching the family info fails, retry with exponential backoff.
+  base::OneShotTimer<ChildAccountService> family_fetch_timer_;
+  net::BackoffEntry family_fetch_backoff_;
+
+  // Callbacks to run when the user status becomes known.
+  std::vector<base::Closure> status_received_callback_list_;
 
   base::WeakPtrFactory<ChildAccountService> weak_ptr_factory_;
 

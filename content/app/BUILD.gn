@@ -10,9 +10,11 @@ content_app_sources = [
   "android/app_jni_registrar.h",
   "android/child_process_service.cc",
   "android/child_process_service.h",
+  "android/content_jni_onload.cc",
   "android/content_main.cc",
   "android/content_main.h",
   "android/library_loader_hooks.cc",
+  "android/library_loader_hooks.h",
   "content_main.cc",
   "content_main_runner.cc",
   "mojo/mojo_init.cc",
@@ -43,6 +45,7 @@ if (is_win) {
   content_app_sources -= [ "content_main.cc" ]
   content_app_deps += [
     "//content/public/android:jni",
+    "//device/vibration",
     "//skia",
     "//third_party/android_tools:cpu_features",
     "//ui/android",
@@ -57,9 +60,9 @@ if (is_ios) {
   ]
 } else {
   content_app_deps += [
-    "//mojo/edk/system",
     "//mojo/environment:chromium",
-    "//mojo/public/interfaces/application",
+    "//third_party/mojo/src/mojo/edk/system",
+    "//third_party/mojo/src/mojo/public/interfaces/application",
   ]
 }
 

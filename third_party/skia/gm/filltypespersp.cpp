@@ -24,15 +24,12 @@ public:
     }
 
 protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("filltypespersp");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(835, 840);
     }
 
@@ -76,7 +73,7 @@ protected:
                  scale, paint);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         this->makePath();
 
         // do perspective drawPaint as the background;
@@ -98,7 +95,7 @@ protected:
             canvas->translate(SkIntToScalar(100), SkIntToScalar(100));
             SkMatrix mat;
             mat.reset();
-            mat.setPerspY(SkScalarToPersp(SK_Scalar1 / 1000));
+            mat.setPerspY(SK_Scalar1 / 1000);
             canvas->concat(mat);
             canvas->drawPaint(bkgnrd);
         canvas->restore();
@@ -106,8 +103,8 @@ protected:
         // draw the paths in perspective
         SkMatrix persp;
         persp.reset();
-        persp.setPerspX(SkScalarToPersp(-SK_Scalar1 / 1800));
-        persp.setPerspY(SkScalarToPersp(SK_Scalar1 / 500));
+        persp.setPerspX(-SK_Scalar1 / 1800);
+        persp.setPerspY(SK_Scalar1 / 500);
         canvas->concat(persp);
 
         canvas->translate(SkIntToScalar(20), SkIntToScalar(20));

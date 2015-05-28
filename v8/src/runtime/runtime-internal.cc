@@ -7,6 +7,9 @@
 #include "src/arguments.h"
 #include "src/bootstrapper.h"
 #include "src/debug.h"
+#include "src/messages.h"
+#include "src/parser.h"
+#include "src/prettyprinter.h"
 #include "src/runtime/runtime-utils.h"
 
 namespace v8 {
@@ -23,7 +26,6 @@ RUNTIME_FUNCTION(Runtime_CheckIsBootstrapping) {
 RUNTIME_FUNCTION(Runtime_Throw) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 1);
-
   return isolate->Throw(args[0]);
 }
 
@@ -31,8 +33,14 @@ RUNTIME_FUNCTION(Runtime_Throw) {
 RUNTIME_FUNCTION(Runtime_ReThrow) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 1);
-
   return isolate->ReThrow(args[0]);
+}
+
+
+RUNTIME_FUNCTION(Runtime_FindExceptionHandler) {
+  SealHandleScope shs(isolate);
+  DCHECK(args.length() == 0);
+  return isolate->FindHandler();
 }
 
 
@@ -49,6 +57,16 @@ RUNTIME_FUNCTION(Runtime_ThrowReferenceError) {
   CONVERT_ARG_HANDLE_CHECKED(Object, name, 0);
   THROW_NEW_ERROR_RETURN_FAILURE(
       isolate, NewReferenceError("not_defined", HandleVector(&name, 1)));
+}
+
+
+RUNTIME_FUNCTION(Runtime_ThrowIteratorResultNotAnObject) {
+  HandleScope scope(isolate);
+  DCHECK(args.length() == 1);
+  CONVERT_ARG_HANDLE_CHECKED(Object, value, 0);
+  THROW_NEW_ERROR_RETURN_FAILURE(
+      isolate,
+      NewTypeError("iterator_result_not_an_object", HandleVector(&value, 1)));
 }
 
 
@@ -153,7 +171,29 @@ RUNTIME_FUNCTION(Runtime_CollectStackTrace) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_GetFromCache) {
+RUNTIME_FUNCTION(Runtime_RenderCallSite) {
+  HandleScope scope(isolate);
+  DCHECK(args.length() == 0);
+  MessageLocation location;
+  isolate->ComputeLocation(&location);
+  if (location.start_pos() == -1) return isolate->heap()->empty_string();
+
+  Zone zone;
+  SmartPointer<ParseInfo> info(location.function()->shared()->is_function()
+                                   ? new ParseInfo(&zone, location.function())
+                                   : new ParseInfo(&zone, location.script()));
+
+  if (!Parser::ParseStatic(info.get())) {
+    isolate->clear_pending_exception();
+    return isolate->heap()->empty_string();
+  }
+  CallPrinter printer(isolate, &zone);
+  const char* string = printer.Print(info->function(), location.start_pos());
+  return *isolate->factory()->NewStringFromAsciiChecked(string);
+}
+
+
+RUNTIME_FUNCTION(Runtime_GetFromCacheRT) {
   SealHandleScope shs(isolate);
   // This is only called from codegen, so checks might be more lax.
   CONVERT_ARG_CHECKED(JSFunctionResultCache, cache, 0);
@@ -271,12 +311,24 @@ RUNTIME_FUNCTION(Runtime_IS_VAR) {
 }
 
 
-RUNTIME_FUNCTION(RuntimeReference_GetFromCache) {
+RUNTIME_FUNCTION(Runtime_GetFromCache) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 2);
   CONVERT_SMI_ARG_CHECKED(id, 0);
   args[0] = isolate->native_context()->jsfunction_result_caches()->get(id);
-  return __RT_impl_Runtime_GetFromCache(args, isolate);
+  return __RT_impl_Runtime_GetFromCacheRT(args, isolate);
+}
+
+
+RUNTIME_FUNCTION(Runtime_IncrementStatsCounter) {
+  SealHandleScope shs(isolate);
+  DCHECK(args.length() == 1);
+  CONVERT_ARG_CHECKED(String, name, 0);
+
+  if (FLAG_native_code_counters) {
+    StatsCounter(isolate, name->ToCString().get()).Increment();
+  }
+  return isolate->heap()->undefined_value();
 }
 }
 }  // namespace v8::internal

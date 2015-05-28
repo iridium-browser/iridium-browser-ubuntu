@@ -42,6 +42,40 @@ FileType.types = [
     pattern: /\.tiff?$/i
   },
 
+  // Raw
+  {
+    type: 'raw', name: 'IMAGE_FILE_TYPE', subtype: 'ARW',
+    pattern: /\.arw$/i, icon: 'image'
+  },
+  {
+    type: 'raw', name: 'IMAGE_FILE_TYPE', subtype: 'CR2',
+    pattern: /\.cr2$/i, icon: 'image'
+  },
+  {
+    type: 'raw', name: 'IMAGE_FILE_TYPE', subtype: 'DNG',
+    pattern: /\.dng$/i, icon: 'image'
+  },
+  {
+    type: 'raw', name: 'IMAGE_FILE_TYPE', subtype: 'NEF',
+    pattern: /\.nef$/i, icon: 'image'
+  },
+  {
+    type: 'raw', name: 'IMAGE_FILE_TYPE', subtype: 'NRW',
+    pattern: /\.nrw$/i, icon: 'image'
+  },
+  {
+    type: 'raw', name: 'IMAGE_FILE_TYPE', subtype: 'ORF',
+    pattern: /\.orf$/i, icon: 'image'
+  },
+  {
+    type: 'raw', name: 'IMAGE_FILE_TYPE', subtype: 'RAF',
+    pattern: /\.raf$/i, icon: 'image'
+  },
+  {
+    type: 'raw', name: 'IMAGE_FILE_TYPE', subtype: 'RW2',
+    pattern: /\.rw2$/i, icon: 'image'
+  },
+
   // Video
   {
     type: 'video', name: 'VIDEO_FILE_TYPE', subtype: '3GP',
@@ -216,7 +250,7 @@ FileType.getExtension = function(entry) {
  * if possible, since this method can't recognize directories.
  *
  * @param {string} name Name of the file.
- * @return {Object} The matching file type object or an empty object.
+ * @return {!Object} The matching file type object or an empty object.
  */
 FileType.getTypeForName = function(name) {
   var types = FileType.types;
@@ -226,7 +260,8 @@ FileType.getTypeForName = function(name) {
   }
 
   // Unknown file type.
-  var extension = util.splitExtension(name)[1];
+  var match = /\.[^\/\.]+$/.exec(name);
+  var extension = match ? match[0] : '';
   if (extension === '') {
     return { name: 'NO_EXTENSION_FILE_TYPE', type: 'UNKNOWN', icon: '' };
   }
@@ -240,7 +275,7 @@ FileType.getTypeForName = function(name) {
 /**
  * Gets the file type object for a given file.
  * @param {Entry} entry Reference to the file.
- * @return {Object} The matching file type object or an empty object.
+ * @return {!Object} The matching file type object or an empty object.
  */
 FileType.getType = function(entry) {
   if (entry.isDirectory)
@@ -265,17 +300,6 @@ FileType.getType = function(entry) {
 };
 
 /**
- * @param {Object} fileType Type object returned by FileType.getType().
- * @return {string} Localized string representation of file type.
- */
-FileType.typeToString = function(fileType) {
-  if (fileType.subtype)
-    return strf(fileType.name, fileType.subtype);
-  else
-    return str(fileType.name);
-};
-
-/**
  * Gets the media type for a given file.
  *
  * @param {Entry} entry Reference to the file.
@@ -295,6 +319,8 @@ FileType.isAudio = function(entry) {
 };
 
 /**
+ * Returns whether the |entry| is image file that can be opened in browser.
+ * Note that it returns false for RAW images.
  * @param {Entry} entry Reference to the file.
  * @return {boolean} True if image file.
  */
@@ -310,15 +336,23 @@ FileType.isVideo = function(entry) {
   return FileType.getMediaType(entry) === 'video';
 };
 
+/**
+ * @param {Entry} entry Reference to the file.
+ * @return {boolean} True if raw file.
+ */
+FileType.isRaw = function(entry) {
+  return FileType.getMediaType(entry) === 'raw';
+};
 
 /**
  * Files with more pixels won't have preview.
  * @param {Entry} entry Reference to the file.
- * @return {boolean} True if image or video.
+ * @param {!Array<string>} types
+ * @return {boolean} True if type is in specified set
  */
-FileType.isImageOrVideo = function(entry) {
+FileType.isType = function(entry, types) {
   var type = FileType.getMediaType(entry);
-  return type === 'image' || type === 'video';
+  return !!type && types.indexOf(type) !== -1;
 };
 
 /**
@@ -338,4 +372,3 @@ FileType.getIcon = function(entry) {
   var fileType = FileType.getType(entry);
   return fileType.icon || fileType.type || 'unknown';
 };
-

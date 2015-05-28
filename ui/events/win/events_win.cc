@@ -156,6 +156,10 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
     // sequences.
     case WM_DEADCHAR:
     case WM_KEYUP:
+    // The WM_SYSDEADCHAR message is posted to a window with keyboard focus
+    // when the WM_SYSKEYDOWN message is translated by the TranslateMessage
+    // function. It specifies the character code of the system dead key.
+    case WM_SYSDEADCHAR:
     case WM_SYSKEYUP:
       return ET_KEY_RELEASED;
     case WM_LBUTTONDBLCLK:
@@ -297,10 +301,6 @@ base::NativeEvent CopyNativeEvent(const base::NativeEvent& event) {
 }
 
 void ReleaseCopiedNativeEvent(const base::NativeEvent& event) {
-}
-
-void IncrementTouchIdRefCount(const base::NativeEvent& event) {
-  NOTIMPLEMENTED();
 }
 
 void ClearTouchIdIfReleased(const base::NativeEvent& xev) {

@@ -206,7 +206,13 @@ base::string16 CollectedCookiesViews::GetDialogButtonLabel(
 }
 
 bool CollectedCookiesViews::Cancel() {
-  if (status_changed_) {
+  // If the user closes our parent tab while we're still open, this method will
+  // (eventually) be called in response to a WebContentsDestroyed() call from
+  // the WebContentsImpl to its observers.  But since the InfoBarService is also
+  // torn down in response to WebContentsDestroyed(), it may already be null.
+  // Since the tab is going away anyway, we can just omit showing an infobar,
+  // which prevents any attempt to access a null InfoBarService.
+  if (status_changed_ && !web_contents_->IsBeingDestroyed()) {
     CollectedCookiesInfoBarDelegate::Create(
         InfoBarService::FromWebContents(web_contents_));
   }
@@ -395,6 +401,7 @@ views::View* CollectedCookiesViews::CreateBlockedPane() {
               IDS_COLLECTED_COOKIES_BLOCKED_COOKIES_LABEL));
   blocked_label_->SetMultiLine(true);
   blocked_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  blocked_label_->SizeToFit(kTreeViewWidth);
   blocked_cookies_tree_model_ =
       content_settings->CreateBlockedCookiesTreeModel();
   blocked_cookies_tree_ = new views::TreeView();

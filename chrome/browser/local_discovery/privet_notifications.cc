@@ -105,13 +105,11 @@ void PrivetNotificationsListener::DeviceChanged(
 
   if (!device_context->registered) {
     device_context->privet_http_resolution =
-        privet_http_factory_->CreatePrivetHTTP(
-            name,
-            description.address,
-            base::Bind(&PrivetNotificationsListener::CreateInfoOperation,
-                       base::Unretained(this)));
-
-    device_context->privet_http_resolution->Start();
+        privet_http_factory_->CreatePrivetHTTP(name);
+    device_context->privet_http_resolution->Start(
+        description.address,
+        base::Bind(&PrivetNotificationsListener::CreateInfoOperation,
+                   base::Unretained(this)));
   }
 }
 
@@ -124,7 +122,8 @@ void PrivetNotificationsListener::CreateInfoOperation(
 
   std::string name = http_client->GetName();
   DeviceContextMap::iterator device_iter = devices_seen_.find(name);
-  DCHECK(device_iter != devices_seen_.end());
+  if (device_iter == devices_seen_.end())
+    return;
   DeviceContext* device = device_iter->second.get();
   device->privet_http.swap(http_client);
   device->info_operation = device->privet_http->CreateInfoOperation(
@@ -152,9 +151,9 @@ void PrivetNotificationsListener::OnPrivetInfoDone(
 }
 
 void PrivetNotificationsListener::DeviceRemoved(const std::string& name) {
-  DCHECK_EQ(1u, devices_seen_.count(name));
   DeviceContextMap::iterator device_iter = devices_seen_.find(name);
-  DCHECK(device_iter != devices_seen_.end());
+  if (device_iter == devices_seen_.end())
+    return;
   DeviceContext* device = device_iter->second.get();
 
   device->info_operation.reset();
@@ -269,10 +268,9 @@ void PrivetNotificationService::PrivetNotify(bool has_multiple,
       body,
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_LOCAL_DISCOVERY_CLOUDPRINT_ICON),
-      blink::WebTextDirectionDefault,
       message_center::NotifierId(GURL(kPrivetNotificationOriginUrl)),
       product_name,
-      base::UTF8ToUTF16(kPrivetNotificationID),
+      kPrivetNotificationID,
       rich_notification_data,
       new PrivetNotificationDelegate(profile_));
 
@@ -352,7 +350,7 @@ void PrivetNotificationService::StartLister() {
 
   scoped_ptr<PrivetHTTPAsynchronousFactory> http_factory(
       PrivetHTTPAsynchronousFactory::CreateInstance(
-          service_discovery_client_.get(), profile_->GetRequestContext()));
+          profile_->GetRequestContext()));
 
   privet_notifications_listener_.reset(new PrivetNotificationsListener(
       http_factory.Pass(), this));

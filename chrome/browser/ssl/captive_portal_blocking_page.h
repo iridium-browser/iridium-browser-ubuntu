@@ -9,9 +9,9 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/interstitials/security_interstitial_page.h"
-
-class GURL;
+#include "url/gurl.h"
 
 namespace content{
 class WebContents;
@@ -29,13 +29,26 @@ class CaptivePortalBlockingPage : public SecurityInterstitialPage {
   // Interstitial type, for testing.
   static const void* kTypeForTesting;
 
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+
+    // Returns true if the connection is a Wi-Fi connection.
+    virtual bool IsWifiConnection() const = 0;
+    // Returns the SSID of the connected Wi-Fi network, if any.
+    virtual std::string GetWiFiSSID() const = 0;
+  };
+
   CaptivePortalBlockingPage(content::WebContents* web_contents,
                             const GURL& request_url,
+                            const GURL& login_url,
                             const base::Callback<void(bool)>& callback);
   ~CaptivePortalBlockingPage() override;
 
   // SecurityInterstitialPage method:
   const void* GetTypeForTesting() const override;
+
+  void SetDelegateForTesting(Delegate* delegate) { delegate_.reset(delegate); }
 
  protected:
   // SecurityInterstitialPage methods:
@@ -47,6 +60,9 @@ class CaptivePortalBlockingPage : public SecurityInterstitialPage {
   void CommandReceived(const std::string& command) override;
 
  private:
+  // URL of the login page, opened when the user clicks the "Connect" button.
+  GURL login_url_;
+  scoped_ptr<Delegate> delegate_;
   base::Callback<void(bool)> callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CaptivePortalBlockingPage);

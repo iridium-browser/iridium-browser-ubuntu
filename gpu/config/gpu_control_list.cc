@@ -1010,7 +1010,9 @@ bool GpuControlList::GpuControlListEntry::GLVersionInfoMismatch(
   GLType gl_type = kGLTypeNone;
   if (segments.size() > 2 &&
       segments[0] == "OpenGL" && segments[1] == "ES") {
-    number = segments[2];
+    bool full_match = RE2::FullMatch(segments[2], "([\\d.]+).*", &number);
+    DCHECK(full_match);
+
     gl_type = kGLTypeGLES;
     if (segments.size() > 3 &&
         StartsWithASCII(segments[3], "(ANGLE", false)) {
@@ -1201,18 +1203,6 @@ bool GpuControlList::GpuControlListEntry::Contains(
   if (gl_reset_notification_strategy_info_.get() != NULL &&
       !gl_reset_notification_strategy_info_->Contains(
           gpu_info.gl_reset_notification_strategy))
-    return false;
-  if (perf_graphics_info_.get() != NULL &&
-      (gpu_info.performance_stats.graphics == 0.0 ||
-       !perf_graphics_info_->Contains(gpu_info.performance_stats.graphics)))
-    return false;
-  if (perf_gaming_info_.get() != NULL &&
-      (gpu_info.performance_stats.gaming == 0.0 ||
-       !perf_gaming_info_->Contains(gpu_info.performance_stats.gaming)))
-    return false;
-  if (perf_overall_info_.get() != NULL &&
-      (gpu_info.performance_stats.overall == 0.0 ||
-       !perf_overall_info_->Contains(gpu_info.performance_stats.overall)))
     return false;
   if (!machine_model_name_list_.empty()) {
     if (gpu_info.machine_model_name.empty())

@@ -13,13 +13,13 @@
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/browser_features.h"
 #include "chrome/browser/safe_browsing/client_side_detection_host.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
@@ -303,7 +303,7 @@ void BrowserFeatureExtractor::StartExtractFeatures(
     scoped_ptr<ClientPhishingRequest> request,
     const DoneCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  HistoryService* history;
+  history::HistoryService* history;
   if (!request || !request->IsInitialized() || !GetHistoryService(&history)) {
     callback.Run(false, request.Pass());
     return;
@@ -370,7 +370,7 @@ void BrowserFeatureExtractor::QueryUrlHistoryDone(
              request.get());
 
   // Issue next history lookup for host visits.
-  HistoryService* history;
+  history::HistoryService* history;
   if (!GetHistoryService(&history)) {
     callback.Run(false, request.Pass());
     return;
@@ -401,7 +401,7 @@ void BrowserFeatureExtractor::QueryHttpHostVisitsDone(
   SetHostVisitsFeatures(num_visits, first_visit, true, request.get());
 
   // Same lookup but for the HTTPS URL.
-  HistoryService* history;
+  history::HistoryService* history;
   if (!GetHistoryService(&history)) {
     callback.Run(false, request.Pass());
     return;
@@ -454,12 +454,13 @@ void BrowserFeatureExtractor::SetHostVisitsFeatures(
   }
 }
 
-bool BrowserFeatureExtractor::GetHistoryService(HistoryService** history) {
+bool BrowserFeatureExtractor::GetHistoryService(
+    history::HistoryService** history) {
   *history = NULL;
   if (tab_ && tab_->GetBrowserContext()) {
     Profile* profile = Profile::FromBrowserContext(tab_->GetBrowserContext());
-    *history = HistoryServiceFactory::GetForProfile(profile,
-                                                    Profile::EXPLICIT_ACCESS);
+    *history = HistoryServiceFactory::GetForProfile(
+        profile, ServiceAccessType::EXPLICIT_ACCESS);
     if (*history) {
       return true;
     }

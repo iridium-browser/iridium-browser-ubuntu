@@ -46,11 +46,13 @@ class ChromeAutofillClient
   PersonalDataManager* GetPersonalDataManager() override;
   scoped_refptr<AutofillWebDataService> GetDatabase() override;
   PrefService* GetPrefs() override;
+  IdentityProvider* GetIdentityProvider() override;
+  rappor::RapporService* GetRapporService() override;
   void HideRequestAutocompleteDialog() override;
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(const CreditCard& card,
                         base::WeakPtr<CardUnmaskDelegate> delegate) override;
-  void OnUnmaskVerificationResult(bool success) override;
+  void OnUnmaskVerificationResult(GetRealPanResult result) override;
   void ConfirmSaveCreditCard(const base::Closure& save_card_callback) override;
   bool HasCreditCardScanFeature() override;
   void ScanCreditCard(const CreditCardScanCallback& callback) override;
@@ -68,12 +70,13 @@ class ChromeAutofillClient
       const std::vector<base::string16>& labels) override;
   void HideAutofillPopup() override;
   bool IsAutocompleteEnabled() override;
-  void DetectAccountCreationForms(
+  void PropagateAutofillPredictions(
       content::RenderFrameHost* rfh,
       const std::vector<autofill::FormStructure*>& forms) override;
   void DidFillOrPreviewField(const base::string16& autofilled_value,
                              const base::string16& profile_full_name) override;
   void OnFirstUserGestureObserved() override;
+  void LinkClicked(const GURL& url, WindowOpenDisposition disposition) override;
 
   // content::WebContentsObserver implementation.
   void RenderFrameDeleted(content::RenderFrameHost* rfh) override;
@@ -81,6 +84,7 @@ class ChromeAutofillClient
       content::RenderFrameHost* render_frame_host,
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) override;
+  void MainFrameWasResized(bool width_changed) override;
   void WebContentsDestroyed() override;
 
   // ZoomObserver implementation.
@@ -126,6 +130,9 @@ class ChromeAutofillClient
 
   // The last render frame that called requestAutocomplete.
   content::RenderFrameHost* last_rfh_to_rac_;
+
+  // The identity provider, used for Wallet integration.
+  scoped_ptr<IdentityProvider> identity_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeAutofillClient);
 };

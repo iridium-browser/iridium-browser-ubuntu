@@ -44,7 +44,7 @@ WebInspector.RenderingOptions = function()
     this._mapSettingToSetter(WebInspector.settings.continuousPainting, "setContinuousPaintingEnabled");
     this._mapSettingToSetter(WebInspector.settings.showScrollBottleneckRects, "setShowScrollBottleneckRects");
 
-    WebInspector.targetManager.observeTargets(this);
+    WebInspector.targetManager.observeTargets(this, WebInspector.Target.Type.Page);
 }
 
 WebInspector.RenderingOptions.prototype = {
@@ -59,7 +59,7 @@ WebInspector.RenderingOptions.prototype = {
             var setting = settings[i];
             if (setting.get()) {
                 var setterName = this._setterNames.get(setting);
-                target.pageAgent()[setterName](true);
+                target.renderingAgent()[setterName](true);
             }
         }
     },
@@ -83,9 +83,9 @@ WebInspector.RenderingOptions.prototype = {
 
         function changeListener()
         {
-            var targets = WebInspector.targetManager.targets();
+            var targets = WebInspector.targetManager.targets(WebInspector.Target.Type.Page);
             for (var i = 0; i < targets.length; ++i)
-                targets[i].pageAgent()[setterName](setting.get());
+                targets[i].renderingAgent()[setterName](setting.get());
         }
     }
 }

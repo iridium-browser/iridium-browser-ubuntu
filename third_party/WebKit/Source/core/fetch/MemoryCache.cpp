@@ -23,12 +23,7 @@
 #include "config.h"
 #include "core/fetch/MemoryCache.h"
 
-#include "core/dom/CrossThreadTask.h"
 #include "core/fetch/ResourcePtr.h"
-#include "core/frame/FrameView.h"
-#include "core/workers/WorkerGlobalScope.h"
-#include "core/workers/WorkerLoaderProxy.h"
-#include "core/workers/WorkerThread.h"
 #include "platform/Logging.h"
 #include "platform/TraceEvent.h"
 #include "platform/weborigin/SecurityOrigin.h"
@@ -36,6 +31,7 @@
 #include "public/platform/Platform.h"
 #include "wtf/Assertions.h"
 #include "wtf/CurrentTime.h"
+#include "wtf/MainThread.h"
 #include "wtf/MathExtras.h"
 #include "wtf/TemporaryChange.h"
 #include "wtf/text/CString.h"
@@ -74,7 +70,7 @@ PassOwnPtrWillBeRawPtr<MemoryCache> replaceMemoryCacheForTesting(PassOwnPtrWillB
     return oldCache.release();
 }
 
-void MemoryCacheEntry::trace(Visitor* visitor)
+DEFINE_TRACE(MemoryCacheEntry)
 {
     visitor->trace(m_previousInLiveResourcesList);
     visitor->trace(m_nextInLiveResourcesList);
@@ -89,7 +85,7 @@ void MemoryCacheEntry::dispose()
 }
 #endif
 
-void MemoryCacheLRUList::trace(Visitor* visitor)
+DEFINE_TRACE(MemoryCacheLRUList)
 {
     visitor->trace(m_head);
     visitor->trace(m_tail);
@@ -99,6 +95,9 @@ inline MemoryCache::MemoryCache()
     : m_inPruneResources(false)
     , m_prunePending(false)
     , m_maxPruneDeferralDelay(cMaxPruneDeferralDelay)
+    , m_pruneTimeStamp(0.0)
+    , m_pruneFrameTimeStamp(0.0)
+    , m_lastFramePaintTimeStamp(0.0)
     , m_capacity(cDefaultCacheCapacity)
     , m_minDeadCapacity(0)
     , m_maxDeadCapacity(cDefaultCacheCapacity)
@@ -114,7 +113,6 @@ inline MemoryCache::MemoryCache()
     const double statsIntervalInSeconds = 15;
     m_statsTimer.startRepeating(statsIntervalInSeconds, FROM_HERE);
 #endif
-    m_pruneTimeStamp = m_pruneFrameTimeStamp = FrameView::currentFrameTimeStamp();
 }
 
 PassOwnPtrWillBeRawPtr<MemoryCache> MemoryCache::create()
@@ -128,7 +126,7 @@ MemoryCache::~MemoryCache()
         blink::Platform::current()->currentThread()->removeTaskObserver(this);
 }
 
-void MemoryCache::trace(Visitor* visitor)
+DEFINE_TRACE(MemoryCache)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_allResources);
@@ -617,7 +615,7 @@ void MemoryCache::updateDecodedResource(Resource* resource, UpdateReason reason,
     if (reason != UpdateForAccess)
         return;
 
-    double timestamp = resource->isImage() ? FrameView::currentFrameTimeStamp() : 0.0;
+    double timestamp = resource->isImage() ? m_lastFramePaintTimeStamp : 0.0;
     if (!timestamp)
         timestamp = currentTime();
     entry->m_lastDecodedAccessTime = timestamp;
@@ -631,19 +629,9 @@ MemoryCacheLiveResourcePriority MemoryCache::priority(Resource* resource) const
     return entry->m_liveResourcePriority;
 }
 
-void MemoryCache::removeURLFromCache(ExecutionContext* context, const KURL& url)
+void MemoryCache::removeURLFromCache(const KURL& url)
 {
-    if (context->isWorkerGlobalScope()) {
-        WorkerGlobalScope* workerGlobalScope = toWorkerGlobalScope(context);
-        workerGlobalScope->thread()->workerLoaderProxy().postTaskToLoader(createCrossThreadTask(&removeURLFromCacheInternal, url));
-        return;
-    }
-    removeURLFromCacheInternal(context, url);
-}
-
-void MemoryCache::removeURLFromCacheInternal(ExecutionContext*, const KURL& url)
-{
-    WillBeHeapVector<Member<Resource>> resources = memoryCache()->resourcesForURL(url);
+    WillBeHeapVector<Member<Resource>> resources = resourcesForURL(url);
     for (Resource* resource : resources)
         memoryCache()->remove(resource);
 }
@@ -789,8 +777,13 @@ void MemoryCache::pruneNow(double currentTime, PruneStrategy strategy)
     TemporaryChange<bool> reentrancyProtector(m_inPruneResources, true);
     pruneDeadResources(strategy); // Prune dead first, in case it was "borrowing" capacity from live.
     pruneLiveResources(strategy);
-    m_pruneFrameTimeStamp = FrameView::currentFrameTimeStamp();
+    m_pruneFrameTimeStamp = m_lastFramePaintTimeStamp;
     m_pruneTimeStamp = currentTime;
+}
+
+void MemoryCache::updateFramePaintTimestamp()
+{
+    m_lastFramePaintTimeStamp = currentTime();
 }
 
 #if ENABLE(OILPAN)

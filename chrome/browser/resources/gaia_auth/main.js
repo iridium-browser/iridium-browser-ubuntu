@@ -36,6 +36,15 @@ Authenticator.API_KEY_TYPES = [
 ];
 
 /**
+ * Allowed origins of the hosting page.
+ * @type {Array<string>}
+ */
+Authenticator.ALLOWED_PARENT_ORIGINS = [
+  'chrome://oobe',
+  'chrome://chrome-signin'
+];
+
+/**
  * Singleton getter of Authenticator.
  * @return {Object} The singleton instance of Authenticator.
  */
@@ -71,25 +80,37 @@ Authenticator.prototype = {
   gaiaLoaded_: false,
   supportChannel_: null,
 
+  useEafe_: false,
+  clientId_: '',
+
   GAIA_URL: 'https://accounts.google.com/',
   GAIA_PAGE_PATH: 'ServiceLogin?skipvpage=true&sarp=1&rm=hide',
-  PARENT_PAGE: 'chrome://oobe/',
   SERVICE_ID: 'chromeoslogin',
   CONTINUE_URL: Authenticator.THIS_EXTENSION_ORIGIN + '/success.html',
   CONSTRAINED_FLOW_SOURCE: 'chrome',
 
   initialize: function() {
-    var params = getUrlSearchParams(location.search);
-    this.parentPage_ = params.parentPage || this.PARENT_PAGE;
+    var handleInitializeMessage = function(e) {
+      if (Authenticator.ALLOWED_PARENT_ORIGINS.indexOf(e.origin) == -1) {
+        console.error('Unexpected parent message, origin=' + e.origin);
+        return;
+      }
+      window.removeEventListener('message', handleInitializeMessage);
+
+      var params = e.data;
+      params.parentPage = e.origin;
+      this.initializeFromParent_(params);
+      this.onPageLoad_();
+    }.bind(this);
+
+    document.addEventListener('DOMContentLoaded', function() {
+      window.addEventListener('message', handleInitializeMessage);
+    });
+  },
+
+  initializeFromParent_: function(params) {
+    this.parentPage_ = params.parentPage;
     this.gaiaUrl_ = params.gaiaUrl || this.GAIA_URL;
-
-    // Sanitize Gaia url before continuing.
-    var scheme = extractProtocol(this.gaiaUrl_);
-    if (scheme != 'https:' && scheme != 'http:') {
-      console.error('Bad Gaia URL, url=' + this.gaiaURL_);
-      return;
-    }
-
     this.gaiaPath_ = params.gaiaPath || this.GAIA_PAGE_PATH;
     this.inputLang_ = params.hl;
     this.inputEmail_ = params.email;
@@ -97,6 +118,8 @@ Authenticator.prototype = {
     this.continueUrl_ = params.continueUrl || this.CONTINUE_URL;
     this.desktopMode_ = params.desktopMode == '1';
     this.isConstrainedWindow_ = params.constrained == '1';
+    this.useEafe_ = params.useEafe || false;
+    this.clientId_ = params.clientId || '';
     this.initialFrameUrl_ = params.frameUrl || this.constructInitialFrameUrl_();
     this.initialFrameUrlWithoutParams_ = stripParams(this.initialFrameUrl_);
     this.needPassword_ = params.needPassword == '1';
@@ -107,9 +130,8 @@ Authenticator.prototype = {
     // TODO(dzhioev): Do not rely on 'load' event after b/16313327 is fixed.
     this.assumeLoadedOnLoadEvent_ =
         this.gaiaPath_.indexOf('ServiceLogin') !== 0 ||
-        this.service_ !== 'chromeoslogin';
-
-    document.addEventListener('DOMContentLoaded', this.onPageLoad_.bind(this));
+        this.service_ !== 'chromeoslogin' ||
+        this.useEafe_;
   },
 
   isGaiaMessage_: function(msg) {
@@ -126,7 +148,10 @@ Authenticator.prototype = {
     var url = this.gaiaUrl_ + this.gaiaPath_;
 
     url = appendParam(url, 'service', this.service_);
-    url = appendParam(url, 'continue', this.continueUrl_);
+    // Easy bootstrap use auth_code message as success signal instead of
+    // continue URL.
+    if (!this.useEafe_)
+      url = appendParam(url, 'continue', this.continueUrl_);
     if (this.inputLang_)
       url = appendParam(url, 'hl', this.inputLang_);
     if (this.inputEmail_)
@@ -147,6 +172,14 @@ Authenticator.prototype = {
         if (!this.gaiaLoaded_) {
           this.gaiaLoaded_ = true;
           this.maybeInitialized_();
+
+          if (this.useEafe_ && this.clientId_) {
+            // Sends initial handshake message to EAFE. Note this fails with
+            // SSO redirect because |gaiaFrame| sits on a different origin.
+            gaiaFrame.contentWindow.postMessage({
+              clientId: this.clientId_
+            }, this.gaiaUrl_);
+          }
         }
       }.bind(this);
       gaiaFrame.addEventListener('load', handler);
@@ -346,6 +379,13 @@ Authenticator.prototype = {
     }
   },
 
+  onGotAuthCode_: function(authCode) {
+    window.parent.postMessage({
+      'method': 'completeAuthenticationAuthCodeOnly',
+      'authCode': authCode
+    }, this.parentPage_);
+  },
+
   sendInitializationSuccess_: function() {
     this.supportChannel_.send({name: 'apiResponse', response: {
       result: 'initialized',
@@ -442,6 +482,26 @@ Authenticator.prototype = {
 
   onMessage: function(e) {
     var msg = e.data;
+
+    if (this.useEafe_) {
+      if (msg == '!_{h:\'gaia-frame\'}' && this.isGaiaMessage_(e)) {
+        // Sends client ID again on the hello message to work around the SSO
+        // signin issue.
+        // TODO(xiyuan): Revisit this when EAFE is integrated or for webview.
+        $('gaia-frame').contentWindow.postMessage({
+          clientId: this.clientId_
+        }, this.gaiaUrl_);
+      } else if (typeof msg == 'object' &&
+                 msg.type == 'authorizationCode' && this.isGaiaMessage_(e)) {
+        this.onGotAuthCode_(msg.authorizationCode);
+      } else {
+        console.error('Authenticator.onMessage: unknown message' +
+                      ', msg=' + JSON.stringify(msg));
+      }
+
+      return;
+    }
+
     if (msg.method == 'attemptLogin' && this.isGaiaMessage_(e)) {
       // At this point GAIA does not yet know the gaiaId, so its not set here.
       this.email_ = msg.email;
@@ -481,7 +541,7 @@ Authenticator.prototype = {
                this.isParentMessage_(e)) {
       $('gaia-frame').src = this.constructInitialFrameUrl_();
     } else {
-       console.error('Authenticator.onMessage: unknown message + origin!?');
+      console.error('Authenticator.onMessage: unknown message + origin!?');
     }
   }
 };

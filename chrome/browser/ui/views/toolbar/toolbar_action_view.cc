@@ -11,17 +11,15 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
-#include "chrome/browser/ui/views/toolbar/wrench_toolbar_button.h"
 #include "chrome/grit/generated_resources.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/events/event.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
@@ -44,11 +42,11 @@ const int kBorderInset = 4;
 
 ToolbarActionView::ToolbarActionView(
     ToolbarActionViewController* view_controller,
-    Browser* browser,
+    Profile* profile,
     ToolbarActionView::Delegate* delegate)
     : MenuButton(this, base::string16(), NULL, false),
       view_controller_(view_controller),
-      browser_(browser),
+      profile_(profile),
       delegate_(delegate),
       called_register_command_(false),
       wants_to_run_(false) {
@@ -64,7 +62,7 @@ ToolbarActionView::ToolbarActionView(
       this,
       chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
       content::Source<ThemeService>(
-          ThemeServiceFactory::GetForProfile(browser->profile())));
+          ThemeServiceFactory::GetForProfile(profile_)));
 
   wants_to_run_border_ = CreateDefaultBorder();
   DecorateWantsToRunBorder(wants_to_run_border_.get());
@@ -79,20 +77,25 @@ ToolbarActionView::~ToolbarActionView() {
 void ToolbarActionView::DecorateWantsToRunBorder(
     views::LabelButtonBorder* border) {
   // Create a special border for when the action wants to run, which gives the
-  // button a "popped out" state. In practice, this is the same appearance we
-  // use for when the user hovers on the action.
-  gfx::Insets insets = border->GetInsets();
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-
+  // button a "popped out" state.
+  static const int kRaisedImages[] = IMAGE_GRID(IDR_TEXTBUTTON_RAISED);
   border->SetPainter(false,
                      views::Button::STATE_NORMAL,
-                     views::Painter::CreateImagePainter(
-                         *rb.GetImageSkiaNamed(IDR_BUTTON_HOVER), insets));
-  border->SetPainter(true,
-                     views::Button::STATE_NORMAL,
-                     views::Painter::CreateImagePainter(
-                         *rb.GetImageSkiaNamed(IDR_BUTTON_FOCUSED_HOVER),
-                         insets));
+                     views::Painter::CreateImageGridPainter(kRaisedImages));
+}
+
+gfx::Size ToolbarActionView::GetPreferredSize() const {
+  return gfx::Size(ToolbarActionsBar::IconWidth(false),
+                   ToolbarActionsBar::IconHeight());
+}
+
+const char* ToolbarActionView::GetClassName() const {
+  return "ToolbarActionView";
+}
+
+void ToolbarActionView::OnDragDone() {
+  views::MenuButton::OnDragDone();
+  delegate_->OnToolbarActionViewDragDone();
 }
 
 void ToolbarActionView::ViewHierarchyChanged(
@@ -105,21 +108,10 @@ void ToolbarActionView::ViewHierarchyChanged(
   MenuButton::ViewHierarchyChanged(details);
 }
 
-void ToolbarActionView::OnDragDone() {
-  views::MenuButton::OnDragDone();
-  delegate_->OnToolbarActionViewDragDone();
-}
-
-gfx::Size ToolbarActionView::GetPreferredSize() const {
-  return gfx::Size(ToolbarActionsBar::IconWidth(false),
-                   ToolbarActionsBar::IconHeight());
-}
-
-void ToolbarActionView::PaintChildren(gfx::Canvas* canvas,
-                                      const views::CullSet& cull_set) {
-  View::PaintChildren(canvas, cull_set);
-  view_controller_->PaintExtra(
-      canvas, GetLocalBounds(), GetCurrentWebContents());
+void ToolbarActionView::PaintChildren(const ui::PaintContext& context) {
+  View::PaintChildren(context);
+  view_controller_->PaintExtra(context.canvas(), GetLocalBounds(),
+                               GetCurrentWebContents());
 }
 
 void ToolbarActionView::OnPaintBorder(gfx::Canvas* canvas) {
@@ -154,8 +146,7 @@ void ToolbarActionView::UpdateState() {
   gfx::ImageSkia icon(view_controller_->GetIcon(web_contents).AsImageSkia());
 
   if (!icon.isNull()) {
-    ThemeService* theme =
-        ThemeServiceFactory::GetForProfile(browser_->profile());
+    ThemeService* theme = ThemeServiceFactory::GetForProfile(profile_);
 
     gfx::ImageSkia bg = *theme->GetImageSkiaNamed(IDR_BROWSER_ACTION);
     SetImage(views::Button::STATE_NORMAL,
@@ -238,6 +229,12 @@ scoped_ptr<LabelButtonBorder> ToolbarActionView::CreateDefaultBorder() const {
   return border.Pass();
 }
 
+bool ToolbarActionView::ShouldEnterPushedState(const ui::Event& event) {
+  return view_controller_->HasPopup(GetCurrentWebContents()) ?
+      MenuButton::ShouldEnterPushedState(event) :
+      LabelButton::ShouldEnterPushedState(event);
+}
+
 gfx::ImageSkia ToolbarActionView::GetIconForTest() {
   return GetImage(views::Button::STATE_NORMAL);
 }
@@ -258,8 +255,7 @@ views::Widget* ToolbarActionView::GetParentForContextMenu() {
   // RunMenuAt expects a nested menu to be parented by the same widget as the
   // already visible menu, in this case the Chrome menu.
   return delegate_->ShownInsideMenu() ?
-      BrowserView::GetBrowserViewForBrowser(browser_)
-          ->toolbar()->app_menu()->GetWidget() :
+      delegate_->GetOverflowReferenceView()->GetWidget() :
       GetWidget();
 }
 
@@ -286,14 +282,10 @@ content::WebContents* ToolbarActionView::GetCurrentWebContents() const {
   return delegate_->GetCurrentWebContents();
 }
 
-void ToolbarActionView::HideActivePopup() {
-  delegate_->HideActivePopup();
-}
-
-void ToolbarActionView::OnPopupShown(bool grant_tab_permissions) {
+void ToolbarActionView::OnPopupShown(bool by_user) {
   delegate_->SetPopupOwner(this);
   // If this was through direct user action, we press the menu button.
-  if (grant_tab_permissions) {
+  if (by_user) {
     // We set the state of the menu button we're using as a reference view,
     // which is either this or the overflow reference view.
     // This cast is safe because GetReferenceViewForPopup returns either |this|
@@ -304,11 +296,7 @@ void ToolbarActionView::OnPopupShown(bool grant_tab_permissions) {
   }
 }
 
-void ToolbarActionView::CleanupPopup() {
-  // We need to do these actions synchronously (instead of closing and then
-  // performing the rest of the cleanup in OnWidgetDestroyed()) because
-  // OnWidgetDestroyed() can be called asynchronously from Close(), and we need
-  // to keep the delegate's popup owner up-to-date.
-  delegate_->SetPopupOwner(NULL);
+void ToolbarActionView::OnPopupClosed() {
+  delegate_->SetPopupOwner(nullptr);
   pressed_lock_.reset();  // Unpress the menu button if it was pressed.
 }

@@ -15,6 +15,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager_impl.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
@@ -40,8 +41,7 @@ class UnittestProfileManager : public ::ProfileManagerWithoutInit {
       : ::ProfileManagerWithoutInit(user_data_dir) {}
 
  protected:
-  virtual Profile* CreateProfileHelper(
-      const base::FilePath& file_path) override {
+  Profile* CreateProfileHelper(const base::FilePath& file_path) override {
     if (!base::PathExists(file_path)) {
       if (!base::CreateDirectory(file_path))
         return NULL;
@@ -53,7 +53,7 @@ class UnittestProfileManager : public ::ProfileManagerWithoutInit {
 
 class UserManagerTest : public testing::Test {
  protected:
-  virtual void SetUp() override {
+  void SetUp() override {
     base::CommandLine& command_line = *base::CommandLine::ForCurrentProcess();
     command_line.AppendSwitch(::switches::kTestType);
     command_line.AppendSwitch(
@@ -83,9 +83,10 @@ class UserManagerTest : public testing::Test {
     chromeos::DBusThreadManager::Initialize();
 
     ResetUserManager();
+    WallpaperManager::Initialize();
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     // Unregister the in-memory local settings instance.
     local_state_.reset();
 
@@ -100,6 +101,7 @@ class UserManagerTest : public testing::Test {
 
     base::RunLoop().RunUntilIdle();
     chromeos::DBusThreadManager::Shutdown();
+    WallpaperManager::Shutdown();
   }
 
   ChromeUserManagerImpl* GetChromeUserManager() const {

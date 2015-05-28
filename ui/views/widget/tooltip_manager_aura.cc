@@ -81,9 +81,19 @@ const gfx::FontList& TooltipManagerAura::GetFontList() const {
   return GetDefaultFontList();
 }
 
+int TooltipManagerAura::GetMaxWidth(const gfx::Point& point,
+                                    aura::Window* context) const {
+  return aura::client::GetTooltipClient(context->GetRootWindow())->
+      GetMaxWidth(point, context);
+}
+
 void TooltipManagerAura::UpdateTooltip() {
   aura::Window* root_window = GetWindow()->GetRootWindow();
   if (aura::client::GetTooltipClient(root_window)) {
+    if (!widget_->IsVisible()) {
+      UpdateTooltipForTarget(NULL, gfx::Point(), root_window);
+      return;
+    }
     gfx::Point view_point =
         root_window->GetHost()->dispatcher()->GetLastMouseLocationInRoot();
     aura::Window::ConvertPointToTarget(root_window, GetWindow(), &view_point);

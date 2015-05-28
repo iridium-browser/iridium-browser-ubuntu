@@ -38,8 +38,8 @@
 #include "core/html/HTMLVideoElement.h"
 #include "platform/LayoutTestSupport.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "public/platform/WebLayerTreeView.h"
 #include "public/web/WebFrameClient.h"
-#include "public/web/WebViewClient.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebSettingsImpl.h"
 #include "web/WebViewImpl.h"
@@ -74,6 +74,8 @@ void FullscreenController::didEnterFullScreen()
         m_exitFullscreenPageScaleFactor = m_webViewImpl->pageScaleFactor();
         m_exitFullscreenScrollOffset = m_webViewImpl->mainFrame()->scrollOffset();
         m_exitFullscreenPinchViewportOffset = m_webViewImpl->pinchViewportOffset();
+
+        updatePageScaleConstraints(false);
         m_webViewImpl->setPageScaleFactor(1.0f);
         m_webViewImpl->setMainFrameScrollOffset(IntPoint());
         m_webViewImpl->setPinchViewportOffset(FloatPoint());
@@ -116,6 +118,7 @@ void FullscreenController::didExitFullScreen()
                     m_webViewImpl->layerTreeView()->setHasTransparentBackground(m_webViewImpl->isTransparent());
 
                 if (m_exitFullscreenPageScaleFactor) {
+                    updatePageScaleConstraints(true);
                     m_webViewImpl->setPageScaleFactor(m_exitFullscreenPageScaleFactor);
                     m_webViewImpl->setMainFrameScrollOffset(IntPoint(m_exitFullscreenScrollOffset));
                     m_webViewImpl->setPinchViewportOffset(m_exitFullscreenPinchViewportOffset);
@@ -147,14 +150,10 @@ void FullscreenController::enterFullScreenForElement(Element* element)
     }
 
     // We need to transition to fullscreen mode.
-    // FIXME: temporarily try to use WebFrameClient and WebViewClient while
-    // Chromium switches from one to the other, see https://crbug.com/374854
     WebLocalFrameImpl* frame = WebLocalFrameImpl::fromFrame(element->document().frame());
-    if (frame && frame->client() && frame->client()->enterFullscreen()) {
+    if (frame && frame->client()) {
+        frame->client()->enterFullscreen();
         m_provisionalFullScreenElement = element;
-    } else if (WebViewClient* client = m_webViewImpl->client()) {
-        if (client->enterFullScreen())
-            m_provisionalFullScreenElement = element;
     }
 }
 
@@ -166,14 +165,9 @@ void FullscreenController::exitFullScreenForElement(Element* element)
     if (m_isCancelingFullScreen)
         return;
 
-    // FIXME: temporarily try to use WebFrameClient and WebViewClient while
-    // Chromium switches from one to the other, see https://crbug.com/374854
     WebLocalFrameImpl* frame = WebLocalFrameImpl::fromFrame(element->document().frame());
-    if (frame && frame->client() && frame->client()->exitFullscreen())
-        return;
-
-    if (WebViewClient* client = m_webViewImpl->client())
-        client->exitFullScreen();
+    if (frame && frame->client())
+        frame->client()->exitFullscreen();
 }
 
 void FullscreenController::updateSize()
@@ -181,12 +175,26 @@ void FullscreenController::updateSize()
     if (!isFullscreen())
         return;
 
-    RenderFullScreen* renderer = Fullscreen::from(*m_fullScreenFrame->document()).fullScreenRenderer();
+    updatePageScaleConstraints(false);
+
+    LayoutFullScreen* renderer = Fullscreen::from(*m_fullScreenFrame->document()).fullScreenRenderer();
     if (renderer)
         renderer->updateStyle();
 }
 
-void FullscreenController::trace(Visitor* visitor)
+void FullscreenController::updatePageScaleConstraints(bool removeConstraints)
+{
+    PageScaleConstraints fullscreenConstraints;
+    if (!removeConstraints) {
+        fullscreenConstraints = PageScaleConstraints(1.0, 1.0, 1.0);
+        fullscreenConstraints.layoutSize = IntSize(m_webViewImpl->size());
+    }
+    m_webViewImpl->pageScaleConstraintsSet().setFullscreenConstraints(fullscreenConstraints);
+    m_webViewImpl->pageScaleConstraintsSet().computeFinalConstraints();
+    m_webViewImpl->updateMainFrameLayoutSize();
+}
+
+DEFINE_TRACE(FullscreenController)
 {
     visitor->trace(m_provisionalFullScreenElement);
     visitor->trace(m_fullScreenFrame);

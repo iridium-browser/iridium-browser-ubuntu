@@ -42,19 +42,24 @@ class ShellPermissionMessageProvider : public PermissionMessageProvider {
   ~ShellPermissionMessageProvider() override {}
 
   // PermissionMessageProvider implementation.
-  PermissionMessages GetPermissionMessages(
+  PermissionMessageIDs GetLegacyPermissionMessageIDs(
       const PermissionSet* permissions,
       Manifest::Type extension_type) const override {
-    return PermissionMessages();
+    return PermissionMessageIDs();
   }
 
-  std::vector<base::string16> GetWarningMessages(
+  CoalescedPermissionMessages GetCoalescedPermissionMessages(
+      const PermissionIDSet& permissions) const override {
+    return CoalescedPermissionMessages();
+  }
+
+  std::vector<base::string16> GetLegacyWarningMessages(
       const PermissionSet* permissions,
       Manifest::Type extension_type) const override {
     return std::vector<base::string16>();
   }
 
-  std::vector<base::string16> GetWarningMessagesDetails(
+  std::vector<base::string16> GetLegacyWarningMessagesDetails(
       const PermissionSet* permissions,
       Manifest::Type extension_type) const override {
     return std::vector<base::string16>();
@@ -66,6 +71,12 @@ class ShellPermissionMessageProvider : public PermissionMessageProvider {
     // Ensure we implement this before shipping.
     CHECK(false);
     return false;
+  }
+
+  PermissionIDSet GetAllPermissionIDs(
+      const PermissionSet* permissions,
+      Manifest::Type extension_type) const override {
+    return PermissionIDSet();
   }
 
  private:

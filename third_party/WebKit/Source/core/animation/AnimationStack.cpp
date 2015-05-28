@@ -42,7 +42,7 @@ namespace blink {
 
 namespace {
 
-void copyToActiveInterpolationMap(const WillBeHeapVector<RefPtrWillBeMember<blink::Interpolation> >& source, WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<blink::Interpolation> >& target)
+void copyToActiveInterpolationMap(const WillBeHeapVector<RefPtrWillBeMember<blink::Interpolation>>& source, WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<blink::Interpolation>>& target)
 {
     for (const auto& interpolation : source) {
         target.set(toStyleInterpolation(interpolation.get())->id(), interpolation.get());
@@ -55,7 +55,7 @@ bool compareEffects(const OwnPtrWillBeMember<SampledEffect>& effect1, const OwnP
     return effect1->sequenceNumber() < effect2->sequenceNumber();
 }
 
-void copyNewAnimationsToActiveInterpolationMap(const WillBeHeapVector<RawPtrWillBeMember<InertAnimation> >& newAnimations, WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation> >& result)
+void copyNewAnimationsToActiveInterpolationMap(const WillBeHeapVector<RawPtrWillBeMember<InertAnimation>>& newAnimations, WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>>& result)
 {
     for (const auto& newAnimation : newAnimations) {
         OwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>> sample = nullptr;
@@ -71,15 +71,6 @@ AnimationStack::AnimationStack()
 {
 }
 
-bool AnimationStack::affects(CSSPropertyID property) const
-{
-    for (const auto& effect : m_effects) {
-        if (effect->animation() && effect->animation()->affects(property))
-            return true;
-    }
-    return false;
-}
-
 bool AnimationStack::hasActiveAnimationsOnCompositor(CSSPropertyID property) const
 {
     for (const auto& effect : m_effects) {
@@ -89,17 +80,17 @@ bool AnimationStack::hasActiveAnimationsOnCompositor(CSSPropertyID property) con
     return false;
 }
 
-WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation> > AnimationStack::activeInterpolations(AnimationStack* animationStack, const WillBeHeapVector<RawPtrWillBeMember<InertAnimation> >* newAnimations, const WillBeHeapHashSet<RawPtrWillBeMember<const AnimationPlayer> >* suppressedAnimationPlayers, Animation::Priority priority, double timelineCurrentTime)
+WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>> AnimationStack::activeInterpolations(AnimationStack* animationStack, const WillBeHeapVector<RawPtrWillBeMember<InertAnimation>>* newAnimations, const WillBeHeapHashSet<RawPtrWillBeMember<const AnimationPlayer>>* suppressedAnimationPlayers, Animation::Priority priority, double timelineCurrentTime)
 {
     // We don't exactly know when new animations will start, but timelineCurrentTime is a good estimate.
 
-    WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation> > result;
+    WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>> result;
 
     if (animationStack) {
-        WillBeHeapVector<OwnPtrWillBeMember<SampledEffect> >& effects = animationStack->m_effects;
+        WillBeHeapVector<OwnPtrWillBeMember<SampledEffect>>& effects = animationStack->m_effects;
         // std::sort doesn't work with OwnPtrs
         nonCopyingSort(effects.begin(), effects.end(), compareEffects);
-        animationStack->simplifyEffects();
+        animationStack->removeClearedEffects();
         for (const auto& effect : effects) {
             if (effect->priority() != priority || (suppressedAnimationPlayers && effect->animation() && suppressedAnimationPlayers->contains(effect->animation()->player())))
                 continue;
@@ -113,33 +104,17 @@ WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation> > AnimationSt
     return result;
 }
 
-void AnimationStack::simplifyEffects()
+void AnimationStack::removeClearedEffects()
 {
-    // FIXME: This will need to be updated when we have 'add' keyframes.
-
-    BitArray<numCSSProperties> replacedProperties;
-    for (size_t i = m_effects.size(); i--; ) {
-        SampledEffect& effect = *m_effects[i];
-        effect.removeReplacedInterpolationsIfNeeded(replacedProperties);
-        if (!effect.canChange()) {
-            for (const auto& interpolation : effect.interpolations())
-                replacedProperties.set(toStyleInterpolation(interpolation.get())->id());
-        }
-    }
-
     size_t dest = 0;
     for (auto& effect : m_effects) {
-        if (!effect->interpolations().isEmpty()) {
-            m_effects[dest++].swap(effect);
-            continue;
-        }
         if (effect->animation())
-            effect->animation()->notifySampledEffectRemovedFromAnimationStack();
+            m_effects[dest++].swap(effect);
     }
     m_effects.shrink(dest);
 }
 
-void AnimationStack::trace(Visitor* visitor)
+DEFINE_TRACE(AnimationStack)
 {
     visitor->trace(m_effects);
 }

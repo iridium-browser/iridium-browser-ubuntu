@@ -6,8 +6,6 @@
 
 #include <set>
 
-#include "base/containers/scoped_ptr_hash_map.h"
-#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "components/nacl/renderer/nexe_load_manager.h"
@@ -380,21 +378,6 @@ void GrabUrlAndPnaclOptions(const Json::Value& url_spec,
 
 }  // namespace
 
-typedef base::ScopedPtrHashMap<PP_Instance, nacl::JsonManifest> JsonManifestMap;
-base::LazyInstance<JsonManifestMap> g_manifest_map = LAZY_INSTANCE_INITIALIZER;
-
-void AddJsonManifest(PP_Instance instance, scoped_ptr<JsonManifest> manifest) {
-  g_manifest_map.Get().add(instance, manifest.Pass());
-}
-
-JsonManifest* GetJsonManifest(PP_Instance instance) {
-  return g_manifest_map.Get().get(instance);
-}
-
-void DeleteJsonManifest(PP_Instance instance) {
-  g_manifest_map.Get().erase(instance);
-}
-
 JsonManifest::JsonManifest(const std::string& manifest_base_url,
                            const std::string& sandbox_isa,
                            bool nonsfi_enabled,
@@ -457,6 +440,24 @@ bool JsonManifest::GetProgramURL(std::string* full_url,
   }
   *full_url = resolved_gurl.possibly_invalid_spec();
   return true;
+}
+
+void JsonManifest::GetPrefetchableFiles(
+    std::vector<std::pair<std::string, std::string> >* out_files) const {
+  const Json::Value& files = dictionary_[kFilesKey];
+  if (!files.isObject())
+    return;
+
+  Json::Value::Members keys = files.getMemberNames();
+  for (size_t i = 0; i < keys.size(); ++i) {
+    std::string full_url;
+    PP_PNaClOptions unused_pnacl_options;  // pnacl does not support "files".
+    // We skip invalid entries in "files".
+    if (GetKeyUrl(files, keys[i], &full_url, &unused_pnacl_options)) {
+      if (GURL(full_url).SchemeIs("chrome-extension"))
+        out_files->push_back(std::make_pair(keys[i], full_url));
+    }
+  }
 }
 
 bool JsonManifest::ResolveKey(const std::string& key,

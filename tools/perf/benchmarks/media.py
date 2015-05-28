@@ -2,18 +2,18 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from measurements import media
-import page_sets
 from telemetry import benchmark
 from telemetry.page import page_test
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
 
+from measurements import media
+import page_sets
+
 
 class _MSEMeasurement(page_test.PageTest):
   def __init__(self):
-    super(_MSEMeasurement, self).__init__(
-        action_name_to_run='RunPageInteractions')
+    super(_MSEMeasurement, self).__init__()
 
   def ValidateAndMeasurePage(self, page, tab, results):
     media_metric = tab.EvaluateJavaScript('window.__testMetrics')
@@ -33,11 +33,15 @@ class _MSEMeasurement(page_test.PageTest):
                 value=float(metrics[m]), important=True))
 
 
-@benchmark.Disabled('android')
+@benchmark.Disabled('android')  # See media.android.tough_video_cases below
 class Media(benchmark.Benchmark):
   """Obtains media metrics for key user scenarios."""
   test = media.Media
   page_set = page_sets.ToughVideoCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'media.tough_video_cases'
 
 
 @benchmark.Disabled
@@ -45,6 +49,10 @@ class MediaNetworkSimulation(benchmark.Benchmark):
   """Obtains media metrics under different network simulations."""
   test = media.Media
   page_set = page_sets.MediaCnsCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'media.media_cns_cases'
 
 
 @benchmark.Enabled('android')
@@ -55,7 +63,11 @@ class MediaAndroid(benchmark.Benchmark):
   tag = 'android'
   page_set = page_sets.ToughVideoCasesPageSet
   # Exclude is_4k and 50 fps media files (garden* & crowd*).
-  options = {'page_label_filter_exclude': 'is_4k,is_50fps'}
+  options = {'story_label_filter_exclude': 'is_4k,is_50fps'}
+
+  @classmethod
+  def Name(cls):
+    return 'media.android.tough_video_cases'
 
 
 @benchmark.Enabled('chromeos')
@@ -66,10 +78,14 @@ class MediaChromeOS4kOnly(benchmark.Benchmark):
   tag = 'chromeOS4kOnly'
   page_set = page_sets.ToughVideoCasesPageSet
   options = {
-      'page_label_filter': 'is_4k',
+      'story_label_filter': 'is_4k',
       # Exclude is_50fps test files: crbug/331816
-      'page_label_filter_exclude': 'is_50fps'
+      'story_label_filter_exclude': 'is_50fps'
   }
+
+  @classmethod
+  def Name(cls):
+    return 'media.chromeOS4kOnly.tough_video_cases'
 
 
 @benchmark.Enabled('chromeos')
@@ -83,7 +99,11 @@ class MediaChromeOS(benchmark.Benchmark):
   tag = 'chromeOS'
   page_set = page_sets.ToughVideoCasesPageSet
   # Exclude is_50fps test files: crbug/331816
-  options = {'page_label_filter_exclude': 'is_4k,is_50fps'}
+  options = {'story_label_filter_exclude': 'is_4k,is_50fps'}
+
+  @classmethod
+  def Name(cls):
+    return 'media.chromeOS.tough_video_cases'
 
 
 @benchmark.Disabled('android-webview') # crbug.com/419689
@@ -91,6 +111,10 @@ class MediaSourceExtensions(benchmark.Benchmark):
   """Obtains media metrics for key media source extensions functions."""
   test = _MSEMeasurement
   page_set = page_sets.MseCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'media.mse_cases'
 
   def CustomizeBrowserOptions(self, options):
     # Needed to allow XHR requests to return stream objects.

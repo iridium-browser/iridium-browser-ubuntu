@@ -29,9 +29,9 @@
 
 #include "core/dom/FirstLetterPseudoElement.h"
 #include "core/inspector/InspectorInstrumentation.h"
-#include "core/rendering/RenderObject.h"
-#include "core/rendering/RenderQuote.h"
-#include "core/rendering/style/ContentData.h"
+#include "core/layout/LayoutObject.h"
+#include "core/layout/LayoutQuote.h"
+#include "core/style/ContentData.h"
 
 namespace blink {
 
@@ -86,13 +86,14 @@ PseudoElement::PseudoElement(Element* parent, PseudoId pseudoId)
     , m_pseudoId(pseudoId)
 {
     ASSERT(pseudoId != NOPSEUDO);
+    parent->treeScope().adoptIfNeeded(*this);
     setParentOrShadowHostNode(parent);
     setHasCustomStyleCallbacks();
 }
 
-PassRefPtr<RenderStyle> PseudoElement::customStyleForRenderer()
+PassRefPtr<ComputedStyle> PseudoElement::customStyleForLayoutObject()
 {
-    return parentOrShadowHostElement()->renderer()->getCachedPseudoStyle(m_pseudoId);
+    return parentOrShadowHostElement()->layoutObject()->getCachedPseudoStyle(m_pseudoId);
 }
 
 void PseudoElement::dispose()
@@ -106,50 +107,51 @@ void PseudoElement::dispose()
 
     detach();
     RefPtrWillBeRawPtr<Element> parent = parentOrShadowHostElement();
+    document().adoptIfNeeded(*this);
     setParentOrShadowHostNode(0);
     removedFrom(parent.get());
 }
 
 void PseudoElement::attach(const AttachContext& context)
 {
-    ASSERT(!renderer());
+    ASSERT(!layoutObject());
 
     Element::attach(context);
 
-    RenderObject* renderer = this->renderer();
+    LayoutObject* renderer = this->layoutObject();
     if (!renderer)
         return;
 
-    RenderStyle* style = renderer->style();
-    if (style->styleType() != BEFORE && style->styleType() != AFTER)
+    ComputedStyle& style = renderer->mutableStyleRef();
+    if (style.styleType() != BEFORE && style.styleType() != AFTER)
         return;
-    ASSERT(style->contentData());
+    ASSERT(style.contentData());
 
-    for (const ContentData* content = style->contentData(); content; content = content->next()) {
-        RenderObject* child = content->createRenderer(document(), style);
+    for (const ContentData* content = style.contentData(); content; content = content->next()) {
+        LayoutObject* child = content->createLayoutObject(document(), style);
         if (renderer->isChildAllowed(child, style)) {
             renderer->addChild(child);
             if (child->isQuote())
-                toRenderQuote(child)->attachQuote();
+                toLayoutQuote(child)->attachQuote();
         } else
             child->destroy();
     }
 }
 
-bool PseudoElement::rendererIsNeeded(const RenderStyle& style)
+bool PseudoElement::layoutObjectIsNeeded(const ComputedStyle& style)
 {
     return pseudoElementRendererIsNeeded(&style);
 }
 
 void PseudoElement::didRecalcStyle(StyleRecalcChange)
 {
-    if (!renderer())
+    if (!layoutObject())
         return;
 
     // The renderers inside pseudo elements are anonymous so they don't get notified of recalcStyle and must have
-    // the style propagated downward manually similar to RenderObject::propagateStyleToAnonymousChildren.
-    RenderObject* renderer = this->renderer();
-    for (RenderObject* child = renderer->nextInPreOrder(renderer); child; child = child->nextInPreOrder(renderer)) {
+    // the style propagated downward manually similar to LayoutObject::propagateStyleToAnonymousChildren.
+    LayoutObject* renderer = this->layoutObject();
+    for (LayoutObject* child = renderer->nextInPreOrder(renderer); child; child = child->nextInPreOrder(renderer)) {
         // We only manage the style for the generated content items.
         if (!child->isText() && !child->isQuote() && !child->isImage())
             continue;

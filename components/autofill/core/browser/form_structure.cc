@@ -27,6 +27,8 @@
 #include "components/autofill/core/common/form_data_predictions.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/form_field_data_predictions.h"
+#include "components/rappor/rappor_service.h"
+#include "components/rappor/rappor_utils.h"
 #include "third_party/icu/source/i18n/unicode/regex.h"
 #include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
 
@@ -54,8 +56,12 @@ const char kXMLElementForm[] = "form";
 const char kBillingMode[] = "billing";
 const char kShippingMode[] = "shipping";
 
-// Stip away >= 5 consecutive digits.
+// Strip away >= 5 consecutive digits.
 const char kIgnorePatternInFieldName[] = "\\d{5,}+";
+
+// A form is considered to have a high prediction mismatch rate if the number of
+// mismatches exceeds this threshold.
+const int kNumberOfMismatchesThreshold = 3;
 
 // Helper for |EncodeUploadRequest()| that creates a bit field corresponding to
 // |available_field_types| and returns the hex representation as a string.
@@ -544,9 +550,9 @@ bool FormStructure::EncodeQueryRequest(
 }
 
 // static
-void FormStructure::ParseQueryResponse(
-    const std::string& response_xml,
-    const std::vector<FormStructure*>& forms) {
+void FormStructure::ParseQueryResponse(const std::string& response_xml,
+                                       const std::vector<FormStructure*>& forms,
+                                       rappor::RapporService* rappor_service) {
   AutofillMetrics::LogServerQueryMetric(
       AutofillMetrics::QUERY_RESPONSE_RECEIVED);
 
@@ -573,6 +579,7 @@ void FormStructure::ParseQueryResponse(
     FormStructure* form = *iter;
     form->upload_required_ = upload_required;
 
+    bool query_response_has_no_server_data = true;
     for (std::vector<AutofillField*>::iterator field = form->fields_.begin();
          field != form->fields_.end(); ++field) {
       if (form->ShouldSkipField(**field))
@@ -582,6 +589,9 @@ void FormStructure::ParseQueryResponse(
       // Quit the update of the types then.
       if (current_info == field_infos.end())
         break;
+
+      query_response_has_no_server_data &=
+          current_info->field_type == NO_SERVER_DATA;
 
       // If |form->has_author_specified_types| only password fields should be
       // updated.
@@ -606,6 +616,12 @@ void FormStructure::ParseQueryResponse(
       ++current_info;
     }
 
+    if (query_response_has_no_server_data && form->source_url().is_valid()) {
+      rappor::SampleDomainAndRegistryFromGURL(
+          rappor_service, "Autofill.QueryResponseHasNoServerDataForForm",
+          form->source_url());
+    }
+
     form->UpdateAutofillCount();
     form->IdentifySections(false);
   }
@@ -624,17 +640,17 @@ void FormStructure::ParseQueryResponse(
 }
 
 // static
-void FormStructure::GetFieldTypePredictions(
-    const std::vector<FormStructure*>& form_structures,
-    std::vector<FormDataPredictions>* forms) {
-  forms->clear();
-  forms->reserve(form_structures.size());
+std::vector<FormDataPredictions> FormStructure::GetFieldTypePredictions(
+    const std::vector<FormStructure*>& form_structures) {
+  std::vector<FormDataPredictions> forms;
+  forms.reserve(form_structures.size());
   for (size_t i = 0; i < form_structures.size(); ++i) {
     FormStructure* form_structure = form_structures[i];
     FormDataPredictions form;
     form.data.name = form_structure->form_name_;
     form.data.origin = form_structure->source_url_;
     form.data.action = form_structure->target_url_;
+    form.data.is_form_tag = form_structure->is_form_tag_;
     form.signature = form_structure->FormSignature();
 
     for (std::vector<AutofillField*>::const_iterator field =
@@ -652,8 +668,9 @@ void FormStructure::GetFieldTypePredictions(
       form.fields.push_back(annotated_field);
     }
 
-    forms->push_back(form);
+    forms.push_back(form);
   }
+  return forms;
 }
 
 std::string FormStructure::FormSignature() const {
@@ -743,6 +760,8 @@ void FormStructure::UpdateFromCache(const FormStructure& cached_form) {
 
       field->set_heuristic_type(cached_field->second->heuristic_type());
       field->set_server_type(cached_field->second->server_type());
+      field->SetHtmlType(cached_field->second->html_type(),
+                         cached_field->second->html_mode());
     }
   }
 
@@ -762,8 +781,11 @@ void FormStructure::UpdateFromCache(const FormStructure& cached_form) {
 void FormStructure::LogQualityMetrics(
     const base::TimeTicks& load_time,
     const base::TimeTicks& interaction_time,
-    const base::TimeTicks& submission_time) const {
+    const base::TimeTicks& submission_time,
+    rappor::RapporService* rappor_service) const {
   size_t num_detected_field_types = 0;
+  size_t num_server_mismatches = 0;
+  size_t num_heuristic_mismatches = 0;
   bool did_autofill_all_possible_fields = true;
   bool did_autofill_some_possible_fields = false;
   for (size_t i = 0; i < field_count(); ++i) {
@@ -824,6 +846,7 @@ void FormStructure::LogQualityMetrics(
       AutofillMetrics::LogHeuristicTypePrediction(AutofillMetrics::TYPE_MATCH,
                                                   field_type);
     } else {
+      ++num_heuristic_mismatches;
       AutofillMetrics::LogHeuristicTypePrediction(
           AutofillMetrics::TYPE_MISMATCH, field_type);
     }
@@ -835,6 +858,7 @@ void FormStructure::LogQualityMetrics(
       AutofillMetrics::LogServerTypePrediction(AutofillMetrics::TYPE_MATCH,
                                                field_type);
     } else {
+      ++num_server_mismatches;
       AutofillMetrics::LogServerTypePrediction(AutofillMetrics::TYPE_MISMATCH,
                                                field_type);
     }
@@ -864,6 +888,17 @@ void FormStructure::LogQualityMetrics(
     } else {
       AutofillMetrics::LogUserHappinessMetric(
           AutofillMetrics::SUBMITTED_FILLABLE_FORM_AUTOFILLED_NONE);
+    }
+
+    // Log some RAPPOR metrics for problematic cases.
+    if (num_server_mismatches >= kNumberOfMismatchesThreshold) {
+      rappor::SampleDomainAndRegistryFromGURL(
+          rappor_service, "Autofill.HighNumberOfServerMismatches", source_url_);
+    }
+    if (num_heuristic_mismatches >= kNumberOfMismatchesThreshold) {
+      rappor::SampleDomainAndRegistryFromGURL(
+          rappor_service, "Autofill.HighNumberOfHeuristicMismatches",
+          source_url_);
     }
 
     // Unlike the other times, the |submission_time| should always be available.
@@ -954,7 +989,7 @@ bool FormStructure::operator!=(const FormData& form) const {
 
 std::string FormStructure::Hash64Bit(const std::string& str) {
   std::string hash_bin = base::SHA1HashString(str);
-  DCHECK_EQ(20U, hash_bin.length());
+  DCHECK_EQ(base::kSHA1Length, hash_bin.length());
 
   uint64 hash64 = (((static_cast<uint64>(hash_bin[0])) & 0xFF) << 56) |
                   (((static_cast<uint64>(hash_bin[1])) & 0xFF) << 48) |
@@ -1206,8 +1241,11 @@ void FormStructure::IdentifySections(bool has_author_specified_sections) {
       if (AutofillType(current_type).group() == PHONE_HOME)
         already_saw_current_type = false;
 
-      // Ignore non-focusable field while inferring boundaries between sections.
-      if (!field->is_focusable)
+      // Ignore non-focusable field and presentation role fields while inferring
+      // boundaries between sections.
+      bool ignored_field = !field->is_focusable ||
+          field->role == FormFieldData::ROLE_ATTRIBUTE_PRESENTATION;
+      if (ignored_field)
         already_saw_current_type = false;
 
       // Some forms have adjacent fields of the same type.  Two common examples:
@@ -1222,20 +1260,23 @@ void FormStructure::IdentifySections(bool has_author_specified_sections) {
       if (current_type == previous_type)
         already_saw_current_type = false;
 
-      previous_type = current_type;
-
       if (current_type != UNKNOWN_TYPE && already_saw_current_type) {
         // We reached the end of a section, so start a new section.
         seen_types.clear();
         current_section = field->unique_name();
       }
 
-      // Only consider a type "seen" if it was focusable. Some forms have
+      // Only consider a type "seen" if it was not ignored. Some forms have
       // sections for different locales, only one of which is enabled at a
       // time. Each section may duplicate some information (e.g. postal code)
       // and we don't want that to cause section splits.
-      if (field->is_focusable)
+      // Also only set |previous_type| when the field was not ignored. This
+      // prevents ignored fields from breaking up fields that are otherwise
+      // adjacent.
+      if (!ignored_field) {
         seen_types.insert(current_type);
+        previous_type = current_type;
+      }
 
       field->set_section(base::UTF16ToUTF8(current_section));
     }

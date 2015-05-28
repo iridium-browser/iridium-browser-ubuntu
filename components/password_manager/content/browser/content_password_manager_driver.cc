@@ -29,11 +29,12 @@ ContentPasswordManagerDriver::ContentPasswordManagerDriver(
     : render_frame_host_(render_frame_host),
       client_(client),
       password_generation_manager_(client, this),
-      password_autofill_manager_(client, this, autofill_client),
+      password_autofill_manager_(this, autofill_client),
       next_free_key_(0) {
 }
 
-ContentPasswordManagerDriver::~ContentPasswordManagerDriver() {}
+ContentPasswordManagerDriver::~ContentPasswordManagerDriver() {
+}
 
 // static
 ContentPasswordManagerDriver*
@@ -41,7 +42,7 @@ ContentPasswordManagerDriver::GetForRenderFrameHost(
     content::RenderFrameHost* render_frame_host) {
   ContentPasswordManagerDriverFactory* factory =
       ContentPasswordManagerDriverFactory::FromWebContents(
-             content::WebContents::FromRenderFrameHost(render_frame_host));
+          content::WebContents::FromRenderFrameHost(render_frame_host));
   return factory ? factory->GetDriverForFrame(render_frame_host) : nullptr;
 }
 
@@ -55,6 +56,8 @@ void ContentPasswordManagerDriver::FillPasswordForm(
 
 void ContentPasswordManagerDriver::AllowPasswordGenerationForForm(
     const autofill::PasswordForm& form) {
+  if (!GetPasswordGenerationManager()->IsGenerationEnabled())
+    return;
   content::RenderFrameHost* host = render_frame_host_;
   host->Send(new AutofillMsg_FormNotBlacklisted(host->GetRoutingID(), form));
 }
@@ -64,6 +67,13 @@ void ContentPasswordManagerDriver::AccountCreationFormsFound(
   content::RenderFrameHost* host = render_frame_host_;
   host->Send(new AutofillMsg_AccountCreationFormsDetected(host->GetRoutingID(),
                                                           forms));
+}
+
+void ContentPasswordManagerDriver::AutofillDataReceived(
+    const std::map<autofill::FormData, autofill::FormFieldData>& predictions) {
+  content::RenderFrameHost* host = render_frame_host_;
+  host->Send(new AutofillMsg_AutofillUsernameDataReceived(host->GetRoutingID(),
+                                                          predictions));
 }
 
 void ContentPasswordManagerDriver::GeneratedPasswordAccepted(
@@ -77,26 +87,21 @@ void ContentPasswordManagerDriver::FillSuggestion(
     const base::string16& username,
     const base::string16& password) {
   content::RenderFrameHost* host = render_frame_host_;
-  host->Send(
-      new AutofillMsg_FillPasswordSuggestion(host->GetRoutingID(),
-                                             username,
-                                             password));
+  host->Send(new AutofillMsg_FillPasswordSuggestion(host->GetRoutingID(),
+                                                    username, password));
 }
 
 void ContentPasswordManagerDriver::PreviewSuggestion(
     const base::string16& username,
     const base::string16& password) {
   content::RenderFrameHost* host = render_frame_host_;
-  host->Send(
-      new AutofillMsg_PreviewPasswordSuggestion(host->GetRoutingID(),
-                                                username,
-                                                password));
+  host->Send(new AutofillMsg_PreviewPasswordSuggestion(host->GetRoutingID(),
+                                                       username, password));
 }
 
 void ContentPasswordManagerDriver::ClearPreviewedForm() {
   content::RenderFrameHost* host = render_frame_host_;
-  host->Send(
-      new AutofillMsg_ClearPreviewedForm(host->GetRoutingID()));
+  host->Send(new AutofillMsg_ClearPreviewedForm(host->GetRoutingID()));
 }
 
 PasswordGenerationManager*

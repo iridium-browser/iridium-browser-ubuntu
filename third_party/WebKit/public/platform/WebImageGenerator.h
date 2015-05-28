@@ -32,19 +32,15 @@
 #define WebImageGenerator_h
 
 #include "WebCommon.h"
-#include "platform/graphics/DecodingImageGenerator.h"
 
 class SkData;
 class SkImageGenerator;
 
 namespace blink {
 
-class WebImageGenerator {
+class BLINK_EXPORT WebImageGenerator {
 public:
-    static SkImageGenerator* create(SkData* data)
-    {
-        return DecodingImageGenerator::create(data);
-    }
+    static SkImageGenerator* create(SkData*);
 };
 
 } // namespace blink

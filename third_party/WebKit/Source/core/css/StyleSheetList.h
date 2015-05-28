@@ -53,15 +53,15 @@ public:
 
     CSSStyleSheet* anonymousNamedGetter(const AtomicString&);
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     explicit StyleSheetList(TreeScope*);
-    const WillBeHeapVector<RefPtrWillBeMember<StyleSheet> >& styleSheets();
+    const WillBeHeapVector<RefPtrWillBeMember<StyleSheet>>& styleSheets();
 
     RawPtrWillBeMember<TreeScope> m_treeScope;
 #if !ENABLE(OILPAN)
-    Vector<RefPtr<StyleSheet> > m_detachedStyleSheets;
+    Vector<RefPtr<StyleSheet>> m_detachedStyleSheets;
 #endif
 };
 

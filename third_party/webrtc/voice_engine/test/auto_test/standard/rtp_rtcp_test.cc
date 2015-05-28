@@ -29,16 +29,15 @@ class TestRtpObserver : public webrtc::VoERTPObserver {
   void WaitForChangedSsrc() {
     // 10 seconds should be enough.
     EXPECT_EQ(voetest::kEventSignaled, changed_ssrc_event_->Wait(10*1000));
-    changed_ssrc_event_->Reset();
   }
   void SetIncomingSsrc(unsigned int ssrc) {
     voetest::CriticalSectionScoped lock(crit_.get());
     incoming_ssrc_ = ssrc;
   }
  public:
-  voetest::scoped_ptr<voetest::CriticalSectionWrapper> crit_;
+  rtc::scoped_ptr<voetest::CriticalSectionWrapper> crit_;
   unsigned int incoming_ssrc_;
-  voetest::scoped_ptr<voetest::EventWrapper> changed_ssrc_event_;
+  rtc::scoped_ptr<voetest::EventWrapper> changed_ssrc_event_;
 };
 
 void TestRtpObserver::OnIncomingSSRCChanged(int channel,

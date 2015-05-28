@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/ui.gni")
+import("//third_party/WebKit/public/features.gni")
 
 if (is_android) {
   import("//build/config/android/config.gni")
@@ -10,7 +11,7 @@ if (is_android) {
   # TODO(brettw) remove this once && early-out is checked in.
   is_android_webview_build = false
 }
-if (cpu_arch == "arm") {
+if (current_cpu == "arm") {
   import("//build/config/arm.gni")
 } else {
   # TODO(brettw) remove this once && early-out is checked in.
@@ -18,9 +19,6 @@ if (cpu_arch == "arm") {
 }
 
 declare_args() {
-  # Enables the Oilpan garbage-collection infrastructure.
-  enable_oilpan = false
-
   # Set to true to enable the clang plugin that checks the usage of the Blink
   # garbage-collection infrastructure during compilation.
   blink_gc_plugin = false
@@ -37,9 +35,10 @@ use_default_render_theme = use_aura
 # enabled. Whether WebAudio is actually available depends on runtime settings
 # and flags.
 use_openmax_dl_fft = is_android && !is_android_webview_build &&
-  (cpu_arch == "x86" ||
-   cpu_arch == "x64" ||
-   (cpu_arch == "arm" && arm_version >= 7))
+  (current_cpu == "x86" ||
+   current_cpu == "x64" ||
+   (current_cpu == "arm" && arm_version >= 7) ||
+   current_cpu == "mipsel")
 
 use_webaudio_ffmpeg = !is_mac && !is_android
 

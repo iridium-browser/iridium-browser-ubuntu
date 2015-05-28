@@ -301,6 +301,53 @@ class BuildUnittest(unittest.TestCase):
     self.assertTrue(abs(second_mtime - UNCHANGED) > 5)
     self.assertTrue(abs(third_mtime - UNCHANGED) < 5)
 
+  def testGenerateDepFileWithDependOnStamp(self):
+    output_dir = tempfile.mkdtemp()
+    builder = build.RcBuilder()
+    class DummyOpts(object):
+      def __init__(self):
+        self.input = util.PathFromRoot('grit/testdata/substitute.grd')
+        self.verbose = False
+        self.extra_verbose = False
+    expected_dep_file_name = 'substitute.grd.d'
+    expected_stamp_file_name = expected_dep_file_name + '.stamp'
+    expected_dep_file = os.path.join(output_dir, expected_dep_file_name)
+    expected_stamp_file = os.path.join(output_dir, expected_stamp_file_name)
+    if os.path.isfile(expected_stamp_file):
+      os.remove(expected_stamp_file)
+    builder.Run(DummyOpts(), ['-o', output_dir,
+                              '--depdir', output_dir,
+                              '--depfile', expected_dep_file,
+                              '--depend-on-stamp'])
+    self.failUnless(os.path.isfile(expected_stamp_file))
+    first_mtime = os.stat(expected_stamp_file).st_mtime
+
+    # Reset mtime to very old.
+    OLDTIME = 10
+    os.utime(expected_stamp_file, (OLDTIME, OLDTIME))
+
+    builder.Run(DummyOpts(), ['-o', output_dir,
+                              '--depdir', output_dir,
+                              '--depfile', expected_dep_file,
+                              '--depend-on-stamp'])
+    self.failUnless(os.path.isfile(expected_stamp_file))
+    second_mtime = os.stat(expected_stamp_file).st_mtime
+
+    # Some OS have a 2s stat resolution window, so can't do a direct comparison.
+    self.assertTrue((second_mtime - OLDTIME) > 5)
+    self.assertTrue(abs(second_mtime - first_mtime) < 5)
+
+    self.failUnless(os.path.isfile(expected_dep_file))
+    with open(expected_dep_file) as f:
+      line = f.readline()
+      (dep_output_file, deps_string) = line.split(': ')
+      deps = deps_string.split(' ')
+
+      self.failUnlessEqual(expected_stamp_file_name, dep_output_file)
+      self.failUnlessEqual(1, len(deps))
+      self.failUnlessEqual(deps[0],
+          util.PathFromRoot('grit/testdata/substitute.xmb'))
+
 
 if __name__ == '__main__':
   unittest.main()

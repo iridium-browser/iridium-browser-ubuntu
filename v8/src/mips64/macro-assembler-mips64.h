@@ -262,9 +262,15 @@ class MacroAssembler: public Assembler {
     mfhc1(dst_high, src);
   }
 
+  inline void FmoveHigh(FPURegister dst, Register src_high) {
+    mthc1(src_high, dst);
+  }
+
   inline void FmoveLow(Register dst_low, FPURegister src) {
     mfc1(dst_low, src);
   }
+
+  void FmoveLow(FPURegister dst, Register src_low);
 
   inline void Move(FPURegister dst, Register src_low, Register src_high) {
     mtc1(src_low, dst);
@@ -901,10 +907,9 @@ class MacroAssembler: public Assembler {
                       int stack_space = 0);
 
   // Leave the current exit frame.
-  void LeaveExitFrame(bool save_doubles,
-                      Register arg_count,
-                      bool restore_context,
-                      bool do_return = NO_EMIT_RETURN);
+  void LeaveExitFrame(bool save_doubles, Register arg_count,
+                      bool restore_context, bool do_return = NO_EMIT_RETURN,
+                      bool argument_count_is_length = false);
 
   // Get the actual activation frame alignment for target environment.
   static int ActivationFrameAlignment();
@@ -994,19 +999,12 @@ class MacroAssembler: public Assembler {
   // -------------------------------------------------------------------------
   // Exception handling.
 
-  // Push a new try handler and link into try handler chain.
-  void PushTryHandler(StackHandler::Kind kind, int handler_index);
+  // Push a new stack handler and link into stack handler chain.
+  void PushStackHandler();
 
-  // Unlink the stack handler on top of the stack from the try handler chain.
+  // Unlink the stack handler on top of the stack from the stack handler chain.
   // Must preserve the result register.
-  void PopTryHandler();
-
-  // Passes thrown value to the handler of top of the try handler chain.
-  void Throw(Register value);
-
-  // Propagates an uncatchable exception to the top of the current JS stack's
-  // handler chain.
-  void ThrowUncatchable(Register value);
+  void PopStackHandler();
 
   // Copies a fixed number of fields of heap objects from src to dst.
   void CopyFields(Register dst, Register src, RegList temps, int field_count);
@@ -1028,6 +1026,11 @@ class MacroAssembler: public Assembler {
 
   // -------------------------------------------------------------------------
   // Support functions.
+
+  // Machine code version of Map::GetConstructor().
+  // |temp| holds |result|'s map when done, and |temp2| its instance type.
+  void GetMapConstructor(Register result, Register map, Register temp,
+                         Register temp2);
 
   // Try to get function prototype of a function and puts the value in
   // the result register. Checks that the function really is a
@@ -1070,7 +1073,6 @@ class MacroAssembler: public Assembler {
                                    Register elements_reg,
                                    Register scratch1,
                                    Register scratch2,
-                                   Register scratch3,
                                    Label* fail,
                                    int elements_offset = 0);
 
@@ -1117,6 +1119,10 @@ class MacroAssembler: public Assembler {
                        Handle<WeakCell> cell, Handle<Code> success,
                        SmiCheckType smi_check_type);
 
+  // If the value is a NaN, canonicalize the value else, do nothing.
+  void FPUCanonicalizeNaN(const DoubleRegister dst, const DoubleRegister src);
+
+
   // Get value of the weak cell.
   void GetWeakValue(Register value, Handle<WeakCell> cell);
 
@@ -1133,7 +1139,7 @@ class MacroAssembler: public Assembler {
     ld(type, FieldMemOperand(obj, HeapObject::kMapOffset));
     lbu(type, FieldMemOperand(type, Map::kInstanceTypeOffset));
     And(type, type, Operand(kIsNotStringMask));
-    DCHECK_EQ(0, kStringTag);
+    DCHECK_EQ(0u, kStringTag);
     return eq;
   }
 
@@ -1315,16 +1321,6 @@ const Operand& rt = Operand(zero_reg), BranchDelaySlot bd = PROTECT
   void MovToFloatParameter(DoubleRegister src);
   void MovToFloatParameters(DoubleRegister src1, DoubleRegister src2);
   void MovToFloatResult(DoubleRegister src);
-
-  // Calls an API function.  Allocates HandleScope, extracts returned value
-  // from handle and propagates exceptions.  Restores context.  stack_space
-  // - space to be unwound on exit (includes the call JS arguments space and
-  // the additional space allocated for the fast call).
-  void CallApiFunctionAndReturn(Register function_address,
-                                ExternalReference thunk_ref,
-                                int stack_space,
-                                MemOperand return_value_operand,
-                                MemOperand* context_restore_operand);
 
   // Jump to the builtin routine.
   void JumpToExternalReference(const ExternalReference& builtin,
@@ -1602,6 +1598,8 @@ const Operand& rt = Operand(zero_reg), BranchDelaySlot bd = PROTECT
   void LoadInstanceDescriptors(Register map, Register descriptors);
   void EnumLength(Register dst, Register map);
   void NumberOfOwnDescriptors(Register dst, Register map);
+  void LoadAccessor(Register dst, Register holder, int accessor_index,
+                    AccessorComponent accessor);
 
   template<typename Field>
   void DecodeField(Register dst, Register src) {
@@ -1723,10 +1721,6 @@ const Operand& rt = Operand(zero_reg), BranchDelaySlot bd = PROTECT
   inline void GetMarkBits(Register addr_reg,
                           Register bitmap_reg,
                           Register mask_reg);
-
-  // Helper for throwing exceptions.  Compute a handler address and jump to
-  // it.  See the implementation for register usage.
-  void JumpToHandlerEntry();
 
   // Compute memory operands for safepoint stack slots.
   static int SafepointRegisterStackIndex(int reg_code);

@@ -6,11 +6,12 @@
  */
 
 #include "SkImage_Base.h"
-#include "SkImagePriv.h"
 #include "SkBitmap.h"
 #include "SkCanvas.h"
 #include "SkData.h"
 #include "SkImageGenerator.h"
+#include "SkImagePriv.h"
+#include "SkPixelRef.h"
 #include "SkSurface.h"
 
 class SkImage_Raster : public SkImage_Base {
@@ -52,23 +53,24 @@ public:
     SkImage_Raster(const SkImageInfo&, SkData*, size_t rb, const SkSurfaceProps*);
     virtual ~SkImage_Raster();
 
-    void onDraw(SkCanvas*, SkScalar, SkScalar, const SkPaint*) const SK_OVERRIDE;
-    void onDrawRect(SkCanvas*, const SkRect*, const SkRect&, const SkPaint*) const SK_OVERRIDE;
-    SkSurface* onNewSurface(const SkImageInfo&, const SkSurfaceProps&) const SK_OVERRIDE;
-    bool onReadPixels(const SkImageInfo&, void*, size_t, int srcX, int srcY) const SK_OVERRIDE;
-    const void* onPeekPixels(SkImageInfo*, size_t* /*rowBytes*/) const SK_OVERRIDE;
-    bool getROPixels(SkBitmap*) const SK_OVERRIDE;
+    void onDraw(SkCanvas*, SkScalar, SkScalar, const SkPaint*) const override;
+    void onDrawRect(SkCanvas*, const SkRect*, const SkRect&, const SkPaint*) const override;
+    SkSurface* onNewSurface(const SkImageInfo&, const SkSurfaceProps&) const override;
+    bool onReadPixels(const SkImageInfo&, void*, size_t, int srcX, int srcY) const override;
+    const void* onPeekPixels(SkImageInfo*, size_t* /*rowBytes*/) const override;
+    bool getROPixels(SkBitmap*) const override;
 
     // exposed for SkSurface_Raster via SkNewImageFromPixelRef
-    SkImage_Raster(const SkImageInfo&, SkPixelRef*, size_t rowBytes, const SkSurfaceProps*);
+    SkImage_Raster(const SkImageInfo&, SkPixelRef*, const SkIPoint& pixelRefOrigin, size_t rowBytes,
+                   const SkSurfaceProps*);
 
     SkPixelRef* getPixelRef() const { return fBitmap.pixelRef(); }
 
     virtual SkShader* onNewShader(SkShader::TileMode,
                                   SkShader::TileMode,
-                                  const SkMatrix* localMatrix) const SK_OVERRIDE;
+                                  const SkMatrix* localMatrix) const override;
 
-    virtual bool isOpaque() const SK_OVERRIDE;
+    bool isOpaque() const override;
 
     SkImage_Raster(const SkBitmap& bm, const SkSurfaceProps* props)
         : INHERITED(bm.width(), bm.height(), props)
@@ -102,12 +104,12 @@ SkImage_Raster::SkImage_Raster(const Info& info, SkData* data, size_t rowBytes,
     fBitmap.lockPixels();
 }
 
-SkImage_Raster::SkImage_Raster(const Info& info, SkPixelRef* pr, size_t rowBytes,
-                               const SkSurfaceProps* props)
+SkImage_Raster::SkImage_Raster(const Info& info, SkPixelRef* pr, const SkIPoint& pixelRefOrigin,
+                               size_t rowBytes,  const SkSurfaceProps* props)
     : INHERITED(info.width(), info.height(), props)
 {
     fBitmap.setInfo(info, rowBytes);
-    fBitmap.setPixelRef(pr);
+    fBitmap.setPixelRef(pr, pixelRefOrigin);
     fBitmap.lockPixels();
 }
 
@@ -186,12 +188,44 @@ SkImage* SkImage::NewFromGenerator(SkImageGenerator* generator) {
     if (!SkInstallDiscardablePixelRef(generator, &bitmap)) {
         return NULL;
     }
+    if (0 == bitmap.width() || 0 == bitmap.height()) {
+        return NULL;
+    }
+
     return SkNEW_ARGS(SkImage_Raster, (bitmap, NULL));
 }
 
-SkImage* SkNewImageFromPixelRef(const SkImageInfo& info, SkPixelRef* pr, size_t rowBytes,
+SkImage* SkNewImageFromPixelRef(const SkImageInfo& info, SkPixelRef* pr,
+                                const SkIPoint& pixelRefOrigin, size_t rowBytes,
                                 const SkSurfaceProps* props) {
-    return SkNEW_ARGS(SkImage_Raster, (info, pr, rowBytes, props));
+    if (!SkImage_Raster::ValidArgs(info, rowBytes)) {
+        return NULL;
+    }
+    return SkNEW_ARGS(SkImage_Raster, (info, pr, pixelRefOrigin, rowBytes, props));
+}
+
+SkImage* SkNewImageFromBitmap(const SkBitmap& bm, bool canSharePixelRef,
+                              const SkSurfaceProps* props) {
+    if (!SkImage_Raster::ValidArgs(bm.info(), bm.rowBytes())) {
+        return NULL;
+    }
+
+    SkImage* image = NULL;
+    if (canSharePixelRef || bm.isImmutable()) {
+        image = SkNEW_ARGS(SkImage_Raster, (bm, props));
+    } else {
+        bm.lockPixels();
+        if (bm.getPixels()) {
+            image = SkImage::NewRasterCopy(bm.info(), bm.getPixels(), bm.rowBytes());
+        }
+        bm.unlockPixels();
+
+        // we don't expose props to NewRasterCopy (need a private vers) so post-init it here
+        if (image && props) {
+            as_IB(image)->initWithProps(*props);
+        }
+    }
+    return image;
 }
 
 const SkPixelRef* SkBitmapImageGetPixelRef(const SkImage* image) {
@@ -201,3 +235,4 @@ const SkPixelRef* SkBitmapImageGetPixelRef(const SkImage* image) {
 bool SkImage_Raster::isOpaque() const {
     return fBitmap.isOpaque();
 }
+

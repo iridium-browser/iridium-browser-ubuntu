@@ -12,6 +12,7 @@
 #include "platform/graphics/UnacceleratedImageBufferSurface.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebThread.h"
+#include "public/platform/WebTraceLocation.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "wtf/OwnPtr.h"
@@ -124,7 +125,7 @@ public:
     void testNoFallbackWithClear()
     {
         m_testSurface->initializeCurrentFrame();
-        m_testSurface->didClearCanvas();
+        m_testSurface->willOverwriteCanvas();
         m_testSurface->getPicture();
         EXPECT_EQ(1, m_fakeImageBufferClient->frameCount());
         expectDisplayListEnabled(true);
@@ -189,7 +190,7 @@ public:
     {
         m_testSurface->initializeCurrentFrame();
         m_testSurface->getPicture();
-        m_testSurface->didClearCanvas();
+        m_testSurface->willOverwriteCanvas();
         m_fakeImageBufferClient->fakeDraw();
         EXPECT_EQ(1, m_fakeImageBufferClient->frameCount());
         m_testSurface->getPicture();
@@ -197,7 +198,7 @@ public:
         expectDisplayListEnabled(true);
         // clear after use
         m_fakeImageBufferClient->fakeDraw();
-        m_testSurface->didClearCanvas();
+        m_testSurface->willOverwriteCanvas();
         EXPECT_EQ(2, m_fakeImageBufferClient->frameCount());
         m_testSurface->getPicture();
         EXPECT_EQ(3, m_fakeImageBufferClient->frameCount());
@@ -260,13 +261,13 @@ private:
             EXPECT_EQ((Task*)0, m_task);
         }
 
-        virtual void postTask(Task* task)
+        virtual void postTask(const WebTraceLocation&, Task* task)
         {
             EXPECT_EQ((Task*)0, m_task);
             m_task = task;
         }
 
-        virtual void postDelayedTask(Task*, long long delayMs) override { ASSERT_NOT_REACHED(); };
+        virtual void postDelayedTask(const WebTraceLocation&, Task*, long long delayMs) override { ASSERT_NOT_REACHED(); };
 
         virtual bool isCurrentThread() const override { return true; }
         virtual PlatformThreadId threadId() const override
@@ -333,7 +334,7 @@ class TestWrapperTask_ ## TEST_METHOD : public WebThread::Task {                
 #define CALL_TEST_TASK_WRAPPER(TEST_METHOD)                                                               \
     {                                                                                                     \
         AutoInstallCurrentThreadPlatformMock ctpm;                                                        \
-        Platform::current()->currentThread()->postTask(new TestWrapperTask_ ## TEST_METHOD(this)); \
+        Platform::current()->currentThread()->postTask(FROM_HERE, new TestWrapperTask_ ## TEST_METHOD(this)); \
         Platform::current()->currentThread()->enterRunLoop();                                      \
     }
 

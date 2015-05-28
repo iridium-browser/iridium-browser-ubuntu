@@ -30,7 +30,8 @@ class PermissionBubbleManager
       public content::WebContentsUserData<PermissionBubbleManager>,
       public PermissionBubbleView::Delegate {
  public:
-  // Return the flag-driven enabled state of permissions bubbles.
+  // Return the enabled state of permissions bubbles.
+  // Controlled by a flag and FieldTrial.
   static bool Enabled();
 
   ~PermissionBubbleManager() override;
@@ -57,8 +58,17 @@ class PermissionBubbleManager
   // take ownership of the view.
   void SetView(PermissionBubbleView* view) override;
 
+  // Controls whether incoming permission requests require user gestures.
+  // If |required| is false, requests will be displayed as soon as they come in.
+  // If |required| is true, requests will be silently queued until a request
+  // comes in with a user gesture.
+  void RequireUserGesture(bool required);
+
  private:
   friend class DownloadRequestLimiterTest;
+  friend class GeolocationBrowserTest;
+  friend class GeolocationPermissionContextTests;
+  friend class GeolocationPermissionContextParamTests;
   friend class PermissionBubbleManagerTest;
   friend class PermissionContextBaseTests;
   friend class content::WebContentsUserData<PermissionBubbleManager>;
@@ -78,7 +88,6 @@ class PermissionBubbleManager
 
   // PermissionBubbleView::Delegate:
   void ToggleAccept(int request_index, bool new_value) override;
-  void SetCustomizationMode() override;
   void Accept() override;
   void Deny() override;
   void Closing() override;
@@ -110,6 +119,10 @@ class PermissionBubbleManager
   bool HasUserGestureRequest(
       const std::vector<PermissionBubbleRequest*>& queue);
 
+  // Whether to delay displaying the bubble until a request with a user gesture.
+  // False by default, unless RequireUserGesture(bool) changes the value.
+  bool require_user_gesture_;
+
   // Whether or not we are showing the bubble in this tab.
   bool bubble_showing_;
 
@@ -126,7 +139,6 @@ class PermissionBubbleManager
   bool request_url_has_loaded_;
 
   std::vector<bool> accept_states_;
-  bool customization_mode_;
 
   base::WeakPtrFactory<PermissionBubbleManager> weak_factory_;
 };

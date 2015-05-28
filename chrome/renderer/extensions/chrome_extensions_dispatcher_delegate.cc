@@ -15,15 +15,13 @@
 #include "chrome/grit/renderer_resources.h"
 #include "chrome/renderer/extensions/app_bindings.h"
 #include "chrome/renderer/extensions/automation_internal_custom_bindings.h"
-#include "chrome/renderer/extensions/chrome_v8_context.h"
-#include "chrome/renderer/extensions/enterprise_platform_keys_natives.h"
 #include "chrome/renderer/extensions/file_browser_handler_custom_bindings.h"
 #include "chrome/renderer/extensions/file_manager_private_custom_bindings.h"
 #include "chrome/renderer/extensions/media_galleries_custom_bindings.h"
 #include "chrome/renderer/extensions/notifications_native_handler.h"
 #include "chrome/renderer/extensions/page_capture_custom_bindings.h"
+#include "chrome/renderer/extensions/platform_keys_natives.h"
 #include "chrome/renderer/extensions/sync_file_system_custom_bindings.h"
-#include "chrome/renderer/extensions/tab_finder.h"
 #include "chrome/renderer/extensions/tabs_custom_bindings.h"
 #include "chrome/renderer/extensions/webstore_bindings.h"
 #include "content/public/renderer/render_thread.h"
@@ -51,23 +49,6 @@ ChromeExtensionsDispatcherDelegate::ChromeExtensionsDispatcherDelegate() {
 }
 
 ChromeExtensionsDispatcherDelegate::~ChromeExtensionsDispatcherDelegate() {
-}
-
-scoped_ptr<extensions::ScriptContext>
-ChromeExtensionsDispatcherDelegate::CreateScriptContext(
-    const v8::Handle<v8::Context>& v8_context,
-    blink::WebFrame* frame,
-    const extensions::Extension* extension,
-    extensions::Feature::Context context_type,
-    const extensions::Extension* effective_extension,
-    extensions::Feature::Context effective_context_type) {
-  return scoped_ptr<extensions::ScriptContext>(
-      new extensions::ChromeV8Context(v8_context,
-                                      frame,
-                                      extension,
-                                      context_type,
-                                      effective_extension,
-                                      effective_context_type));
 }
 
 void ChromeExtensionsDispatcherDelegate::InitOriginPermissions(
@@ -100,10 +81,6 @@ void ChromeExtensionsDispatcherDelegate::RegisterNativeHandlers(
       scoped_ptr<NativeHandler>(
           new extensions::SyncFileSystemCustomBindings(context)));
   module_system->RegisterNativeHandler(
-      "enterprise_platform_keys_natives",
-      scoped_ptr<NativeHandler>(
-          new extensions::EnterprisePlatformKeysNatives(context)));
-  module_system->RegisterNativeHandler(
       "file_browser_handler",
       scoped_ptr<NativeHandler>(
           new extensions::FileBrowserHandlerCustomBindings(context)));
@@ -123,6 +100,9 @@ void ChromeExtensionsDispatcherDelegate::RegisterNativeHandlers(
       "page_capture",
       scoped_ptr<NativeHandler>(
           new extensions::PageCaptureCustomBindings(context)));
+  module_system->RegisterNativeHandler(
+      "platform_keys_natives",
+      scoped_ptr<NativeHandler>(new extensions::PlatformKeysNatives(context)));
   module_system->RegisterNativeHandler(
       "tabs",
       scoped_ptr<NativeHandler>(new extensions::TabsCustomBindings(context)));
@@ -161,16 +141,12 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
                              IDR_ENTERPRISE_PLATFORM_KEYS_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("enterprise.platformKeys.internalAPI",
                              IDR_ENTERPRISE_PLATFORM_KEYS_INTERNAL_API_JS);
-  source_map->RegisterSource("enterprise.platformKeys.Key",
-                             IDR_ENTERPRISE_PLATFORM_KEYS_KEY_JS);
   source_map->RegisterSource("enterprise.platformKeys.KeyPair",
                              IDR_ENTERPRISE_PLATFORM_KEYS_KEY_PAIR_JS);
   source_map->RegisterSource("enterprise.platformKeys.SubtleCrypto",
                              IDR_ENTERPRISE_PLATFORM_KEYS_SUBTLE_CRYPTO_JS);
   source_map->RegisterSource("enterprise.platformKeys.Token",
                              IDR_ENTERPRISE_PLATFORM_KEYS_TOKEN_JS);
-  source_map->RegisterSource("enterprise.platformKeys.utils",
-                             IDR_ENTERPRISE_PLATFORM_KEYS_UTILS_JS);
   source_map->RegisterSource("feedbackPrivate",
                              IDR_FEEDBACK_PRIVATE_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("fileBrowserHandler",
@@ -194,6 +170,16 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   source_map->RegisterSource("pageAction", IDR_PAGE_ACTION_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("pageCapture",
                              IDR_PAGE_CAPTURE_CUSTOM_BINDINGS_JS);
+  source_map->RegisterSource("platformKeys",
+                             IDR_PLATFORM_KEYS_CUSTOM_BINDINGS_JS);
+  source_map->RegisterSource("platformKeys.getPublicKey",
+                             IDR_PLATFORM_KEYS_GET_PUBLIC_KEY_JS);
+  source_map->RegisterSource("platformKeys.internalAPI",
+                             IDR_PLATFORM_KEYS_INTERNAL_API_JS);
+  source_map->RegisterSource("platformKeys.Key", IDR_PLATFORM_KEYS_KEY_JS);
+  source_map->RegisterSource("platformKeys.SubtleCrypto",
+                             IDR_PLATFORM_KEYS_SUBTLE_CRYPTO_JS);
+  source_map->RegisterSource("platformKeys.utils", IDR_PLATFORM_KEYS_UTILS_JS);
   source_map->RegisterSource("syncFileSystem",
                              IDR_SYNC_FILE_SYSTEM_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("systemIndicator",
@@ -210,6 +196,9 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   source_map->RegisterSource(
       "cast.streaming.udpTransport",
       IDR_CAST_STREAMING_UDP_TRANSPORT_CUSTOM_BINDINGS_JS);
+  source_map->RegisterSource(
+      "cast.streaming.receiverSession",
+      IDR_CAST_STREAMING_RECEIVER_SESSION_CUSTOM_BINDINGS_JS);
 #endif
   source_map->RegisterSource("webstore", IDR_WEBSTORE_CUSTOM_BINDINGS_JS);
 
@@ -222,15 +211,10 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   // Platform app sources that are not API-specific..
   source_map->RegisterSource("fileEntryBindingUtil",
                              IDR_FILE_ENTRY_BINDING_UTIL_JS);
-  source_map->RegisterSource("extensionOptions", IDR_EXTENSION_OPTIONS_JS);
-  source_map->RegisterSource("extensionOptionsEvents",
-                             IDR_EXTENSION_OPTIONS_EVENTS_JS);
   source_map->RegisterSource("tagWatcher", IDR_TAG_WATCHER_JS);
   source_map->RegisterSource("chromeWebViewInternal",
                              IDR_CHROME_WEB_VIEW_INTERNAL_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("chromeWebView", IDR_CHROME_WEB_VIEW_JS);
-  source_map->RegisterSource("chromeWebViewExperimental",
-                             IDR_CHROME_WEB_VIEW_EXPERIMENTAL_JS);
   source_map->RegisterSource("injectAppTitlebar", IDR_INJECT_APP_TITLEBAR_JS);
 }
 
@@ -255,14 +239,6 @@ void ChromeExtensionsDispatcherDelegate::RequireAdditionalModules(
   // The API will be automatically set up when first used.
   if (context->GetAvailability("webViewInternal").is_available()) {
     module_system->Require("chromeWebView");
-    if (context->GetAvailability("webViewExperimentalInternal")
-            .is_available()) {
-      module_system->Require("chromeWebViewExperimental");
-    }
-  }
-
-  if (context->GetAvailability("extensionOptionsInternal").is_available()) {
-    module_system->Require("extensionOptions");
   }
 }
 

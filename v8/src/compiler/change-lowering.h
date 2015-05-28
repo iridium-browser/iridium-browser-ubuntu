@@ -16,11 +16,11 @@ class CommonOperatorBuilder;
 class JSGraph;
 class Linkage;
 class MachineOperatorBuilder;
+class Operator;
 
 class ChangeLowering FINAL : public Reducer {
  public:
-  ChangeLowering(JSGraph* jsgraph, Linkage* linkage)
-      : jsgraph_(jsgraph), linkage_(linkage) {}
+  explicit ChangeLowering(JSGraph* jsgraph) : jsgraph_(jsgraph) {}
   ~ChangeLowering() FINAL;
 
   Reduction Reduce(Node* node) FINAL;
@@ -32,13 +32,13 @@ class ChangeLowering FINAL : public Reducer {
 
   Node* AllocateHeapNumberWithValue(Node* value, Node* control);
   Node* ChangeInt32ToFloat64(Node* value);
+  Node* ChangeInt32ToSmi(Node* value);
   Node* ChangeSmiToFloat64(Node* value);
   Node* ChangeSmiToInt32(Node* value);
   Node* ChangeUint32ToFloat64(Node* value);
   Node* ChangeUint32ToSmi(Node* value);
   Node* LoadHeapNumberValue(Node* value, Node* control);
   Node* TestNotSmi(Node* value);
-  Node* Uint32LessThanOrEqual(Node* lhs, Node* rhs);
 
   Reduction ChangeBitToBool(Node* value, Node* control);
   Reduction ChangeBoolToBit(Node* value);
@@ -52,12 +52,11 @@ class ChangeLowering FINAL : public Reducer {
   Graph* graph() const;
   Isolate* isolate() const;
   JSGraph* jsgraph() const { return jsgraph_; }
-  Linkage* linkage() const { return linkage_; }
   CommonOperatorBuilder* common() const;
   MachineOperatorBuilder* machine() const;
 
-  JSGraph* jsgraph_;
-  Linkage* linkage_;
+  JSGraph* const jsgraph_;
+  SetOncePointer<const Operator> allocate_heap_number_operator_;
 };
 
 }  // namespace compiler

@@ -24,11 +24,11 @@
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
-#include "chrome/common/print_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/google_chrome_strings.h"
+#include "components/printing/common/print_messages.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -323,6 +323,9 @@ content::WebUIDataSource* CreatePrintPreviewUISource() {
                              IDS_PRINT_PREVIEW_COULD_NOT_PRINT);
   source->AddLocalizedString("registerPromoButtonText",
                              IDS_PRINT_PREVIEW_REGISTER_PROMO_BUTTON_TEXT);
+  source->AddLocalizedString(
+      "extensionDestinationIconTooltip",
+      IDS_PRINT_PREVIEW_EXTENSION_DESTINATION_ICON_TOOLTIP);
   source->AddLocalizedString(
       "advancedSettingsSearchBoxPlaceholder",
       IDS_PRINT_PREVIEW_ADVANCED_SETTINGS_SEARCH_BOX_PLACEHOLDER);
@@ -632,6 +635,7 @@ void PrintPreviewUI::OnSetOptionsFromDocument(
   options.SetBoolean(printing::kSettingDisableScaling,
                      params.is_scaling_disabled);
   options.SetInteger(printing::kSettingCopies, params.copies);
+  options.SetInteger(printing::kSettingDuplexMode, params.duplex);
   web_ui()->CallJavascriptFunction("printPresetOptionsFromDocument", options);
 }
 

@@ -7,6 +7,7 @@
 
 #include "core/dom/ActiveDOMObject.h"
 #include "core/frame/LocalDOMWindow.h"
+#include "core/frame/UseCounter.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "modules/fetch/FetchManager.h"
 #include "modules/fetch/Request.h"
@@ -45,10 +46,10 @@ public:
         Request* r = Request::create(m_stopDetector->executionContext(), input, init, exceptionState);
         if (exceptionState.hadException())
             return ScriptPromise();
-        return m_fetchManager->fetch(scriptState, r->request());
+        return m_fetchManager->fetch(scriptState, r->passRequestData());
     }
 
-    void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_fetchManager);
         visitor->trace(m_stopDetector);
@@ -66,7 +67,7 @@ private:
 
         void stop() override { m_fetchManager->stop(); }
 
-        void trace(Visitor* visitor)
+        DEFINE_INLINE_TRACE()
         {
             visitor->trace(m_fetchManager);
             ActiveDOMObject::trace(visitor);
@@ -82,7 +83,7 @@ private:
 
         // Having a raw pointer is safe, because |m_fetchManager| is owned by
         // the owner of this object.
-        GC_PLUGIN_IGNORE("crbug.com/444740") RawPtrWillBeMember<FetchManager> m_fetchManager;
+        RawPtrWillBeMember<FetchManager> m_fetchManager;
     };
 
     explicit GlobalFetchImpl(ExecutionContext* executionContext)
@@ -100,11 +101,14 @@ private:
 
 ScriptPromise GlobalFetch::fetch(ScriptState* scriptState, DOMWindow& window, const RequestInfo& input, const Dictionary& init, ExceptionState& exceptionState)
 {
+    UseCounter::count(window.executionContext(), UseCounter::Fetch);
     return GlobalFetchImpl<LocalDOMWindow>::from(toLocalDOMWindow(window), window.executionContext()).fetch(scriptState, input, init, exceptionState);
 }
 
 ScriptPromise GlobalFetch::fetch(ScriptState* scriptState, WorkerGlobalScope& worker, const RequestInfo& input, const Dictionary& init, ExceptionState& exceptionState)
 {
+    // Note that UseCounter doesn't work with SharedWorker or ServiceWorker.
+    UseCounter::count(worker.executionContext(), UseCounter::Fetch);
     return GlobalFetchImpl<WorkerGlobalScope>::from(worker, worker.executionContext()).fetch(scriptState, input, init, exceptionState);
 }
 

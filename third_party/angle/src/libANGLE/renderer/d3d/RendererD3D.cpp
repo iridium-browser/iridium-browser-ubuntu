@@ -17,6 +17,7 @@
 #include "libANGLE/State.h"
 #include "libANGLE/VertexArray.h"
 #include "libANGLE/formatutils.h"
+#include "libANGLE/renderer/d3d/BufferD3D.h"
 #include "libANGLE/renderer/d3d/DisplayD3D.h"
 #include "libANGLE/renderer/d3d/IndexDataManager.h"
 
@@ -65,6 +66,12 @@ gl::Error RendererD3D::drawElements(const gl::Data &data,
                                     const GLvoid *indices, GLsizei instances,
                                     const RangeUI &indexRange)
 {
+    if (data.state->isPrimitiveRestartEnabled())
+    {
+        UNIMPLEMENTED();
+        return gl::Error(GL_INVALID_OPERATION, "Primitive restart not implemented");
+    }
+
     gl::Program *program = data.state->getProgram();
     ASSERT(program != NULL);
 
@@ -76,7 +83,7 @@ gl::Error RendererD3D::drawElements(const gl::Data &data,
         return error;
     }
 
-    if (!applyPrimitiveType(mode, count))
+    if (!applyPrimitiveType(mode, count, program->usesPointSize()))
     {
         return gl::Error(GL_NO_ERROR);
     }
@@ -102,19 +109,19 @@ gl::Error RendererD3D::drawElements(const gl::Data &data,
         return error;
     }
 
+    applyTransformFeedbackBuffers(*data.state);
+    // Transform feedback is not allowed for DrawElements, this error should have been caught at the API validation
+    // layer.
+    ASSERT(!data.state->isTransformFeedbackActiveUnpaused());
+
     GLsizei vertexCount = indexInfo.indexRange.length() + 1;
-    error = applyVertexBuffer(*data.state, indexInfo.indexRange.start, vertexCount, instances);
+    error = applyVertexBuffer(*data.state, mode, indexInfo.indexRange.start, vertexCount, instances);
     if (error.isError())
     {
         return error;
     }
 
-    bool transformFeedbackActive = applyTransformFeedbackBuffers(data);
-    // Transform feedback is not allowed for DrawElements, this error should have been caught at the API validation
-    // layer.
-    ASSERT(!transformFeedbackActive);
-
-    error = applyShaders(data, transformFeedbackActive);
+    error = applyShaders(data);
     if (error.isError())
     {
         return error;
@@ -126,7 +133,7 @@ gl::Error RendererD3D::drawElements(const gl::Data &data,
         return error;
     }
 
-    error = applyUniformBuffers(data);
+    error = program->applyUniformBuffers(data);
     if (error.isError())
     {
         return error;
@@ -159,7 +166,7 @@ gl::Error RendererD3D::drawArrays(const gl::Data &data,
         return error;
     }
 
-    if (!applyPrimitiveType(mode, count))
+    if (!applyPrimitiveType(mode, count, program->usesPointSize()))
     {
         return gl::Error(GL_NO_ERROR);
     }
@@ -176,15 +183,15 @@ gl::Error RendererD3D::drawArrays(const gl::Data &data,
         return error;
     }
 
-    error = applyVertexBuffer(*data.state, first, count, instances);
+    applyTransformFeedbackBuffers(*data.state);
+
+    error = applyVertexBuffer(*data.state, mode, first, count, instances);
     if (error.isError())
     {
         return error;
     }
 
-    bool transformFeedbackActive = applyTransformFeedbackBuffers(data);
-
-    error = applyShaders(data, transformFeedbackActive);
+    error = applyShaders(data);
     if (error.isError())
     {
         return error;
@@ -196,7 +203,7 @@ gl::Error RendererD3D::drawArrays(const gl::Data &data,
         return error;
     }
 
-    error = applyUniformBuffers(data);
+    error = program->applyUniformBuffers(data);
     if (error.isError())
     {
         return error;
@@ -204,13 +211,13 @@ gl::Error RendererD3D::drawArrays(const gl::Data &data,
 
     if (!skipDraw(data, mode))
     {
-        error = drawArrays(mode, count, instances, transformFeedbackActive);
+        error = drawArrays(data, mode, count, instances, program->usesPointSize());
         if (error.isError())
         {
             return error;
         }
 
-        if (transformFeedbackActive)
+        if (data.state->isTransformFeedbackActiveUnpaused())
         {
             markTransformFeedbackUsage(data);
         }
@@ -350,22 +357,8 @@ gl::Error RendererD3D::applyState(const gl::Data &data, GLenum drawMode)
     return gl::Error(GL_NO_ERROR);
 }
 
-bool RendererD3D::applyTransformFeedbackBuffers(const gl::Data &data)
-{
-    gl::TransformFeedback *curTransformFeedback = data.state->getCurrentTransformFeedback();
-    if (curTransformFeedback && curTransformFeedback->isStarted() && !curTransformFeedback->isPaused())
-    {
-        applyTransformFeedbackBuffers(*data.state);
-        return true;
-    }
-    else
-    {
-        return false;
-    }
-}
-
 // Applies the shaders and shader constants to the Direct3D device
-gl::Error RendererD3D::applyShaders(const gl::Data &data, bool transformFeedbackActive)
+gl::Error RendererD3D::applyShaders(const gl::Data &data)
 {
     gl::Program *program = data.state->getProgram();
 
@@ -374,7 +367,7 @@ gl::Error RendererD3D::applyShaders(const gl::Data &data, bool transformFeedback
 
     const gl::Framebuffer *fbo = data.state->getDrawFramebuffer();
 
-    gl::Error error = applyShaders(program, inputLayout, fbo, data.state->getRasterizerState().rasterizerDiscard, transformFeedbackActive);
+    gl::Error error = applyShaders(program, inputLayout, fbo, data.state->getRasterizerState().rasterizerDiscard, data.state->isTransformFeedbackActiveUnpaused());
     if (error.isError())
     {
         return error;
@@ -481,32 +474,6 @@ gl::Error RendererD3D::applyTextures(const gl::Data &data)
     return gl::Error(GL_NO_ERROR);
 }
 
-gl::Error RendererD3D::applyUniformBuffers(const gl::Data &data)
-{
-    gl::Program *program = data.state->getProgram();
-
-    std::vector<gl::Buffer*> boundBuffers;
-
-    for (unsigned int uniformBlockIndex = 0; uniformBlockIndex < program->getActiveUniformBlockCount(); uniformBlockIndex++)
-    {
-        GLuint blockBinding = program->getUniformBlockBinding(uniformBlockIndex);
-
-        if (data.state->getIndexedUniformBuffer(blockBinding)->id() == 0)
-        {
-            // undefined behaviour
-            return gl::Error(GL_INVALID_OPERATION, "It is undefined behaviour to have a used but unbound uniform buffer.");
-        }
-        else
-        {
-            gl::Buffer *uniformBuffer = data.state->getIndexedUniformBuffer(blockBinding);
-            ASSERT(uniformBuffer);
-            boundBuffers.push_back(uniformBuffer);
-        }
-    }
-
-    return program->applyUniformBuffers(boundBuffers, *data.caps);
-}
-
 bool RendererD3D::skipDraw(const gl::Data &data, GLenum drawMode)
 {
     if (drawMode == GL_POINTS)
@@ -514,7 +481,7 @@ bool RendererD3D::skipDraw(const gl::Data &data, GLenum drawMode)
         // ProgramBinary assumes non-point rendering if gl_PointSize isn't written,
         // which affects varying interpolation. Since the value of gl_PointSize is
         // undefined when not written, just skip drawing to avoid unexpected results.
-        if (!data.state->getProgram()->usesPointSize())
+        if (!data.state->getProgram()->usesPointSize() && !data.state->isTransformFeedbackActiveUnpaused())
         {
             // This is stictly speaking not an error, but developers should be
             // notified of risking undefined behavior.
@@ -541,7 +508,8 @@ void RendererD3D::markTransformFeedbackUsage(const gl::Data &data)
         gl::Buffer *buffer = data.state->getIndexedTransformFeedbackBuffer(i);
         if (buffer)
         {
-            buffer->markTransformFeedbackUsage();
+            BufferD3D *bufferD3D = GetImplAs<BufferD3D>(buffer);
+            bufferD3D->markTransformFeedbackUsage();
         }
     }
 }
@@ -552,7 +520,7 @@ size_t RendererD3D::getBoundFramebufferTextureSerials(const gl::Data &data,
     size_t serialCount = 0;
 
     const gl::Framebuffer *drawFramebuffer = data.state->getDrawFramebuffer();
-    for (unsigned int i = 0; i < gl::IMPLEMENTATION_MAX_DRAW_BUFFERS; i++)
+    for (unsigned int i = 0; i < data.caps->maxColorAttachments; i++)
     {
         gl::FramebufferAttachment *attachment = drawFramebuffer->getColorbuffer(i);
         if (attachment && attachment->type() == GL_TEXTURE)
@@ -580,17 +548,9 @@ gl::Texture *RendererD3D::getIncompleteTexture(GLenum type)
     {
         const GLubyte color[] = { 0, 0, 0, 255 };
         const gl::Extents colorSize(1, 1, 1);
-        const gl::PixelUnpackState incompleteUnpackState(1);
+        const gl::PixelUnpackState incompleteUnpackState(1, 0);
 
-        gl::Texture* t = NULL;
-        switch (type)
-        {
-          default: UNREACHABLE(); // default falls through to TEXTURE_2D
-          case GL_TEXTURE_2D:       t = new gl::Texture2D(createTexture(type), gl::Texture::INCOMPLETE_TEXTURE_ID);      break;
-          case GL_TEXTURE_CUBE_MAP: t = new gl::TextureCubeMap(createTexture(type), gl::Texture::INCOMPLETE_TEXTURE_ID); break;
-          case GL_TEXTURE_3D:       t = new gl::Texture3D(createTexture(type), gl::Texture::INCOMPLETE_TEXTURE_ID);      break;
-          case GL_TEXTURE_2D_ARRAY: t = new gl::Texture2DArray(createTexture(type), gl::Texture::INCOMPLETE_TEXTURE_ID); break;
-        }
+        gl::Texture* t = new gl::Texture(createTexture(type), gl::Texture::INCOMPLETE_TEXTURE_ID, type);
 
         if (type == GL_TEXTURE_CUBE_MAP)
         {
@@ -633,11 +593,6 @@ std::string RendererD3D::getVendorString() const
     }
 
     return std::string("");
-}
-
-DisplayImpl *RendererD3D::createDisplay()
-{
-    return new DisplayD3D(this);
 }
 
 gl::Error RendererD3D::getScratchMemoryBuffer(size_t requestedSize, MemoryBuffer **bufferOut)

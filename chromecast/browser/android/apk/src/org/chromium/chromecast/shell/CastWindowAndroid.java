@@ -20,10 +20,10 @@ import org.chromium.base.JNINamespace;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.ContentViewRenderView;
-import org.chromium.content.browser.WebContentsObserver;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
@@ -124,11 +124,11 @@ public class CastWindowAndroid extends LinearLayout {
      */
     @SuppressWarnings("unused")
     @CalledByNative
-    private void initFromNativeWebContents(long nativeWebContents, int renderProcessId) {
+    private void initFromNativeWebContents(WebContents webContents, int renderProcessId) {
         Context context = getContext();
         mContentViewCore = new ContentViewCore(context);
         ContentView view = ContentView.newInstance(context, mContentViewCore);
-        mContentViewCore.initialize(view, view, nativeWebContents, mWindow);
+        mContentViewCore.initialize(view, view, webContents, mWindow);
         mWebContents = mContentViewCore.getWebContents();
         mNavigationController = mWebContents.getNavigationController();
         mRenderProcessId = renderProcessId;

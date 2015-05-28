@@ -20,13 +20,12 @@
 #include "base/time/time.h"
 #include "chrome/browser/autocomplete/history_provider.h"
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
-#include "chrome/browser/history/history_notifications.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/autocomplete_input.h"
 #include "components/omnibox/autocomplete_match.h"
@@ -109,8 +108,9 @@ void ShortcutsProvider::DeleteMatch(const AutocompleteMatch& match) {
 
   // Delete the match from the history DB. This will eventually result in a
   // second call to DeleteShortcutsWithURL(), which is harmless.
-  HistoryService* const history_service =
-      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
+  history::HistoryService* const history_service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(history_service);
   history_service->DeleteURL(url);
 }
@@ -180,7 +180,7 @@ void ShortcutsProvider::GetMatches(const AutocompleteInput& input) {
 }
 
 AutocompleteMatch ShortcutsProvider::ShortcutToACMatch(
-    const history::ShortcutsDatabase::Shortcut& shortcut,
+    const ShortcutsDatabase::Shortcut& shortcut,
     int relevance,
     const AutocompleteInput& input,
     const base::string16& fixed_up_input_text) {
@@ -374,7 +374,7 @@ ShortcutsBackend::ShortcutMap::const_iterator
 
 int ShortcutsProvider::CalculateScore(
     const base::string16& terms,
-    const history::ShortcutsDatabase::Shortcut& shortcut,
+    const ShortcutsDatabase::Shortcut& shortcut,
     int max_relevance) {
   DCHECK(!terms.empty());
   DCHECK_LE(terms.length(), shortcut.text.length());

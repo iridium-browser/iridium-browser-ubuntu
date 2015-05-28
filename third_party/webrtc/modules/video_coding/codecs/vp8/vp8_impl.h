@@ -22,6 +22,7 @@
 #include "vpx/vp8cx.h"
 #include "vpx/vp8dx.h"
 
+#include "webrtc/common_video/interface/i420_buffer_pool.h"
 #include "webrtc/common_video/interface/i420_video_frame.h"
 #include "webrtc/modules/video_coding/codecs/interface/video_codec_interface.h"
 #include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
@@ -51,13 +52,16 @@ class VP8EncoderImpl : public VP8Encoder {
 
   virtual int RegisterEncodeCompleteCallback(EncodedImageCallback* callback);
 
-  virtual int SetChannelParameters(uint32_t packet_loss, int rtt);
+  virtual int SetChannelParameters(uint32_t packet_loss, int64_t rtt);
 
   virtual int SetRates(uint32_t new_bitrate_kbit, uint32_t frame_rate);
 
  private:
   void SetupTemporalLayers(int num_streams, int num_temporal_layers,
                            const VideoCodec& codec);
+
+  // Set the cpu_speed setting for encoder based on resolution and/or platform.
+  int SetCpuSpeed(int width, int height);
 
   // Determine number of encoder threads to use.
   int NumberOfThreads(int width, int height, int number_of_cores);
@@ -94,6 +98,7 @@ class VP8EncoderImpl : public VP8Encoder {
   int64_t timestamp_;
   bool feedback_mode_;
   int qp_max_;
+  int cpu_speed_default_;
   uint32_t rc_max_intra_target_;
   int token_partitions_;
   ReferencePictureSelection rps_;
@@ -150,7 +155,7 @@ class VP8DecoderImpl : public VP8Decoder {
                   uint32_t timeStamp,
                   int64_t ntp_time_ms);
 
-  I420VideoFrame decoded_image_;
+  I420BufferPool buffer_pool_;
   DecodedImageCallback* decode_complete_callback_;
   bool inited_;
   bool feedback_mode_;

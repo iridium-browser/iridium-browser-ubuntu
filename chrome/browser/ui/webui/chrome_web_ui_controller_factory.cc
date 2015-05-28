@@ -14,7 +14,6 @@
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/bookmarks/enhanced_bookmarks_features.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/about_ui.h"
@@ -24,6 +23,7 @@
 #include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "chrome/browser/ui/webui/copresence_ui.h"
 #include "chrome/browser/ui/webui/crashes_ui.h"
+#include "chrome/browser/ui/webui/device_log_ui.h"
 #include "chrome/browser/ui/webui/domain_reliability_internals_ui.h"
 #include "chrome/browser/ui/webui/downloads_ui.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
@@ -44,6 +44,7 @@
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/predictors/predictors_ui.h"
 #include "chrome/browser/ui/webui/profiler_ui.h"
+#include "chrome/browser/ui/webui/settings/md_settings_ui.h"
 #include "chrome/browser/ui/webui/signin/inline_login_ui.h"
 #include "chrome/browser/ui/webui/signin/profile_signin_confirmation_ui.h"
 #include "chrome/browser/ui/webui/signin/user_manager_ui.h"
@@ -59,6 +60,7 @@
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/dom_distiller/webui/dom_distiller_ui.h"
+#include "components/favicon/core/favicon_service.h"
 #include "components/favicon_base/favicon_util.h"
 #include "components/favicon_base/select_favicon_frames.h"
 #include "components/history/core/browser/history_types.h"
@@ -69,6 +71,7 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_utils.h"
 #include "ui/gfx/favicon_size.h"
+#include "ui/oobe/oobe_md_ui.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
 #include "url/gurl.h"
 
@@ -106,13 +109,15 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/oobe/oobe.h"
 #include "chrome/browser/ui/webui/chromeos/bluetooth_pairing_ui.h"
 #include "chrome/browser/ui/webui/chromeos/certificate_manager_dialog_ui.h"
 #include "chrome/browser/ui/webui/chromeos/choose_mobile_network_ui.h"
 #include "chrome/browser/ui/webui/chromeos/cryptohome_ui.h"
-#include "chrome/browser/ui/webui/chromeos/device_log_ui.h"
 #include "chrome/browser/ui/webui/chromeos/drive_internals_ui.h"
+#include "chrome/browser/ui/webui/chromeos/first_run/first_run_ui.h"
 #include "chrome/browser/ui/webui/chromeos/imageburner/imageburner_ui.h"
+#include "chrome/browser/ui/webui/chromeos/keyboard_overlay_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/mobile_setup_ui.h"
 #include "chrome/browser/ui/webui/chromeos/network_ui.h"
@@ -125,11 +130,6 @@
 #include "chrome/browser/ui/webui/chromeos/sim_unlock_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_trace_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_ui.h"
-#endif
-
-#if defined(OS_CHROMEOS) && !defined(USE_ATHENA)
-#include "chrome/browser/ui/webui/chromeos/first_run/first_run_ui.h"
-#include "chrome/browser/ui/webui/chromeos/keyboard_overlay_ui.h"
 #endif
 
 #if defined(USE_AURA)
@@ -208,6 +208,12 @@ template<>
 WebUIController* NewWebUI<chromeos::OobeUI>(WebUI* web_ui, const GURL& url) {
   return new chromeos::OobeUI(web_ui, url);
 }
+
+template <>
+WebUIController* NewWebUI<OobeMdUI>(WebUI* web_ui, const GURL& url) {
+  chromeos::Oobe::Register();
+  return new OobeMdUI(web_ui, url.host());
+}
 #endif
 
 // Special cases for DOM distiller.
@@ -247,8 +253,7 @@ bool IsAboutUI(const GURL& url) {
           url.host() == chrome::kChromeUICreditsHost ||
           url.host() == chrome::kChromeUIDNSHost ||
           url.host() == chrome::kChromeUIMemoryHost ||
-          url.host() == chrome::kChromeUIMemoryRedirectHost ||
-          url.host() == chrome::kChromeUIStatsHost
+          url.host() == chrome::kChromeUIMemoryRedirectHost
 #if !defined(OS_ANDROID)
           || url.host() == chrome::kChromeUITermsHost
 #endif
@@ -300,6 +305,8 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<ConstrainedWebDialogUI>;
   if (url.host() == chrome::kChromeUICrashesHost)
     return &NewWebUI<CrashesUI>;
+  if (url.host() == chrome::kChromeUIDeviceLogHost)
+    return &NewWebUI<chromeos::DeviceLogUI>;
   if (url.host() == chrome::kChromeUIDomainReliabilityInternalsHost)
     return &NewWebUI<DomainReliabilityInternalsUI>;
   if (url.host() == chrome::kChromeUIFlagsHost)
@@ -370,6 +377,10 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<IdentityInternalsUI>;
   if (url.host() == chrome::kChromeUINewTabHost)
     return &NewWebUI<NewTabUI>;
+  if (url.host() == chrome::kChromeUIMdSettingsHost &&
+      ::switches::MdSettingsEnabled()) {
+    return &NewWebUI<MdSettingsUI>;
+  }
   // Android does not support plugins for now.
   if (url.host() == chrome::kChromeUIPluginsHost)
     return &NewWebUI<PluginsUI>;
@@ -411,24 +422,22 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<chromeos::ChooseMobileNetworkUI>;
   if (url.host() == chrome::kChromeUICryptohomeHost)
     return &NewWebUI<chromeos::CryptohomeUI>;
-  if (url.host() == chrome::kChromeUIDeviceLogHost)
-    return &NewWebUI<chromeos::DeviceLogUI>;
   if (url.host() == chrome::kChromeUIDriveInternalsHost)
     return &NewWebUI<chromeos::DriveInternalsUI>;
   if (url.host() == chrome::kChromeUIImageBurnerHost)
     return &NewWebUI<ImageBurnUI>;
-#if !defined(USE_ATHENA)
   if (url.host() == chrome::kChromeUIFirstRunHost)
     return &NewWebUI<chromeos::FirstRunUI>;
   if (url.host() == chrome::kChromeUIKeyboardOverlayHost)
     return &NewWebUI<KeyboardOverlayUI>;
-#endif
   if (url.host() == chrome::kChromeUIMobileSetupHost)
     return &NewWebUI<MobileSetupUI>;
   if (url.host() == chrome::kChromeUINfcDebugHost)
     return &NewWebUI<chromeos::NfcDebugUI>;
   if (url.host() == chrome::kChromeUIOobeHost)
     return &NewWebUI<chromeos::OobeUI>;
+  if (url.host() == chrome::kChromeUIOobeMdHost)
+    return &NewWebUI<OobeMdUI>;
   if (url.host() == chrome::kChromeUIProvidedFileSystemsHost)
     return &NewWebUI<chromeos::ProvidedFileSystemsUI>;
   if (url.host() == chrome::kChromeUIProxySettingsHost)
@@ -550,7 +559,7 @@ void RunFaviconCallbackAsync(
     const std::vector<favicon_base::FaviconRawBitmapResult>* results) {
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
-      base::Bind(&FaviconService::FaviconResultsCallbackRunner,
+      base::Bind(&favicon::FaviconService::FaviconResultsCallbackRunner,
                  callback, base::Owned(results)));
 }
 

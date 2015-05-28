@@ -16,10 +16,6 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/web_contents.h"
@@ -242,6 +238,7 @@ AppWindow::AppWindow(BrowserContext* context,
       is_hidden_(false),
       cached_always_on_top_(false),
       requested_alpha_enabled_(false),
+      is_ime_window_(false),
       image_loader_ptr_factory_(this) {
   ExtensionsBrowserClient* client = ExtensionsBrowserClient::Get();
   CHECK(!client->IsGuestSession(context) || context->IsOffTheRecord())
@@ -254,10 +251,9 @@ void AppWindow::Init(const GURL& url,
   // Initialize the render interface and web contents
   app_window_contents_.reset(app_window_contents);
   app_window_contents_->Initialize(browser_context(), url);
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableAppsShowOnFirstPaint)) {
-    content::WebContentsObserver::Observe(web_contents());
-  }
+
+  content::WebContentsObserver::Observe(web_contents());
+  SetViewType(web_contents(), VIEW_TYPE_APP_WINDOW);
   app_delegate_->InitWebContents(web_contents());
 
   WebContentsModalDialogManager::CreateForWebContents(web_contents());
@@ -265,7 +261,6 @@ void AppWindow::Init(const GURL& url,
   web_contents()->SetDelegate(this);
   WebContentsModalDialogManager::FromWebContents(web_contents())
       ->SetDelegate(this);
-  SetViewType(web_contents(), VIEW_TYPE_APP_WINDOW);
 
   // Initialize the window
   CreateParams new_params = LoadDefaults(params);
@@ -278,6 +273,8 @@ void AppWindow::Init(const GURL& url,
     new_params.always_on_top = false;
 
   requested_alpha_enabled_ = new_params.alpha_enabled;
+
+  is_ime_window_ = params.is_ime_window;
 
   AppWindowClient* app_window_client = AppWindowClient::Get();
   native_app_window_.reset(
@@ -314,20 +311,7 @@ void AppWindow::Init(const GURL& url,
 
   OnNativeWindowChanged();
 
-  // When the render view host is changed, the native window needs to know
-  // about it in case it has any setup to do to make the renderer appear
-  // properly. In particular, on Windows, the view's clickthrough region needs
-  // to be set[
-  ExtensionsBrowserClient* client = ExtensionsBrowserClient::Get();
-  registrar_.Add(this,
-                 NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
-                 content::Source<content::BrowserContext>(
-                     client->GetOriginalContext(browser_context_)));
-  // Update the app menu if an ephemeral app becomes installed.
-  registrar_.Add(this,
-                 NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
-                 content::Source<content::BrowserContext>(
-                     client->GetOriginalContext(browser_context_)));
+  ExtensionRegistry::Get(browser_context_)->AddObserver(this);
 
   // Close when the browser process is exiting.
   app_delegate_->SetTerminatingCallback(
@@ -349,6 +333,7 @@ void AppWindow::Init(const GURL& url,
 }
 
 AppWindow::~AppWindow() {
+  ExtensionRegistry::Get(browser_context_)->RemoveObserver(this);
 }
 
 void AppWindow::RequestMediaAccessPermission(
@@ -375,14 +360,14 @@ WebContents* AppWindow::OpenURLFromTab(WebContents* source,
 void AppWindow::AddNewContents(WebContents* source,
                                WebContents* new_contents,
                                WindowOpenDisposition disposition,
-                               const gfx::Rect& initial_pos,
+                               const gfx::Rect& initial_rect,
                                bool user_gesture,
                                bool* was_blocked) {
   DCHECK(new_contents->GetBrowserContext() == browser_context_);
   app_delegate_->AddNewContents(browser_context_,
                                 new_contents,
                                 disposition,
-                                initial_pos,
+                                initial_rect,
                                 user_gesture,
                                 was_blocked);
 }
@@ -439,6 +424,10 @@ void AppWindow::RequestToLockMouse(WebContents* web_contents,
 bool AppWindow::PreHandleGestureEvent(WebContents* source,
                                       const blink::WebGestureEvent& event) {
   return AppWebContentsHelper::ShouldSuppressGestureEvent(event);
+}
+
+void AppWindow::RenderViewCreated(content::RenderViewHost* render_view_host) {
+  app_delegate_->RenderViewCreated(render_view_host);
 }
 
 void AppWindow::DidFirstVisuallyNonEmptyPaint() {
@@ -536,8 +525,9 @@ void AppWindow::SetAppIconUrl(const GURL& url) {
   app_icon_url_ = url;
   web_contents()->DownloadImage(
       url,
-      true,  // is a favicon
-      0,     // no maximum size
+      true,   // is a favicon
+      0,      // no maximum size
+      false,  // normal cache policy
       base::Bind(&AppWindow::DidDownloadFavicon,
                  image_loader_ptr_factory_.GetWeakPtr()));
 }
@@ -552,8 +542,9 @@ void AppWindow::SetBadgeIconUrl(const GURL& url) {
   badge_icon_url_ = url;
   web_contents()->DownloadImage(
       url,
-      true,  // is a favicon
-      0,     // no maximum size
+      true,   // is a favicon
+      0,      // no maximum size
+      false,  // normal cache policy
       base::Bind(&AppWindow::DidDownloadFavicon,
                  image_loader_ptr_factory_.GetWeakPtr()));
 }
@@ -934,6 +925,15 @@ void AppWindow::NavigationStateChanged(content::WebContents* source,
     native_app_window_->UpdateWindowIcon();
 }
 
+void AppWindow::EnterFullscreenModeForTab(content::WebContents* source,
+                                          const GURL& origin) {
+  ToggleFullscreenModeForTab(source, true);
+}
+
+void AppWindow::ExitFullscreenModeForTab(content::WebContents* source) {
+  ToggleFullscreenModeForTab(source, false);
+}
+
 void AppWindow::ToggleFullscreenModeForTab(content::WebContents* source,
                                            bool enter_fullscreen) {
   const Extension* extension = GetExtension();
@@ -953,30 +953,22 @@ bool AppWindow::IsFullscreenForTabOrPending(const content::WebContents* source)
   return IsHtmlApiFullscreen();
 }
 
-void AppWindow::Observe(int type,
-                        const content::NotificationSource& source,
-                        const content::NotificationDetails& details) {
-  switch (type) {
-    case NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED: {
-      const Extension* unloaded_extension =
-          content::Details<UnloadedExtensionInfo>(details)->extension;
-      if (extension_id_ == unloaded_extension->id())
-        native_app_window_->Close();
-      break;
-    }
-    case NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED: {
-      const Extension* installed_extension =
-          content::Details<const InstalledExtensionInfo>(details)->extension;
-      DCHECK(installed_extension);
-      if (installed_extension->id() == extension_id())
-        native_app_window_->UpdateShelfMenu();
-      break;
-    }
-    default:
-      NOTREACHED() << "Received unexpected notification";
-  }
+void AppWindow::OnExtensionUnloaded(BrowserContext* browser_context,
+                                    const Extension* extension,
+                                    UnloadedExtensionInfo::Reason reason) {
+  if (extension_id_ == extension->id())
+    native_app_window_->Close();
 }
 
+void AppWindow::OnExtensionWillBeInstalled(
+    BrowserContext* browser_context,
+    const Extension* extension,
+    bool is_update,
+    bool from_ephemeral,
+    const std::string& old_name) {
+  if (extension->id() == extension_id())
+    native_app_window_->UpdateShelfMenu();
+}
 void AppWindow::SetWebContentsBlocked(content::WebContents* web_contents,
                                       bool blocked) {
   app_delegate_->SetWebContentsBlocked(web_contents, blocked);

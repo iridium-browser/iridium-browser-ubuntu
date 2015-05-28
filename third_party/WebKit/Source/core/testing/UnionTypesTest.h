@@ -23,6 +23,7 @@ public:
     void setDoubleOrStringOrStringArrayAttribute(const DoubleOrStringOrStringArray&);
 
     String doubleOrStringArg(DoubleOrString&);
+    String doubleOrInternalEnumArg(DoubleOrInternalEnum&);
     String doubleOrStringArrayArg(Vector<DoubleOrString>&);
     String doubleOrStringSequenceArg(Vector<DoubleOrString>&);
 
@@ -32,7 +33,7 @@ public:
     String doubleOrStringOrStringArrayArg(const DoubleOrStringOrStringArray&);
     String doubleOrStringOrStringSequenceArg(const DoubleOrStringOrStringSequence&);
 
-    void trace(Visitor*) { }
+    DEFINE_INLINE_TRACE() { }
 
 private:
     UnionTypesTest()

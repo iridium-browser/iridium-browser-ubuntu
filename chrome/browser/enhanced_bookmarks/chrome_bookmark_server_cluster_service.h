@@ -5,16 +5,17 @@
 #ifndef CHROME_BROWSER_ENHANCED_BOOKMARKS_CHROME_BOOKMARK_SERVER_CLUSTER_SERVICE_H_
 #define CHROME_BROWSER_ENHANCED_BOOKMARKS_CHROME_BOOKMARK_SERVER_CLUSTER_SERVICE_H_
 
-#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "components/enhanced_bookmarks/bookmark_server_cluster_service.h"
+#include "components/sync_driver/sync_service_observer.h"
 
 class ProfileSyncService;
 
 namespace enhanced_bookmarks {
 
 // A cluster service that invalidates its data when a sync operation finishes.
-class ChromeBookmarkServerClusterService : public BookmarkServerClusterService,
-                                           public ProfileSyncServiceObserver {
+class ChromeBookmarkServerClusterService
+    : public BookmarkServerClusterService,
+      public sync_driver::SyncServiceObserver {
  public:
   ChromeBookmarkServerClusterService(
       const std::string& application_language_code,
@@ -29,14 +30,16 @@ class ChromeBookmarkServerClusterService : public BookmarkServerClusterService,
   // BookmarkServerClusterService
   void AddObserver(BookmarkServerServiceObserver* observer) override;
 
-  // ProfileSyncServiceObserver implementation.
+  // sync_driver::SyncServiceObserver implementation.
   void OnStateChanged() override;
   void OnSyncCycleCompleted() override;
 
   // EnhancedBookmarkModelObserver implementation.
-  void EnhancedBookmarkAdded(const BookmarkNode* node) override;
-  void EnhancedBookmarkRemoved(const BookmarkNode* node) override;
-  void EnhancedBookmarkNodeChanged(const BookmarkNode* node) override;
+  void EnhancedBookmarkAdded(const bookmarks::BookmarkNode* node) override;
+  void EnhancedBookmarkRemoved(const bookmarks::BookmarkNode* node) override;
+  void EnhancedBookmarkNodeChanged(
+      const bookmarks::BookmarkNode* node) override;
+
  private:
   // This sets an internal flag to fetch new clusters.
   void InvalidateCache();

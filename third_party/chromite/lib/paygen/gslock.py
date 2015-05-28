@@ -27,12 +27,7 @@ Note that lock files will be left behind forever if not explicitly cleaned up by
 the creating server.
 """
 
-# pylint: disable=bad-whitespace
-
 from __future__ import print_function
-
-import fixup_path
-fixup_path.FixupPath()
 
 import datetime
 import logging
@@ -79,6 +74,7 @@ class Lock(object):
     It assumes that local server time is in sync with Google Storage server
     time.
   """
+
   def __init__(self, gs_path, lock_timeout_mins=120, dry_run=False,
                ctx=None):
     """Initializer for the lock.
@@ -98,6 +94,7 @@ class Lock(object):
     self._timeout = datetime.timedelta(minutes=lock_timeout_mins)
     self._contents = cros_build_lib.MachineDetails()
     self._generation = 0
+    self._dry_run = dry_run
     self._ctx = ctx if ctx is not None else gs.GSContext(dry_run=dry_run)
 
   def _LockExpired(self):
@@ -115,7 +112,7 @@ class Lock(object):
       return False, 0
 
     modified = stat_results.creation_time
-    expired =  datetime.datetime.utcnow() > modified + self._timeout
+    expired = datetime.datetime.utcnow() > modified + self._timeout
 
     return expired, stat_results.generation
 
@@ -130,15 +127,35 @@ class Lock(object):
           '-', self._gs_path, input=self._contents, version=self._generation)
       if self._generation is None:
         self._generation = 0
-        raise LockProbeError('Unable to detect generation')
+        if not self._dry_run:
+          raise LockProbeError('Unable to detect generation')
     except gs.GSContextPreconditionFailed:
-      # We could use Cat here to find who owns the lock, but it's another GS
-      # round trip for data that mostly doesn't matter. Also this behavior
-      # was triggering BigStore errors.
+      # Find the lock contents. Either use this for error reporting, or to find
+      # out if we already own it.
+      contents = 'Unknown'
+      try:
+        contents = self._ctx.Cat(self._gs_path)
+      except gs.GSContextException:
+        pass
+
+      # If we thought we were creating the file it's possible for us to already
+      # own it because the Copy command above can retry. If the first attempt
+      # works but returns a retryable error, it will fail with
+      # GSContextPreconditionFailed on the second attempt.
+      if self._generation == 0 and contents == self._contents:
+        # If the lock contains our contents, we own it, but don't know the
+        # generation.
+        try:
+          stat_results = self._ctx.Stat(self._gs_path)
+          self._generation = stat_results.generation
+          return
+        except gs.GSNoSuchKey:
+          # If we can't look up stats.... we didn't get the lock.
+          pass
 
       # We didn't get the lock, raise the expected exception.
       self._generation = 0
-      raise LockNotAcquired()
+      raise LockNotAcquired('Lock: %s held by: %s' % (self._gs_path, contents))
 
   def Acquire(self):
     """Attempt to acquire the lock.

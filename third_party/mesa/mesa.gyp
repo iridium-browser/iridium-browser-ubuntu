@@ -80,6 +80,7 @@
           # which is used by gallium/auxiliary/Makefile.
           '-fsanitize=null',
           '-fsanitize=vptr',
+          '-fsanitize-coverage=<(sanitizer_coverage)',
         ],
       }],
     ],
@@ -681,6 +682,15 @@
             'KEYWORD1=GLAPI',
             'KEYWORD2=GLAPIENTRY',
           ],
+        }],
+        ['OS=="linux"', {
+          'link_settings': {
+            'libraries': [
+              '-ldl',
+              '-lm',
+              '-lstdc++',
+            ],
+          },
         }],
       ],
       'include_dirs': [

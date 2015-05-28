@@ -33,7 +33,7 @@ class SslHandshakeHandler:
         host = connection.get_servername()
         if host:
           cert_str = (
-              self.server.http_archive_fetch.http_archive.get_certificate(host))
+              self.server.get_certificate(host))
           new_context = certutils.get_ssl_context()
           cert = certutils.load_cert(cert_str)
           new_context.use_certificate(cert)
@@ -43,7 +43,7 @@ class SslHandshakeHandler:
         # else: fail with 'no shared cipher'
       except Exception, e:
         # Do not leak any exceptions or else openssl crashes.
-        logging.error('Exception in SNI handler', e)
+        logging.error('Exception in SNI handler: %s', e)
 
     context.set_tlsext_servername_callback(handle_servername)
     self.connection = certutils.get_ssl_connection(context, self.connection)
@@ -69,7 +69,7 @@ class SslHandshakeHandler:
 
 
 def wrap_handler(handler_class):
-  """Wraps a BaseHTTPHandler wtih SSL MITM certificates."""
+  """Wraps a BaseHTTPHandler with SSL MITM certificates."""
   if certutils.openssl_import_error:
     raise certutils.openssl_import_error
 

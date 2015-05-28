@@ -25,11 +25,10 @@
 #include "chrome/browser/sync/backend_unrecoverable_error_handler.h"
 #include "chrome/browser/sync/backup_rollback_controller.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
-#include "chrome/browser/sync/profile_sync_service_base.h"
-#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/protocol_event_observer.h"
 #include "chrome/browser/sync/sessions/sessions_sync_manager.h"
 #include "chrome/browser/sync/startup_controller.h"
+#include "chrome/browser/sync/sync_stopped_reporter.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/sync_driver/data_type_controller.h"
@@ -42,6 +41,7 @@
 #include "components/sync_driver/non_blocking_data_type_manager.h"
 #include "components/sync_driver/sync_frontend.h"
 #include "components/sync_driver/sync_prefs.h"
+#include "components/sync_driver/sync_service.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 #include "net/base/backoff_entry.h"
@@ -180,7 +180,7 @@ class EncryptedData;
 //   tell the sync engine that setup is completed and it can begin downloading
 //   data from the sync server.
 //
-class ProfileSyncService : public ProfileSyncServiceBase,
+class ProfileSyncService : public sync_driver::SyncService,
                            public sync_driver::SyncFrontend,
                            public sync_driver::SyncPrefObserver,
                            public sync_driver::DataTypeManagerObserver,
@@ -282,16 +282,16 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // immediately after an object of this class is constructed.
   void Initialize();
 
-  virtual void SetSyncSetupCompleted();
+  void SetSyncSetupCompleted();
 
-  // ProfileSyncServiceBase implementation.
+  // sync_driver::SyncService implementation
   bool HasSyncSetupCompleted() const override;
   bool SyncActive() const override;
   syncer::ModelTypeSet GetActiveDataTypes() const override;
-  void AddObserver(ProfileSyncServiceBase::Observer* observer) override;
-  void RemoveObserver(ProfileSyncServiceBase::Observer* observer) override;
+  void AddObserver(sync_driver::SyncServiceObserver* observer) override;
+  void RemoveObserver(sync_driver::SyncServiceObserver* observer) override;
   bool HasObserver(
-      const ProfileSyncServiceBase::Observer* observer) const override;
+      const sync_driver::SyncServiceObserver* observer) const override;
 
   void AddProtocolEventObserver(browser_sync::ProtocolEventObserver* observer);
   void RemoveProtocolEventObserver(
@@ -377,14 +377,13 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Returns DeviceInfo provider for the local device.
   virtual sync_driver::LocalDeviceInfoProvider* GetLocalDeviceInfoProvider();
 
-  // Returns synced devices tracker. If DEVICE_INFO model type isn't yet
-  // enabled or syncing, returns NULL.
+  // Returns synced devices tracker.
   virtual sync_driver::DeviceInfoTracker* GetDeviceInfoTracker() const;
 
   // Fills state_map with a map of current data types that are possible to
   // sync, as well as their states.
   void GetDataTypeControllerStates(
-    sync_driver::DataTypeController::StateMap* state_map) const;
+      sync_driver::DataTypeController::StateMap* state_map) const;
 
   // Disables sync for user. Use ShowLoginDialog to enable.
   virtual void DisableForUser();
@@ -702,10 +701,6 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Resets the flag for suppressing sync startup and starts the sync backend.
   virtual void UnsuppressAndStart();
 
-  // Marks all currently registered types as "acknowledged" so we won't prompt
-  // the user about them any more.
-  void AcknowledgeSyncedTypes();
-
   SyncErrorController* sync_error_controller() {
     return sync_error_controller_.get();
   }
@@ -920,14 +915,6 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // backend to start, one of SYNC, BACKUP or ROLLBACK.
   virtual void StartUpSlowBackendComponents(BackendMode mode);
 
-  // About-flags experiment names for datatypes that aren't enabled by default
-  // yet.
-  static std::string GetExperimentNameForDataType(
-      syncer::ModelType data_type);
-
-  // Create and register a new datatype controller.
-  void RegisterNewDataType(syncer::ModelType data_type);
-
   // Collects preferred sync data types from |preference_providers_|.
   syncer::ModelTypeSet GetDataTypesFromPreferenceProviders() const;
 
@@ -980,6 +967,9 @@ class ProfileSyncService : public ProfileSyncServiceBase,
 
   // Clean up prefs and backup DB when rollback is not needed.
   void CleanUpBackup();
+
+  // Tell the sync server that this client has disabled sync.
+  void RemoveClientFromServer() const;
 
   // Factory used to create various dependent objects.
   scoped_ptr<ProfileSyncComponentsFactory> factory_;
@@ -1034,7 +1024,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Manager for the non-blocking data types.
   sync_driver::NonBlockingDataTypeManager non_blocking_data_type_manager_;
 
-  ObserverList<ProfileSyncServiceBase::Observer> observers_;
+  ObserverList<sync_driver::SyncServiceObserver> observers_;
   ObserverList<browser_sync::ProtocolEventObserver> protocol_event_observers_;
   ObserverList<syncer::TypeDebugInfoObserver> type_debug_info_observers_;
 
@@ -1157,6 +1147,8 @@ class ProfileSyncService : public ProfileSyncServiceBase,
 
   // The full path to the sync data directory.
   base::FilePath directory_path_;
+
+  scoped_ptr<browser_sync::SyncStoppedReporter> sync_stopped_reporter_;
 
   base::WeakPtrFactory<ProfileSyncService> weak_factory_;
 

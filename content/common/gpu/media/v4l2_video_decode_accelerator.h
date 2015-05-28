@@ -19,7 +19,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "content/common/content_export.h"
-#include "content/common/gpu/media/v4l2_video_device.h"
+#include "content/common/gpu/media/v4l2_device.h"
 #include "media/base/limits.h"
 #include "media/base/video_decoder_config.h"
 #include "media/video/picture.h"
@@ -83,20 +83,20 @@ class CONTENT_EXPORT V4L2VideoDecodeAccelerator
       const base::Callback<bool(void)>& make_context_current,
       const scoped_refptr<V4L2Device>& device,
       const scoped_refptr<base::MessageLoopProxy>& io_message_loop_proxy);
-  virtual ~V4L2VideoDecodeAccelerator();
+  ~V4L2VideoDecodeAccelerator() override;
 
   // media::VideoDecodeAccelerator implementation.
   // Note: Initialize() and Destroy() are synchronous.
-  virtual bool Initialize(media::VideoCodecProfile profile,
-                          Client* client) override;
-  virtual void Decode(const media::BitstreamBuffer& bitstream_buffer) override;
-  virtual void AssignPictureBuffers(
+  bool Initialize(media::VideoCodecProfile profile,
+                  Client* client) override;
+  void Decode(const media::BitstreamBuffer& bitstream_buffer) override;
+  void AssignPictureBuffers(
       const std::vector<media::PictureBuffer>& buffers) override;
-  virtual void ReusePictureBuffer(int32 picture_buffer_id) override;
-  virtual void Flush() override;
-  virtual void Reset() override;
-  virtual void Destroy() override;
-  virtual bool CanDecodeOnIOThread() override;
+  void ReusePictureBuffer(int32 picture_buffer_id) override;
+  void Flush() override;
+  void Reset() override;
+  void Destroy() override;
+  bool CanDecodeOnIOThread() override;
 
  private:
   // These are rather subjectively tuned.
@@ -242,11 +242,19 @@ class CONTENT_EXPORT V4L2VideoDecodeAccelerator
   void StartResolutionChangeIfNeeded();
   void FinishResolutionChange();
 
-  // Try to get output format, detected after parsing the beginning
-  // of the stream. Sets |again| to true if more parsing is needed.
-  bool GetFormatInfo(struct v4l2_format* format, bool* again);
-  // Create output buffers for the given |format|.
-  bool CreateBuffersForFormat(const struct v4l2_format& format);
+  // Try to get output format and visible size, detected after parsing the
+  // beginning of the stream. Sets |again| to true if more parsing is needed.
+  // |visible_size| could be nullptr and ignored.
+  bool GetFormatInfo(struct v4l2_format* format,
+                     gfx::Size* visible_size,
+                     bool* again);
+  // Create output buffers for the given |format| and |visible_size|.
+  bool CreateBuffersForFormat(const struct v4l2_format& format,
+                              const gfx::Size& visible_size);
+
+  // Try to get |visible_size|. Return visible size, or, if querying it is not
+  // supported or produces invalid size, return |coded_size| instead.
+  gfx::Size GetVisibleSize(const gfx::Size& coded_size);
 
   //
   // Device tasks, to be run on device_poll_thread_.
@@ -415,8 +423,11 @@ class CONTENT_EXPORT V4L2VideoDecodeAccelerator
   // to avoid races with potential Reset requests.
   base::WaitableEvent pictures_assigned_;
 
-  // Output picture size.
-  gfx::Size frame_buffer_size_;
+  // Output picture coded size.
+  gfx::Size coded_size_;
+
+  // Output picture visible size.
+  gfx::Size visible_size_;
 
   //
   // The device polling thread handles notifications of V4L2 device changes.

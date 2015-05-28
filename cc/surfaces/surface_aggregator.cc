@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/containers/hash_tables.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/base/math_util.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/delegated_frame_data.h"
@@ -228,6 +228,8 @@ void SurfaceAggregator::HandleSurfaceQuad(
 
   bool merge_pass = surface_quad->opacity() == 1.f && copy_requests.empty();
 
+  gfx::Rect surface_damage = DamageRectForSurface(
+      surface, *render_pass_list.back(), surface_quad->visible_rect);
   const RenderPassList& referenced_passes = render_pass_list;
   size_t passes_to_copy =
       merge_pass ? referenced_passes.size() - 1 : referenced_passes.size();
@@ -240,9 +242,7 @@ void SurfaceAggregator::HandleSurfaceQuad(
 
     RenderPassId remapped_pass_id = RemapPassId(source.id, surface_id);
 
-    copy_pass->SetAll(remapped_pass_id,
-                      source.output_rect,
-                      source.damage_rect,
+    copy_pass->SetAll(remapped_pass_id, source.output_rect, gfx::Rect(),
                       source.transform_to_root_target,
                       source.has_transparent_background);
 
@@ -251,15 +251,18 @@ void SurfaceAggregator::HandleSurfaceQuad(
     // Contributing passes aggregated in to the pass list need to take the
     // transform of the surface quad into account to update their transform to
     // the root surface.
-    // TODO(jamesr): Make sure this is sufficient for surfaces nested several
-    // levels deep and add tests.
     copy_pass->transform_to_root_target.ConcatTransform(
         surface_quad->quadTransform());
     copy_pass->transform_to_root_target.ConcatTransform(
         content_to_target_transform);
+    copy_pass->transform_to_root_target.ConcatTransform(
+        dest_pass->transform_to_root_target);
 
     CopyQuadsToPass(source.quad_list, source.shared_quad_state_list,
                     gfx::Transform(), ClipData(), copy_pass.get(), surface_id);
+
+    if (j == referenced_passes.size() - 1)
+      surface_damage = gfx::UnionRects(surface_damage, copy_pass->damage_rect);
 
     dest_pass_list_->push_back(copy_pass.Pass());
   }
@@ -309,9 +312,7 @@ void SurfaceAggregator::HandleSurfaceQuad(
   dest_pass->damage_rect =
       gfx::UnionRects(dest_pass->damage_rect,
                       MathUtil::MapEnclosingClippedRect(
-                          surface_quad->quadTransform(),
-                          DamageRectForSurface(surface, last_pass,
-                                               surface_quad->visible_rect)));
+                          surface_quad->quadTransform(), surface_damage));
 
   referenced_surfaces_.erase(it);
 }
@@ -375,10 +376,20 @@ void SurfaceAggregator::CopyQuadsToPass(
         RenderPassId remapped_pass_id =
             RemapPassId(original_pass_id, surface_id);
 
-        dest_pass->CopyFromAndAppendRenderPassDrawQuad(
-            pass_quad,
-            dest_pass->shared_quad_state_list.back(),
+        gfx::Rect pass_damage;
+        for (const auto* pass : *dest_pass_list_) {
+          if (pass->id == remapped_pass_id) {
+            pass_damage = pass->damage_rect;
+            break;
+          }
+        }
+
+        DrawQuad* rpdq = dest_pass->CopyFromAndAppendRenderPassDrawQuad(
+            pass_quad, dest_pass->shared_quad_state_list.back(),
             remapped_pass_id);
+        dest_pass->damage_rect = gfx::UnionRects(
+            dest_pass->damage_rect, MathUtil::MapEnclosingClippedRect(
+                                        rpdq->quadTransform(), pass_damage));
       } else {
         dest_pass->CopyFromAndAppendDrawQuad(
             quad, dest_pass->shared_quad_state_list.back());
@@ -411,8 +422,11 @@ void SurfaceAggregator::CopyPasses(const DelegatedFrameData* frame_data,
     RenderPassId remapped_pass_id =
         RemapPassId(source.id, surface->surface_id());
 
-    copy_pass->SetAll(remapped_pass_id, source.output_rect,
-                      DamageRectForSurface(surface, source, source.output_rect),
+    gfx::Rect damage_rect =
+        (i < source_pass_list.size() - 1)
+            ? gfx::Rect()
+            : DamageRectForSurface(surface, source, source.output_rect);
+    copy_pass->SetAll(remapped_pass_id, source.output_rect, damage_rect,
                       source.transform_to_root_target,
                       source.has_transparent_background);
 
@@ -433,6 +447,10 @@ void SurfaceAggregator::RemoveUnreferencedChildren() {
         provider_->DestroyChild(it->second);
         surface_id_to_resource_child_id_.erase(it);
       }
+
+      Surface* surface_ptr = manager_->GetSurfaceForId(surface.first);
+      if (surface_ptr)
+        surface_ptr->RunDrawCallbacks(SurfaceDrawStatus::DRAW_SKIPPED);
     }
   }
 }

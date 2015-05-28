@@ -14,24 +14,26 @@
 #include "bindings/core/v8/V8Event.h"
 #include "bindings/core/v8/WrapperTypeInfo.h"
 #include "bindings/tests/idls/core/TestInterfaceEventInitConstructor.h"
+#include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
 class V8TestInterfaceEventInitConstructor {
 public:
-    static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
+    CORE_EXPORT static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
     static v8::Local<v8::Object> findInstanceInPrototypeChain(v8::Local<v8::Value>, v8::Isolate*);
-    static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*);
+    CORE_EXPORT static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*);
     static TestInterfaceEventInitConstructor* toImpl(v8::Local<v8::Object> object)
     {
         return blink::toScriptWrappable(object)->toImpl<TestInterfaceEventInitConstructor>();
     }
-    static TestInterfaceEventInitConstructor* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
-    static const WrapperTypeInfo wrapperTypeInfo;
+    CORE_EXPORT static TestInterfaceEventInitConstructor* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
+    CORE_EXPORT static const WrapperTypeInfo wrapperTypeInfo;
     static void refObject(ScriptWrappable*);
     static void derefObject(ScriptWrappable*);
-    static void trace(Visitor* visitor, ScriptWrappable* scriptWrappable)
+    template<typename VisitorDispatcher>
+    static void trace(VisitorDispatcher visitor, ScriptWrappable* scriptWrappable)
     {
 #if ENABLE(OILPAN)
         visitor->trace(scriptWrappable->toImpl<TestInterfaceEventInitConstructor>());
@@ -41,6 +43,11 @@ public:
     static const int internalFieldCount = v8DefaultWrapperInternalFieldCount + 0;
     static void installConditionallyEnabledProperties(v8::Local<v8::Object>, v8::Isolate*) { }
     static void installConditionallyEnabledMethods(v8::Local<v8::Object>, v8::Isolate*) { }
+};
+
+template <>
+struct V8TypeOf<TestInterfaceEventInitConstructor> {
+    typedef V8TestInterfaceEventInitConstructor Type;
 };
 
 } // namespace blink

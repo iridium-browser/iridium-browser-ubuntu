@@ -82,19 +82,16 @@ static void draw_scene(SkCanvas* canvas, SkScalar pictureSize) {
 
 class PictureShaderTileGM : public skiagm::GM {
 protected:
-    uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("pictureshadertile");
     }
 
-    SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(800, 600);
     }
 
-    void onOnceBeforeDraw() SK_OVERRIDE {
+    void onOnceBeforeDraw() override {
         SkPictureRecorder recorder;
         SkCanvas* pictureCanvas = recorder.beginRecording(kPictureSize, kPictureSize);
         draw_scene(pictureCanvas, kPictureSize);
@@ -135,7 +132,7 @@ protected:
         }
     }
 
-    void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         canvas->clear(SK_ColorBLACK);
 
         SkPaint paint;

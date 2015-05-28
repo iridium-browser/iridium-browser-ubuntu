@@ -46,7 +46,8 @@ namespace fileSystemProvider {
     // True if it is a directory.
     boolean isDirectory;
 
-    // Name of this entry (not full path name). Must not contain '/'.
+    // Name of this entry (not full path name). Must not contain '/'. For root
+    // it must be empty.
     DOMString name;
 
     // File size in bytes.
@@ -77,6 +78,18 @@ namespace fileSystemProvider {
     DOMString? lastTag;
   };
 
+  // Represents an opened file.
+  dictionary OpenedFile {
+    // A request ID to be be used by consecutive read/write and close requests.
+    long openRequestId;
+
+    // The path of the opened file.
+    DOMString filePath;
+
+    // Whether the file was opened for reading or writing.
+    OpenFileMode mode;
+  };
+
   // Represents a mounted file system.
   dictionary FileSystemInfo {
     // The identifier of the file system.
@@ -88,6 +101,13 @@ namespace fileSystemProvider {
     // Whether the file system supports operations which may change contents
     // of the file system (such as creating, deleting or writing to files).
     boolean writable;
+
+    // The maximum number of files that can be opened at once. If 0, then not
+    // limited.
+    long openedFilesLimit;
+
+    // List of currently opened files.
+    OpenedFile[] openedFiles;
 
     // Whether the file system supports the <code>tag</code> field for observing
     // directories.
@@ -111,7 +131,7 @@ namespace fileSystemProvider {
     boolean? writable;
 
     // The maximum number of files that can be opened at once. If not specified,
-    // then not limited.
+    // or 0, then not limited.
     long? openedFilesLimit;
 
     // Whether the file system supports the <code>tag</code> field for observed
@@ -393,6 +413,9 @@ namespace fileSystemProvider {
   // Callback to receive the result of getAll() function.
   callback GetAllCallback = void(FileSystemInfo[] fileSystems);
 
+  // Callback to receive the result of get() function.
+  callback GetCallback = void(FileSystemInfo fileSystem);
+
   // Callback to be called by the providing extension in case of a success.
   [nocompile] callback ProviderSuccessCallback = void();
 
@@ -445,6 +468,10 @@ namespace fileSystemProvider {
 
     // Returns all file systems mounted by the extension.
     static void getAll(GetAllCallback callback);
+
+    // Returns information about a file system with the passed <code>
+    // fileSystemId</code>.
+    static void get(DOMString fileSystemId, GetCallback callback);
 
     // Notifies about changes in the watched directory at <code>
     // observedPath</code> in <code>recursive</code mode. If the file system is

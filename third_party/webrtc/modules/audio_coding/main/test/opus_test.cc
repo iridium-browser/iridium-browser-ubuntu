@@ -20,7 +20,6 @@
 #include "webrtc/modules/audio_coding/codecs/opus/interface/opus_interface.h"
 #include "webrtc/modules/audio_coding/main/interface/audio_coding_module_typedefs.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_codec_database.h"
-#include "webrtc/modules/audio_coding/main/acm2/acm_opus.h"
 #include "webrtc/modules/audio_coding/main/test/TestStereo.h"
 #include "webrtc/modules/audio_coding/main/test/utility.h"
 #include "webrtc/system_wrappers/interface/trace.h"
@@ -79,8 +78,8 @@ void OpusTest::Perform() {
   in_file_mono_.ReadStereo(false);
 
   // Create Opus encoders for mono and stereo.
-  ASSERT_GT(WebRtcOpus_EncoderCreate(&opus_mono_encoder_, 1), -1);
-  ASSERT_GT(WebRtcOpus_EncoderCreate(&opus_stereo_encoder_, 2), -1);
+  ASSERT_GT(WebRtcOpus_EncoderCreate(&opus_mono_encoder_, 1, 0), -1);
+  ASSERT_GT(WebRtcOpus_EncoderCreate(&opus_stereo_encoder_, 2, 1), -1);
 
   // Create Opus decoders for mono and stereo for stand-alone testing of Opus.
   ASSERT_GT(WebRtcOpus_DecoderCreate(&opus_mono_decoder_, 1), -1);

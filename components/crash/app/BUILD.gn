@@ -8,10 +8,10 @@ if (is_android) {
 
 source_set("lib") {
   sources = [
-    "crash_reporter_client.cc",
-    "crash_reporter_client.h",
     "crash_keys_win.cc",
     "crash_keys_win.h",
+    "crash_reporter_client.cc",
+    "crash_reporter_client.h",
   ]
 
   include_dirs = [ "../../../breakpad/src" ]
@@ -61,7 +61,7 @@ source_set("app") {
 
       #'../breakpad/breakpad.gyp:breakpad_sender',  TODO(GYP)
     ]
-  } else if (is_posix && !is_ios && (!is_android || !is_android_webview_build)) {
+  } else if (is_posix && !is_ios) {
     deps += [ "//breakpad:client" ]
   }
 }

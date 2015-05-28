@@ -106,6 +106,8 @@ typedef std::vector<ConnectionInfo> ConnectionInfos;
 struct TransportChannelStats {
   int component;
   ConnectionInfos connection_infos;
+  std::string srtp_cipher;
+  std::string ssl_cipher;
 };
 
 // Information about all the channels of a transport.
@@ -384,7 +386,7 @@ class Transport : public rtc::MessageHandler,
   void OnRemoteCandidate_w(const Candidate& candidate);
   void OnChannelReadableState_s();
   void OnChannelWritableState_s();
-  void OnChannelRequestSignaling_s(int component);
+  void OnChannelRequestSignaling_s();
   void OnConnecting_s();
   void OnChannelRouteChange_s(const TransportChannel* channel,
                               const Candidate& remote_candidate);
@@ -413,11 +415,11 @@ class Transport : public rtc::MessageHandler,
   // Sends SignalCompleted if we are now in that state.
   void MaybeCompleted_w();
 
-  rtc::Thread* signaling_thread_;
-  rtc::Thread* worker_thread_;
-  std::string content_name_;
-  std::string type_;
-  PortAllocator* allocator_;
+  rtc::Thread* const signaling_thread_;
+  rtc::Thread* const worker_thread_;
+  const std::string content_name_;
+  const std::string type_;
+  PortAllocator* const allocator_;
   bool destroyed_;
   TransportState readable_;
   TransportState writable_;
@@ -430,6 +432,7 @@ class Transport : public rtc::MessageHandler,
   rtc::scoped_ptr<TransportDescription> local_description_;
   rtc::scoped_ptr<TransportDescription> remote_description_;
 
+  // TODO(tommi): Make sure we only use this on the worker thread.
   ChannelMap channels_;
   // Buffers the ready_candidates so that SignalCanidatesReady can
   // provide them in multiples.

@@ -6,7 +6,7 @@
 #include <limits>
 #include <set>
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/base/region.h"
 #include "cc/debug/debug_colors.h"
 #include "cc/resources/picture_pile_impl.h"
@@ -16,51 +16,62 @@
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
-namespace {
-
-#ifdef NDEBUG
-const bool kDefaultClearCanvasSetting = false;
-#else
-const bool kDefaultClearCanvasSetting = true;
-#endif
-
-}  // namespace
-
 namespace cc {
 
 scoped_refptr<PicturePileImpl> PicturePileImpl::CreateFromPicturePile(
-    const PicturePile* other) {
-  return make_scoped_refptr(new PicturePileImpl(other));
+    const PicturePile* other,
+    bool can_use_lcd_text) {
+  return make_scoped_refptr(new PicturePileImpl(other, can_use_lcd_text));
 }
 
 PicturePileImpl::PicturePileImpl()
     : background_color_(SK_ColorTRANSPARENT),
       requires_clear_(true),
-      can_use_lcd_text_(false),
+      can_use_lcd_text_(true),
       is_solid_color_(false),
       solid_color_(SK_ColorTRANSPARENT),
       has_any_recordings_(false),
-      clear_canvas_with_debug_color_(kDefaultClearCanvasSetting),
+      clear_canvas_with_debug_color_(false),
       min_contents_scale_(0.f),
       slow_down_raster_scale_factor_for_debug_(0),
       should_attempt_to_use_distance_field_text_(false) {
 }
 
-PicturePileImpl::PicturePileImpl(const PicturePile* other)
+PicturePileImpl::PicturePileImpl(const PicturePile* other,
+                                 bool can_use_lcd_text)
     : picture_map_(other->picture_map_),
       tiling_(other->tiling_),
-      background_color_(SK_ColorTRANSPARENT),
-      requires_clear_(true),
-      can_use_lcd_text_(other->can_use_lcd_text_),
+      background_color_(other->background_color_),
+      requires_clear_(other->requires_clear_),
+      can_use_lcd_text_(can_use_lcd_text),
       is_solid_color_(other->is_solid_color_),
       solid_color_(other->solid_color_),
       recorded_viewport_(other->recorded_viewport_),
       has_any_recordings_(other->has_any_recordings_),
-      clear_canvas_with_debug_color_(kDefaultClearCanvasSetting),
+      clear_canvas_with_debug_color_(other->clear_canvas_with_debug_color_),
       min_contents_scale_(other->min_contents_scale_),
       slow_down_raster_scale_factor_for_debug_(
           other->slow_down_raster_scale_factor_for_debug_),
       should_attempt_to_use_distance_field_text_(false) {
+}
+
+PicturePileImpl::PicturePileImpl(const PicturePileImpl* other,
+                                 bool can_use_lcd_text)
+    : picture_map_(other->picture_map_),
+      tiling_(other->tiling_),
+      background_color_(other->background_color_),
+      requires_clear_(other->requires_clear_),
+      can_use_lcd_text_(can_use_lcd_text),
+      is_solid_color_(other->is_solid_color_),
+      solid_color_(other->solid_color_),
+      recorded_viewport_(other->recorded_viewport_),
+      has_any_recordings_(other->has_any_recordings_),
+      clear_canvas_with_debug_color_(other->clear_canvas_with_debug_color_),
+      min_contents_scale_(other->min_contents_scale_),
+      slow_down_raster_scale_factor_for_debug_(
+          other->slow_down_raster_scale_factor_for_debug_),
+      should_attempt_to_use_distance_field_text_(
+          other->should_attempt_to_use_distance_field_text_) {
 }
 
 PicturePileImpl::~PicturePileImpl() {
@@ -69,17 +80,13 @@ PicturePileImpl::~PicturePileImpl() {
 void PicturePileImpl::PlaybackToSharedCanvas(SkCanvas* canvas,
                                              const gfx::Rect& canvas_rect,
                                              float contents_scale) const {
-  RasterCommon(canvas,
-               NULL,
-               canvas_rect,
-               contents_scale,
-               false);
+  RasterCommon(canvas, NULL, canvas_rect, contents_scale);
 }
 
 void PicturePileImpl::RasterForAnalysis(skia::AnalysisCanvas* canvas,
                                         const gfx::Rect& canvas_rect,
                                         float contents_scale) const {
-  RasterCommon(canvas, canvas, canvas_rect, contents_scale, true);
+  RasterCommon(canvas, canvas, canvas_rect, contents_scale);
 }
 
 void PicturePileImpl::PlaybackToCanvas(SkCanvas* canvas,
@@ -88,12 +95,7 @@ void PicturePileImpl::PlaybackToCanvas(SkCanvas* canvas,
   RasterSourceHelper::PrepareForPlaybackToCanvas(
       canvas, canvas_rect, gfx::Rect(tiling_.tiling_size()), contents_scale,
       background_color_, clear_canvas_with_debug_color_, requires_clear_);
-
-  RasterCommon(canvas,
-               NULL,
-               canvas_rect,
-               contents_scale,
-               false);
+  RasterCommon(canvas, NULL, canvas_rect, contents_scale);
 }
 
 void PicturePileImpl::CoalesceRasters(const gfx::Rect& canvas_rect,
@@ -191,12 +193,10 @@ void PicturePileImpl::CoalesceRasters(const gfx::Rect& canvas_rect,
   }
 }
 
-void PicturePileImpl::RasterCommon(
-    SkCanvas* canvas,
-    SkDrawPictureCallback* callback,
-    const gfx::Rect& canvas_rect,
-    float contents_scale,
-    bool is_analysis) const {
+void PicturePileImpl::RasterCommon(SkCanvas* canvas,
+                                   SkDrawPictureCallback* callback,
+                                   const gfx::Rect& canvas_rect,
+                                   float contents_scale) const {
   DCHECK(contents_scale >= min_contents_scale_);
 
   canvas->translate(-canvas_rect.x(), -canvas_rect.y());
@@ -367,19 +367,12 @@ void PicturePileImpl::SetShouldAttemptToUseDistanceFieldText() {
   should_attempt_to_use_distance_field_text_ = true;
 }
 
-void PicturePileImpl::SetBackgoundColor(SkColor background_color) {
-  background_color_ = background_color;
-}
-
-void PicturePileImpl::SetRequiresClear(bool requires_clear) {
-  requires_clear_ = requires_clear;
-}
-
 bool PicturePileImpl::ShouldAttemptToUseDistanceFieldText() const {
   return should_attempt_to_use_distance_field_text_;
 }
 
-void PicturePileImpl::AsValueInto(base::debug::TracedValue* pictures) const {
+void PicturePileImpl::AsValueInto(
+    base::trace_event::TracedValue* pictures) const {
   gfx::Rect tiling_rect(tiling_.tiling_size());
   std::set<const void*> appended_pictures;
   bool include_borders = true;
@@ -399,6 +392,13 @@ void PicturePileImpl::AsValueInto(base::debug::TracedValue* pictures) const {
 
 bool PicturePileImpl::CanUseLCDText() const {
   return can_use_lcd_text_;
+}
+
+scoped_refptr<RasterSource> PicturePileImpl::CreateCloneWithoutLCDText() const {
+  DCHECK(CanUseLCDText());
+  bool can_use_lcd_text = false;
+  return scoped_refptr<RasterSource>(
+      new PicturePileImpl(this, can_use_lcd_text));
 }
 
 PicturePileImpl::PixelRefIterator::PixelRefIterator(
@@ -445,7 +445,7 @@ void PicturePileImpl::PixelRefIterator::AdvanceToTilePictureWithPixelRefs() {
       continue;
 
     processed_pictures_.insert(picture);
-    pixel_ref_iterator_ = Picture::PixelRefIterator(layer_rect_, picture);
+    pixel_ref_iterator_ = picture->GetPixelRefMapIterator(layer_rect_);
     if (pixel_ref_iterator_)
       break;
   }
@@ -453,10 +453,8 @@ void PicturePileImpl::PixelRefIterator::AdvanceToTilePictureWithPixelRefs() {
 
 void PicturePileImpl::DidBeginTracing() {
   std::set<const void*> processed_pictures;
-  for (PictureMap::iterator it = picture_map_.begin();
-       it != picture_map_.end();
-       ++it) {
-    const Picture* picture = it->second.GetPicture();
+  for (const auto& map_pair : picture_map_) {
+    const Picture* picture = map_pair.second.GetPicture();
     if (picture && (processed_pictures.count(picture) == 0)) {
       picture->EmitTraceSnapshot();
       processed_pictures.insert(picture);

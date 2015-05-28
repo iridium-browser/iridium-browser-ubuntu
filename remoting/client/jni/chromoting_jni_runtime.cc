@@ -7,6 +7,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/android/library_loader/library_loader_hooks.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
@@ -146,6 +147,13 @@ static void SendTextEvent(JNIEnv* env,
       ConvertJavaStringToUTF8(env, text));
 }
 
+static void EnableVideoChannel(JNIEnv* env,
+                               jclass clazz,
+                               jboolean enable) {
+  remoting::ChromotingJniRuntime::GetInstance()->session()->EnableVideoChannel(
+      enable);
+}
+
 static void OnThirdPartyTokenFetched(JNIEnv* env,
                                      jclass clazz,
                                      jstring token,
@@ -175,8 +183,6 @@ ChromotingJniRuntime* ChromotingJniRuntime::GetInstance() {
 }
 
 ChromotingJniRuntime::ChromotingJniRuntime() {
-  at_exit_manager_.reset(new base::AtExitManager());
-
   // On Android, the UI thread is managed by Java, so we need to attach and
   // start a special type of message loop to allow Chromium code to run tasks.
   ui_loop_.reset(new base::MessageLoopForUI());
@@ -217,6 +223,7 @@ ChromotingJniRuntime::~ChromotingJniRuntime() {
       base::Unretained(this),
       &done_event));
   done_event.Wait();
+  base::android::LibraryLoaderExitHook();
   base::android::DetachFromVM();
 }
 

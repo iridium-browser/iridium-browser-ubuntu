@@ -6,8 +6,8 @@ import shutil
 import tempfile
 import zipfile
 
-from telemetry import decorators
 from telemetry.core.platform.profiler import android_systrace_profiler
+from telemetry import decorators
 from telemetry.unittest_util import tab_test_case
 
 
@@ -21,7 +21,8 @@ class TestAndroidSystraceProfiler(tab_test_case.TabTestCase):
           self._browser._browser_backend,
           self._browser._platform_backend,
           os.path.join(out_dir, 'systrace'),
-          {})
+          {},
+          self._device)
       result = profiler.CollectProfile()[0]
       self.assertTrue(zipfile.is_zipfile(result))
       with zipfile.ZipFile(result) as z:

@@ -1,4 +1,5 @@
 namespace="EventType"
+export="CORE_EXPORT"
 
 DOMActivate
 DOMCharacterDataModified
@@ -12,6 +13,7 @@ DOMNodeRemovedFromDocument
 DOMSubtreeModified
 abort
 activate
+active
 addsourcebuffer
 addstream
 addtrack
@@ -26,6 +28,7 @@ autocompleteerror
 availablechange
 beforecopy
 beforecut
+beforeinstallprompt
 beforepaste
 beforeunload
 beginEvent
@@ -62,6 +65,7 @@ cuechange
 cut
 datachannel
 dblclick
+defaultsessionstart
 devicelight
 devicemotion
 deviceorientation
@@ -106,11 +110,13 @@ gesturetapunconfirmed
 hashchange
 icecandidate
 iceconnectionstatechange
+inactive
 input
 install
 invalid
 keydown
 keypress
+keystatuseschange
 keyup
 languagechange
 levelchange
@@ -215,6 +221,7 @@ visibilitychange
 voiceschanged
 volumechange
 waiting
+waitingforkey
 webglcontextcreationerror
 webglcontextlost
 webglcontextrestored

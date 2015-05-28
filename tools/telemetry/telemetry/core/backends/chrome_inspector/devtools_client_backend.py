@@ -4,37 +4,78 @@
 
 import logging
 import re
+import sys
 
-from telemetry import decorators
 from telemetry.core.backends.chrome_inspector import devtools_http
 from telemetry.core.backends.chrome_inspector import inspector_backend
 from telemetry.core.backends.chrome_inspector import tracing_backend
+from telemetry.core import exceptions
+from telemetry.core.platform.tracing_agent import chrome_tracing_agent
+from telemetry import decorators
 from telemetry.timeline import trace_data as trace_data_module
 
 
+class TabNotFoundError(exceptions.Error):
+  pass
+
+
+def IsDevToolsAgentAvailable(port):
+  """Returns True if a DevTools agent is available on the given port."""
+  devtools_http_instance = devtools_http.DevToolsHttp(port)
+  try:
+    return _IsDevToolsAgentAvailable(devtools_http.DevToolsHttp(port))
+  finally:
+    devtools_http_instance.Disconnect()
+
+
+# TODO(nednguyen): Find a more reliable way to check whether the devtool agent
+# is still alive.
+def _IsDevToolsAgentAvailable(devtools_http_instance):
+  try:
+    devtools_http_instance.Request('')
+  except devtools_http.DevToolsClientConnectionError:
+    return False
+  else:
+    return True
+
+
 class DevToolsClientBackend(object):
-  def __init__(self, devtools_port, app_backend):
+  """An object that communicates with Chrome's devtools.
+
+  This class owns a map of InspectorBackends. It is responsible for creating
+  them and destroying them.
+  """
+  def __init__(self, devtools_port, remote_devtools_port, app_backend):
+    """Creates a new DevToolsClientBackend.
+
+    A DevTools agent must exist on the given devtools_port.
+
+    Args:
+      devtools_port: The port to use to connect to DevTools agent.
+      remote_devtools_port: In some cases (e.g., app running on
+          Android device, devtools_port is the forwarded port on the
+          host platform. We also need to know the remote_devtools_port
+          so that we can uniquely identify the DevTools agent.
+      app_backend: For the app that contains the DevTools agent.
+    """
     self._devtools_port = devtools_port
+    self._remote_devtools_port = remote_devtools_port
     self._devtools_http = devtools_http.DevToolsHttp(devtools_port)
     self._tracing_backend = None
     self._app_backend = app_backend
     self._devtools_context_map_backend = _DevToolsContextMapBackend(
         self._app_backend, self)
 
-  # TODO(chrishenry): This is temporarily exposed during DevTools code
-  # refactoring. Please do not introduce new usage! crbug.com/423954
+    chrome_tracing_agent.ChromeTracingAgent.RegisterDevToolsClient(
+      self, self._app_backend.platform_backend)
+
   @property
-  def devtools_http(self):
-    return self._devtools_http
+  def remote_port(self):
+    return self._remote_devtools_port
 
   def IsAlive(self):
     """Whether the DevTools server is available and connectable."""
-    try:
-      self._devtools_http.Request('', timeout=.1)
-    except devtools_http.DevToolsClientConnectionError:
-      return False
-    else:
-      return True
+    return _IsDevToolsAgentAvailable(self._devtools_http)
 
   def Close(self):
     if self._tracing_backend:
@@ -62,15 +103,70 @@ class DevToolsClientBackend(object):
     # Branch number can't be determined, so fail any branch number checks.
     return 0
 
-  # TODO(chrishenry): This is exposed tempoarily during DevTools code
-  # refactoring. Instead, we should expose InspectorBackendList or
-  # equivalent. crbug.com/423954.
-  def ListInspectableContexts(self):
+  def _ListInspectableContexts(self):
     return self._devtools_http.RequestJson('')
+
+  def CreateNewTab(self, timeout):
+    """Creates a new tab.
+
+    Raises:
+      devtools_http.DevToolsClientConnectionError
+    """
+    self._devtools_http.Request('new', timeout=timeout)
+
+  def CloseTab(self, tab_id, timeout):
+    """Closes the tab with the given id.
+
+    Raises:
+      devtools_http.DevToolsClientConnectionError
+      TabNotFoundError
+    """
+    try:
+      return self._devtools_http.Request('close/%s' % tab_id,
+                                         timeout=timeout)
+    except devtools_http.DevToolsClientUrlError:
+      error = TabNotFoundError(
+          'Unable to close tab, tab id not found: %s' % tab_id)
+      raise error, None, sys.exc_info()[2]
+
+  def ActivateTab(self, tab_id, timeout):
+    """Activates the tab with the given id.
+
+    Raises:
+      devtools_http.DevToolsClientConnectionError
+      TabNotFoundError
+    """
+    try:
+      return self._devtools_http.Request('activate/%s' % tab_id,
+                                         timeout=timeout)
+    except devtools_http.DevToolsClientUrlError:
+      error = TabNotFoundError(
+          'Unable to activate tab, tab id not found: %s' % tab_id)
+      raise error, None, sys.exc_info()[2]
+
+  def GetUrl(self, tab_id):
+    """Returns the URL of the tab with |tab_id|, as reported by devtools.
+
+    Raises:
+      devtools_http.DevToolsClientConnectionError
+    """
+    for c in self._ListInspectableContexts():
+      if c['id'] == tab_id:
+        return c['url']
+    return None
+
+  def IsInspectable(self, tab_id):
+    """Whether the tab with |tab_id| is inspectable, as reported by devtools.
+
+    Raises:
+      devtools_http.DevToolsClientConnectionError
+    """
+    contexts  = self._ListInspectableContexts()
+    return tab_id in [c['id'] for c in contexts]
 
   def GetUpdatedInspectableContexts(self):
     """Returns an updated instance of _DevToolsContextMapBackend."""
-    contexts = self.ListInspectableContexts()
+    contexts = self._ListInspectableContexts()
     self._devtools_context_map_backend._Update(contexts)
     return self._devtools_context_map_backend
 
@@ -102,6 +198,8 @@ class DevToolsClientBackend(object):
   def StopChromeTracing(self, trace_data_builder, timeout=30):
     context_map = self.GetUpdatedInspectableContexts()
     for context in context_map.contexts:
+      if context['type'] not in ['iframe', 'page', 'webview']:
+        continue
       context_id = context['id']
       backend = context_map.GetInspectorBackend(context_id)
       success = backend.EvaluateJavaScript(
@@ -160,6 +258,8 @@ class _DevToolsContextMapBackend(object):
     context_ids = [context['id'] for context in contexts]
     for context_id in self._inspector_backends_dict.keys():
       if context_id not in context_ids:
+        backend = self._inspector_backends_dict[context_id]
+        backend.Disconnect()
         del self._inspector_backends_dict[context_id]
 
     valid_contexts = []

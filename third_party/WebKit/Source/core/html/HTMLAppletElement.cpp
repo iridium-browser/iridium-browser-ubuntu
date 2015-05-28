@@ -33,9 +33,9 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
+#include "core/layout/LayoutApplet.h"
+#include "core/layout/LayoutBlockFlow.h"
 #include "core/plugins/PluginPlaceholder.h"
-#include "core/rendering/RenderApplet.h"
-#include "core/rendering/RenderBlockFlow.h"
 #include "platform/Widget.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
@@ -53,7 +53,7 @@ HTMLAppletElement::HTMLAppletElement(Document& document, bool createdByParser)
 PassRefPtrWillBeRawPtr<HTMLAppletElement> HTMLAppletElement::create(Document& document, bool createdByParser)
 {
     RefPtrWillBeRawPtr<HTMLAppletElement> element = adoptRefWillBeNoop(new HTMLAppletElement(document, createdByParser));
-    element->ensureUserAgentShadowRoot();
+    element->ensureClosedShadowRoot();
     return element.release();
 }
 
@@ -83,34 +83,34 @@ bool HTMLAppletElement::hasLegalLinkAttribute(const QualifiedName& name) const
     return name == codebaseAttr || HTMLPlugInElement::hasLegalLinkAttribute(name);
 }
 
-bool HTMLAppletElement::rendererIsNeeded(const RenderStyle& style)
+bool HTMLAppletElement::layoutObjectIsNeeded(const ComputedStyle& style)
 {
-    if (!fastHasAttribute(codeAttr) && !hasAuthorShadowRoot())
+    if (!fastHasAttribute(codeAttr) && !hasOpenShadowRoot())
         return false;
-    return HTMLPlugInElement::rendererIsNeeded(style);
+    return HTMLPlugInElement::layoutObjectIsNeeded(style);
 }
 
-RenderObject* HTMLAppletElement::createRenderer(RenderStyle* style)
+LayoutObject* HTMLAppletElement::createLayoutObject(const ComputedStyle& style)
 {
-    if (!canEmbedJava() || hasAuthorShadowRoot())
-        return RenderObject::createObject(this, style);
+    if (!canEmbedJava() || hasOpenShadowRoot())
+        return LayoutObject::createObject(this, style);
 
     if (usePlaceholderContent())
-        return new RenderBlockFlow(this);
+        return new LayoutBlockFlow(this);
 
-    return new RenderApplet(this);
+    return new LayoutApplet(this);
 }
 
-RenderPart* HTMLAppletElement::renderPartForJSBindings() const
+LayoutPart* HTMLAppletElement::layoutPartForJSBindings() const
 {
     if (!canEmbedJava())
         return nullptr;
-    return HTMLPlugInElement::renderPartForJSBindings();
+    return HTMLPlugInElement::layoutPartForJSBindings();
 }
 
-RenderPart* HTMLAppletElement::existingRenderPart() const
+LayoutPart* HTMLAppletElement::existingLayoutPart() const
 {
-    return renderPart();
+    return layoutPart();
 }
 
 void HTMLAppletElement::updateWidgetInternal()
@@ -120,7 +120,7 @@ void HTMLAppletElement::updateWidgetInternal()
     if (!isFinishedParsingChildren())
         return;
 
-    RenderEmbeddedObject* renderer = renderEmbeddedObject();
+    LayoutEmbeddedObject* renderer = layoutEmbeddedObject();
 
     LocalFrame* frame = document().frame();
     ASSERT(frame);
@@ -193,7 +193,7 @@ void HTMLAppletElement::updateWidgetInternal()
 
     if (!placeholder && !widget) {
         if (!renderer->showsUnavailablePluginIndicator())
-            renderer->setPluginUnavailabilityReason(RenderEmbeddedObject::PluginMissing);
+            renderer->setPluginUnavailabilityReason(LayoutEmbeddedObject::PluginMissing);
         setPlaceholder(nullptr);
     } else if (placeholder) {
         setPlaceholder(placeholder.release());
@@ -227,8 +227,8 @@ bool HTMLAppletElement::canEmbedURL(const KURL& url) const
     }
 
     if (!document().contentSecurityPolicy()->allowObjectFromSource(url)
-        || !document().contentSecurityPolicy()->allowPluginType(m_serviceType, m_serviceType, url)) {
-        renderEmbeddedObject()->setPluginUnavailabilityReason(RenderEmbeddedObject::PluginBlockedByContentSecurityPolicy);
+        || !document().contentSecurityPolicy()->allowPluginTypeForDocument(document(), m_serviceType, m_serviceType, url)) {
+        layoutEmbeddedObject()->setPluginUnavailabilityReason(LayoutEmbeddedObject::PluginBlockedByContentSecurityPolicy);
         return false;
     }
     return true;

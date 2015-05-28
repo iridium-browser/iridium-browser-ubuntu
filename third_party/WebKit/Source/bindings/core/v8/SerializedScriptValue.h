@@ -32,6 +32,7 @@
 #define SerializedScriptValue_h
 
 #include "bindings/core/v8/ScriptValue.h"
+#include "core/CoreExport.h"
 #include "wtf/HashMap.h"
 #include "wtf/ThreadSafeRefCounted.h"
 #include <v8.h>
@@ -52,10 +53,10 @@ class WebBlobInfo;
 
 typedef WillBeHeapVector<RefPtrWillBeMember<MessagePort>, 1> MessagePortArray;
 typedef Vector<RefPtr<DOMArrayBuffer>, 1> ArrayBufferArray;
-typedef HashMap<String, RefPtr<BlobDataHandle> > BlobDataHandleMap;
+typedef HashMap<String, RefPtr<BlobDataHandle>> BlobDataHandleMap;
 typedef Vector<blink::WebBlobInfo> WebBlobInfoArray;
 
-class SerializedScriptValue : public ThreadSafeRefCounted<SerializedScriptValue> {
+class CORE_EXPORT SerializedScriptValue : public ThreadSafeRefCounted<SerializedScriptValue> {
 public:
     // Increment this for each incompatible change to the wire format.
     // Version 2: Added StringUCharTag for UChar v8 strings.
@@ -64,7 +65,8 @@ public:
     // Version 5: Added CryptoKeyTag for Key objects.
     // Version 6: Added indexed serialization for File, Blob, and FileList.
     // Version 7: Extended File serialization with user visibility.
-    static const uint32_t wireFormatVersion = 7;
+    // Version 8: File.lastModified in milliseconds (seconds-based in earlier versions.)
+    static const uint32_t wireFormatVersion = 8;
 
     // VarInt encoding constants.
     static const int varIntShift = 7;

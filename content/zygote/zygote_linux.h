@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_ZYGOTE_ZYGOTE_H_
-#define CONTENT_ZYGOTE_ZYGOTE_H_
+#ifndef CONTENT_ZYGOTE_ZYGOTE_LINUX_H_
+#define CONTENT_ZYGOTE_ZYGOTE_LINUX_H_
 
 #include <stddef.h>
 
@@ -53,6 +53,8 @@ class Zygote {
 
   // Returns true if the SUID sandbox is active.
   bool UsingSUIDSandbox() const;
+  // Returns true if the NS sandbox is active.
+  bool UsingNSSandbox() const;
 
   // ---------------------------------------------------------------------------
   // Requests from the browser...
@@ -136,4 +138,4 @@ class Zygote {
 
 }  // namespace content
 
-#endif  // CONTENT_ZYGOTE_ZYGOTE_H_
+#endif  // CONTENT_ZYGOTE_ZYGOTE_LINUX_H_

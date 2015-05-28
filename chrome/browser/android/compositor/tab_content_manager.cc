@@ -135,7 +135,7 @@ TabContentManager::TabContentManager(JNIEnv* env,
                                      jint compression_queue_max_size,
                                      jint write_queue_max_size,
                                      jboolean use_approximation_thumbnail)
-    : weak_factory_(this), weak_java_tab_content_manager_(env, obj) {
+    : weak_java_tab_content_manager_(env, obj), weak_factory_(this) {
   std::string disk_cache_path_str =
       base::android::ConvertJavaStringToUTF8(env, disk_cache_path);
   thumbnail_cache_ = make_scoped_ptr(new ThumbnailCache(
@@ -248,8 +248,7 @@ void TabContentManager::CacheTab(JNIEnv* env,
                                  jobject tab,
                                  jobject content_view_core,
                                  jfloat thumbnail_scale) {
-  TabAndroid* tab_android =
-      static_cast<TabAndroid*>(TabAndroid::GetNativeTab(env, tab));
+  TabAndroid* tab_android = TabAndroid::GetNativeTab(env, tab);
   DCHECK(tab_android);
   int tab_id = tab_android->GetAndroidId();
   GURL url = tab_android->GetURL();
@@ -285,8 +284,7 @@ void TabContentManager::CacheTabWithBitmap(JNIEnv* env,
                                            jobject tab,
                                            jobject bitmap,
                                            jfloat thumbnail_scale) {
-  TabAndroid* tab_android =
-      static_cast<TabAndroid*>(TabAndroid::GetNativeTab(env, tab));
+  TabAndroid* tab_android = TabAndroid::GetNativeTab(env, tab);
   DCHECK(tab_android);
   int tab_id = tab_android->GetAndroidId();
   GURL url = tab_android->GetURL();

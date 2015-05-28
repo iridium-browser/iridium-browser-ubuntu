@@ -25,7 +25,6 @@
 #include "ui/app_list/app_list_folder_item.h"
 #include "ui/app_list/app_list_item.h"
 #include "ui/app_list/app_list_model.h"
-#include "ui/app_list/app_list_switches.h"
 #include "ui/gfx/geometry/rect.h"
 
 #if defined(ENABLE_RLZ)
@@ -87,7 +86,7 @@ bool AppListControllerDelegate::UserMayModifySettings(
 }
 
 bool AppListControllerDelegate::CanDoShowAppInfoFlow() {
-  return app_list::switches::IsAppInfoEnabled();
+  return CanShowAppInfoDialog();
 }
 
 void AppListControllerDelegate::DoShowAppInfoFlow(
@@ -188,10 +187,7 @@ void AppListControllerDelegate::SetExtensionLaunchType(
     Profile* profile,
     const std::string& extension_id,
     extensions::LaunchType launch_type) {
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
-  extensions::SetLaunchType(
-      service, extension_id, launch_type);
+  extensions::SetLaunchType(profile, extension_id, launch_type);
 }
 
 bool AppListControllerDelegate::IsExtensionInstalled(

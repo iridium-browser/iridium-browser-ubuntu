@@ -40,8 +40,8 @@
 
 namespace blink {
 
-class RenderFullScreen;
-class RenderStyle;
+class LayoutFullScreen;
+class ComputedStyle;
 
 class Fullscreen final
     : public NoBaseWillBeGarbageCollectedFinalized<Fullscreen>
@@ -74,8 +74,8 @@ public:
     void didEnterFullScreenForElement(Element*);
     void didExitFullScreenForElement(Element*);
 
-    void setFullScreenRenderer(RenderFullScreen*);
-    RenderFullScreen* fullScreenRenderer() const { return m_fullScreenRenderer; }
+    void setFullScreenRenderer(LayoutFullScreen*);
+    LayoutFullScreen* fullScreenRenderer() const { return m_fullScreenRenderer; }
     void fullScreenRendererDestroyed();
 
     void elementRemoved(Element&);
@@ -88,7 +88,7 @@ public:
     virtual void documentWasDisposed() override;
 #endif
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     static Fullscreen* fromIfExistsSlow(Document&);
@@ -106,12 +106,12 @@ private:
     void eventQueueTimerFired(Timer<Fullscreen>*);
 
     RefPtrWillBeMember<Element> m_fullScreenElement;
-    WillBeHeapVector<std::pair<RefPtrWillBeMember<Element>, RequestType> > m_fullScreenElementStack;
-    RawPtrWillBeMember<RenderFullScreen> m_fullScreenRenderer;
+    WillBeHeapVector<std::pair<RefPtrWillBeMember<Element>, RequestType>> m_fullScreenElementStack;
+    LayoutFullScreen* m_fullScreenRenderer;
     Timer<Fullscreen> m_eventQueueTimer;
-    WillBeHeapDeque<RefPtrWillBeMember<Event> > m_eventQueue;
+    WillBeHeapDeque<RefPtrWillBeMember<Event>> m_eventQueue;
     LayoutRect m_savedPlaceholderFrameRect;
-    RefPtr<RenderStyle> m_savedPlaceholderRenderStyle;
+    RefPtr<ComputedStyle> m_savedPlaceholderComputedStyle;
 };
 
 inline bool Fullscreen::isActiveFullScreenElement(const Element& element)

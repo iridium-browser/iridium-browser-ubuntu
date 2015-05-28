@@ -160,7 +160,7 @@ void LogSigninProfile(bool is_first_run, base::Time install_date);
 void LogSignout(ProfileSignout metric);
 
 // Tracks whether the external connection results were all fetched before
-// the reconcilor tried to use them with MergeSession.
+// the gaia cookie manager service tried to use them with merge session.
 // |time_to_check_connections| is the time it took to complete.
 void LogExternalCcResultFetches(
     bool fetches_completed,
@@ -168,6 +168,8 @@ void LogExternalCcResultFetches(
 
 // Track when the current authentication error changed.
 void LogAuthError(GoogleServiceAuthError::State auth_error);
+
+void LogSigninConfirmHistogramValue(int action);
 
 }  // namespace signin_metrics
 

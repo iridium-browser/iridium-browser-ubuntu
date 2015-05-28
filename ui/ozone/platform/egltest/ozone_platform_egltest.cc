@@ -56,7 +56,7 @@ std::string GetShimLibraryName() {
 void ScaleTouchEvent(TouchEvent* event, const gfx::SizeF& size) {
   for (const auto& device :
        DeviceDataManager::GetInstance()->touchscreen_devices()) {
-    if (device.id == static_cast<unsigned int>(event->source_device_id())) {
+    if (device.id == event->source_device_id()) {
       gfx::SizeF touchscreen_size = device.size;
       gfx::PointF location = event->location_f();
 
@@ -223,7 +223,7 @@ class SurfaceOzoneEgltest : public SurfaceOzoneEGL {
   }
 
   scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() override {
-    return scoped_ptr<gfx::VSyncProvider>();
+    return nullptr;
   }
 
  private:
@@ -354,7 +354,7 @@ class OzonePlatformEgltest : public OzonePlatform {
         delegate, &eglplatform_shim_, event_factory_ozone_.get(), bounds));
   }
   scoped_ptr<NativeDisplayDelegate> CreateNativeDisplayDelegate() override {
-    return scoped_ptr<NativeDisplayDelegate>(new NativeDisplayDelegateOzone());
+    return make_scoped_ptr(new NativeDisplayDelegateOzone());
   }
 
   void InitializeUI() override {

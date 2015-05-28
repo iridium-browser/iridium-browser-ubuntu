@@ -33,7 +33,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/browser/install/crx_installer_error.h"
+#include "extensions/browser/install/crx_install_error.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/extension.h"
@@ -46,7 +46,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/users/fake_user_manager.h"
+#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/extensions/extension_assets_manager_chromeos.h"
 #include "chromeos/chromeos_switches.h"
@@ -118,7 +118,7 @@ class MockInstallPrompt : public ExtensionInstallPrompt {
     proxy_->set_extension_id(extension->id());
     base::MessageLoopForUI::current()->Quit();
   }
-  void OnInstallFailure(const CrxInstallerError& error) override {
+  void OnInstallFailure(const CrxInstallError& error) override {
     proxy_->set_error(error.message());
     base::MessageLoopForUI::current()->Quit();
   }
@@ -533,8 +533,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, KioskOnlyTest) {
 #if defined(OS_CHROMEOS)
   // Simulate ChromeOS kiosk mode. |scoped_user_manager| will take over
   // lifetime of |user_manager|.
-  chromeos::FakeUserManager* fake_user_manager =
-      new chromeos::FakeUserManager();
+  chromeos::FakeChromeUserManager* fake_user_manager =
+      new chromeos::FakeChromeUserManager();
   fake_user_manager->AddKioskAppUser("example@example.com");
   fake_user_manager->LoginUser("example@example.com");
   chromeos::ScopedUserManagerEnabler scoped_user_manager(fake_user_manager);
@@ -596,44 +596,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, ManagementPolicy) {
 
   base::FilePath crx_path = test_data_dir_.AppendASCII("crx_installer/v1.crx");
   EXPECT_FALSE(InstallExtension(crx_path, 0));
-}
-
-IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, WithheldElevationCheck) {
-  // Enable consent flag and install extension. The <all_hosts> permission will
-  // be withheld.
-  scoped_ptr<FeatureSwitch::ScopedOverride> enable_scripts_switch(
-      new FeatureSwitch::ScopedOverride(
-          FeatureSwitch::scripts_require_action(), true));
-
-  const char kManifest[] =
-      "{"
-      "  \"name\": \"Withheld test\","
-      "  \"version\": \"1.0\","
-      "  \"permissions\": ["
-      "    \"http://*/*\""
-      "  ],"
-      "  \"manifest_version\": 2"
-      "}";
-  TestExtensionDir dir;
-  dir.WriteManifest(kManifest);
-  base::FilePath crx_path = dir.Pack();
-  EXPECT_FALSE(crx_path.empty());
-  const Extension* extension = InstallExtension(crx_path, 1);
-  EXPECT_TRUE(base::PathExists(extension->path()));
-
-  std::string extension_id = extension->id();
-  ExtensionRegistry* registry = ExtensionRegistry::Get(
-      browser()->profile());
-  EXPECT_TRUE(registry->enabled_extensions().GetByID(extension_id));
-
-  // Disable consent flag and reinstall extension. It should now be disabled
-  // because previously withheld permissions are now being requested.
-  enable_scripts_switch.reset();
-  extension = InstallExtension(crx_path, -1);
-  EXPECT_FALSE(registry->enabled_extensions().GetByID(extension_id));
-  EXPECT_TRUE(registry->disabled_extensions().GetByID(extension_id));
-  EXPECT_TRUE(ExtensionPrefs::Get(browser()->profile())->GetDisableReasons(
-      extension_id) & Extension::DISABLE_PERMISSIONS_INCREASE);
 }
 
 }  // namespace extensions

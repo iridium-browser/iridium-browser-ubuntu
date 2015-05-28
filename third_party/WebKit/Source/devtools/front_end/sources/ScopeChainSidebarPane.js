@@ -30,7 +30,7 @@
  */
 WebInspector.ScopeChainSidebarPane = function()
 {
-    WebInspector.SidebarPane.call(this, WebInspector.UIString("Scope Variables"));
+    WebInspector.SidebarPane.call(this, WebInspector.UIString("Scope"));
     this._sections = [];
     /** @type {!Set.<?string>} */
     this._expandedSections = new Set();
@@ -67,15 +67,14 @@ WebInspector.ScopeChainSidebarPane.prototype = {
         this._sections = [];
 
         var foundLocalScope = false;
-        var scopeChain = callFrame.scopeChain;
+        var scopeChain = callFrame.scopeChain();
         for (var i = 0; i < scopeChain.length; ++i) {
             var scope = scopeChain[i];
             var title = null;
             var emptyPlaceholder = null;
             var extraProperties = [];
-            var declarativeScope = true;
 
-            switch (scope.type) {
+            switch (scope.type()) {
             case DebuggerAgent.ScopeType.Local:
                 foundLocalScope = true;
                 title = WebInspector.UIString("Local");
@@ -110,31 +109,26 @@ WebInspector.ScopeChainSidebarPane.prototype = {
                 break;
             case DebuggerAgent.ScopeType.With:
                 title = WebInspector.UIString("With Block");
-                declarativeScope = false;
                 break;
             case DebuggerAgent.ScopeType.Global:
                 title = WebInspector.UIString("Global");
-                declarativeScope = false;
                 break;
             }
 
-            var subtitle = declarativeScope ? undefined : scope.object.description;
+            var subtitle = scope.description();
             if (!title || title === subtitle)
                 subtitle = undefined;
 
-            var runtimeModel = callFrame.target().runtimeModel;
-            if (declarativeScope)
-                var scopeObject = runtimeModel.createScopeRemoteObject(scope.object, new WebInspector.ScopeRef(i, callFrame.id, undefined));
-            else
-                var scopeObject = runtimeModel.createRemoteObject(scope.object);
-
-            var section = new WebInspector.ObjectPropertiesSection(scopeObject, title, subtitle, emptyPlaceholder, true, extraProperties, WebInspector.ScopeVariableTreeElement);
+            var section = new WebInspector.ObjectPropertiesSection(scope.object(), title, subtitle, emptyPlaceholder, true, extraProperties);
+            section.propertiesTreeOutline.addEventListener(TreeOutline.Events.ElementAttached, this._elementAttached, this);
+            section.propertiesTreeOutline.addEventListener(TreeOutline.Events.ElementExpanded, this._elementExpanded, this);
+            section.propertiesTreeOutline.addEventListener(TreeOutline.Events.ElementCollapsed, this._elementCollapsed, this);
             section.editInSelectedCallFrameWhenPaused = true;
             section.pane = this;
 
-            if (scope.type === DebuggerAgent.ScopeType.Global)
+            if (scope.type() === DebuggerAgent.ScopeType.Global)
                 section.collapse();
-            else if (!foundLocalScope || scope.type === DebuggerAgent.ScopeType.Local || this._expandedSections.has(title))
+            else if (!foundLocalScope || scope.type() === DebuggerAgent.ScopeType.Local || this._expandedSections.has(title))
                 section.expand();
 
             this._sections.push(section);
@@ -142,49 +136,43 @@ WebInspector.ScopeChainSidebarPane.prototype = {
         }
     },
 
-    __proto__: WebInspector.SidebarPane.prototype
-}
-
-/**
- * @constructor
- * @extends {WebInspector.ObjectPropertyTreeElement}
- * @param {!WebInspector.RemoteObjectProperty} property
- */
-WebInspector.ScopeVariableTreeElement = function(property)
-{
-    WebInspector.ObjectPropertyTreeElement.call(this, property);
-}
-
-WebInspector.ScopeVariableTreeElement.prototype = {
-    onattach: function()
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _elementAttached: function(event)
     {
-        WebInspector.ObjectPropertyTreeElement.prototype.onattach.call(this);
-        if (this.hasChildren && this.treeOutline.section.pane._expandedProperties.has(this.propertyPath()))
-            this.expand();
-    },
-
-    onexpand: function()
-    {
-        this.treeOutline.section.pane._expandedProperties.add(this.propertyPath());
-    },
-
-    oncollapse: function()
-    {
-        this.treeOutline.section.pane._expandedProperties.delete(this.propertyPath());
+        var element = /** @type {!WebInspector.ObjectPropertyTreeElement} */ (event.data);
+        if (element.isExpandable() && this._expandedProperties.has(this._propertyPath(element)))
+            element.expand();
     },
 
     /**
-     * @override
-     * @return {string|undefined}
+     * @param {!WebInspector.Event} event
      */
-    propertyPath: function()
+    _elementExpanded: function(event)
     {
-        if (!this._propertyIdentifier) {
-            var section = this.treeOutline.section;
-            this._propertyIdentifier = section.title + ":" + (section.subtitle ? section.subtitle + ":" : "") + WebInspector.ObjectPropertyTreeElement.prototype.propertyPath.call(this);
-        }
-        return this._propertyIdentifier;
+        var element = /** @type {!WebInspector.ObjectPropertyTreeElement} */ (event.data);
+        this._expandedProperties.add(this._propertyPath(element));
     },
 
-    __proto__: WebInspector.ObjectPropertyTreeElement.prototype
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _elementCollapsed: function(event)
+    {
+        var element = /** @type {!WebInspector.ObjectPropertyTreeElement} */ (event.data);
+        this._expandedProperties.delete(this._propertyPath(element));
+    },
+
+    /**
+     * @param {!WebInspector.ObjectPropertyTreeElement} treeElement
+     * @return {string}
+     */
+    _propertyPath: function(treeElement)
+    {
+        var section = treeElement.treeOutline.section;
+        return section.title + ":" + (section.subtitle ? section.subtitle + ":" : "") + WebInspector.ObjectPropertyTreeElement.prototype.propertyPath.call(treeElement);
+    },
+
+    __proto__: WebInspector.SidebarPane.prototype
 }

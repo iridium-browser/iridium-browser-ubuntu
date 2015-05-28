@@ -127,7 +127,7 @@ WebInspector.RequestPreviewView.prototype = {
             return this._createMessageView(WebInspector.UIString("Failed to load response data"));
 
         var mimeType = this.request.mimeType || "";
-        if (mimeType === "application/json" || mimeType.endsWith("+json")) {
+        if (mimeType.endsWith("json") || mimeType.endsWith("javascript")) {
             var jsonView = this._jsonView();
             if (jsonView)
                 return jsonView;
@@ -144,12 +144,20 @@ WebInspector.RequestPreviewView.prototype = {
             return xmlView;
 
         if (this.request.resourceType() === WebInspector.resourceTypes.XHR) {
-            var jsonView = this._jsonView();
-            if (jsonView)
-                return jsonView;
-            var htmlErrorPreview = this._htmlErrorPreview();
-            if (htmlErrorPreview)
-                return htmlErrorPreview;
+            var isHtml = false;
+            try {
+                isHtml = !!((new DOMParser()).parseFromString(this._requestContent(), mimeType)).body;
+            } catch (e) {
+            }
+            if (!isHtml) {
+                var jsonView = this._jsonView();
+                if (jsonView)
+                    return jsonView;
+            } else {
+                var htmlErrorPreview = this._htmlErrorPreview();
+                if (htmlErrorPreview)
+                    return htmlErrorPreview;
+            }
         }
 
         if (this._responseView.sourceView)

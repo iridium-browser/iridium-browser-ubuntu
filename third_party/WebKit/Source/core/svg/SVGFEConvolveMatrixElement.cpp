@@ -96,7 +96,7 @@ inline SVGFEConvolveMatrixElement::SVGFEConvolveMatrixElement(Document& document
     addToPropertyMap(m_targetY);
 }
 
-void SVGFEConvolveMatrixElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFEConvolveMatrixElement)
 {
     visitor->trace(m_bias);
     visitor->trace(m_divisor);
@@ -129,11 +129,6 @@ bool SVGFEConvolveMatrixElement::isSupportedAttribute(const QualifiedName& attrN
         supportedAttributes.add(SVGNames::preserveAlphaAttr);
     }
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGFEConvolveMatrixElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
 }
 
 bool SVGFEConvolveMatrixElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)

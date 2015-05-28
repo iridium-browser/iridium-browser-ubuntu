@@ -35,10 +35,11 @@
  * @param {number} endLine
  * @param {number} endColumn
  * @param {boolean} isContentScript
+ * @param {boolean} isInternalScript
  * @param {string=} sourceMapURL
  * @param {boolean=} hasSourceURL
  */
-WebInspector.Script = function(target, scriptId, sourceURL, startLine, startColumn, endLine, endColumn, isContentScript, sourceMapURL, hasSourceURL)
+WebInspector.Script = function(target, scriptId, sourceURL, startLine, startColumn, endLine, endColumn, isContentScript, isInternalScript, sourceMapURL, hasSourceURL)
 {
     WebInspector.SDKObject.call(this, target);
     this.scriptId = scriptId;
@@ -48,6 +49,7 @@ WebInspector.Script = function(target, scriptId, sourceURL, startLine, startColu
     this.endLine = endLine;
     this.endColumn = endColumn;
     this._isContentScript = isContentScript;
+    this._isInternalScript = isInternalScript;
     this.sourceMapURL = sourceMapURL;
     this.hasSourceURL = hasSourceURL;
 }
@@ -56,8 +58,6 @@ WebInspector.Script.Events = {
     ScriptEdited: "ScriptEdited",
     SourceMapURLAdded: "SourceMapURLAdded",
 }
-
-WebInspector.Script.snippetSourceURLPrefix = "snippets:///";
 
 WebInspector.Script.sourceURLRegex = /\n[\040\t]*\/\/[@#]\ssourceURL=\s*(\S*?)\s*$/mg;
 
@@ -78,6 +78,14 @@ WebInspector.Script.prototype = {
     isContentScript: function()
     {
         return this._isContentScript;
+    },
+
+    /**
+     * @return {boolean}
+     */
+    isInternalScript: function()
+    {
+        return this._isInternalScript;
     },
 
     /**
@@ -131,18 +139,21 @@ WebInspector.Script.prototype = {
      * @param {string} query
      * @param {boolean} caseSensitive
      * @param {boolean} isRegex
-     * @param {function(!Array.<!PageAgent.SearchMatch>)} callback
+     * @param {function(!Array.<!DebuggerAgent.SearchMatch>)} callback
      */
     searchInContent: function(query, caseSensitive, isRegex, callback)
     {
         /**
          * @param {?Protocol.Error} error
-         * @param {!Array.<!PageAgent.SearchMatch>} searchMatches
+         * @param {!Array.<!DebuggerAgent.SearchMatch>} searchMatches
          */
         function innerCallback(error, searchMatches)
         {
-            if (error)
+            if (error) {
                 console.error(error);
+                callback([]);
+                return;
+            }
             var result = [];
             for (var i = 0; i < searchMatches.length; ++i) {
                 var searchMatch = new WebInspector.ContentProvider.SearchMatch(searchMatches[i].lineNumber, searchMatches[i].lineContent);
@@ -241,14 +252,6 @@ WebInspector.Script.prototype = {
     isAnonymousScript: function()
     {
         return !this.sourceURL;
-    },
-
-    /**
-     * @return {boolean}
-     */
-    isSnippet: function()
-    {
-        return !!this.sourceURL && this.sourceURL.startsWith(WebInspector.Script.snippetSourceURLPrefix);
     },
 
     /**

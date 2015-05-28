@@ -30,7 +30,10 @@ class MockCloudPolicyClient : public CloudPolicyClient {
   MOCK_METHOD0(Unregister, void(void));
   MOCK_METHOD2(UploadCertificate,
                void(const std::string&, const StatusCallback&));
-
+  MOCK_METHOD3(UploadDeviceStatus,
+               void(const enterprise_management::DeviceStatusReportRequest*,
+                    const enterprise_management::SessionStatusReportRequest*,
+                    const StatusCallback&));
   // Sets the DMToken.
   void SetDMToken(const std::string& token);
 
@@ -38,6 +41,10 @@ class MockCloudPolicyClient : public CloudPolicyClient {
   void SetPolicy(const std::string& policy_type,
                  const std::string& settings_entity_id,
                  const enterprise_management::PolicyFetchResponse& policy);
+
+  // Inject invalidation version.
+  void SetFetchedInvalidationVersion(
+      int64_t fetched_invalidation_version);
 
   // Sets the status field.
   void SetStatus(DeviceManagementStatus status);

@@ -58,8 +58,8 @@
 
 
 static const SSL_PROTOCOL_METHOD TLS_protocol_method = {
+    0 /* is_dtls */,
     ssl3_new,
-    ssl3_clear,
     ssl3_free,
     ssl3_accept,
     ssl3_connect,
@@ -78,9 +78,11 @@ static const SSL_PROTOCOL_METHOD TLS_protocol_method = {
     ssl3_pending,
     ssl3_num_ciphers,
     ssl3_get_cipher,
-    ssl_undefined_void_function,
     ssl3_callback_ctrl,
     ssl3_ctx_callback_ctrl,
+    SSL3_HM_HEADER_LENGTH,
+    ssl3_set_handshake_header,
+    ssl3_handshake_write,
 };
 
 const SSL_METHOD *TLS_method(void) {

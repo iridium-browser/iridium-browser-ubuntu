@@ -18,11 +18,11 @@ public:
     static GrPathRenderer* Create(GrContext* context);
 
     virtual bool canDrawPath(const GrDrawTarget*,
-                             const GrDrawState*,
+                             const GrPipelineBuilder*,
                              const SkMatrix& viewMatrix,
                              const SkPath&,
                              const SkStrokeRec&,
-                             bool antiAlias) const SK_OVERRIDE;
+                             bool antiAlias) const override;
 
     typedef SkTArray<SkPoint, true> PtArray;
     typedef SkTArray<int, true> IntArray;
@@ -30,42 +30,17 @@ public:
 
 protected:
     virtual bool onDrawPath(GrDrawTarget*,
-                            GrDrawState*,
+                            GrPipelineBuilder*,
                             GrColor,
                             const SkMatrix& viewMatrix,
                             const SkPath&,
                             const SkStrokeRec&,
-                            bool antiAlias) SK_OVERRIDE;
+                            bool antiAlias) override;
 
 private:
     GrAAHairLinePathRenderer(const GrContext* context,
                              const GrIndexBuffer* fLinesIndexBuffer,
                              const GrIndexBuffer* fQuadsIndexBuffer);
-
-    bool createLineGeom(GrDrawTarget* target,
-                        GrDrawState*,
-                        const SkMatrix& viewMatrix,
-                        uint8_t coverage,
-                        size_t vertexStride,
-                        GrDrawTarget::AutoReleaseGeometry* arg,
-                        SkRect* devBounds,
-                        const SkPath& path,
-                        const PtArray& lines,
-                        int lineCnt);
-
-    bool createBezierGeom(GrDrawTarget* target,
-                          GrDrawState*,
-                          const SkMatrix& viewMatrix,
-                          GrDrawTarget::AutoReleaseGeometry* arg,
-                          SkRect* devBounds,
-                          const SkPath& path,
-                          const PtArray& quads,
-                          int quadCnt,
-                          const PtArray& conics,
-                          int conicCnt,
-                          const IntArray& qSubdivs,
-                          const FloatArray& cWeights,
-                          size_t vertexStride);
 
     const GrIndexBuffer*        fLinesIndexBuffer;
     const GrIndexBuffer*        fQuadsIndexBuffer;

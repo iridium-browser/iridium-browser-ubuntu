@@ -23,6 +23,8 @@
         'component_metrics_proto',
       ],
       'sources': [
+        'metrics/call_stack_profile_metrics_provider.cc',
+        'metrics/call_stack_profile_metrics_provider.h',
         'metrics/clean_exit_beacon.cc',
         'metrics/clean_exit_beacon.h',
         'metrics/client_info.cc',
@@ -66,6 +68,8 @@
         'metrics/metrics_switches.h',
         'metrics/persisted_logs.cc',
         'metrics/persisted_logs.h',
+        'metrics/url_constants.cc',
+        'metrics/url_constants.h',
       ],
       'conditions': [
         ['chromeos==1', {
@@ -114,10 +118,10 @@
         'metrics',
       ],
       'sources': [
-        'metrics/net/network_metrics_provider.cc',
-        'metrics/net/network_metrics_provider.h',
         'metrics/net/net_metrics_log_uploader.cc',
         'metrics/net/net_metrics_log_uploader.h',
+        'metrics/net/network_metrics_provider.cc',
+        'metrics/net/network_metrics_provider.h',
         'metrics/net/wifi_access_point_info_provider.cc',
         'metrics/net/wifi_access_point_info_provider.h',
         'metrics/net/wifi_access_point_info_provider_chromeos.cc',
@@ -156,6 +160,7 @@
       'target_name': 'component_metrics_proto',
       'type': 'static_library',
       'sources': [
+        'metrics/proto/call_stack_profile.proto',
         'metrics/proto/cast_logs.proto',
         'metrics/proto/chrome_user_metrics_extension.proto',
         'metrics/proto/histogram_event.proto',
@@ -202,10 +207,10 @@
           'target_name': 'metrics_serialization',
           'type': 'static_library',
           'sources': [
-            'metrics/serialization/serialization_utils.cc',
-            'metrics/serialization/serialization_utils.h',
             'metrics/serialization/metric_sample.cc',
             'metrics/serialization/metric_sample.h',
+            'metrics/serialization/serialization_utils.cc',
+            'metrics/serialization/serialization_utils.h',
           ],
           'dependencies': [
             '../base/base.gyp:base',

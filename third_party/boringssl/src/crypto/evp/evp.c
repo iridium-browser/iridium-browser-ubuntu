@@ -57,6 +57,7 @@
 #include <openssl/evp.h>
 
 #include <assert.h>
+#include <string.h>
 
 #include <openssl/bio.h>
 #include <openssl/dh.h>
@@ -108,12 +109,6 @@ void EVP_PKEY_free(EVP_PKEY *pkey) {
   }
 
   free_it(pkey);
-  if (pkey->attributes) {
-    /* TODO(fork): layering: X509_ATTRIBUTE_free is an X.509 function. In
-     * practice this path isn't called but should be removed in the future. */
-    /*sk_X509_ATTRIBUTE_pop_free(pkey->attributes, X509_ATTRIBUTE_free);*/
-    assert(0);
-  }
   OPENSSL_free(pkey);
 }
 
@@ -141,8 +136,9 @@ int EVP_PKEY_cmp(const EVP_PKEY *a, const EVP_PKEY *b) {
     /* Compare parameters if the algorithm has them */
     if (a->ameth->param_cmp) {
       ret = a->ameth->param_cmp(a, b);
-      if (ret <= 0)
+      if (ret <= 0) {
         return ret;
+      }
     }
 
     if (a->ameth->pub_cmp) {
@@ -235,18 +231,19 @@ EVP_PKEY *EVP_PKEY_new_mac_key(int type, ENGINE *e, const uint8_t *mac_key,
     return NULL;
   }
 
-  if (EVP_PKEY_keygen_init(mac_ctx) <= 0 ||
-      EVP_PKEY_CTX_ctrl(mac_ctx, -1, EVP_PKEY_OP_KEYGEN,
-                        EVP_PKEY_CTRL_SET_MAC_KEY, mac_key_len,
-                        (uint8_t *)mac_key) <= 0 ||
-      EVP_PKEY_keygen(mac_ctx, &ret) <= 0) {
+  if (!EVP_PKEY_keygen_init(mac_ctx) ||
+      !EVP_PKEY_CTX_ctrl(mac_ctx, -1, EVP_PKEY_OP_KEYGEN,
+                         EVP_PKEY_CTRL_SET_MAC_KEY, mac_key_len,
+                         (uint8_t *)mac_key) ||
+      !EVP_PKEY_keygen(mac_ctx, &ret)) {
     ret = NULL;
     goto merr;
   }
 
 merr:
-  if (mac_ctx)
+  if (mac_ctx) {
     EVP_PKEY_CTX_free(mac_ctx);
+  }
   return ret;
 }
 

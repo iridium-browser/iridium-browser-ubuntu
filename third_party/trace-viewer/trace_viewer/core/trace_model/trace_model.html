@@ -5,20 +5,25 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 <link rel="import" href="/base/base.html">
-<link rel="import" href="/base/range.html">
 <link rel="import" href="/base/events.html">
 <link rel="import" href="/base/interval_tree.html">
+<link rel="import" href="/base/range.html">
+<link rel="import" href="/base/task.html">
 <link rel="import" href="/base/ui/overlay.html">
 <link rel="import" href="/core/filter.html">
+<link rel="import" href="/core/auditor.html">
 <link rel="import" href="/core/importer/empty_importer.html">
 <link rel="import" href="/core/importer/importer.html">
-<link rel="import" href="/core/importer/task.html">
 <link rel="import" href="/core/trace_model/kernel.html">
 <link rel="import" href="/core/trace_model/process.html">
 <link rel="import" href="/core/trace_model/sample.html">
 <link rel="import" href="/core/trace_model/stack_frame.html">
 <link rel="import" href="/core/trace_model/instant_event.html">
 <link rel="import" href="/core/trace_model/flow_event.html">
+<link rel="import" href="/core/trace_model/global_memory_dump.html">
+<link rel="import" href="/core/trace_model/process_memory_dump.html">
+<link rel="import" href="/core/trace_model/alert.html">
+<link rel="import" href="/core/trace_model/interaction_record.html">
 
 <script>
 'use strict';
@@ -44,16 +49,56 @@ tv.exportTo('tv.c', function() {
   var Process = tv.c.trace_model.Process;
   var Kernel = tv.c.trace_model.Kernel;
 
+  function ImportOptions() {
+    this.shiftWorldToZero = true;
+    this.pruneEmptyContainers = true;
+
+    // Callback called after
+    // importers run in which more data can be added to the model, before it is
+    // finalized.
+    this.customizeModelCallback = undefined;
+
+    var auditorTypes = tv.c.Auditor.getAllRegisteredTypeInfos();
+    this.auditorConstructors = auditorTypes.map(function(typeInfo) {
+      return typeInfo.constructor;
+    });
+  }
+
+  ImportOptions.fromArguments = function(args, argsStartIndex) {
+    var arg0 = args[argsStartIndex + 0];
+    if (typeof arg0 === 'object') {
+      if (!(arg0 instanceof ImportOptions))
+        throw new Error('Unexpected');
+      return arg0;
+    }
+    var options = new ImportOptions();
+    if (args[argsStartIndex] !== undefined)
+      options.shiftWorldToZero = args[argsStartIndex];
+
+    if (args[argsStartIndex + 1] !== undefined)
+      options.pruneEmptyContainers = args[argsStartIndex + 1];
+
+    if (args[argsStartIndex + 2])
+      options.customizeModelCallback = args[argsStartIndex + 2];
+
+    return options;
+  }
+
+  function ClockSyncRecord(name, ts, args) {
+    this.name = name;
+    this.ts = ts;
+    this.args = args;
+  }
+
   /**
    * Builds a model from an array of TraceEvent objects.
    * @param {Object=} opt_eventData Data from a single trace to be imported into
    *     the new model. See TraceModel.importTraces for details on how to
    *     import multiple traces at once.
-   * @param {bool=} opt_shiftWorldToZero Whether to shift the world to zero.
-   * Defaults to true.
+   * @param {ImportOptions=} opt_options Options for the import.
    * @constructor
    */
-  function TraceModel(opt_eventData, opt_shiftWorldToZero) {
+  function TraceModel(opt_eventData, opt_options) {
     this.kernel = new Kernel(this);
     this.processes = {};
     this.metadata = [];
@@ -61,19 +106,26 @@ tv.exportTo('tv.c', function() {
     this.bounds = new tv.b.Range();
     this.instantEvents = [];
     this.flowEvents = [];
+    this.clockSyncRecords = [];
 
     this.stackFrames = {};
     this.samples = [];
+
+    this.alerts = [];
+    this.interaction_records = [];
 
     this.flowIntervalTree = new tv.b.IntervalTree(
         function(s) { return s.start; },
         function(e) { return e.start; });
 
+    this.globalMemoryDumps = [];
+
     this.importWarnings_ = [];
     this.reportedImportWarnings_ = {};
 
+    var options = ImportOptions.fromArguments(arguments, 1);
     if (opt_eventData)
-      this.importTraces([opt_eventData], opt_shiftWorldToZero);
+      this.importTraces([opt_eventData], options);
   }
 
   TraceModel.prototype = {
@@ -115,6 +167,16 @@ tv.exportTo('tv.c', function() {
       return stackFrame;
     },
 
+    addInteractionRecord: function(ir1) {
+      this.interaction_records.push(ir1);
+    },
+
+    getClockSyncRecordsNamed: function(name) {
+      return this.clockSyncRecords.filter(function(x) {
+        return x.name === name;
+      });
+    },
+
     /**
      * Generates the set of categories from the slices and counters.
      */
@@ -140,6 +202,18 @@ tv.exportTo('tv.c', function() {
         this.processes[pid].updateBounds();
         this.bounds.addRange(this.processes[pid].bounds);
       }
+
+      for (var i = 0; i < this.globalMemoryDumps.length; i++)
+        this.globalMemoryDumps[i].addBoundsToRange(this.bounds);
+
+      this.alerts.forEach(function(alert) {
+        this.bounds.addValue(alert.start);
+        this.bounds.addValue(alert.end);
+      }, this);
+      this.interaction_records.forEach(function(ir) {
+        this.bounds.addValue(ir.start);
+        this.bounds.addValue(ir.end);
+      }, this);
     },
 
     shiftWorldToZero: function() {
@@ -158,6 +232,15 @@ tv.exportTo('tv.c', function() {
         var sample = this.samples[i];
         sample.start -= timeBase;
       }
+      this.alerts.forEach(function(alert) {
+        alert.start -= timeBase;
+      });
+      this.interaction_records.forEach(function(ir) {
+        ir.start -= timeBase;
+      });
+
+      for (var i = 0; i < this.globalMemoryDumps.length; i++)
+        this.globalMemoryDumps[i].shiftTimestampsForward(-timeBase);
 
       this.updateBounds();
     },
@@ -246,28 +329,19 @@ tv.exportTo('tv.c', function() {
      * @param {Array} traces An array of eventData to be imported. Each
      * eventData should correspond to a single trace file and will be handled by
      * a separate importer.
-     * @param {bool=} opt_shiftWorldToZero Whether to shift the world to zero.
-     * Defaults to true.
-     * @param {bool=} opt_pruneEmptyContainers Whether to prune empty
-     * containers. Defaults to true.
-     * @param {Function=} opt_customizeModelCallback Callback called after
-     * importers run in which more data can be added to the model, before it is
-     * finalized.
+     * @param {ImportOptions} options Options for the import, or undefined for
+     * default options.
      */
-    importTraces: function(traces,
-                           opt_shiftWorldToZero,
-                           opt_pruneEmptyContainers,
-                           opt_customizeModelCallback) {
+    importTraces: function(traces, opt_options) {
       var progressMeter = {
         update: function(msg) {}
       };
+      var options = ImportOptions.fromArguments(arguments, 1);
       var task = this.createImportTracesTask(
           progressMeter,
           traces,
-          opt_shiftWorldToZero,
-          opt_pruneEmptyContainers,
-          opt_customizeModelCallback);
-      tv.c.importer.Task.RunSynchronously(task);
+          options);
+      tv.b.Task.RunSynchronously(task);
     },
 
     /**
@@ -275,10 +349,9 @@ tv.exportTo('tv.c', function() {
      * does so using idle callbacks, putting up an import dialog
      * during the import process.
      */
-    importTracesWithProgressDialog: function(traces,
-                                             opt_shiftWorldToZero,
-                                             opt_pruneEmptyContainers,
-                                             opt_customizeModelCallback) {
+    importTracesWithProgressDialog: function(traces, opt_options) {
+      var options = ImportOptions.fromArguments(arguments, 1);
+
       var overlay = tv.b.ui.Overlay();
       overlay.title = 'Importing...';
       overlay.userCanClose = false;
@@ -293,10 +366,8 @@ tv.exportTo('tv.c', function() {
       var task = this.createImportTracesTask(
           overlay,
           traces,
-          opt_shiftWorldToZero,
-          opt_pruneEmptyContainers,
-          opt_customizeModelCallback);
-      var promise = tv.c.importer.Task.RunWhenIdle(task);
+          options);
+      var promise = tv.b.Task.RunWhenIdle(task);
       promise.then(
           function() {
             overlay.visible = false;
@@ -324,21 +395,17 @@ tv.exportTo('tv.c', function() {
      */
     createImportTracesTask: function(progressMeter,
                                      traces,
-                                     opt_shiftWorldToZero,
-                                     opt_pruneEmptyContainers,
-                                     opt_customizeModelCallback) {
+                                     opt_options) {
+      var options = ImportOptions.fromArguments(arguments, 2);
+
       if (this.importing_)
         throw new Error('Already importing.');
-      if (opt_shiftWorldToZero === undefined)
-        opt_shiftWorldToZero = true;
-      if (opt_pruneEmptyContainers === undefined)
-        opt_pruneEmptyContainers = true;
       this.importing_ = true;
 
       // Just some simple setup. It is useful to have a nop first
       // task so that we can set up the lastTask = lastTask.after()
       // pattern that follows.
-      var importTask = new tv.c.importer.Task(function() {
+      var importTask = new tv.b.Task(function() {
         progressMeter.update('I will now import your traces for you...');
       }, this);
       var lastTask = importTask;
@@ -370,8 +437,10 @@ tv.exportTo('tv.c', function() {
           }
         }
 
-        if (traces.length && !this.hasEventDataDecoder_(importers))
-          throw new Error('Could not find an importer for the provided eventData.');
+        if (traces.length && !this.hasEventDataDecoder_(importers)) {
+          throw new Error('Could not find an importer for ' +
+                          'the provided eventData.');
+        }
 
         // Sort them on priority. This ensures importing happens in a
         // predictable order, e.g. linux_perf_importer before
@@ -393,9 +462,9 @@ tv.exportTo('tv.c', function() {
       }, this);
 
       // Run the cusomizeModelCallback if needed.
-      if (opt_customizeModelCallback) {
+      if (options.customizeModelCallback) {
         lastTask = lastTask.after(function(task) {
-          opt_customizeModelCallback(this);
+          options.customizeModelCallback(this);
         }, this);
       }
 
@@ -443,7 +512,7 @@ tv.exportTo('tv.c', function() {
       }, this);
 
       // Prune empty containers.
-      if (opt_pruneEmptyContainers) {
+      if (options.pruneEmptyContainers) {
         lastTask = lastTask.after(function() {
           progressMeter.update('Pruning empty containers...');
           this.kernel.pruneEmptyContainers();
@@ -465,7 +534,7 @@ tv.exportTo('tv.c', function() {
         this.updateBounds();
         this.updateCategories_();
 
-        if (opt_shiftWorldToZero)
+        if (options.shiftWorldToZero)
           this.shiftWorldToZero();
       }, this);
 
@@ -493,11 +562,42 @@ tv.exportTo('tv.c', function() {
           this.processes[pid].autoDeleteObjects(this.bounds.max);
       }, this);
 
+      // Sort global and process memory dumps.
+      lastTask = lastTask.after(function() {
+        progressMeter.update('Sorting memory dumps...');
+        this.globalMemoryDumps.sort(function(x, y) {
+          return x.start - y.start;
+        });
+        for (var pid in this.processes)
+          this.processes[pid].sortMemoryDumps();
+      }, this);
+
       // Run initializers.
       lastTask = lastTask.after(function() {
         progressMeter.update('Initializing objects (step 2/2)...');
         for (var pid in this.processes)
           this.processes[pid].initializeObjects();
+      }, this);
+
+      // Run audits.
+      lastTask = lastTask.after(function() {
+        progressMeter.update('Running auditors...');
+        var auditors = options.auditorConstructors.map(
+          function(auditorConstructor) {
+            return new auditorConstructor(this);
+          }, this);
+        auditors.forEach(function(auditor) {
+          auditor.runAudit();
+        });
+
+        this.interaction_records.sort(function(x, y) {
+          return x.start - y.start;
+        });
+        this.alerts.sort(function(x, y) {
+          return x.start - y.start;
+        });
+
+        this.updateBounds();
       }, this);
 
       // Cleanup.
@@ -546,6 +646,8 @@ tv.exportTo('tv.c', function() {
         this.processes[pid].iterateAllEvents(callback, opt_this);
 
       this.samples.forEach(callback, opt_this);
+
+      this.globalMemoryDumps.forEach(callback, opt_this);
     },
 
     /**
@@ -557,10 +659,18 @@ tv.exportTo('tv.c', function() {
       this.kernel.iterateAllPersistableObjects(cb);
       for (var pid in this.processes)
         this.processes[pid].iterateAllPersistableObjects(cb);
+    },
+
+    iterateAllEventContainers: function(cb) {
+      this.kernel.iterateAllEventContainers(cb);
+      for (var pid in this.processes)
+        this.processes[pid].iterateAllEventContainers(cb);
     }
   };
 
   return {
+    ImportOptions: ImportOptions,
+    ClockSyncRecord: ClockSyncRecord,
     TraceModel: TraceModel
   };
 });

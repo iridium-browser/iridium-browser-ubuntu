@@ -46,13 +46,14 @@
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/shadow/TextControlInnerElements.h"
+#include "core/layout/compositing/CompositedSelectionBound.h"
+#include "core/style/ComputedStyleConstants.h"
+#include "core/loader/FrameLoaderClient.h"
 #include "core/loader/FrameLoaderTypes.h"
 #include "core/loader/NavigationPolicy.h"
 #include "core/loader/appcache/ApplicationCacheHost.h"
 #include "core/page/InjectedStyleSheets.h"
 #include "core/page/PageVisibilityState.h"
-#include "core/rendering/compositing/CompositedSelectionBound.h"
-#include "core/rendering/style/RenderStyleConstants.h"
 #include "modules/accessibility/AXObject.h"
 #include "modules/geolocation/GeolocationError.h"
 #include "modules/geolocation/GeolocationPosition.h"
@@ -113,6 +114,7 @@
 #include "public/web/WebContentSecurityPolicy.h"
 #include "public/web/WebFontDescription.h"
 #include "public/web/WebFormElement.h"
+#include "public/web/WebFrameClient.h"
 #include "public/web/WebGeolocationError.h"
 #include "public/web/WebGeolocationPosition.h"
 #include "public/web/WebHistoryCommitType.h"
@@ -122,6 +124,7 @@
 #include "public/web/WebInputEvent.h"
 #include "public/web/WebNavigationPolicy.h"
 #include "public/web/WebNavigatorContentUtilsClient.h"
+#include "public/web/WebSandboxFlags.h"
 #include "public/web/WebSecurityPolicy.h"
 #include "public/web/WebSerializedScriptValueVersion.h"
 #include "public/web/WebSettings.h"
@@ -158,6 +161,7 @@ STATIC_ASSERT_MATCHING_ENUM(WebAXEventLiveRegionChanged, AXObjectCache::AXLiveRe
 STATIC_ASSERT_MATCHING_ENUM(WebAXEventLoadComplete, AXObjectCache::AXLoadComplete);
 STATIC_ASSERT_MATCHING_ENUM(WebAXEventLocationChanged, AXObjectCache::AXLocationChanged);
 STATIC_ASSERT_MATCHING_ENUM(WebAXEventMenuListItemSelected, AXObjectCache::AXMenuListItemSelected);
+STATIC_ASSERT_MATCHING_ENUM(WebAXEventMenuListItemUnselected, AXObjectCache::AXMenuListItemUnselected);
 STATIC_ASSERT_MATCHING_ENUM(WebAXEventMenuListValueChanged, AXObjectCache::AXMenuListValueChanged);
 STATIC_ASSERT_MATCHING_ENUM(WebAXEventRowCollapsed, AXObjectCache::AXRowCollapsed);
 STATIC_ASSERT_MATCHING_ENUM(WebAXEventRowCountChanged, AXObjectCache::AXRowCountChanged);
@@ -262,6 +266,7 @@ STATIC_ASSERT_MATCHING_ENUM(WebAXRoleScrollArea, ScrollAreaRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleScrollBar, ScrollBarRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleSeamlessWebArea, SeamlessWebAreaRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleSearch, SearchRole);
+STATIC_ASSERT_MATCHING_ENUM(WebAXRoleSearchBox, SearchBoxRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleSlider, SliderRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleSliderThumb, SliderThumbRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleSpinButtonPart, SpinButtonPartRole);
@@ -269,6 +274,7 @@ STATIC_ASSERT_MATCHING_ENUM(WebAXRoleSpinButton, SpinButtonRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleSplitter, SplitterRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleStaticText, StaticTextRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleStatus, StatusRole);
+STATIC_ASSERT_MATCHING_ENUM(WebAXRoleSwitch, SwitchRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleTabGroup, TabGroupRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleTabList, TabListRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleTabPanel, TabPanelRole);
@@ -315,6 +321,12 @@ STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionLR, AccessibilityTextDirectionLeft
 STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionRL, AccessibilityTextDirectionRightToLeft);
 STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionTB, AccessibilityTextDirectionTopToBottom);
 STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionBT, AccessibilityTextDirectionBottomToTop);
+
+STATIC_ASSERT_MATCHING_ENUM(WebAXSortDirectionUndefined, SortDirectionUndefined);
+STATIC_ASSERT_MATCHING_ENUM(WebAXSortDirectionNone, SortDirectionNone);
+STATIC_ASSERT_MATCHING_ENUM(WebAXSortDirectionAscending, SortDirectionAscending);
+STATIC_ASSERT_MATCHING_ENUM(WebAXSortDirectionDescending, SortDirectionDescending);
+STATIC_ASSERT_MATCHING_ENUM(WebAXSortDirectionOther, SortDirectionOther);
 
 STATIC_ASSERT_MATCHING_ENUM(WebAXExpandedUndefined, ExpandedUndefined);
 STATIC_ASSERT_MATCHING_ENUM(WebAXExpandedCollapsed, ExpandedCollapsed);
@@ -651,6 +663,12 @@ STATIC_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsNone, V8CacheOptionsNone)
 STATIC_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsParseMemory, V8CacheOptionsParseMemory);
 STATIC_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsHeuristics, V8CacheOptionsHeuristics);
 STATIC_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsHeuristicsMobile, V8CacheOptionsHeuristicsMobile);
+STATIC_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsHeuristics, V8CacheOptionsHeuristics);
+STATIC_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsHeuristicsMobile, V8CacheOptionsHeuristicsMobile);
+STATIC_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsHeuristicsDefault, V8CacheOptionsHeuristicsDefault);
+STATIC_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsHeuristicsDefaultMobile, V8CacheOptionsHeuristicsDefaultMobile);
+STATIC_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsRecent, V8CacheOptionsRecent);
+STATIC_ASSERT_MATCHING_ENUM(WebSettings::V8CacheOptionsRecentSmall, V8CacheOptionsRecentSmall);
 
 STATIC_ASSERT_MATCHING_ENUM(WebSettings::PointerTypeNone, PointerTypeNone);
 STATIC_ASSERT_MATCHING_ENUM(WebSettings::PointerTypeCoarse, PointerTypeCoarse);
@@ -666,4 +684,19 @@ STATIC_ASSERT_MATCHING_ENUM(WebSecurityPolicy::PolicyAreaAll, SchemeRegistry::Po
 
 STATIC_ASSERT_MATCHING_UINT64(kSerializedScriptValueVersion, SerializedScriptValue::wireFormatVersion);
 
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::None, SandboxNone);
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::Navigation, SandboxNavigation);
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::Plugins, SandboxPlugins);
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::Origin, SandboxOrigin);
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::Forms, SandboxForms);
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::Scripts, SandboxScripts);
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::TopNavigation, SandboxTopNavigation);
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::Popups, SandboxPopups);
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::AutomaticFeatures, SandboxAutomaticFeatures);
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::PointerLock, SandboxPointerLock);
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::DocumentDomain, SandboxDocumentDomain);
+STATIC_ASSERT_MATCHING_ENUM(WebSandboxFlags::OrientationLock, SandboxOrientationLock);
+
+STATIC_ASSERT_MATCHING_ENUM(FrameLoaderClient::BeforeUnloadHandler, WebFrameClient::BeforeUnloadHandler);
+STATIC_ASSERT_MATCHING_ENUM(FrameLoaderClient::UnloadHandler, WebFrameClient::UnloadHandler);
 } // namespace blink

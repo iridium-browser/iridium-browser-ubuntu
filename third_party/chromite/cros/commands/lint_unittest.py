@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -8,13 +7,13 @@
 from __future__ import print_function
 
 import collections
-import os
-import sys
-
-sys.path.insert(0, os.path.abspath('%s/../../..' % os.path.dirname(__file__)))
+import StringIO
 
 from chromite.lib import cros_test_lib
-import lint
+from chromite.cros.commands import lint
+
+
+# pylint: disable=protected-access
 
 
 class TestNode(object):
@@ -36,7 +35,25 @@ class TestNode(object):
     return self.args
 
 
-class DocStringCheckerTest(cros_test_lib.TestCase):
+class CheckerTestCase(cros_test_lib.TestCase):
+  """Helpers for Checker modules"""
+
+  def add_message(self, msg_id, node=None, line=None, args=None):
+    """Capture lint checks"""
+    # We include node.doc here explicitly so the pretty assert message
+    # inclues it in the output automatically.
+    doc = node.doc if node else ''
+    self.results.append((msg_id, doc, line, args))
+
+  def setUp(self):
+    assert hasattr(self, 'CHECKER'), 'TestCase must set CHECKER'
+
+    self.results = []
+    self.checker = self.CHECKER()
+    self.checker.add_message = self.add_message
+
+
+class DocStringCheckerTest(CheckerTestCase):
   """Tests for DocStringChecker module"""
 
   GOOD_FUNC_DOCSTRINGS = (
@@ -146,16 +163,7 @@ class DocStringCheckerTest(cros_test_lib.TestCase):
       """,
   )
 
-  def add_message(self, msg_id, node=None, line=None, args=None):
-    """Capture lint checks"""
-    # We include node.doc here explicitly so the pretty assert message
-    # inclues it in the output automatically.
-    self.results.append((msg_id, node.doc, line, args))
-
-  def setUp(self):
-    self.results = []
-    self.checker = lint.DocStringChecker()
-    self.checker.add_message = self.add_message
+  CHECKER = lint.DocStringChecker
 
   def testGood_visit_function(self):
     """Allow known good docstrings"""
@@ -188,7 +196,6 @@ class DocStringCheckerTest(cros_test_lib.TestCase):
 
   def testGood_check_first_line(self):
     """Verify _check_first_line accepts good inputs"""
-    # pylint: disable=W0212
     docstrings = (
         'Some string',
     )
@@ -201,7 +208,6 @@ class DocStringCheckerTest(cros_test_lib.TestCase):
 
   def testBad_check_first_line(self):
     """Verify _check_first_line rejects bad inputs"""
-    # pylint: disable=W0212
     docstrings = (
         '\nSome string\n',
     )
@@ -213,7 +219,6 @@ class DocStringCheckerTest(cros_test_lib.TestCase):
 
   def testGood_check_second_line_blank(self):
     """Verify _check_second_line_blank accepts good inputs"""
-    # pylint: disable=protected-access
     docstrings = (
         'Some string\n\nThis is the third line',
         'Some string',
@@ -227,7 +232,6 @@ class DocStringCheckerTest(cros_test_lib.TestCase):
 
   def testBad_check_second_line_blank(self):
     """Verify _check_second_line_blank rejects bad inputs"""
-    # pylint: disable=protected-access
     docstrings = (
         'Some string\nnonempty secondline',
     )
@@ -239,7 +243,6 @@ class DocStringCheckerTest(cros_test_lib.TestCase):
 
   def testGoodFuncVarKwArg(self):
     """Check valid inputs for *args and **kwargs"""
-    # pylint: disable=W0212
     for vararg in (None, 'args', '_args'):
       for kwarg in (None, 'kwargs', '_kwargs'):
         self.results = []
@@ -249,7 +252,6 @@ class DocStringCheckerTest(cros_test_lib.TestCase):
 
   def testMisnamedFuncVarKwArg(self):
     """Reject anything but *args and **kwargs"""
-    # pylint: disable=W0212
     for vararg in ('arg', 'params', 'kwargs', '_moo'):
       self.results = []
       node = TestNode(vararg=vararg)
@@ -264,7 +266,6 @@ class DocStringCheckerTest(cros_test_lib.TestCase):
 
   def testGoodFuncArgs(self):
     """Verify normal args in Args are allowed"""
-    # pylint: disable=W0212
     datasets = (
         ("""args are correct, and cls is ignored
 
@@ -300,7 +301,6 @@ class DocStringCheckerTest(cros_test_lib.TestCase):
 
   def testBadFuncArgs(self):
     """Verify bad/missing args in Args are caught"""
-    # pylint: disable=W0212
     datasets = (
         ("""missing 'bar'
 
@@ -338,5 +338,39 @@ class DocStringCheckerTest(cros_test_lib.TestCase):
       self.assertEqual(len(self.results), 1)
 
 
-if __name__ == '__main__':
-  cros_test_lib.main()
+class SourceCheckerTest(CheckerTestCase):
+  """Tests for SourceChecker module"""
+
+  CHECKER = lint.SourceChecker
+
+  def _testShebang(self, shebangs, exp, fileno):
+    """Helper for shebang tests"""
+    for shebang in shebangs:
+      self.results = []
+      node = TestNode()
+      stream = StringIO.StringIO(shebang)
+      stream.fileno = lambda: fileno
+      self.checker._check_shebang(node, stream)
+      self.assertEqual(len(self.results), exp,
+                       msg='processing shebang failed: %r' % shebang)
+
+  def testBadShebangNoExec(self):
+    """Verify _check_shebang rejects bad shebangs"""
+    shebangs = (
+        '#!/usr/bin/python\n',
+        '#! /usr/bin/python2 \n',
+        '#!/usr/bin/env python3\n',
+    )
+    with open('/dev/null') as f:
+      self._testShebang(shebangs, 2, f.fileno())
+
+  def testGoodShebang(self):
+    """Verify _check_shebang accepts good shebangs"""
+    shebangs = (
+        '#!/usr/bin/python2\n',
+        '#!/usr/bin/python2  \n',
+        '#!/usr/bin/python3\n',
+        '#!/usr/bin/python3\t\n',
+    )
+    with open('/bin/sh') as f:
+      self._testShebang(shebangs, 0, f.fileno())

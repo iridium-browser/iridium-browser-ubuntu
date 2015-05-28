@@ -7,8 +7,8 @@
 #include "src/arguments.h"
 #include "src/deoptimizer.h"
 #include "src/full-codegen.h"
-#include "src/natives.h"
 #include "src/runtime/runtime-utils.h"
+#include "src/snapshot/natives.h"
 
 namespace v8 {
 namespace internal {
@@ -17,6 +17,36 @@ RUNTIME_FUNCTION(Runtime_DeoptimizeFunction) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 1);
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
+  if (!function->IsOptimized()) return isolate->heap()->undefined_value();
+
+  // TODO(turbofan): Deoptimization is not supported yet.
+  if (function->code()->is_turbofanned() && !FLAG_turbo_deoptimization) {
+    return isolate->heap()->undefined_value();
+  }
+
+  Deoptimizer::DeoptimizeFunction(*function);
+
+  return isolate->heap()->undefined_value();
+}
+
+
+RUNTIME_FUNCTION(Runtime_DeoptimizeNow) {
+  HandleScope scope(isolate);
+  DCHECK(args.length() == 0);
+
+  Handle<JSFunction> function;
+
+  // If the argument is 'undefined', deoptimize the topmost
+  // function.
+  JavaScriptFrameIterator it(isolate);
+  while (!it.done()) {
+    if (it.frame()->is_java_script()) {
+      function = Handle<JSFunction>(it.frame()->function());
+      break;
+    }
+  }
+  if (function.is_null()) return isolate->heap()->undefined_value();
+
   if (!function->IsOptimized()) return isolate->heap()->undefined_value();
 
   // TODO(turbofan): Deoptimization is not supported yet.
@@ -53,37 +83,65 @@ RUNTIME_FUNCTION(Runtime_OptimizeFunctionOnNextCall) {
   HandleScope scope(isolate);
   RUNTIME_ASSERT(args.length() == 1 || args.length() == 2);
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
-  // The following two assertions are lifted from the DCHECKs inside
+  // The following assertion was lifted from the DCHECK inside
   // JSFunction::MarkForOptimization().
-  RUNTIME_ASSERT(!function->shared()->is_generator());
   RUNTIME_ASSERT(function->shared()->allows_lazy_compilation() ||
                  (function->code()->kind() == Code::FUNCTION &&
                   function->code()->optimizable()));
 
-  if (!isolate->use_crankshaft()) return isolate->heap()->undefined_value();
-
   // If the function is already optimized, just return.
   if (function->IsOptimized()) return isolate->heap()->undefined_value();
-
-  // If the function cannot optimized, just return.
-  if (function->shared()->optimization_disabled()) {
-    return isolate->heap()->undefined_value();
-  }
 
   function->MarkForOptimization();
 
   Code* unoptimized = function->shared()->code();
   if (args.length() == 2 && unoptimized->kind() == Code::FUNCTION) {
     CONVERT_ARG_HANDLE_CHECKED(String, type, 1);
-    if (type->IsOneByteEqualTo(STATIC_CHAR_VECTOR("osr")) && FLAG_use_osr) {
-      // Start patching from the currently patched loop nesting level.
-      DCHECK(BackEdgeTable::Verify(isolate, unoptimized));
-      isolate->runtime_profiler()->AttemptOnStackReplacement(
-          *function, Code::kMaxLoopNestingMarker);
-    } else if (type->IsOneByteEqualTo(STATIC_CHAR_VECTOR("concurrent")) &&
-               isolate->concurrent_recompilation_enabled()) {
+    if (type->IsOneByteEqualTo(STATIC_CHAR_VECTOR("concurrent")) &&
+        isolate->concurrent_recompilation_enabled()) {
       function->AttemptConcurrentOptimization();
     }
+  }
+
+  return isolate->heap()->undefined_value();
+}
+
+
+RUNTIME_FUNCTION(Runtime_OptimizeOsr) {
+  HandleScope scope(isolate);
+  RUNTIME_ASSERT(args.length() == 0 || args.length() == 1);
+  Handle<JSFunction> function = Handle<JSFunction>::null();
+
+  if (args.length() == 0) {
+    // Find the JavaScript function on the top of the stack.
+    JavaScriptFrameIterator it(isolate);
+    while (!it.done()) {
+      if (it.frame()->is_java_script()) {
+        function = Handle<JSFunction>(it.frame()->function());
+        break;
+      }
+    }
+    if (function.is_null()) return isolate->heap()->undefined_value();
+  } else {
+    // Function was passed as an argument.
+    CONVERT_ARG_HANDLE_CHECKED(JSFunction, arg, 0);
+    function = arg;
+  }
+
+  // The following assertion was lifted from the DCHECK inside
+  // JSFunction::MarkForOptimization().
+  RUNTIME_ASSERT(function->shared()->allows_lazy_compilation() ||
+                 (function->code()->kind() == Code::FUNCTION &&
+                  function->code()->optimizable()));
+
+  // If the function is already optimized, just return.
+  if (function->IsOptimized()) return isolate->heap()->undefined_value();
+
+  Code* unoptimized = function->shared()->code();
+  if (unoptimized->kind() == Code::FUNCTION) {
+    DCHECK(BackEdgeTable::Verify(isolate, unoptimized));
+    isolate->runtime_profiler()->AttemptOnStackReplacement(
+        *function, Code::kMaxLoopNestingMarker);
   }
 
   return isolate->heap()->undefined_value();
@@ -315,6 +373,23 @@ RUNTIME_FUNCTION(Runtime_GetV8Version) {
   const char* version_string = v8::V8::GetVersion();
 
   return *isolate->factory()->NewStringFromAsciiChecked(version_string);
+}
+
+
+RUNTIME_FUNCTION(Runtime_DisassembleFunction) {
+  HandleScope scope(isolate);
+#ifdef DEBUG
+  DCHECK(args.length() == 1);
+  // Get the function and make sure it is compiled.
+  CONVERT_ARG_HANDLE_CHECKED(JSFunction, func, 0);
+  if (!Compiler::EnsureCompiled(func, KEEP_EXCEPTION)) {
+    return isolate->heap()->exception();
+  }
+  OFStream os(stdout);
+  func->code()->Print(os);
+  os << std::endl;
+#endif  // DEBUG
+  return isolate->heap()->undefined_value();
 }
 
 

@@ -5,6 +5,12 @@
 #ifndef UI_OZONE_PUBLIC_INPUT_CONTROLLER_H_
 #define UI_OZONE_PUBLIC_INPUT_CONTROLLER_H_
 
+#include <set>
+#include <string>
+#include <vector>
+
+#include "base/callback.h"
+#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/ozone/ozone_export.h"
@@ -15,6 +21,8 @@ class TimeDelta;
 
 namespace ui {
 
+enum class DomCode;
+
 // Platform-specific interface for controlling input devices.
 //
 // The object provides methods for the preference page to configure input
@@ -22,6 +30,11 @@ namespace ui {
 // script that is originally located at /opt/google/chrome/.
 class OZONE_EXPORT InputController {
  public:
+  typedef base::Callback<void(scoped_ptr<std::string>)>
+      GetTouchDeviceStatusReply;
+  typedef base::Callback<void(scoped_ptr<std::vector<base::FilePath>>)>
+      GetTouchEventLogReply;
+
   InputController() {}
   virtual ~InputController() {}
 
@@ -51,9 +64,27 @@ class OZONE_EXPORT InputController {
   virtual void SetMouseSensitivity(int value) = 0;
   virtual void SetPrimaryButtonRight(bool right) = 0;
 
+  // Touch log collection.
+  virtual void GetTouchDeviceStatus(const GetTouchDeviceStatusReply& reply) = 0;
+  virtual void GetTouchEventLog(const base::FilePath& out_dir,
+                                const GetTouchEventLogReply& reply) = 0;
+
   // Temporarily enable/disable Tap-to-click. Used to enhance the user
   // experience in some use cases (e.g., typing, watching video).
   virtual void SetTapToClickPaused(bool state) = 0;
+
+  // Disables the internal touchpad.
+  virtual void DisableInternalTouchpad() = 0;
+
+  // Enables the internal touchpad.
+  virtual void EnableInternalTouchpad() = 0;
+
+  // Disables all keys on the internal keyboard except |excepted_keys|.
+  virtual void DisableInternalKeyboardExceptKeys(
+      scoped_ptr<std::set<DomCode>> excepted_keys) = 0;
+
+  // Enables all keys on the internal keyboard.
+  virtual void EnableInternalKeyboard() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InputController);

@@ -37,11 +37,11 @@
 #include "core/dom/Range.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/editing/Editor.h"
-#include "core/editing/TextIterator.h"
 #include "core/editing/VisibleSelection.h"
+#include "core/editing/iterators/TextIterator.h"
 #include "core/frame/FrameView.h"
+#include "core/layout/LayoutObject.h"
 #include "core/page/Page.h"
-#include "core/rendering/RenderObject.h"
 #include "modules/accessibility/AXObject.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "platform/Timer.h"
@@ -63,7 +63,7 @@ TextFinder::FindMatch::FindMatch(PassRefPtrWillBeRawPtr<Range> range, int ordina
 {
 }
 
-void TextFinder::FindMatch::trace(Visitor* visitor)
+DEFINE_TRACE(TextFinder::FindMatch)
 {
     visitor->trace(m_range);
 }
@@ -75,7 +75,7 @@ public:
         return adoptPtrWillBeNoop(new DeferredScopeStringMatches(textFinder, identifier, searchText, options, reset));
     }
 
-    void trace(Visitor* visitor)
+    DEFINE_INLINE_TRACE()
     {
         visitor->trace(m_textFinder);
     }
@@ -156,7 +156,7 @@ bool TextFinder::find(int identifier, const WebString& searchText, const WebFind
     }
 
 #if OS(ANDROID)
-    ownerFrame().viewImpl()->zoomToFindInPageRect(ownerFrame().frameView()->contentsToWindow(enclosingIntRect(RenderObject::absoluteBoundingBoxRectForRange(m_activeMatch.get()))));
+    ownerFrame().viewImpl()->zoomToFindInPageRect(ownerFrame().frameView()->contentsToRootFrame(enclosingIntRect(LayoutObject::absoluteBoundingBoxRectForRange(m_activeMatch.get()))));
 #endif
 
     setMarkerActive(m_activeMatch.get(), true);
@@ -189,7 +189,7 @@ bool TextFinder::find(int identifier, const WebString& searchText, const WebFind
                 m_activeMatchIndexInCurrentFrame = m_lastMatchCount - 1;
         }
         if (selectionRect) {
-            *selectionRect = ownerFrame().frameView()->contentsToWindow(m_activeMatch->boundingBox());
+            *selectionRect = ownerFrame().frameView()->contentsToRootFrame(m_activeMatch->boundingBox());
             reportFindInPageSelection(*selectionRect, m_activeMatchIndexInCurrentFrame + 1, identifier);
         }
     }
@@ -343,7 +343,7 @@ void TextFinder::scopeStringMatches(int identifier, const WebString& searchText,
 
             // Notify browser of new location for the selected rectangle.
             reportFindInPageSelection(
-                ownerFrame().frameView()->contentsToWindow(resultBounds),
+                ownerFrame().frameView()->contentsToRootFrame(resultBounds),
                 m_activeMatchIndexInCurrentFrame + 1,
                 identifier);
         }
@@ -621,16 +621,16 @@ int TextFinder::selectFindMatch(unsigned index, WebRect* selectionRect)
     }
 
     IntRect activeMatchRect;
-    IntRect activeMatchBoundingBox = enclosingIntRect(RenderObject::absoluteBoundingBoxRectForRange(m_activeMatch.get()));
+    IntRect activeMatchBoundingBox = enclosingIntRect(LayoutObject::absoluteBoundingBoxRectForRange(m_activeMatch.get()));
 
     if (!activeMatchBoundingBox.isEmpty()) {
-        if (m_activeMatch->firstNode() && m_activeMatch->firstNode()->renderer()) {
-            m_activeMatch->firstNode()->renderer()->scrollRectToVisible(
-                activeMatchBoundingBox, ScrollAlignment::alignCenterIfNeeded, ScrollAlignment::alignCenterIfNeeded);
+        if (m_activeMatch->firstNode() && m_activeMatch->firstNode()->layoutObject()) {
+            m_activeMatch->firstNode()->layoutObject()->scrollRectToVisible(
+                LayoutRect(activeMatchBoundingBox), ScrollAlignment::alignCenterIfNeeded, ScrollAlignment::alignCenterIfNeeded);
         }
 
         // Zoom to the active match.
-        activeMatchRect = ownerFrame().frameView()->contentsToWindow(activeMatchBoundingBox);
+        activeMatchRect = ownerFrame().frameView()->contentsToRootFrame(activeMatchBoundingBox);
         ownerFrame().viewImpl()->zoomToFindInPageRect(activeMatchRect);
     }
 
@@ -786,7 +786,7 @@ int TextFinder::ordinalOfFirstMatch() const
     return ordinalOfFirstMatchForFrame(m_ownerFrame.get());
 }
 
-void TextFinder::trace(Visitor* visitor)
+DEFINE_TRACE(TextFinder)
 {
     visitor->trace(m_ownerFrame);
     visitor->trace(m_currentActiveMatchFrame);

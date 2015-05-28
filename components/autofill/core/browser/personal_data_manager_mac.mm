@@ -207,6 +207,7 @@ void AuxiliaryProfilesImpl::GetAddressBookMeCard(const std::string& app_locale,
 
     scoped_ptr<AutofillProfile> profile(
         new AutofillProfile(guid, kAddressBookOrigin));
+    profile->set_record_type(AutofillProfile::AUXILIARY_PROFILE);
     DCHECK(base::IsValidGUID(profile->guid()));
 
     // Fill in name and company information.
@@ -394,6 +395,7 @@ bool PersonalDataManager::ShouldShowAccessAddressBookSuggestion(
     case CREDIT_CARD:
     case PASSWORD_FIELD:
     case TRANSACTION:
+    case USERNAME_FIELD:
       return false;
   }
 

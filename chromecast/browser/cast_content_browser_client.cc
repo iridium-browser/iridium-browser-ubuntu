@@ -9,30 +9,36 @@
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/files/scoped_file.h"
+#include "base/i18n/icu_util.h"
 #include "base/i18n/rtl.h"
 #include "base/path_service.h"
+#include "chromecast/base/cast_paths.h"
 #include "chromecast/browser/cast_browser_context.h"
 #include "chromecast/browser/cast_browser_main_parts.h"
 #include "chromecast/browser/cast_browser_process.h"
 #include "chromecast/browser/cast_network_delegate.h"
+#include "chromecast/browser/cast_resource_dispatcher_host_delegate.h"
 #include "chromecast/browser/devtools/cast_dev_tools_delegate.h"
 #include "chromecast/browser/geolocation/cast_access_token_store.h"
 #include "chromecast/browser/media/cma_message_filter_host.h"
 #include "chromecast/browser/url_request_context_factory.h"
-#include "chromecast/common/cast_paths.h"
 #include "chromecast/common/chromecast_switches.h"
 #include "chromecast/common/global_descriptors.h"
 #include "components/crash/app/breakpad_linux.h"
 #include "components/crash/browser/crash_handler_host_linux.h"
-#include "components/dns_prefetch/browser/net_message_filter.h"
+#include "components/network_hints/browser/network_hints_message_filter.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/certificate_request_result_type.h"
+#include "content/public/browser/client_certificate_delegate.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/resource_dispatcher_host.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/content_descriptors.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/web_preferences.h"
 #include "net/ssl/ssl_cert_request_info.h"
+#include "ui/gl/gl_switches.h"
 
 #if defined(OS_ANDROID)
 #include "chromecast/browser/android/external_video_surface_container_impl.h"
@@ -64,15 +70,20 @@ content::BrowserMainParts* CastContentBrowserClient::CreateBrowserMainParts(
 
 void CastContentBrowserClient::RenderProcessWillLaunch(
     content::RenderProcessHost* host) {
-  scoped_refptr<content::BrowserMessageFilter> net_message_filter(
-      new dns_prefetch::NetMessageFilter(
+  scoped_refptr<content::BrowserMessageFilter> network_hints_message_filter(
+      new network_hints::NetworkHintsMessageFilter(
           url_request_context_factory_->host_resolver()));
-  host->AddFilter(net_message_filter.get());
+  host->AddFilter(network_hints_message_filter.get());
 #if !defined(OS_ANDROID)
   scoped_refptr<media::CmaMessageFilterHost> cma_message_filter(
       new media::CmaMessageFilterHost(host->GetID()));
   host->AddFilter(cma_message_filter.get());
 #endif  // !defined(OS_ANDROID)
+
+  auto extra_filters = PlatformGetBrowserMessageFilters();
+  for (auto const& filter : extra_filters) {
+    host->AddFilter(filter.get());
+  }
 }
 
 net::URLRequestContextGetter* CastContentBrowserClient::CreateRequestContext(
@@ -128,13 +139,21 @@ void CastContentBrowserClient::AppendExtraCommandLineSwitches(
   if (process_type == switches::kRendererProcess) {
     // Any browser command-line switches that should be propagated to
     // the renderer go here.
-#if defined(OS_ANDROID)
-    command_line->AppendSwitch(switches::kForceUseOverlayEmbeddedVideo);
-#endif  // defined(OS_ANDROID)
 
     if (browser_command_line->HasSwitch(switches::kEnableCmaMediaPipeline))
       command_line->AppendSwitch(switches::kEnableCmaMediaPipeline);
   }
+
+#if defined(OS_LINUX)
+  // Necessary for accelerated 2d canvas.  By default on Linux, Chromium assumes
+  // GLES2 contexts can be lost to a power-save mode, which breaks GPU canvas
+  // apps.
+  if (process_type == switches::kGpuProcess) {
+    command_line->AppendSwitch(switches::kGpuNoContextLost);
+  }
+#endif
+
+  PlatformAppendExtraCommandLineSwitches(command_line);
 }
 
 content::AccessTokenStore* CastContentBrowserClient::CreateAccessTokenStore() {
@@ -144,7 +163,6 @@ content::AccessTokenStore* CastContentBrowserClient::CreateAccessTokenStore() {
 
 void CastContentBrowserClient::OverrideWebkitPrefs(
     content::RenderViewHost* render_view_host,
-    const GURL& url,
     content::WebPreferences* prefs) {
   prefs->allow_scripts_to_close_windows = true;
   // TODO(lcwu): http://crbug.com/391089. This pref is set to true by default
@@ -152,10 +170,13 @@ void CastContentBrowserClient::OverrideWebkitPrefs(
   // to retrieve media data chunks while running in a https page. This pref
   // should be disabled once all the content providers are no longer doing that.
   prefs->allow_running_insecure_content = true;
-#if defined(DISABLE_DISPLAY)
-  prefs->images_enabled = false;
-  prefs->loads_images_automatically = false;
-#endif  // defined(DISABLE_DISPLAY)
+}
+
+void CastContentBrowserClient::ResourceDispatcherHostCreated() {
+  CastBrowserProcess::GetInstance()->SetResourceDispatcherHostDelegate(
+      make_scoped_ptr(new CastResourceDispatcherHostDelegate));
+  content::ResourceDispatcherHost::Get()->SetDelegate(
+      CastBrowserProcess::GetInstance()->resource_dispatcher_host_delegate());
 }
 
 std::string CastContentBrowserClient::GetApplicationLocale() {
@@ -182,16 +203,15 @@ void CastContentBrowserClient::AllowCertificateError(
 }
 
 void CastContentBrowserClient::SelectClientCertificate(
-    int render_process_id,
-    int render_view_id,
+    content::WebContents* web_contents,
     net::SSLCertRequestInfo* cert_request_info,
-    const base::Callback<void(net::X509Certificate*)>& callback) {
+    scoped_ptr<content::ClientCertificateDelegate> delegate) {
   GURL requesting_url("https://" + cert_request_info->host_and_port.ToString());
 
   if (!requesting_url.is_valid()) {
     LOG(ERROR) << "Invalid URL string: "
                << requesting_url.possibly_invalid_spec();
-    callback.Run(NULL);
+    delegate->ContinueWithCertificate(nullptr);
     return;
   }
 
@@ -202,16 +222,16 @@ void CastContentBrowserClient::SelectClientCertificate(
   // it, because CastNetworkDelegate is bound to the IO thread.
   // Subsequently, the callback must then itself be performed back here
   // on the UI thread.
+  //
+  // TODO(davidben): Stop using child ID to identify an app.
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   content::BrowserThread::PostTaskAndReplyWithResult(
-      content::BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(
-          &CastContentBrowserClient::SelectClientCertificateOnIOThread,
-          base::Unretained(this),
-          requesting_url,
-          render_process_id),
-      callback);
+      content::BrowserThread::IO, FROM_HERE,
+      base::Bind(&CastContentBrowserClient::SelectClientCertificateOnIOThread,
+                 base::Unretained(this), requesting_url,
+                 web_contents->GetRenderProcessHost()->GetID()),
+      base::Bind(&content::ClientCertificateDelegate::ContinueWithCertificate,
+                 base::Owned(delegate.release())));
 }
 
 net::X509Certificate*
@@ -262,17 +282,16 @@ void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     int child_process_id,
     content::FileDescriptorInfo* mappings) {
 #if defined(OS_ANDROID)
-  int flags = base::File::FLAG_OPEN | base::File::FLAG_READ;
-  base::FilePath pak_file;
-  CHECK(PathService::Get(FILE_CAST_PAK, &pak_file));
-  base::File pak_with_flags(pak_file, flags);
-  if (!pak_with_flags.IsValid()) {
+  const int flags_open_read = base::File::FLAG_OPEN | base::File::FLAG_READ;
+  base::FilePath pak_file_path;
+  CHECK(PathService::Get(FILE_CAST_PAK, &pak_file_path));
+  base::File pak_file(pak_file_path, flags_open_read);
+  if (!pak_file.IsValid()) {
     NOTREACHED() << "Failed to open file when creating renderer process: "
                  << "cast_shell.pak";
   }
-  mappings->Transfer(
-      kAndroidPakDescriptor,
-      base::ScopedFD(pak_with_flags.TakePlatformFile()));
+  mappings->Transfer(kAndroidPakDescriptor,
+                     base::ScopedFD(pak_file.TakePlatformFile()));
 
   if (breakpad::IsCrashReporterEnabled()) {
     base::File minidump_file(
@@ -286,6 +305,16 @@ void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
                          base::ScopedFD(minidump_file.TakePlatformFile()));
     }
   }
+
+  base::FilePath app_data_path;
+  CHECK(PathService::Get(base::DIR_ANDROID_APP_DATA, &app_data_path));
+  base::FilePath icudata_path =
+      app_data_path.AppendASCII(base::i18n::kIcuDataFileName);
+  base::File icudata_file(icudata_path, flags_open_read);
+  if (!icudata_file.IsValid())
+    NOTREACHED() << "Failed to open ICU file when creating renderer process";
+  mappings->Transfer(kAndroidICUDataDescriptor,
+                     base::ScopedFD(icudata_file.TakePlatformFile()));
 #else
   int crash_signal_fd = GetCrashSignalFD(command_line);
   if (crash_signal_fd >= 0) {

@@ -8,6 +8,7 @@
 #include "base/strings/string_util.h"
 #include "base/threading/platform_thread.h"
 #include "net/socket/client_socket_factory.h"
+#include "policy/policy_constants.h"
 #include "remoting/base/auto_thread.h"
 #include "remoting/base/logging.h"
 #include "remoting/base/rsa_key_pair.h"
@@ -18,7 +19,7 @@
 #include "remoting/host/host_status_logger.h"
 #include "remoting/host/it2me/it2me_confirmation_dialog.h"
 #include "remoting/host/it2me_desktop_environment.h"
-#include "remoting/host/policy_hack/policy_watcher.h"
+#include "remoting/host/policy_watcher.h"
 #include "remoting/host/register_support_host_request.h"
 #include "remoting/host/session_manager_factory.h"
 #include "remoting/protocol/it2me_host_authenticator_factory.h"
@@ -37,22 +38,22 @@ const int kMaxLoginAttempts = 5;
 
 It2MeHost::It2MeHost(
     scoped_ptr<ChromotingHostContext> host_context,
-    scoped_ptr<policy_hack::PolicyWatcher> policy_watcher,
+    scoped_ptr<PolicyWatcher> policy_watcher,
     scoped_ptr<It2MeConfirmationDialogFactory> confirmation_dialog_factory,
     base::WeakPtr<It2MeHost::Observer> observer,
     const XmppSignalStrategy::XmppServerConfig& xmpp_server_config,
     const std::string& directory_bot_jid)
-  : host_context_(host_context.Pass()),
-    task_runner_(host_context_->ui_task_runner()),
-    observer_(observer),
-    xmpp_server_config_(xmpp_server_config),
-    directory_bot_jid_(directory_bot_jid),
-    state_(kDisconnected),
-    failed_login_attempts_(0),
-    policy_watcher_(policy_watcher.Pass()),
-    confirmation_dialog_factory_(confirmation_dialog_factory.Pass()),
-    nat_traversal_enabled_(false),
-    policy_received_(false) {
+    : host_context_(host_context.Pass()),
+      task_runner_(host_context_->ui_task_runner()),
+      observer_(observer),
+      xmpp_server_config_(xmpp_server_config),
+      directory_bot_jid_(directory_bot_jid),
+      state_(kDisconnected),
+      failed_login_attempts_(0),
+      policy_watcher_(policy_watcher.Pass()),
+      confirmation_dialog_factory_(confirmation_dialog_factory.Pass()),
+      nat_traversal_enabled_(false),
+      policy_received_(false) {
   DCHECK(task_runner_->BelongsToCurrentThread());
 }
 
@@ -228,8 +229,10 @@ void It2MeHost::FinishConnect() {
      protocol::NetworkSettings::NAT_TRAVERSAL_FULL :
      protocol::NetworkSettings::NAT_TRAVERSAL_DISABLED);
   if (!nat_traversal_enabled_) {
-    network_settings.min_port = protocol::NetworkSettings::kDefaultMinPort;
-    network_settings.max_port = protocol::NetworkSettings::kDefaultMaxPort;
+    network_settings.port_range.min_port =
+        protocol::NetworkSettings::kDefaultMinPort;
+    network_settings.port_range.max_port =
+        protocol::NetworkSettings::kDefaultMaxPort;
   }
 
   // Create the host.
@@ -297,14 +300,6 @@ void It2MeHost::ShutdownOnUiThread() {
   desktop_environment_factory_.reset();
 
   // Stop listening for policy updates.
-  if (policy_watcher_.get()) {
-    policy_watcher_->StopWatching(
-        base::Bind(&It2MeHost::OnPolicyWatcherShutdown, this));
-    return;
-  }
-}
-
-void It2MeHost::OnPolicyWatcherShutdown() {
   policy_watcher_.reset();
 }
 
@@ -355,8 +350,7 @@ void It2MeHost::OnClientDisconnected(const std::string& jid) {
 }
 
 void It2MeHost::OnPolicyUpdate(scoped_ptr<base::DictionaryValue> policies) {
-  // The policy watcher runs on the |ui_task_runner| on ChromeOS and the
-  // |network_task_runner| on other platforms.
+  // The policy watcher runs on the |ui_task_runner|.
   if (!host_context_->network_task_runner()->BelongsToCurrentThread()) {
     host_context_->network_task_runner()->PostTask(
         FROM_HERE,
@@ -365,13 +359,12 @@ void It2MeHost::OnPolicyUpdate(scoped_ptr<base::DictionaryValue> policies) {
   }
 
   bool nat_policy;
-  if (policies->GetBoolean(policy_hack::PolicyWatcher::kNatPolicyName,
+  if (policies->GetBoolean(policy::key::kRemoteAccessHostFirewallTraversal,
                            &nat_policy)) {
     UpdateNatPolicy(nat_policy);
   }
   std::string host_domain;
-  if (policies->GetString(policy_hack::PolicyWatcher::kHostDomainPolicyName,
-                          &host_domain)) {
+  if (policies->GetString(policy::key::kRemoteAccessHostDomain, &host_domain)) {
     UpdateHostDomainPolicy(host_domain);
   }
 
@@ -532,11 +525,12 @@ scoped_refptr<It2MeHost> It2MeHostFactory::CreateIt2MeHost(
     base::WeakPtr<It2MeHost::Observer> observer,
     const XmppSignalStrategy::XmppServerConfig& xmpp_server_config,
     const std::string& directory_bot_jid) {
+  DCHECK(context->ui_task_runner()->BelongsToCurrentThread());
+
   scoped_ptr<It2MeConfirmationDialogFactory> confirmation_dialog_factory(
       new It2MeConfirmationDialogFactory());
-  scoped_ptr<policy_hack::PolicyWatcher> policy_watcher =
-      policy_hack::PolicyWatcher::Create(policy_service_,
-                                         context->network_task_runner());
+  scoped_ptr<PolicyWatcher> policy_watcher =
+      PolicyWatcher::Create(policy_service_, context->file_task_runner());
   return new It2MeHost(context.Pass(), policy_watcher.Pass(),
                        confirmation_dialog_factory.Pass(),
                        observer, xmpp_server_config, directory_bot_jid);

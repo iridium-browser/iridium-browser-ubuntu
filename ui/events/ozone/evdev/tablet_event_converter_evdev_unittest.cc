@@ -17,7 +17,11 @@
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/event.h"
+#include "ui/events/ozone/device/device_manager.h"
+#include "ui/events/ozone/evdev/event_converter_test_util.h"
+#include "ui/events/ozone/evdev/event_factory_evdev.h"
 #include "ui/events/ozone/evdev/tablet_event_converter_evdev.h"
+#include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/events/platform/platform_event_source.h"
 
@@ -40,30 +44,18 @@ class MockTabletEventConverterEvdev : public TabletEventConverterEvdev {
  public:
   MockTabletEventConverterEvdev(int fd,
                                 base::FilePath path,
-                                EventModifiersEvdev* modifiers,
-                                CursorDelegateEvdev* cursor);
+                                CursorDelegateEvdev* cursor,
+                                DeviceEventDispatcherEvdev* dispatcher);
   ~MockTabletEventConverterEvdev() override {};
 
   void ConfigureReadMock(struct input_event* queue,
                          long read_this_many,
                          long queue_index);
 
-  unsigned size() { return dispatched_events_.size(); }
-  MouseEvent* event(unsigned index) {
-    DCHECK_GT(dispatched_events_.size(), index);
-    Event* ev = dispatched_events_[index];
-    DCHECK(ev->IsMouseEvent());
-    return static_cast<MouseEvent*>(ev);
-  }
-
   // Actually dispatch the event reader code.
   void ReadNow() {
     OnFileCanReadWithoutBlocking(read_pipe_);
     base::RunLoop().RunUntilIdle();
-  }
-
-  void DispatchCallback(scoped_ptr<Event> event) {
-    dispatched_events_.push_back(event.release());
   }
 
  private:
@@ -77,7 +69,7 @@ class MockTabletEventConverterEvdev : public TabletEventConverterEvdev {
 
 class MockTabletCursorEvdev : public CursorDelegateEvdev {
  public:
-  MockTabletCursorEvdev() { confined_bounds_ = gfx::Rect(1024, 768); }
+  MockTabletCursorEvdev() { cursor_confined_bounds_ = gfx::Rect(1024, 768); }
   ~MockTabletCursorEvdev() override {}
 
   // CursorDelegateEvdev:
@@ -91,29 +83,28 @@ class MockTabletCursorEvdev : public CursorDelegateEvdev {
   void MoveCursor(const gfx::Vector2dF& delta) override { NOTREACHED(); }
   bool IsCursorVisible() override { return 1; }
   gfx::PointF GetLocation() override { return cursor_location_; }
-  gfx::Rect GetCursorConfinedBounds() override { return confined_bounds_; }
+  gfx::Rect GetCursorConfinedBounds() override {
+    return cursor_confined_bounds_;
+  }
 
  private:
   gfx::PointF cursor_location_;
-  gfx::Rect confined_bounds_;
+  gfx::Rect cursor_confined_bounds_;
   DISALLOW_COPY_AND_ASSIGN(MockTabletCursorEvdev);
 };
 
 MockTabletEventConverterEvdev::MockTabletEventConverterEvdev(
     int fd,
     base::FilePath path,
-    EventModifiersEvdev* modifiers,
-    CursorDelegateEvdev* cursor)
-    : TabletEventConverterEvdev(
-          fd,
-          path,
-          1,
-          INPUT_DEVICE_UNKNOWN,
-          modifiers,
-          cursor,
-          EventDeviceInfo(),
-          base::Bind(&MockTabletEventConverterEvdev::DispatchCallback,
-                     base::Unretained(this))) {
+    CursorDelegateEvdev* cursor,
+    DeviceEventDispatcherEvdev* dispatcher)
+    : TabletEventConverterEvdev(fd,
+                                path,
+                                1,
+                                INPUT_DEVICE_UNKNOWN,
+                                cursor,
+                                EventDeviceInfo(),
+                                dispatcher) {
   // Real values taken from Wacom Intuos 4
   x_abs_min_ = 0;
   x_abs_range_ = 65024;
@@ -125,10 +116,9 @@ MockTabletEventConverterEvdev::MockTabletEventConverterEvdev(
   if (pipe(fds))
     PLOG(FATAL) << "failed pipe";
 
-  DCHECK(SetNonBlocking(fds[0]) == 0)
-      << "SetNonBlocking for pipe fd[0] failed, errno: " << errno;
-  DCHECK(SetNonBlocking(fds[1]) == 0)
-      << "SetNonBlocking for pipe fd[0] failed, errno: " << errno;
+  EXPECT_FALSE(SetNonBlocking(fds[0]) || SetNonBlocking(fds[1]))
+    << "failed to set non-blocking: " << strerror(errno);
+
   read_pipe_ = fds[0];
   write_pipe_ = fds[1];
 }
@@ -160,26 +150,48 @@ class TabletEventConverterEvdevTest : public testing::Test {
     events_out_ = evdev_io[1];
 
     cursor_.reset(new ui::MockTabletCursorEvdev());
-    modifiers_.reset(new ui::EventModifiersEvdev());
+    device_manager_ = ui::CreateDeviceManagerForTest();
+    event_factory_ = ui::CreateEventFactoryEvdevForTest(
+        cursor_.get(), device_manager_.get(),
+        ui::KeyboardLayoutEngineManager::GetKeyboardLayoutEngine(),
+        base::Bind(&TabletEventConverterEvdevTest::DispatchEventForTest,
+                   base::Unretained(this)));
+    dispatcher_ =
+        ui::CreateDeviceEventDispatcherEvdevForTest(event_factory_.get());
     device_.reset(new ui::MockTabletEventConverterEvdev(
-        events_in_, base::FilePath(kTestDevicePath), modifiers_.get(),
-        cursor_.get()));
+        events_in_, base::FilePath(kTestDevicePath), cursor_.get(),
+        dispatcher_.get()));
   }
 
   void TearDown() override {
-    modifiers_.reset();
     cursor_.reset();
     device_.reset();
   }
 
   ui::MockTabletEventConverterEvdev* device() { return device_.get(); }
   ui::CursorDelegateEvdev* cursor() { return cursor_.get(); }
-  ui::EventModifiersEvdev* modifiers() { return modifiers_.get(); }
+
+  unsigned size() { return dispatched_events_.size(); }
+  ui::MouseEvent* dispatched_event(unsigned index) {
+    DCHECK_GT(dispatched_events_.size(), index);
+    ui::Event* ev = dispatched_events_[index];
+    DCHECK(ev->IsMouseEvent());
+    return static_cast<ui::MouseEvent*>(ev);
+  }
+
+  void DispatchEventForTest(ui::Event* event) {
+    scoped_ptr<ui::Event> cloned_event = ui::Event::Clone(*event);
+    dispatched_events_.push_back(cloned_event.release());
+  }
 
  private:
-  scoped_ptr<ui::MockTabletEventConverterEvdev> device_;
   scoped_ptr<ui::MockTabletCursorEvdev> cursor_;
-  scoped_ptr<ui::EventModifiersEvdev> modifiers_;
+  scoped_ptr<ui::DeviceManager> device_manager_;
+  scoped_ptr<ui::EventFactoryEvdev> event_factory_;
+  scoped_ptr<ui::DeviceEventDispatcherEvdev> dispatcher_;
+  scoped_ptr<ui::MockTabletEventConverterEvdev> device_;
+
+  ScopedVector<ui::Event> dispatched_events_;
 
   int events_out_;
   int events_in_;
@@ -212,9 +224,9 @@ TEST_F(TabletEventConverterEvdevTest, MoveTopLeft) {
   };
 
   dev->ProcessEvents(mock_kernel_queue, arraysize(mock_kernel_queue));
-  EXPECT_EQ(1u, dev->size());
+  EXPECT_EQ(1u, size());
 
-  ui::MouseEvent* event = dev->event(0);
+  ui::MouseEvent* event = dispatched_event(0);
   EXPECT_EQ(ui::ET_MOUSE_MOVED, event->type());
 
   EXPECT_LT(cursor()->GetLocation().x(), EPSILON);
@@ -245,9 +257,9 @@ TEST_F(TabletEventConverterEvdevTest, MoveTopRight) {
   };
 
   dev->ProcessEvents(mock_kernel_queue, arraysize(mock_kernel_queue));
-  EXPECT_EQ(1u, dev->size());
+  EXPECT_EQ(1u, size());
 
-  ui::MouseEvent* event = dev->event(0);
+  ui::MouseEvent* event = dispatched_event(0);
   EXPECT_EQ(ui::ET_MOUSE_MOVED, event->type());
 
   EXPECT_GT(cursor()->GetLocation().x(),
@@ -278,9 +290,9 @@ TEST_F(TabletEventConverterEvdevTest, MoveBottomLeft) {
   };
 
   dev->ProcessEvents(mock_kernel_queue, arraysize(mock_kernel_queue));
-  EXPECT_EQ(1u, dev->size());
+  EXPECT_EQ(1u, size());
 
-  ui::MouseEvent* event = dev->event(0);
+  ui::MouseEvent* event = dispatched_event(0);
   EXPECT_EQ(ui::ET_MOUSE_MOVED, event->type());
 
   EXPECT_LT(cursor()->GetLocation().x(), EPSILON);
@@ -313,9 +325,9 @@ TEST_F(TabletEventConverterEvdevTest, MoveBottomRight) {
   };
 
   dev->ProcessEvents(mock_kernel_queue, arraysize(mock_kernel_queue));
-  EXPECT_EQ(1u, dev->size());
+  EXPECT_EQ(1u, size());
 
-  ui::MouseEvent* event = dev->event(0);
+  ui::MouseEvent* event = dispatched_event(0);
   EXPECT_EQ(ui::ET_MOUSE_MOVED, event->type());
 
   EXPECT_GT(cursor()->GetLocation().x(),
@@ -363,14 +375,14 @@ TEST_F(TabletEventConverterEvdevTest, Tap) {
   };
 
   dev->ProcessEvents(mock_kernel_queue, arraysize(mock_kernel_queue));
-  EXPECT_EQ(3u, dev->size());
+  EXPECT_EQ(3u, size());
 
-  ui::MouseEvent* event = dev->event(0);
+  ui::MouseEvent* event = dispatched_event(0);
   EXPECT_EQ(ui::ET_MOUSE_MOVED, event->type());
-  event = dev->event(1);
+  event = dispatched_event(1);
   EXPECT_EQ(ui::ET_MOUSE_PRESSED, event->type());
   EXPECT_EQ(true, event->IsLeftMouseButton());
-  event = dev->event(2);
+  event = dispatched_event(2);
   EXPECT_EQ(ui::ET_MOUSE_RELEASED, event->type());
   EXPECT_EQ(true, event->IsLeftMouseButton());
 }
@@ -410,14 +422,14 @@ TEST_F(TabletEventConverterEvdevTest, StylusButtonPress) {
   };
 
   dev->ProcessEvents(mock_kernel_queue, arraysize(mock_kernel_queue));
-  EXPECT_EQ(3u, dev->size());
+  EXPECT_EQ(3u, size());
 
-  ui::MouseEvent* event = dev->event(0);
+  ui::MouseEvent* event = dispatched_event(0);
   EXPECT_EQ(ui::ET_MOUSE_MOVED, event->type());
-  event = dev->event(1);
+  event = dispatched_event(1);
   EXPECT_EQ(ui::ET_MOUSE_PRESSED, event->type());
   EXPECT_EQ(true, event->IsRightMouseButton());
-  event = dev->event(2);
+  event = dispatched_event(2);
   EXPECT_EQ(ui::ET_MOUSE_RELEASED, event->type());
   EXPECT_EQ(true, event->IsRightMouseButton());
 }
@@ -433,5 +445,5 @@ TEST_F(TabletEventConverterEvdevTest, CheckStylusFiltering) {
   };
 
   dev->ProcessEvents(mock_kernel_queue, arraysize(mock_kernel_queue));
-  EXPECT_EQ(0u, dev->size());
+  EXPECT_EQ(0u, size());
 }

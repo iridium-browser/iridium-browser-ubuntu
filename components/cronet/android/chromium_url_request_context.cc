@@ -63,7 +63,6 @@ bool ChromiumUrlRequestContextRegisterJni(JNIEnv* env) {
 // Sets global user-agent to be used for all subsequent requests.
 static jlong CreateRequestContextAdapter(JNIEnv* env,
                                          jobject jcaller,
-                                         jobject jcontext,
                                          jstring juser_agent,
                                          jint jlog_level,
                                          jstring jconfig) {
@@ -84,10 +83,6 @@ static jlong CreateRequestContextAdapter(JNIEnv* env,
     DLOG(ERROR) << "Bad Config: " << config_value;
     return 0;
   }
-
-  // Set application context.
-  base::android::ScopedJavaLocalRef<jobject> scoped_context(env, jcontext);
-  base::android::InitApplicationContext(env, scoped_context);
 
   // TODO(mef): MinLogLevel is global, shared by all URLRequestContexts.
   // Revisit this if each URLRequestContext would need an individual log level.

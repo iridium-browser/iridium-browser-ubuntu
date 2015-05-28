@@ -24,6 +24,7 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
     private int mActiveModelIndex = NORMAL_TAB_MODEL_INDEX;
     private final ObserverList<TabModelSelectorObserver> mObservers =
             new ObserverList<TabModelSelectorObserver>();
+    private boolean mTabStateInitialized;
 
     protected final void initialize(boolean startIncognito, TabModel... models) {
         // Only normal and incognito supported for now.
@@ -65,7 +66,15 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
 
     @Override
     public void selectModel(boolean incognito) {
+        TabModel previousModel = getCurrentModel();
         mActiveModelIndex = incognito ? INCOGNITO_TAB_MODEL_INDEX : NORMAL_TAB_MODEL_INDEX;
+        TabModel newModel = getCurrentModel();
+
+        if (previousModel != newModel) {
+            for (TabModelSelectorObserver listener : mObservers) {
+                listener.onTabModelSelected(newModel, previousModel);
+            }
+        }
     }
 
     @Override
@@ -180,6 +189,22 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
     @Override
     public void removeObserver(TabModelSelectorObserver observer) {
         mObservers.removeObserver(observer);
+    }
+
+    @Override
+    public void setCloseAllTabsDelegate(CloseAllTabsDelegate delegate) { }
+
+    /**
+     * Marks the task state being initialized and notifies observers.
+     */
+    protected void markTabStateInitialized() {
+        mTabStateInitialized = true;
+        for (TabModelSelectorObserver listener : mObservers) listener.onTabStateInitialized();
+    }
+
+    @Override
+    public boolean isTabStateInitialized() {
+        return mTabStateInitialized;
     }
 
     /**

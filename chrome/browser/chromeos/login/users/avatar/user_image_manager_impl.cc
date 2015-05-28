@@ -5,7 +5,6 @@
 #include "chrome/browser/chromeos/login/users/avatar/user_image_manager_impl.h"
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -20,6 +19,7 @@
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -609,6 +609,11 @@ void UserImageManagerImpl::UserLoggedIn(bool user_is_new,
   profile_image_url_ = GURL();
   profile_image_requested_ = false;
 
+  user_image_sync_observer_.reset();
+  TryToCreateImageSyncObserver();
+}
+
+void UserImageManagerImpl::UserProfileCreated() {
   if (IsUserLoggedInAndHasGaiaAccount()) {
     TryToInitDownloadedProfileImage();
 
@@ -633,9 +638,6 @@ void UserImageManagerImpl::UserLoggedIn(bool user_is_new,
     profile_download_one_shot_timer_.Stop();
     profile_download_periodic_timer_.Stop();
   }
-
-  user_image_sync_observer_.reset();
-  TryToCreateImageSyncObserver();
 }
 
 void UserImageManagerImpl::SaveUserDefaultImageIndex(int default_image_index) {

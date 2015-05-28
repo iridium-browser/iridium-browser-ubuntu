@@ -34,27 +34,29 @@ class BookmarkUndoService : public bookmarks::BaseBookmarkModelObserver,
  private:
   // bookmarks::BaseBookmarkModelObserver:
   void BookmarkModelChanged() override {}
-  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
-  void BookmarkModelBeingDeleted(BookmarkModel* model) override;
-  void BookmarkNodeMoved(BookmarkModel* model,
-                         const BookmarkNode* old_parent,
+  void BookmarkModelLoaded(bookmarks::BookmarkModel* model,
+                           bool ids_reassigned) override;
+  void BookmarkModelBeingDeleted(bookmarks::BookmarkModel* model) override;
+  void BookmarkNodeMoved(bookmarks::BookmarkModel* model,
+                         const bookmarks::BookmarkNode* old_parent,
                          int old_index,
-                         const BookmarkNode* new_parent,
+                         const bookmarks::BookmarkNode* new_parent,
                          int new_index) override;
-  void BookmarkNodeAdded(BookmarkModel* model,
-                         const BookmarkNode* parent,
+  void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
+                         const bookmarks::BookmarkNode* parent,
                          int index) override;
-  void OnWillRemoveBookmarks(BookmarkModel* model,
-                             const BookmarkNode* parent,
+  void OnWillRemoveBookmarks(bookmarks::BookmarkModel* model,
+                             const bookmarks::BookmarkNode* parent,
                              int old_index,
-                             const BookmarkNode* node) override;
-  void OnWillRemoveAllUserBookmarks(BookmarkModel* model) override;
-  void OnWillChangeBookmarkNode(BookmarkModel* model,
-                                const BookmarkNode* node) override;
-  void OnWillReorderBookmarkNode(BookmarkModel* model,
-                                 const BookmarkNode* node) override;
-  void GroupedBookmarkChangesBeginning(BookmarkModel* model) override;
-  void GroupedBookmarkChangesEnded(BookmarkModel* model) override;
+                             const bookmarks::BookmarkNode* node) override;
+  void OnWillRemoveAllUserBookmarks(bookmarks::BookmarkModel* model) override;
+  void OnWillChangeBookmarkNode(bookmarks::BookmarkModel* model,
+                                const bookmarks::BookmarkNode* node) override;
+  void OnWillReorderBookmarkNode(bookmarks::BookmarkModel* model,
+                                 const bookmarks::BookmarkNode* node) override;
+  void GroupedBookmarkChangesBeginning(
+      bookmarks::BookmarkModel* model) override;
+  void GroupedBookmarkChangesEnded(bookmarks::BookmarkModel* model) override;
 
   // BookmarkRenumberObserver:
   void OnBookmarkRenumbered(int64 old_id, int64 new_id) override;

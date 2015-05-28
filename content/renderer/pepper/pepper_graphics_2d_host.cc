@@ -5,9 +5,9 @@
 #include "content/renderer/pepper/pepper_graphics_2d_host.h"
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/resources/shared_bitmap.h"
 #include "cc/resources/texture_mailbox.h"
 #include "content/child/child_shared_bitmap_manager.h"
@@ -15,7 +15,7 @@
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "content/renderer/pepper/gfx_conversion.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
-#include "content/renderer/pepper/pepper_plugin_instance_throttler.h"
+#include "content/renderer/pepper/plugin_instance_throttler_impl.h"
 #include "content/renderer/pepper/ppb_image_data_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "ppapi/c/pp_bool.h"
@@ -688,8 +688,10 @@ int32_t PepperGraphics2DHost::Flush(PP_Resource* old_image_data) {
     need_flush_ack_ = true;
   }
 
-  if (bound_instance_ && bound_instance_->throttler())
+  if (bound_instance_ && bound_instance_->throttler() &&
+      bound_instance_->throttler()->needs_representative_keyframe()) {
     bound_instance_->throttler()->OnImageFlush(image_data_->GetMappedBitmap());
+  }
 
   return PP_OK_COMPLETIONPENDING;
 }

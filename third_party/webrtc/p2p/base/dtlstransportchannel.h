@@ -126,6 +126,9 @@ class DtlsTransportChannelWrapper : public TransportChannelImpl {
   virtual int SetOption(rtc::Socket::Option opt, int value) {
     return channel_->SetOption(opt, value);
   }
+  virtual bool GetOption(rtc::Socket::Option opt, int* value) {
+    return channel_->GetOption(opt, value);
+  }
   virtual int GetError() {
     return channel_->GetError();
   }
@@ -146,6 +149,9 @@ class DtlsTransportChannelWrapper : public TransportChannelImpl {
 
   virtual bool GetSslRole(rtc::SSLRole* role) const;
   virtual bool SetSslRole(rtc::SSLRole role);
+
+  // Find out which DTLS cipher was negotiated
+  virtual bool GetSslCipher(std::string* cipher);
 
   // Once DTLS has been established, this method retrieves the certificate in
   // use by the remote peer, for use in external identity verification.

@@ -25,6 +25,7 @@
 #define ContainerNode_h
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "core/CoreExport.h"
 #include "core/dom/Node.h"
 #include "core/html/CollectionType.h"
 #include "wtf/OwnPtr.h"
@@ -67,7 +68,7 @@ enum SubtreeModificationAction {
 const int initialNodeVectorSize = 11;
 using NodeVector = WillBeHeapVector<RefPtrWillBeMember<Node>, initialNodeVectorSize>;
 
-class ContainerNode : public Node {
+class CORE_EXPORT ContainerNode : public Node {
 public:
     virtual ~ContainerNode();
 
@@ -212,7 +213,7 @@ public:
 
     void disconnectDescendantFrames();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     ContainerNode(TreeScope*, ConstructionType = CreateContainer);

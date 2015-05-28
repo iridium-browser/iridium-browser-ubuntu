@@ -43,15 +43,15 @@ class ExecutionContextTask;
 
 class MainThreadTaskRunner {
     WTF_MAKE_NONCOPYABLE(MainThreadTaskRunner);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(MainThreadTaskRunner);
 
 public:
     static PassOwnPtr<MainThreadTaskRunner> create(ExecutionContext*);
 
     ~MainThreadTaskRunner();
 
-    void postTask(PassOwnPtr<ExecutionContextTask>); // Executes the task on context's thread asynchronously.
-    void postInspectorTask(PassOwnPtr<ExecutionContextTask>);
+    void postTask(const WebTraceLocation&, PassOwnPtr<ExecutionContextTask>); // Executes the task on context's thread asynchronously.
+    void postInspectorTask(const WebTraceLocation&, PassOwnPtr<ExecutionContextTask>);
     void perform(PassOwnPtr<ExecutionContextTask>, bool);
 
     void suspend();
@@ -65,7 +65,7 @@ private:
     ExecutionContext* m_context;
     WeakPtrFactory<MainThreadTaskRunner> m_weakFactory;
     Timer<MainThreadTaskRunner> m_pendingTasksTimer;
-    Vector<OwnPtr<ExecutionContextTask> > m_pendingTasks;
+    Vector<OwnPtr<ExecutionContextTask>> m_pendingTasks;
     bool m_suspended;
 };
 

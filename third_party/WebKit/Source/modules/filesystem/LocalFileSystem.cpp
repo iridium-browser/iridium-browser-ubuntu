@@ -40,7 +40,7 @@
 #include "core/workers/WorkerGlobalScope.h"
 #include "modules/filesystem/FileSystemClient.h"
 #include "platform/AsyncFileSystemCallbacks.h"
-#include "platform/PermissionCallbacks.h"
+#include "platform/ContentSettingCallbacks.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebFileSystem.h"
 #include "wtf/Functional.h"
@@ -69,7 +69,7 @@ public:
         return m_callbacks.release();
     }
 
-    void trace(Visitor*) { }
+    DEFINE_INLINE_TRACE() { }
 
 private:
     OwnPtr<AsyncFileSystemCallbacks> m_callbacks;
@@ -136,21 +136,21 @@ void LocalFileSystem::requestFileSystemAccessInternal(ExecutionContext* context,
         (*allowed)();
         return;
     }
-    client()->requestFileSystemAccessAsync(context, PermissionCallbacks::create(allowed, denied));
+    client()->requestFileSystemAccessAsync(context, ContentSettingCallbacks::create(allowed, denied));
 }
 
 void LocalFileSystem::fileSystemNotAvailable(
     PassRefPtrWillBeRawPtr<ExecutionContext> context,
     CallbackWrapper* callbacks)
 {
-    context->postTask(createCrossThreadTask(&reportFailure, callbacks->release(), FileError::ABORT_ERR));
+    context->postTask(FROM_HERE, createCrossThreadTask(&reportFailure, callbacks->release(), FileError::ABORT_ERR));
 }
 
 void LocalFileSystem::fileSystemNotAllowedInternal(
     PassRefPtrWillBeRawPtr<ExecutionContext> context,
     CallbackWrapper* callbacks)
 {
-    context->postTask(createCrossThreadTask(&reportFailure, callbacks->release(), FileError::ABORT_ERR));
+    context->postTask(FROM_HERE, createCrossThreadTask(&reportFailure, callbacks->release(), FileError::ABORT_ERR));
 }
 
 void LocalFileSystem::fileSystemAllowedInternal(

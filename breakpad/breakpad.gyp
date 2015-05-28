@@ -9,8 +9,8 @@
   ],
   'conditions': [
     # minidump_stackwalk and minidump_dump are tool-type executables that do
-    # not build on iOS.
-    ['OS!="ios" and OS!="win"', {
+    # not build on iOS with Xcode (but do build on iOS with ninja.)
+    ['(OS!="ios" or "<(GENERATOR)"!="xcode" or "<(GENERATOR_FLAVOR)"=="ninja") and OS!="win"', {
       'targets': [
         {
           # code shared by both {micro,mini}dump_stackwalk
@@ -91,6 +91,11 @@
             'src/third_party/libdisasm/x86_operand_list.c',
             'src/third_party/libdisasm/x86_operand_list.h',
           ],
+          'conditions': [
+            ['OS=="ios"', {
+              'toolsets': ['host'],
+            }],
+          ],
         },
         {
           # GN version: //breakpad:microdump_stackwalk
@@ -103,6 +108,11 @@
             'src/processor/microdump.cc',
             'src/processor/microdump_processor.cc',
             'src/processor/microdump_stackwalk.cc',
+          ],
+          'conditions': [
+            ['OS=="ios"', {
+              'toolsets': ['host'],
+            }],
           ],
         },
         {
@@ -121,6 +131,11 @@
             'src/processor/minidump.cc',
             'src/processor/minidump_processor.cc',
             'src/processor/minidump_stackwalk.cc',
+          ],
+          'conditions': [
+            ['OS=="ios"', {
+              'toolsets': ['host'],
+            }],
           ],
         },
         {
@@ -141,10 +156,15 @@
             'src/processor/pathname_stripper.cc',
             'src/processor/pathname_stripper.h',
           ],
+          'conditions': [
+            ['OS=="ios"', {
+              'toolsets': ['host'],
+            }],
+          ],
         },
       ],
     }],
-    ['OS=="mac" or (OS=="ios" and "<(GENERATOR)"=="ninja")', {
+    ['OS=="mac" or (OS=="ios" and ("<(GENERATOR)"!="xcode" or "<(GENERATOR_FLAVOR)"=="ninja"))', {
       'target_defaults': {
         'include_dirs': [
           'src',
@@ -831,7 +851,7 @@
         }
       ]
     }],
-    ['OS=="ios" and "<(GENERATOR)"!="ninja"', {
+    ['OS=="ios" and "<(GENERATOR)"=="xcode" and "<(GENERATOR_FLAVOR)"!="ninja"', {
       'variables': {
         'ninja_output_dir': 'ninja-breakpad',
         'ninja_product_dir':

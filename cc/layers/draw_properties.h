@@ -6,6 +6,7 @@
 #define CC_LAYERS_DRAW_PROPERTIES_H_
 
 #include "base/memory/scoped_ptr.h"
+#include "cc/trees/occlusion.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/transform.h"
@@ -31,8 +32,10 @@ struct CC_EXPORT DrawProperties {
         num_unclipped_descendants(0),
         layer_or_descendant_has_copy_request(false),
         layer_or_descendant_has_input_handler(false),
+        layer_or_descendant_is_drawn(false),
         has_child_with_a_scroll_parent(false),
         sorted_for_recursion(false),
+        visited(false),
         index_of_first_descendants_addition(0),
         num_descendants_added(0),
         index_of_first_render_surface_layer_list_addition(0),
@@ -49,6 +52,9 @@ struct CC_EXPORT DrawProperties {
 
   // Transforms objects from content space to screen space (viewport space).
   gfx::Transform screen_space_transform;
+
+  // Known occlusion above the layer mapped to the content space of the layer.
+  Occlusion occlusion_in_content_space;
 
   // DrawProperties::opacity may be different than LayerType::opacity,
   // particularly in the case when a RenderSurface re-parents the layer's
@@ -109,6 +115,9 @@ struct CC_EXPORT DrawProperties {
   // If true, the layer or one of its descendants has a wheel or touch handler.
   bool layer_or_descendant_has_input_handler;
 
+  // If true, the layer or one of its descendants is drawn
+  bool layer_or_descendant_is_drawn;
+
   // This is true if the layer has any direct child that has a scroll parent.
   // This layer will not be the scroll parent in this case. This information
   // lets us avoid work in CalculateDrawPropertiesInternal -- if none of our
@@ -118,6 +127,9 @@ struct CC_EXPORT DrawProperties {
   // This is true if the order (wrt to its siblings in the tree) in which the
   // layer will be visited while computing draw properties has been determined.
   bool sorted_for_recursion;
+
+  // This is used to sanity-check CDP and ensure that we don't revisit a layer.
+  bool visited;
 
   // If this layer is visited out of order, its contribution to the descendant
   // and render surface layer lists will be put aside in a temporary list.

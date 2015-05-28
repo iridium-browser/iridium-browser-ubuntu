@@ -14,7 +14,7 @@ public:
 	virtual ~Icon();
 
 public:
-	FX_BOOL name(OBJ_PROP_PARAMS);
+	FX_BOOL name(IFXJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sError);
 	
 public:
 	void				SetStream(CPDF_Stream* pIconStream);

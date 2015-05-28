@@ -16,7 +16,7 @@
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "device/battery/battery_monitor.mojom.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/strong_binding.h"
 
 // These tests run against a dummy implementation of the BatteryMonitor service.
 // That is, they verify that the service implementation is correctly exposed to
@@ -91,6 +91,16 @@ class TestContentBrowserClient : public ContentBrowserClient {
   void OverrideRenderProcessMojoServices(ServiceRegistry* registry) override {
     registry->AddService(base::Bind(&FakeBatteryMonitor::Create));
   }
+
+#if defined(OS_ANDROID)
+  void GetAdditionalMappedFilesForChildProcess(
+      const base::CommandLine& command_line,
+      int child_process_id,
+      FileDescriptorInfo* mappings) override {
+    ShellContentBrowserClient::Get()->GetAdditionalMappedFilesForChildProcess(
+        command_line, child_process_id, mappings);
+  }
+#endif  // defined(OS_ANDROID)
 };
 
 class BatteryMonitorIntegrationTest : public ContentBrowserTest {

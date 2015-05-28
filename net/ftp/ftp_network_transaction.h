@@ -14,12 +14,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "net/base/address_list.h"
 #include "net/base/auth.h"
-#include "net/base/net_log.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/single_request_host_resolver.h"
 #include "net/ftp/ftp_ctrl_response_buffer.h"
 #include "net/ftp/ftp_response_info.h"
 #include "net/ftp/ftp_transaction.h"
+#include "net/log/net_log.h"
 
 namespace net {
 
@@ -33,8 +33,7 @@ class NET_EXPORT_PRIVATE FtpNetworkTransaction : public FtpTransaction {
                         ClientSocketFactory* socket_factory);
   ~FtpNetworkTransaction() override;
 
-  virtual int Stop(int error);
-  virtual int RestartIgnoringLastError(const CompletionCallback& callback);
+  int Stop(int error);
 
   // FtpTransaction methods:
   int Start(const FtpRequestInfo* request_info,
@@ -127,8 +126,9 @@ class NET_EXPORT_PRIVATE FtpNetworkTransaction : public FtpTransaction {
   // Resets the members of the transaction so it can be restarted.
   void ResetStateForRestart();
 
-  // Resets the data connection after an error and switches to |next_state|.
-  void ResetDataConnectionAfterError(State next_state);
+  // Establishes the data connection and switches to |state_after_connect|.
+  // |state_after_connect| should only be RETR or LIST.
+  void EstablishDataConnection(State state_after_connect);
 
   void DoCallback(int result);
   void OnIOComplete(int result);

@@ -40,8 +40,8 @@
 #include "core/dom/Range.h"
 #include "core/dom/TreeScope.h"
 #include "core/editing/FrameSelection.h"
-#include "core/editing/TextIterator.h"
 #include "core/editing/htmlediting.h"
+#include "core/editing/iterators/TextIterator.h"
 #include "core/frame/LocalFrame.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "wtf/text/WTFString.h"
@@ -558,7 +558,7 @@ void DOMSelection::addConsoleError(const String& message)
         m_treeScope->document().addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, message));
 }
 
-void DOMSelection::trace(Visitor* visitor)
+DEFINE_TRACE(DOMSelection)
 {
     visitor->trace(m_treeScope);
     DOMWindowProperty::trace(visitor);

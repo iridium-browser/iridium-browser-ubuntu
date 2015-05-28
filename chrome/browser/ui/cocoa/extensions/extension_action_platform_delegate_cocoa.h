@@ -10,11 +10,9 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
-@class ExtensionActionContextMenuController;
 @class ExtensionPopupController;
-class ToolbarActionViewDelegateCocoa;
 
-// The cocoa-specific implementation for ExtensionActionPlatformDelegate.
+// The Cocoa-specific implementation for ExtensionActionPlatformDelegate.
 class ExtensionActionPlatformDelegateCocoa
     : public ExtensionActionPlatformDelegate,
       public content::NotificationObserver {
@@ -25,14 +23,11 @@ class ExtensionActionPlatformDelegateCocoa
 
  private:
   // ExtensionActionPlatformDelegate:
-  gfx::NativeView GetPopupNativeView() override;
   bool IsMenuRunning() const override;
   void RegisterCommand() override;
   void OnDelegateSet() override;
-  bool IsShowingPopup() const override;
   void CloseActivePopup() override;
-  void CloseOwnPopup() override;
-  bool ShowPopupWithUrl(
+  extensions::ExtensionViewHost* ShowPopupWithUrl(
       ExtensionActionViewController::PopupShowAction show_action,
       const GURL& popup_url,
       bool grant_tab_permissions) override;
@@ -42,17 +37,11 @@ class ExtensionActionPlatformDelegateCocoa
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
-  // Returns the popup shown by this extension action, if one exists.
-  ExtensionPopupController* GetPopup() const;
-
-  // Returns the delegate in its cocoa implementation.
-  ToolbarActionViewDelegateCocoa* GetDelegateCocoa();
+  // Returns the point at which the popup should be shown.
+  NSPoint GetPopupPoint() const;
 
   // The main controller for this extension action.
   ExtensionActionViewController* controller_;
-
-  // The context menu controller for the extension action, if any.
-  base::scoped_nsobject<ExtensionActionContextMenuController> menuController_;
 
   content::NotificationRegistrar registrar_;
 

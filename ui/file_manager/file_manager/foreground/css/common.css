@@ -115,61 +115,17 @@ input.common[type='checkbox']::after {
   opacity: 0.7;
 }
 
-.buttonbar {
-  display: flex;
-  height: 31px;
-}
-
-.buttonbar button:active img {
-  opacity: 1.0;
-}
-
-.buttonbar button:hover img {
-  opacity: 0.72;
-}
-
-.buttonbar button[disabled] img {
-  opacity: 0.9;
-}
-
-.buttonbar button img {
-  display: inline-block;
-  margin: -3px 0 0;
-  opacity: 0.55;
-  vertical-align: middle;
-}
-
-.buttonbar button.menubutton span.disclosureindicator {
-  -webkit-transform: rotate(90deg);
-  float: right;
-  margin-left: 7px;
-  margin-top: 10px;
-  opacity: .8;
-  transition: none;
-}
-
-span.disclosureindicator {
-  background-image: -webkit-image-set(
-    url(../images/common/disclosure_arrow_dk_grey.png) 1x,
-    url(../images/common/2x/disclosure_arrow_dk_grey.png) 2x);
-  background-position: center;
-  background-repeat: no-repeat;
-  display: inline-block;
-  height: 7px;
-  width: 5px;
-}
-
 /* "chrome-menu" class overrides some standard menu.css styles, to make custom
    menus in FileBrowser look like native ChromeOS menus. */
 
 cr-menu.chrome-menu {
-  background-color: rgb(250, 250, 250);
-  border-radius: 3px;
+  background-color: white;
+  border-radius: 2px;
   box-shadow: 0 1px 4px 0 rgba(0, 0, 0, .5);
-  color: rgb(34, 34, 34);
+  color: rgb(51, 51, 51);
   outline: none;
   overflow: hidden;
-  padding: 5px 0;
+  padding: 4px 0;
   transition: opacity 200ms ease-in;
   z-index: 600;  /* Must be below the overlay pane (1000). */
 }
@@ -189,9 +145,8 @@ cr-menu.chrome-menu.hide-delayed[hidden] {
 cr-menu.chrome-menu > :not(hr) {
   background-position: right 10px center;
   background-repeat: no-repeat;
-  line-height: 30px;
-  padding-left: 20px;
-  padding-right: 20px;
+  line-height: 32px;
+  padding: 0 12px;
 }
 
 html[dir='rtl'] cr-menu.chrome-menu > :not(hr) {
@@ -233,19 +188,19 @@ html[dir='rtl'] cr-menu.chrome-menu > .menuitem-button.right {
 }
 
 cr-menu.chrome-menu > cr-menu-item[disabled] {
-  color: rgb(153, 153, 153);
+  color: rgb(219, 219, 219);
 }
 
 cr-menu.chrome-menu > cr-menu-item:not([disabled])[selected],
 cr-menu.chrome-menu > cr-menu-item:not([disabled]):active {
-  background-color: rgb(66, 129, 244);
+  background-color: rgb(33, 150, 243);
   color: white;
 }
 
 cr-menu.chrome-menu > hr {
-  background: rgb(235, 235, 235);
+  background: rgb(219, 219, 219);
   height: 1px;
-  margin: 5px 0;
+  margin: 4px 0;
 }
 
 cr-menu.chrome-menu > cr-menu-item[checked] {
@@ -295,7 +250,7 @@ select {
 }
 
 .buttonbar button {
-  -webkit-margin-start: 10px;
+  -webkit-margin-start: 12px;
 }
 
 button:hover,
@@ -339,6 +294,30 @@ select[size='0']:hover,
 select[size='1']:hover {
   /* Original value is '5 fill', which hides the dropdown triangle. */
   border-image-slice: 5;
+}
+
+/* Style for <button>s to have similar style with Polymer's <paper-button>. */
+.imitate-paper-button {
+  -webkit-user-select: none;
+  background: transparent;
+  border: 0;
+  border-image: none;
+  border-radius: 3px;
+  box-sizing: border-box;
+  color: inherit;
+  cursor: pointer;
+  display: inline-block;
+  font: inherit;
+  height: auto;
+  margin: 0 0.29em;
+  min-width: 5.14em;
+  outline: none;
+  overflow: hidden;
+  padding: 0.7em 0.57em;
+  position: relative;
+  text-align: center;
+  text-transform: uppercase;
+  z-index: 0;
 }
 
 /* Gray progress bar. */
@@ -499,10 +478,41 @@ html[dir='rtl'] .entry-name {
   width: 44px;
 }
 
+html[dir='rtl'] .cr-dialog-close {
+  left: 0;
+  right: auto;
+}
+
 .cr-dialog-close:hover {
   background-image: url(chrome://theme/IDR_CLOSE_DIALOG_H);
 }
 
 .cr-dialog-close:active {
   background-image: url(chrome://theme/IDR_CLOSE_DIALOG_P);
+}
+
+/* Minor tweak of vertical position for texts which need to be vertically
+ * aligned with corresponding file-type icons. */
+.tree-row > .label,
+.table-row-cell .filename-label,
+.table-row-cell .size,
+.table-row-cell .type,
+.table-row-cell .date,
+.thumbnail-bottom .filename-label,
+.autocomplete-suggestions > li > .detail-text {
+  padding-top: 1px;
+}
+
+@media (-webkit-min-device-pixel-ratio: 1.5) {
+  .tree-row > .label,
+  .table-row-cell .filename-label,
+  .table-row-cell .size,
+  .table-row-cell .type,
+  .table-row-cell .date,
+  .thumbnail-bottom .filename-label,
+  .autocomplete-suggestions > li > .detail-text {
+    /* In HiDPI display, 13pt Roboto font is drawn upper than normal display,
+     * so add extra padding on top of it. */
+    padding-top: 3px;
+  }
 }

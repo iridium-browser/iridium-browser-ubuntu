@@ -9,7 +9,6 @@
 
 #include "base/time/time.h"
 #include "chrome/browser/prerender/prerender_contents.h"
-#include "chrome/browser/prerender/prerender_events.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_local_predictor.h"
 #include "chrome/browser/prerender/prerender_origin.h"
@@ -99,26 +98,6 @@ class PrerenderHistograms {
   // Record the time since a page was recently visited.
   void RecordTimeSinceLastRecentVisit(Origin origin,
                                       base::TimeDelta time) const;
-
-  // Records a prerender event.
-  void RecordEvent(Origin origin, uint8 experiment_id, PrerenderEvent event)
-      const;
-
-  // Record a prerender cookie status bitmap. Must be in the range
-  // [0, PrerenderContents::kNumCookieStatuses).
-  void RecordCookieStatus(Origin origin,
-                          uint8 experiment_id,
-                          int cookie_status) const;
-
-  // Record a prerender cookie send type. Must be in the range
-  // [0, PrerenderContents::kNumCookieSendTypes).
-  void RecordCookieSendType(Origin origin,
-                            uint8 experiment_id,
-                            int cookie_send_type) const;
-
-  void RecordPrerenderPageVisitedStatus(Origin origin,
-                                        uint8 experiment_id,
-                                        bool visited_before) const;
 
   // Record the bytes in the prerender, whether it was used or not, and the
   // total number of bytes fetched for this profile since the last call to

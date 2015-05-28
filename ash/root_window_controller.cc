@@ -100,7 +100,7 @@ aura::Window* CreateContainer(int window_id,
   aura::Window* container = new aura::Window(NULL);
   container->set_id(window_id);
   container->SetName(name);
-  container->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+  container->Init(ui::LAYER_NOT_DRAWN);
   parent->AddChild(container);
   if (window_id != kShellWindowId_UnparentedControlContainer)
     container->Show();
@@ -221,6 +221,7 @@ class EmptyWindowDelegate : public aura::WindowDelegate {
   gfx::Size GetMaximumSize() const override { return gfx::Size(); }
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override {}
+  ui::TextInputClient* GetFocusedTextInputClient() override { return nullptr; }
   gfx::NativeCursor GetCursor(const gfx::Point& point) override {
     return gfx::kNullCursor;
   }
@@ -234,7 +235,7 @@ class EmptyWindowDelegate : public aura::WindowDelegate {
   }
   bool CanFocus() override { return false; }
   void OnCaptureLost() override {}
-  void OnPaint(gfx::Canvas* canvas) override {}
+  void OnPaint(const ui::PaintContext& context) override {}
   void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
   void OnWindowDestroying(aura::Window* window) override {}
   void OnWindowDestroyed(aura::Window* window) override { delete this; }
@@ -762,7 +763,7 @@ void RootWindowController::InitLayoutManagers() {
     // This window exists only to be a event target on login screen.
     // It does not have to handle events, nor be visible.
     mouse_event_target_.reset(new aura::Window(new EmptyWindowDelegate));
-    mouse_event_target_->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+    mouse_event_target_->Init(ui::LAYER_NOT_DRAWN);
 
     aura::Window* lock_background_container =
         GetContainer(kShellWindowId_LockScreenBackgroundContainer);

@@ -39,6 +39,7 @@ class ResourceCreationImpl : public ppapi::thunk::ResourceCreationAPI {
   PP_Resource CreateCompositor(PP_Instance instance) override;
   PP_Resource CreateBroker(PP_Instance instance) override;
   PP_Resource CreateBuffer(PP_Instance instance, uint32_t size) override;
+  PP_Resource CreateCameraDevicePrivate(PP_Instance instance) override;
   PP_Resource CreateFlashDRM(PP_Instance instance) override;
   PP_Resource CreateFlashFontFile(
       PP_Instance instance,
@@ -127,6 +128,7 @@ class ResourceCreationImpl : public ppapi::thunk::ResourceCreationAPI {
                                     PP_Resource graphics3d_id,
                                     PP_VideoDecoder_Profile profile) override;
   PP_Resource CreateVideoDestination(PP_Instance instance) override;
+  PP_Resource CreateVideoEncoder(PP_Instance instance) override;
   PP_Resource CreateVideoSource(PP_Instance instance) override;
   PP_Resource CreateWheelInputEvent(PP_Instance instance,
                                     PP_TimeTicks time_stamp,

@@ -13,6 +13,9 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "url/gurl.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
+
 @implementation BookmarkFolderAppleScript
 
 - (NSArray*)bookmarkFolders {

@@ -22,17 +22,13 @@ var remoting = remoting || {};
 remoting.WcsSandboxContainer = function(sandbox) {
   /** @private */
   this.sandbox_ = sandbox;
-  /** @type {?function(string):void}
-    * @private */
+  /** @private {?function(string):void} */
   this.onConnected_ = null;
-  /** @type {function(remoting.Error):void}
-    * @private */
+  /** @private {function(!remoting.Error):void} */
   this.onError_ = function(error) {};
-  /** @type {?function(string):void}
-    * @private */
+  /** @private {?function(string):void} */
   this.onIq_ = null;
-  /** @type {Object.<number, XMLHttpRequest>}
-    * @private */
+  /** @private {Object<number, XMLHttpRequest>} */
   this.pendingXhrs_ = {};
   /** @private */
   this.localJid_ = '';
@@ -53,7 +49,7 @@ remoting.WcsSandboxContainer = function(sandbox) {
 /**
  * @param {function(string):void} onConnected Callback to be called when WCS is
  *     connected. May be called synchronously if WCS is already connected.
- * @param {function(remoting.Error):void} onError called in case of an error.
+ * @param {function(!remoting.Error):void} onError called in case of an error.
  * @return {void} Nothing.
  */
 remoting.WcsSandboxContainer.prototype.connect = function(
@@ -97,8 +93,9 @@ remoting.WcsSandboxContainer.prototype.ensureAccessTokenRefreshTimer_ =
  * @return {void} Nothing.
  */
 remoting.WcsSandboxContainer.prototype.refreshAccessToken_ = function() {
-  remoting.identity.callWithToken(
-      this.setAccessToken_.bind(this), this.onError_);
+  remoting.identity.getToken().then(
+      this.setAccessToken_.bind(this),
+      remoting.Error.handler(this.onError_));
 };
 
 /**
@@ -150,7 +147,7 @@ remoting.WcsSandboxContainer.prototype.onMessage_ = function(event) {
       break;
 
     case 'onError':
-      /** @type {remoting.Error} */
+      /** @type {!remoting.Error} */
       var error = event.data['error'];
       if (error === undefined) {
         console.error('onError: missing error code');

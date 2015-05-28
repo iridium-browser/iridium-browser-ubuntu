@@ -20,23 +20,6 @@ class FrameHost;
 class FrameOwner;
 class RemoteFrame;
 
-// FIXME: This is just a placeholder frame owner to supply to RemoteFrame when
-// the parent is also a remote frame. Strictly speaking, this shouldn't be
-// necessary, since a remote frame shouldn't ever need to communicate with a
-// remote parent (there are no sandbox flags to retrieve in this case, nor can
-// the RemoteFrame itself load a document). In most circumstances, the check for
-// frame->owner() can be replaced with a check for frame->tree().parent(). Once
-// that's done, this class can be removed.
-class PlaceholderFrameOwner : public NoBaseWillBeGarbageCollectedFinalized<PlaceholderFrameOwner>, public FrameOwner {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(PlaceholderFrameOwner);
-public:
-    virtual bool isLocal() const override;
-    virtual SandboxFlags sandboxFlags() const override;
-    virtual void dispatchLoad() override;
-
-    virtual void trace(Visitor*) override;
-};
-
 class WebRemoteFrameImpl final : public RefCountedWillBeGarbageCollectedFinalized<WebRemoteFrameImpl>, public WebRemoteFrame {
 public:
     explicit WebRemoteFrameImpl(WebRemoteFrameClient*);
@@ -53,7 +36,6 @@ public:
     virtual void setName(const WebString&) override;
     virtual WebVector<WebIconURL> iconURLs(int iconTypesMask) const override;
     virtual void setRemoteWebLayer(WebLayer*) override;
-    virtual void setPermissionClient(WebPermissionClient*) override;
     virtual void setSharedWorkerRepositoryClient(WebSharedWorkerRepositoryClient*) override;
     virtual void setCanHaveScrollbars(bool) override;
     virtual WebSize scrollOffset() const override;
@@ -83,7 +65,7 @@ public:
     virtual void addMessageToConsole(const WebConsoleMessage&) override;
     virtual void collectGarbage() override;
     virtual bool checkIfRunInsecureContent(const WebURL&) const override;
-    virtual v8::Handle<v8::Value> executeScriptAndReturnValue(
+    virtual v8::Local<v8::Value> executeScriptAndReturnValue(
         const WebScriptSource&) override;
     virtual void executeScriptInIsolatedWorld(
         int worldID, const WebScriptSource* sourcesIn, unsigned numSources,
@@ -136,7 +118,7 @@ public:
     virtual bool selectWordAroundCaret() override;
     virtual void selectRange(const WebPoint& base, const WebPoint& extent) override;
     virtual void selectRange(const WebRange&) override;
-    virtual void moveRangeSelection(const WebPoint& base, const WebPoint& extent) override;
+    virtual void moveRangeSelection(const WebPoint& base, const WebPoint& extent, WebFrame::TextGranularity = CharacterGranularity) override;
     virtual void moveCaretSelection(const WebPoint&) override;
     virtual bool setEditableSelectionOffsets(int start, int end) override;
     virtual bool setCompositionFromExistingText(int compositionStart, int compositionEnd, const WebVector<WebCompositionUnderline>& underlines) override;
@@ -179,15 +161,15 @@ public:
 
     virtual WebString contentAsText(size_t maxChars) const override;
     virtual WebString contentAsMarkup() const override;
-    virtual WebString renderTreeAsText(RenderAsTextControls toShow = RenderAsTextNormal) const override;
+    virtual WebString layoutTreeAsText(LayoutAsTextControls toShow = LayoutAsTextNormal) const override;
     virtual WebString markerTextForListItem(const WebElement&) const override;
     virtual WebRect selectionBoundsRect() const override;
 
     virtual bool selectionStartHasSpellingMarkerFor(int from, int length) const override;
     virtual WebString layerTreeAsText(bool showDebugInfo = false) const override;
 
-    virtual WebLocalFrame* createLocalChild(const WebString& name, WebFrameClient*) override;
-    virtual WebRemoteFrame* createRemoteChild(const WebString& name, WebRemoteFrameClient*) override;
+    virtual WebLocalFrame* createLocalChild(const WebString& name, WebSandboxFlags, WebFrameClient*) override;
+    virtual WebRemoteFrame* createRemoteChild(const WebString& name, WebSandboxFlags, WebRemoteFrameClient*) override;
 
     void initializeCoreFrame(FrameHost*, FrameOwner*, const AtomicString& name);
 
@@ -201,11 +183,15 @@ public:
     virtual void initializeFromFrame(WebLocalFrame*) const override;
 
     virtual void setReplicatedOrigin(const WebSecurityOrigin&) const override;
+    virtual void setReplicatedSandboxFlags(WebSandboxFlags) const override;
+    virtual void setReplicatedName(const WebString&) const override;
+    virtual void DispatchLoadEventForFrameOwner() const override;
+
     void didStartLoading() override;
     void didStopLoading() override;
 
 #if ENABLE(OILPAN)
-    void trace(Visitor*);
+    DECLARE_TRACE();
 #endif
 
 private:

@@ -5,13 +5,12 @@
 import logging
 import os
 
-from telemetry import decorators
+from telemetry.core.backends.chrome import chrome_browser_backend
+from telemetry.core.backends.chrome import misc_web_contents_backend
 from telemetry.core import exceptions
 from telemetry.core import forwarders
 from telemetry.core import util
-from telemetry.core.backends.chrome import chrome_browser_backend
-from telemetry.core.backends.chrome import misc_web_contents_backend
-from telemetry.core.forwarders import cros_forwarder
+from telemetry import decorators
 
 
 class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
@@ -29,10 +28,10 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     self._forwarder = None
     self.wpr_port_pairs = forwarders.PortPairs(
         http=forwarders.PortPair(self.wpr_port_pairs.http.local_port,
-                                 self.GetRemotePort(
+                                 self._platform_backend.GetRemotePort(
                                      self.wpr_port_pairs.http.local_port)),
         https=forwarders.PortPair(self.wpr_port_pairs.https.local_port,
-                                  self.GetRemotePort(
+                                  self._platform_backend.GetRemotePort(
                                       self.wpr_port_pairs.http.local_port)),
         dns=None)
     self._remote_debugging_port = self._cri.GetRemotePort()
@@ -44,9 +43,9 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     for e in extensions_to_load:
       extension_dir = cri.RunCmdOnDevice(
           ['mktemp', '-d', '/tmp/extension_XXXXX'])[0].rstrip()
+      e.local_path = os.path.join(extension_dir, os.path.basename(e.path))
       cri.PushFile(e.path, extension_dir)
       cri.Chown(extension_dir)
-      e.local_path = os.path.join(extension_dir, os.path.basename(e.path))
 
     self._cri.RestartUI(self.browser_options.clear_enterprise_policy)
     util.WaitFor(self.IsBrowserRunning, 20)
@@ -99,11 +98,6 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   def profile_directory(self):
     return '/home/chronos/Default'
 
-  def GetRemotePort(self, port):
-    if self._cri.local:
-      return port
-    return self._cri.GetRemotePort()
-
   def __del__(self):
     self.Close()
 
@@ -124,14 +118,16 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
     if not self._cri.local:
       self._port = util.GetUnreservedAvailableLocalPort()
-      self._forwarder = self.forwarder_factory.Create(
+      self._forwarder = self._platform_backend.forwarder_factory.Create(
           forwarders.PortPairs(
               http=forwarders.PortPair(self._port, self._remote_debugging_port),
               https=None,
               dns=None), use_remote_port_forwarding=False)
 
     # Wait for oobe.
-    self._WaitForBrowserToComeUp(wait_for_extensions=False)
+    self._WaitForBrowserToComeUp()
+    self._InitDevtoolsClientBackend(
+        remote_devtools_port=self._remote_debugging_port)
     util.WaitFor(lambda: self.oobe_exists, 10)
 
     if self.browser_options.auto_login:
@@ -147,7 +143,7 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         else:
           self.oobe.NavigateFakeLogin(self._username, self._password)
         self._WaitForLogin()
-      except util.TimeoutException:
+      except exceptions.TimeoutException:
         self._cri.TakeScreenShot('login-screen')
         raise exceptions.LoginException('Timed out going through login screen')
 
@@ -171,11 +167,6 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         self._cri.RmRF(os.path.dirname(e.local_path))
 
     self._cri = None
-
-  @property
-  @decorators.Cache
-  def forwarder_factory(self):
-    return cros_forwarder.CrOsForwarderFactory(self._cri)
 
   def IsBrowserRunning(self):
     return bool(self.pid)
@@ -223,5 +214,10 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     # Wait for cryptohome to mount.
     util.WaitFor(self._IsLoggedIn, 60)
 
-    # Wait for extensions to load.
+    # For incognito mode, the session manager actually relaunches chrome with
+    # new arguments, so we have to wait for the browser to come up.
     self._WaitForBrowserToComeUp()
+
+    # Wait for extensions to load.
+    if self._supports_extensions:
+      self._WaitForExtensionsToLoad()

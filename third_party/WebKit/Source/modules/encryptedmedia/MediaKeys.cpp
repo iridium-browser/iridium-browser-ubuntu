@@ -31,6 +31,7 @@
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
+#include "modules/encryptedmedia/EncryptedMediaUtils.h"
 #include "modules/encryptedmedia/MediaKeySession.h"
 #include "modules/encryptedmedia/SimpleContentDecryptionModuleResultPromise.h"
 #include "platform/Logging.h"
@@ -64,7 +65,7 @@ public:
     {
     }
 
-    void trace(Visitor* visitor)
+    DEFINE_INLINE_TRACE()
     {
         visitor->trace(m_result);
     }
@@ -80,9 +81,10 @@ private:
     const RefPtr<DOMArrayBuffer> m_data;
 };
 
-MediaKeys::MediaKeys(ExecutionContext* context, const String& keySystem, PassOwnPtr<WebContentDecryptionModule> cdm)
+MediaKeys::MediaKeys(ExecutionContext* context, const String& keySystem, const blink::WebVector<WebEncryptedMediaSessionType>& supportedSessionTypes, PassOwnPtr<WebContentDecryptionModule> cdm)
     : ContextLifecycleObserver(context)
     , m_keySystem(keySystem)
+    , m_supportedSessionTypes(supportedSessionTypes)
     , m_cdm(cdm)
     , m_timer(this, &MediaKeys::timerFired)
 {
@@ -98,30 +100,29 @@ MediaKeys::~MediaKeys()
     WTF_LOG(Media, "MediaKeys(%p)::~MediaKeys", this);
 }
 
-MediaKeySession* MediaKeys::createSession(ScriptState* scriptState, const String& sessionType, ExceptionState& exceptionState)
+MediaKeySession* MediaKeys::createSession(ScriptState* scriptState, const String& sessionTypeString, ExceptionState& exceptionState)
 {
     WTF_LOG(Media, "MediaKeys(%p)::createSession", this);
 
-    // From <http://dvcs.w3.org/hg/html-media/raw-file/default/encrypted-media/encrypted-media.html#dom-createsession>:
-    // The createSession(sessionType) method returns a new MediaKeySession
-    // object. It must run the following steps:
-    // 1. If sessionType is not supported by the content decryption module
-    //    corresponding to the keySystem, throw a DOMException whose name is
-    //    "NotSupportedError".
-    ASSERT(MediaKeySession::isValidSessionType(sessionType));
-    // FIXME: Check whether sessionType is actually supported by the CDM.
-    // (http://crbug.com/384152)
-    // FIXME: Enable "persistent-release-message" session type once support
-    // added to CDMs.
-    if (sessionType == "persistent-release-message") {
-        exceptionState.throwDOMException(NotSupportedError, "'persistent-release-message' is not supported.");
-        return nullptr;
-    }
+    // From http://w3c.github.io/encrypted-media/#createSession
 
-    // 2. Let session be a new MediaKeySession object, and initialize it as
+    // When this method is invoked, the user agent must run the following steps:
+    // 1. If this object's persistent state allowed value is false and
+    //    sessionType is not "temporary", throw a new DOMException whose name is
+    //    NotSupportedError.
+    //    (Chromium ensures that only session types supported by the
+    //    configuration are listed in supportedSessionTypes.)
+    // 2. If the Key System implementation represented by this object's cdm
+    //    implementation value does not support sessionType, throw a new
+    //    DOMException whose name is NotSupportedError.
+    WebEncryptedMediaSessionType sessionType = EncryptedMediaUtils::convertToSessionType(sessionTypeString);
+    if (!sessionTypeSupported(sessionType))
+        exceptionState.throwDOMException(NotSupportedError, "Unsupported session type.");
+
+    // 3. Let session be a new MediaKeySession object, and initialize it as
     //    follows:
     //    (Initialization is performed in the constructor.)
-    // 3. Return session.
+    // 4. Return session.
     return MediaKeySession::create(scriptState, this, sessionType);
 }
 
@@ -160,13 +161,23 @@ ScriptPromise MediaKeys::setServerCertificate(ScriptState* scriptState, const DO
     return promise;
 }
 
+bool MediaKeys::sessionTypeSupported(WebEncryptedMediaSessionType sessionType)
+{
+    for (size_t i = 0; i < m_supportedSessionTypes.size(); i++) {
+        if (m_supportedSessionTypes[i] == sessionType)
+            return true;
+    }
+
+    return false;
+}
+
 void MediaKeys::timerFired(Timer<MediaKeys>*)
 {
     ASSERT(m_pendingActions.size());
 
     // Swap the queue to a local copy to avoid problems if resolving promises
     // run synchronously.
-    HeapDeque<Member<PendingAction> > pendingActions;
+    HeapDeque<Member<PendingAction>> pendingActions;
     pendingActions.swap(m_pendingActions);
 
     while (!pendingActions.isEmpty()) {
@@ -190,7 +201,7 @@ WebContentDecryptionModule* MediaKeys::contentDecryptionModule()
     return m_cdm.get();
 }
 
-void MediaKeys::trace(Visitor* visitor)
+DEFINE_TRACE(MediaKeys)
 {
     visitor->trace(m_pendingActions);
     ContextLifecycleObserver::trace(visitor);

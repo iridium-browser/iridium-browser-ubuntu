@@ -39,6 +39,7 @@ class _ApkDelegate(object):
     self._package = apk_helper.GetPackageName(self._apk)
     self._runner = apk_helper.GetInstrumentationName(self._apk)
     self._component = '%s/%s' % (self._package, self._runner)
+    self._enable_test_server_spawner = False
 
   def Install(self, device):
     device.Install(self._apk)
@@ -47,11 +48,12 @@ class _ApkDelegate(object):
     with device_temp_file.DeviceTempFile(device.adb) as command_line_file:
       device.WriteFile(command_line_file.name, '_ %s' % flags)
 
+      extras = {
+        _EXTRA_COMMAND_LINE_FILE: command_line_file.name,
+      }
+
       return device.StartInstrumentation(
-          self._component,
-          extras={_EXTRA_COMMAND_LINE_FILE: command_line_file.name},
-          raw=False,
-          **kwargs)
+          self._component, extras=extras, raw=False, **kwargs)
 
   def Clear(self, device):
     device.ClearApplicationState(self._package)

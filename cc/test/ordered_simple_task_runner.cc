@@ -11,9 +11,9 @@
 #include <vector>
 
 #include "base/auto_reset.h"
-#include "base/debug/trace_event.h"
-#include "base/debug/trace_event_argument.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_argument.h"
 
 #define TRACE_TASK(function, task) \
   TRACE_EVENT_INSTANT1(            \
@@ -60,16 +60,16 @@ bool TestOrderablePendingTask::operator<(
   return ShouldRunBefore(other);
 }
 
-scoped_refptr<base::debug::ConvertableToTraceFormat>
+scoped_refptr<base::trace_event::ConvertableToTraceFormat>
 TestOrderablePendingTask::AsValue() const {
-  scoped_refptr<base::debug::TracedValue> state =
-      new base::debug::TracedValue();
+  scoped_refptr<base::trace_event::TracedValue> state =
+      new base::trace_event::TracedValue();
   AsValueInto(state.get());
   return state;
 }
 
 void TestOrderablePendingTask::AsValueInto(
-    base::debug::TracedValue* state) const {
+    base::trace_event::TracedValue* state) const {
   state->SetInteger("id", task_id_);
   state->SetInteger("run_at", GetTimeToRun().ToInternalValue());
   state->SetString("posted_from", location.ToString());
@@ -125,6 +125,10 @@ bool OrderedSimpleTaskRunner::PostNonNestableDelayedTask(
 bool OrderedSimpleTaskRunner::RunsTasksOnCurrentThread() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   return true;
+}
+
+size_t OrderedSimpleTaskRunner::NumPendingTasks() const {
+  return pending_tasks_.size();
 }
 
 bool OrderedSimpleTaskRunner::HasPendingTasks() const {
@@ -255,17 +259,17 @@ bool OrderedSimpleTaskRunner::RunForPeriod(base::TimeDelta period) {
   return RunUntilTime(now_src_->Now() + period);
 }
 
-// base::debug tracing functionality
-scoped_refptr<base::debug::ConvertableToTraceFormat>
+// base::trace_event tracing functionality
+scoped_refptr<base::trace_event::ConvertableToTraceFormat>
 OrderedSimpleTaskRunner::AsValue() const {
-  scoped_refptr<base::debug::TracedValue> state =
-      new base::debug::TracedValue();
+  scoped_refptr<base::trace_event::TracedValue> state =
+      new base::trace_event::TracedValue();
   AsValueInto(state.get());
   return state;
 }
 
 void OrderedSimpleTaskRunner::AsValueInto(
-    base::debug::TracedValue* state) const {
+    base::trace_event::TracedValue* state) const {
   state->SetInteger("pending_tasks", pending_tasks_.size());
 
   state->BeginArray("tasks");

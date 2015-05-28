@@ -22,7 +22,7 @@ namespace {
 
 class TestingTemplateURLServiceClient : public ChromeTemplateURLServiceClient {
  public:
-  TestingTemplateURLServiceClient(HistoryService* history_service,
+  TestingTemplateURLServiceClient(history::HistoryService* history_service,
                                   base::string16* search_term)
       : ChromeTemplateURLServiceClient(history_service),
         search_term_(search_term) {}
@@ -114,11 +114,10 @@ void TemplateURLServiceTestUtil::ResetModel(bool verify_load) {
   model_.reset(new TemplateURLService(
       profile()->GetPrefs(), scoped_ptr<SearchTermsData>(search_terms_data_),
       web_data_service_.get(),
-      scoped_ptr<TemplateURLServiceClient>(
-          new TestingTemplateURLServiceClient(
-              HistoryServiceFactory::GetForProfileIfExists(
-                  profile(), Profile::EXPLICIT_ACCESS),
-              &search_term_)),
+      scoped_ptr<TemplateURLServiceClient>(new TestingTemplateURLServiceClient(
+          HistoryServiceFactory::GetForProfileIfExists(
+              profile(), ServiceAccessType::EXPLICIT_ACCESS),
+          &search_term_)),
       NULL, NULL, base::Closure()));
   model()->AddObserver(this);
   changed_count_ = 0;

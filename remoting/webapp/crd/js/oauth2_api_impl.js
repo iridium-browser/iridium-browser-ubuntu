@@ -7,10 +7,12 @@
  * OAuth2 API flow implementations.
  */
 
-'use strict';
-
 /** @suppress {duplicate} */
 var remoting = remoting || {};
+
+(function() {
+
+'use strict';
 
 /**
  * @constructor
@@ -39,20 +41,20 @@ remoting.OAuth2ApiImpl.prototype.getOAuth2ApiUserInfoEndpoint_ = function() {
  *
  * @private
  * @param {number} xhrStatus Status (HTTP response code) of the XMLHttpRequest.
- * @return {remoting.Error} An error code to be raised.
+ * @return {!remoting.Error} An error code to be raised.
  */
 remoting.OAuth2ApiImpl.prototype.interpretXhrStatus_ =
     function(xhrStatus) {
   // Return AUTHENTICATION_FAILED by default, so that the user can try to
   // recover from an unexpected failure by signing in again.
-  /** @type {remoting.Error} */
-  var error = remoting.Error.AUTHENTICATION_FAILED;
+  /** @type {!remoting.Error} */
+  var error = new remoting.Error(remoting.Error.Tag.AUTHENTICATION_FAILED);
   if (xhrStatus == 400 || xhrStatus == 401 || xhrStatus == 403) {
-    error = remoting.Error.AUTHENTICATION_FAILED;
+    error = new remoting.Error(remoting.Error.Tag.AUTHENTICATION_FAILED);
   } else if (xhrStatus == 502 || xhrStatus == 503) {
-    error = remoting.Error.SERVICE_UNAVAILABLE;
+    error = new remoting.Error(remoting.Error.Tag.SERVICE_UNAVAILABLE);
   } else if (xhrStatus == 0) {
-    error = remoting.Error.NETWORK_FAILURE;
+    error = new remoting.Error(remoting.Error.Tag.NETWORK_FAILURE);
   } else {
     console.warn('Unexpected authentication response code: ' + xhrStatus);
   }
@@ -64,7 +66,7 @@ remoting.OAuth2ApiImpl.prototype.interpretXhrStatus_ =
  *
  * @param {function(string, number): void} onDone Callback to invoke when
  *     the access token and expiration time are successfully fetched.
- * @param {function(remoting.Error):void} onError Callback invoked if an
+ * @param {function(!remoting.Error):void} onError Callback invoked if an
  *     error occurs.
  * @param {string} clientId OAuth2 client ID.
  * @param {string} clientSecret OAuth2 client secret.
@@ -73,35 +75,36 @@ remoting.OAuth2ApiImpl.prototype.interpretXhrStatus_ =
  */
 remoting.OAuth2ApiImpl.prototype.refreshAccessToken = function(
     onDone, onError, clientId, clientSecret, refreshToken) {
-  /** @param {XMLHttpRequest} xhr */
-  var onResponse = function(xhr) {
-    if (xhr.status == 200) {
+  /** @param {!remoting.Xhr.Response} response */
+  var onResponse = function(response) {
+    if (response.status == 200) {
       try {
         // Don't use base.jsonParseSafe here unless you also include base.js,
         // otherwise this won't work from the OAuth trampoline.
         // TODO(jamiewalch): Fix this once we're no longer using the trampoline.
-        var tokens = JSON.parse(xhr.responseText);
+        var tokens = JSON.parse(response.getText());
         onDone(tokens['access_token'], tokens['expires_in']);
-      } catch (err) {
-        console.error('Invalid "token" response from server:',
-                      /** @type {*} */ (err));
-        onError(remoting.Error.UNEXPECTED);
+      } catch (/** @type {Error} */ err) {
+        console.error('Invalid "token" response from server:', err);
+        onError(remoting.Error.unexpected());
       }
     } else {
-      console.error('Failed to refresh token. Status: ' + xhr.status +
-                    ' response: ' + xhr.responseText);
-      onError(remoting.Error.fromHttpStatus(xhr.status));
+      console.error('Failed to refresh token. Status: ' + response.status +
+                    ' response: ' + response.getText());
+      onError(remoting.Error.fromHttpStatus(response.status));
     }
   };
 
-  var parameters = {
-    'client_id': clientId,
-    'client_secret': clientSecret,
-    'refresh_token': refreshToken,
-    'grant_type': 'refresh_token'
-  };
-
-  remoting.xhr.post(this.getOAuth2TokenEndpoint_(), onResponse, parameters);
+  new remoting.Xhr({
+    method: 'POST',
+    url: this.getOAuth2TokenEndpoint_(),
+    formContent: {
+      'client_id': clientId,
+      'client_secret': clientSecret,
+      'refresh_token': refreshToken,
+      'grant_type': 'refresh_token'
+    }
+  }).start().then(onResponse);
 };
 
 /**
@@ -110,7 +113,7 @@ remoting.OAuth2ApiImpl.prototype.refreshAccessToken = function(
  * @param {function(string, string, number): void} onDone Callback to
  *     invoke when the refresh token, access token and access token expiration
  *     time are successfully fetched.
- * @param {function(remoting.Error):void} onError Callback invoked if an
+ * @param {function(!remoting.Error):void} onError Callback invoked if an
  *     error occurs.
  * @param {string} clientId OAuth2 client ID.
  * @param {string} clientSecret OAuth2 client secret.
@@ -120,36 +123,38 @@ remoting.OAuth2ApiImpl.prototype.refreshAccessToken = function(
  */
 remoting.OAuth2ApiImpl.prototype.exchangeCodeForTokens = function(
     onDone, onError, clientId, clientSecret, code, redirectUri) {
-  /** @param {XMLHttpRequest} xhr */
-  var onResponse = function(xhr) {
-    if (xhr.status == 200) {
+  /** @param {!remoting.Xhr.Response} response */
+  var onResponse = function(response) {
+    if (response.status == 200) {
       try {
         // Don't use base.jsonParseSafe here unless you also include base.js,
         // otherwise this won't work from the OAuth trampoline.
         // TODO(jamiewalch): Fix this once we're no longer using the trampoline.
-        var tokens = JSON.parse(xhr.responseText);
+        var tokens = JSON.parse(response.getText());
         onDone(tokens['refresh_token'],
                tokens['access_token'], tokens['expires_in']);
-      } catch (err) {
-        console.error('Invalid "token" response from server:',
-                      /** @type {*} */ (err));
-        onError(remoting.Error.UNEXPECTED);
+      } catch (/** @type {Error} */ err) {
+        console.error('Invalid "token" response from server:', err);
+        onError(remoting.Error.unexpected());
       }
     } else {
-      console.error('Failed to exchange code for token. Status: ' + xhr.status +
-                    ' response: ' + xhr.responseText);
-      onError(remoting.Error.fromHttpStatus(xhr.status));
+      console.error('Failed to exchange code for token. Status: ' +
+                    response.status + ' response: ' + response.getText());
+      onError(remoting.Error.fromHttpStatus(response.status));
     }
   };
 
-  var parameters = {
-    'client_id': clientId,
-    'client_secret': clientSecret,
-    'redirect_uri': redirectUri,
-    'code': code,
-    'grant_type': 'authorization_code'
-  };
-  remoting.xhr.post(this.getOAuth2TokenEndpoint_(), onResponse, parameters);
+  new remoting.Xhr({
+    method: 'POST',
+    url: this.getOAuth2TokenEndpoint_(),
+    formContent: {
+      'client_id': clientId,
+      'client_secret': clientSecret,
+      'redirect_uri': redirectUri,
+      'code': code,
+      'grant_type': 'authorization_code'
+    }
+  }).start().then(onResponse);
 };
 
 /**
@@ -157,32 +162,33 @@ remoting.OAuth2ApiImpl.prototype.exchangeCodeForTokens = function(
  *
  * @param {function(string):void} onDone Callback invoked when the email
  *     address is available.
- * @param {function(remoting.Error):void} onError Callback invoked if an
+ * @param {function(!remoting.Error):void} onError Callback invoked if an
  *     error occurs.
  * @param {string} token Access token.
  * @return {void} Nothing.
  */
 remoting.OAuth2ApiImpl.prototype.getEmail = function(onDone, onError, token) {
-  /** @param {XMLHttpRequest} xhr */
-  var onResponse = function(xhr) {
-    if (xhr.status == 200) {
+  /** @param {!remoting.Xhr.Response} response */
+  var onResponse = function(response) {
+    if (response.status == 200) {
       try {
-        var result = JSON.parse(xhr.responseText);
+        var result = JSON.parse(response.getText());
         onDone(result['email']);
-      } catch (err) {
-        console.error('Invalid "userinfo" response from server:',
-                      /** @type {*} */ (err));
-        onError(remoting.Error.UNEXPECTED);
+      } catch (/** @type {Error} */ err) {
+        console.error('Invalid "userinfo" response from server:', err);
+        onError(remoting.Error.unexpected());
       }
     } else {
-      console.error('Failed to get email. Status: ' + xhr.status +
-                    ' response: ' + xhr.responseText);
-      onError(remoting.Error.fromHttpStatus(xhr.status));
+      console.error('Failed to get email. Status: ' + response.status +
+                    ' response: ' + response.getText());
+      onError(remoting.Error.fromHttpStatus(response.status));
     }
   };
-  var headers = { 'Authorization': 'OAuth ' + token };
-  remoting.xhr.get(this.getOAuth2ApiUserInfoEndpoint_(),
-                   onResponse, '', headers);
+  new remoting.Xhr({
+    method: 'GET',
+    url: this.getOAuth2ApiUserInfoEndpoint_(),
+    oauthToken: token
+  }).start().then(onResponse);
 };
 
 /**
@@ -190,34 +196,48 @@ remoting.OAuth2ApiImpl.prototype.getEmail = function(onDone, onError, token) {
  *
  * @param {function(string, string):void} onDone Callback invoked when the email
  *     address and full name are available.
- * @param {function(remoting.Error):void} onError Callback invoked if an
+ * @param {function(!remoting.Error):void} onError Callback invoked if an
  *     error occurs.
  * @param {string} token Access token.
  * @return {void} Nothing.
  */
 remoting.OAuth2ApiImpl.prototype.getUserInfo =
     function(onDone, onError, token) {
-  /** @param {XMLHttpRequest} xhr */
-  var onResponse = function(xhr) {
-    if (xhr.status == 200) {
+  /** @param {!remoting.Xhr.Response} response */
+  var onResponse = function(response) {
+    if (response.status == 200) {
       try {
-        var result = JSON.parse(xhr.responseText);
+        var result = JSON.parse(response.getText());
         onDone(result['email'], result['name']);
-      } catch (err) {
-        console.error('Invalid "userinfo" response from server:',
-                      /** @type {*} */ (err));
-        onError(remoting.Error.UNEXPECTED);
+      } catch (/** @type {Error} */ err) {
+        console.error('Invalid "userinfo" response from server:', err);
+        onError(remoting.Error.unexpected());
       }
     } else {
-      console.error('Failed to get user info. Status: ' + xhr.status +
-                    ' response: ' + xhr.responseText);
-      onError(remoting.Error.fromHttpStatus(xhr.status));
+      console.error('Failed to get user info. Status: ' + response.status +
+                    ' response: ' + response.getText());
+      onError(remoting.Error.fromHttpStatus(response.status));
     }
   };
-  var headers = { 'Authorization': 'OAuth ' + token };
-  remoting.xhr.get(this.getOAuth2ApiUserInfoEndpoint_(),
-                   onResponse, '', headers);
+  new remoting.Xhr({
+    method: 'GET',
+    url: this.getOAuth2ApiUserInfoEndpoint_(),
+    oauthToken: token
+  }).start().then(onResponse);
 };
+
+/** @returns {!remoting.Error} */
+function fromHttpStatus(/** number */ status) {
+  var error = remoting.Error.fromHttpStatus(status);
+  if (error === remoting.Error.unexpected()) {
+    // Return AUTHENTICATION_FAILED by default, so that the user can try to
+    // recover from an unexpected failure by signing in again.
+    return new remoting.Error(remoting.Error.Tag.AUTHENTICATION_FAILED);
+  }
+  return error;
+}
 
 /** @type {remoting.OAuth2Api} */
 remoting.oauth2Api = new remoting.OAuth2ApiImpl();
+
+})();

@@ -367,15 +367,10 @@ void ProfileDownloader::OnURLFetchComplete(const net::URLFetcher* source) {
   }
 
   VLOG(1) << "Decoding the image...";
-  scoped_refptr<ImageDecoder> image_decoder = new ImageDecoder(
-      this, data, ImageDecoder::DEFAULT_CODEC);
-  scoped_refptr<base::MessageLoopProxy> task_runner =
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI);
-  image_decoder->Start(task_runner);
+  ImageDecoder::Start(this, data);
 }
 
-void ProfileDownloader::OnImageDecoded(const ImageDecoder* decoder,
-                                       const SkBitmap& decoded_image) {
+void ProfileDownloader::OnImageDecoded(const SkBitmap& decoded_image) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   int image_size = delegate_->GetDesiredImageSideLength();
   profile_picture_ = skia::ImageOperations::Resize(
@@ -387,7 +382,7 @@ void ProfileDownloader::OnImageDecoded(const ImageDecoder* decoder,
   delegate_->OnProfileDownloadSuccess(this);
 }
 
-void ProfileDownloader::OnDecodeImageFailed(const ImageDecoder* decoder) {
+void ProfileDownloader::OnDecodeImageFailed() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   delegate_->OnProfileDownloadFailure(
       this, ProfileDownloaderDelegate::IMAGE_DECODE_FAILED);

@@ -84,6 +84,11 @@
             'display_types',
           ],
         }],
+        ['chromeos == 1 and use_x11 == 1', {
+          'dependencies': [
+            '../gfx/x/gfx_x11.gyp:gfx_x11',
+          ],
+        }],
         ['use_ozone == 1', {
           'dependencies': [
             '../../ui/ozone/ozone.gyp:ozone',
@@ -115,6 +120,7 @@
       'conditions': [
         ['use_x11 == 1', {
           'dependencies': [
+            '../../build/linux/system.gyp:x11',
             '../../build/linux/system.gyp:xrandr',
             '../../ui/gfx/x/gfx_x11.gyp:gfx_x11',
           ],

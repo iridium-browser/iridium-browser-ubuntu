@@ -12,7 +12,7 @@ import sys
 import unittest
 
 import PRESUBMIT
-from PRESUBMIT_test_mocks import MockChange, MockFile
+from PRESUBMIT_test_mocks import MockChange, MockFile, MockAffectedFile
 from PRESUBMIT_test_mocks import MockInputApi, MockOutputApi
 
 _TEST_DATA_DIR = 'base/test/data/presubmit'
@@ -270,6 +270,73 @@ class VersionControlConflictsTest(unittest.TestCase):
     self.assertTrue('3' in errors[1])
     self.assertTrue('5' in errors[2])
 
+class UmaHistogramChangeMatchedOrNotTest(unittest.TestCase):
+  def testTypicalCorrectlyMatchedChange(self):
+    diff_cc = ['UMA_HISTOGRAM_BOOL("Bla.Foo.Dummy", true)']
+    diff_xml = ['<histogram name="Bla.Foo.Dummy"> </histogram>']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [
+      MockFile('some/path/foo.cc', diff_cc),
+      MockFile('tools/metrics/histograms/histograms.xml', diff_xml),
+    ]
+    warnings = PRESUBMIT._CheckUmaHistogramChanges(mock_input_api,
+                                                   MockOutputApi())
+    self.assertEqual(0, len(warnings))
+
+  def testTypicalNotMatchedChange(self):
+    diff_cc = ['UMA_HISTOGRAM_BOOL("Bla.Foo.Dummy", true)']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [MockFile('some/path/foo.cc', diff_cc)]
+    warnings = PRESUBMIT._CheckUmaHistogramChanges(mock_input_api,
+                                                   MockOutputApi())
+    self.assertEqual(1, len(warnings))
+    self.assertEqual('warning', warnings[0].type)
+
+  def testTypicalNotMatchedChangeViaSuffixes(self):
+    diff_cc = ['UMA_HISTOGRAM_BOOL("Bla.Foo.Dummy", true)']
+    diff_xml = ['<histogram_suffixes name="SuperHistogram">',
+                '  <suffix name="Dummy"/>',
+                '  <affected-histogram name="Snafu.Dummy"/>',
+                '</histogram>']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [
+      MockFile('some/path/foo.cc', diff_cc),
+      MockFile('tools/metrics/histograms/histograms.xml', diff_xml),
+    ]
+    warnings = PRESUBMIT._CheckUmaHistogramChanges(mock_input_api,
+                                                   MockOutputApi())
+    self.assertEqual(1, len(warnings))
+    self.assertEqual('warning', warnings[0].type)
+
+  def testTypicalCorrectlyMatchedChangeViaSuffixes(self):
+    diff_cc = ['UMA_HISTOGRAM_BOOL("Bla.Foo.Dummy", true)']
+    diff_xml = ['<histogram_suffixes name="SuperHistogram">',
+                '  <suffix name="Dummy"/>',
+                '  <affected-histogram name="Bla.Foo"/>',
+                '</histogram>']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [
+      MockFile('some/path/foo.cc', diff_cc),
+      MockFile('tools/metrics/histograms/histograms.xml', diff_xml),
+    ]
+    warnings = PRESUBMIT._CheckUmaHistogramChanges(mock_input_api,
+                                                   MockOutputApi())
+    self.assertEqual(0, len(warnings))
+
+  def testTypicalCorrectlyMatchedChangeViaSuffixesWithSeparator(self):
+    diff_cc = ['UMA_HISTOGRAM_BOOL("Snafu_Dummy", true)']
+    diff_xml = ['<histogram_suffixes name="SuperHistogram" separator="_">',
+                '  <suffix name="Dummy"/>',
+                '  <affected-histogram name="Snafu"/>',
+                '</histogram>']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [
+      MockFile('some/path/foo.cc', diff_cc),
+      MockFile('tools/metrics/histograms/histograms.xml', diff_xml),
+    ]
+    warnings = PRESUBMIT._CheckUmaHistogramChanges(mock_input_api,
+                                                   MockOutputApi())
+    self.assertEqual(0, len(warnings))
 
 class BadExtensionsTest(unittest.TestCase):
   def testBadRejFile(self):
@@ -308,13 +375,32 @@ class BadExtensionsTest(unittest.TestCase):
     results = PRESUBMIT._CheckPatchFiles(mock_input_api, MockOutputApi())
     self.assertEqual(0, len(results))
 
-  def testOnlyOwnersFiles(self):
-    mock_change = MockChange([
-      'some/path/OWNERS',
-      'A\Windows\Path\OWNERS',
-    ])
-    results = PRESUBMIT.GetPreferredTryMasters(None, mock_change)
-    self.assertEqual({}, results)
+
+class CheckSingletonInHeadersTest(unittest.TestCase):
+  def testSingletonInArbitraryHeader(self):
+    diff_singleton_h = ['base::subtle::AtomicWord '
+                        'Singleton<Type, Traits, DifferentiatingType>::']
+    diff_foo_h = ['// Singleton<Foo> in comment.',
+                  'friend class Singleton<Foo>']
+    diff_bad_h = ['Foo* foo = Singleton<Foo>::get();']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [MockAffectedFile('base/memory/singleton.h',
+                                     diff_singleton_h),
+                            MockAffectedFile('foo.h', diff_foo_h),
+                            MockAffectedFile('bad.h', diff_bad_h)]
+    warnings = PRESUBMIT._CheckSingletonInHeaders(mock_input_api,
+                                                  MockOutputApi())
+    self.assertEqual(1, len(warnings))
+    self.assertEqual('error', warnings[0].type)
+    self.assertTrue('Found Singleton<T>' in warnings[0].message)
+
+  def testSingletonInCC(self):
+    diff_cc = ['Foo* foo = Singleton<Foo>::get();']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [MockAffectedFile('some/path/foo.cc', diff_cc)]
+    warnings = PRESUBMIT._CheckSingletonInHeaders(mock_input_api,
+                                                  MockOutputApi())
+    self.assertEqual(0, len(warnings))
 
 
 class InvalidOSMacroNamesTest(unittest.TestCase):
@@ -597,12 +683,6 @@ class IDLParsingTest(unittest.TestCase):
 class TryServerMasterTest(unittest.TestCase):
   def testTryServerMasters(self):
     bots = {
-        'tryserver.chromium.gpu': [
-            'linux_gpu',
-            'linux_gpu_triggered_tests',
-            'win_gpu',
-            'win_gpu_triggered_tests',
-        ],
         'tryserver.chromium.mac': [
             'ios_dbg_simulator',
             'ios_rel_device',
@@ -693,6 +773,40 @@ class TryServerMasterTest(unittest.TestCase):
         self.assertEqual(master, PRESUBMIT.GetTryServerMasterForBot(bot),
                          'bot=%s: expected %s, computed %s' % (
             bot, master, PRESUBMIT.GetTryServerMasterForBot(bot)))
+
+
+class UserMetricsActionTest(unittest.TestCase):
+  def testUserMetricsActionInActions(self):
+    input_api = MockInputApi()
+    file_with_user_action = 'file_with_user_action.cc'
+    contents_with_user_action = [
+      'base::UserMetricsAction("AboutChrome")'
+    ]
+
+    input_api.files = [MockFile(file_with_user_action,
+                                contents_with_user_action)]
+
+    self.assertEqual(
+      [], PRESUBMIT._CheckUserActionUpdate(input_api, MockOutputApi()))
+
+
+  def testUserMetricsActionNotAddedToActions(self):
+    input_api = MockInputApi()
+    file_with_user_action = 'file_with_user_action.cc'
+    contents_with_user_action = [
+      'base::UserMetricsAction("NotInActionsXml")'
+    ]
+
+    input_api.files = [MockFile(file_with_user_action,
+                                contents_with_user_action)]
+
+    output = PRESUBMIT._CheckUserActionUpdate(input_api, MockOutputApi())
+    self.assertEqual(
+      ('File %s line %d: %s is missing in '
+       'tools/metrics/actions/actions.xml. Please run '
+       'tools/metrics/actions/extract_actions.py to update.'
+       % (file_with_user_action, 1, 'NotInActionsXml')),
+      output[0].message)
 
 
 if __name__ == '__main__':

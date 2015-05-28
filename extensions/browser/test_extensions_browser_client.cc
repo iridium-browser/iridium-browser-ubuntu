@@ -72,6 +72,13 @@ BrowserContext* TestExtensionsBrowserClient::GetOriginalContext(
   return main_context_;
 }
 
+#if defined(OS_CHROMEOS)
+std::string TestExtensionsBrowserClient::GetUserIdHashFromContext(
+    content::BrowserContext* context) {
+  return "";
+}
+#endif
+
 bool TestExtensionsBrowserClient::IsGuestSession(
     BrowserContext* context) const {
   return false;
@@ -152,6 +159,11 @@ TestExtensionsBrowserClient::GetExtensionSystemFactory() {
 
 void TestExtensionsBrowserClient::RegisterExtensionFunctions(
     ExtensionFunctionRegistry* registry) const {}
+
+void TestExtensionsBrowserClient::RegisterMojoServices(
+    content::RenderFrameHost* render_frame_host,
+    const Extension* extension) const {
+}
 
 scoped_ptr<RuntimeAPIDelegate>
 TestExtensionsBrowserClient::CreateRuntimeAPIDelegate(

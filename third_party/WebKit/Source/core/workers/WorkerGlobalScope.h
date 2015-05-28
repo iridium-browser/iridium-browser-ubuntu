@@ -27,10 +27,14 @@
 #ifndef WorkerGlobalScope_h
 #define WorkerGlobalScope_h
 
+#include "bindings/core/v8/V8CacheOptions.h"
 #include "bindings/core/v8/WorkerScriptController.h"
+#include "core/CoreExport.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/events/EventListener.h"
 #include "core/events/EventTarget.h"
+#include "core/fetch/CachedMetadataHandler.h"
+#include "core/frame/DOMTimerCoordinator.h"
 #include "core/frame/DOMWindowBase64.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
@@ -57,7 +61,7 @@ class WorkerLocation;
 class WorkerNavigator;
 class WorkerThread;
 
-class WorkerGlobalScope : public EventTargetWithInlineData, public RefCountedWillBeNoBase<WorkerGlobalScope>, public SecurityContext, public ExecutionContext, public WillBeHeapSupplementable<WorkerGlobalScope>, public DOMWindowBase64 {
+class CORE_EXPORT WorkerGlobalScope : public EventTargetWithInlineData, public RefCountedWillBeNoBase<WorkerGlobalScope>, public SecurityContext, public ExecutionContext, public WillBeHeapSupplementable<WorkerGlobalScope>, public DOMWindowBase64 {
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(WorkerGlobalScope);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(WorkerGlobalScope);
@@ -86,7 +90,7 @@ public:
 
     WorkerThread* thread() const { return m_thread; }
 
-    virtual void postTask(PassOwnPtr<ExecutionContextTask>) override final; // Executes the task on context's thread asynchronously.
+    virtual void postTask(const WebTraceLocation&, PassOwnPtr<ExecutionContextTask>) override final; // Executes the task on context's thread asynchronously.
 
     // WorkerGlobalScope
     WorkerGlobalScope* self() { return this; }
@@ -98,6 +102,9 @@ public:
 
     // WorkerUtils
     virtual void importScripts(const Vector<String>& urls, ExceptionState&);
+    // Returns null if caching is not supported.
+    virtual PassOwnPtr<CachedMetadataHandler> createWorkerScriptCachedMetadataHandler(const KURL& scriptURL, const Vector<char>* metaData) { return nullptr; }
+
     WorkerNavigator* navigator() const;
 
     // ExecutionContextClient
@@ -108,12 +115,11 @@ public:
     virtual bool isJSExecutionForbidden() const override final;
 
     virtual double timerAlignmentInterval() const override final;
+    virtual DOMTimerCoordinator* timers() override final;
 
     WorkerInspectorController* workerInspectorController() { return m_workerInspectorController.get(); }
 
     bool isClosing() { return m_closing; }
-
-    bool idleNotification();
 
     double timeOrigin() const { return m_timeOrigin; }
 
@@ -127,7 +133,9 @@ public:
 
     void exceptionHandled(int exceptionId, bool isHandled);
 
-    virtual void trace(Visitor*) override;
+    virtual void scriptLoaded(size_t scriptSize, size_t cachedMetadataSize) { }
+
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     WorkerGlobalScope(const KURL&, const String& userAgent, WorkerThread*, double timeOrigin, const SecurityOrigin*, PassOwnPtrWillBeRawPtr<WorkerClients>);
@@ -135,6 +143,9 @@ protected:
 
     virtual void logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>) override;
     void addMessageToWorkerConsole(PassRefPtrWillBeRawPtr<ConsoleMessage>);
+    void setV8CacheOptions(V8CacheOptions v8CacheOptions) { m_v8CacheOptions = v8CacheOptions; }
+
+    void removeURLFromMemoryCache(const KURL&) override;
 
 private:
 #if !ENABLE(OILPAN)
@@ -150,12 +161,17 @@ private:
     virtual EventTarget* errorEventTarget() override final;
     virtual void didUpdateSecurityOrigin() override final { }
 
+    static void removeURLFromMemoryCacheInternal(ExecutionContext*, const KURL&);
+
     KURL m_url;
     String m_userAgent;
+    V8CacheOptions m_v8CacheOptions;
 
     mutable RefPtrWillBeMember<WorkerConsole> m_console;
     mutable RefPtrWillBeMember<WorkerLocation> m_location;
     mutable RefPtrWillBeMember<WorkerNavigator> m_navigator;
+
+    mutable UseCounter::CountBits m_deprecationWarningBits;
 
     OwnPtr<WorkerScriptController> m_script;
     WorkerThread* m_thread;
@@ -166,6 +182,8 @@ private:
     OwnPtrWillBeMember<WorkerEventQueue> m_eventQueue;
 
     OwnPtrWillBeMember<WorkerClients> m_workerClients;
+
+    DOMTimerCoordinator m_timers;
 
     double m_timeOrigin;
 

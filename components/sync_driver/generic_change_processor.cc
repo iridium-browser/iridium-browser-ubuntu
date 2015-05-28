@@ -94,7 +94,7 @@ GenericChangeProcessor::GenericChangeProcessor(
     const base::WeakPtr<syncer::SyncMergeResult>& merge_result,
     syncer::UserShare* user_share,
     SyncApiComponentFactory* sync_factory,
-    const scoped_refptr<syncer::AttachmentStore>& attachment_store)
+    scoped_ptr<syncer::AttachmentStoreForSync> attachment_store)
     : ChangeProcessor(error_handler),
       type_(type),
       local_service_(local_service),
@@ -103,14 +103,14 @@ GenericChangeProcessor::GenericChangeProcessor(
       weak_ptr_factory_(this) {
   DCHECK(CalledOnValidThread());
   DCHECK_NE(type_, syncer::UNSPECIFIED);
-  if (attachment_store.get()) {
+  if (attachment_store) {
     std::string store_birthday;
     {
       syncer::ReadTransaction trans(FROM_HERE, share_handle());
       store_birthday = trans.GetStoreBirthday();
     }
     attachment_service_ = sync_factory->CreateAttachmentService(
-        attachment_store, *user_share, store_birthday, type, this);
+        attachment_store.Pass(), *user_share, store_birthday, type, this);
     attachment_service_weak_ptr_factory_.reset(
         new base::WeakPtrFactory<syncer::AttachmentService>(
             attachment_service_.get()));
@@ -471,7 +471,11 @@ syncer::SyncError GenericChangeProcessor::ProcessSyncChanges(
       NOTREACHED();
       return error;
     }
-    attachment_service_->UploadAttachments(new_attachments);
+    syncer::AttachmentIdList ids_to_upload;
+    ids_to_upload.reserve(new_attachments.size());
+    std::copy(new_attachments.begin(), new_attachments.end(),
+              std::back_inserter(ids_to_upload));
+    attachment_service_->UploadAttachments(ids_to_upload);
   }
 
   return syncer::SyncError();
@@ -705,13 +709,13 @@ syncer::UserShare* GenericChangeProcessor::share_handle() const {
 void GenericChangeProcessor::UploadAllAttachmentsNotOnServer() {
   DCHECK(CalledOnValidThread());
   DCHECK(attachment_service_.get());
-  syncer::AttachmentIdSet id_set;
+  syncer::AttachmentIdList ids;
   {
     syncer::ReadTransaction trans(FROM_HERE, share_handle());
-    trans.GetAttachmentIdsToUpload(type_, &id_set);
+    trans.GetAttachmentIdsToUpload(type_, &ids);
   }
-  if (!id_set.empty()) {
-    attachment_service_->UploadAttachments(id_set);
+  if (!ids.empty()) {
+    attachment_service_->UploadAttachments(ids);
   }
 }
 

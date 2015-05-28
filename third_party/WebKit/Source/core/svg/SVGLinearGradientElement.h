@@ -42,16 +42,15 @@ public:
     SVGAnimatedLength* x2() const { return m_x2.get(); }
     SVGAnimatedLength* y2() const { return m_y2.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGLinearGradientElement(Document&);
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
 
     virtual bool selfHasRelativeLengths() const override;
 

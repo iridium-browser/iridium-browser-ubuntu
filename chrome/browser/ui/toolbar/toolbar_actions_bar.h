@@ -9,11 +9,16 @@
 #include "base/memory/scoped_vector.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
+#include "chrome/browser/ui/toolbar/toolbar_actions_bar_bubble_delegate.h"
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace extensions {
 class Extension;
+}
+
+namespace user_prefs {
+class PrefRegistrySyncable;
 }
 
 class ToolbarActionsBarDelegate;
@@ -30,7 +35,8 @@ class ToolbarActionViewController;
 // (fka wrench) menu. The main bar can have only a single row of icons with
 // flexible width, whereas the overflow bar has multiple rows of icons with a
 // fixed width (the width of the menu).
-class ToolbarActionsBar : public extensions::ExtensionToolbarModel::Observer {
+class ToolbarActionsBar : public extensions::ExtensionToolbarModel::Observer,
+                          public ToolbarActionsBarBubbleDelegate {
  public:
   // A struct to contain the platform settings.
   struct PlatformSettings {
@@ -70,6 +76,9 @@ class ToolbarActionsBar : public extensions::ExtensionToolbarModel::Observer {
 
   // Returns the height of a browser action icon.
   static int IconHeight();
+
+  // Registers profile preferences.
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // Returns the preferred size for the toolbar; this does *not* reflect any
   // animations that may be running.
@@ -113,6 +122,9 @@ class ToolbarActionsBar : public extensions::ExtensionToolbarModel::Observer {
                   int dropped_index,
                   DragType drag_type);
 
+  // Returns true if the info bubble about the toolbar redesign should be shown.
+  bool ShouldShowInfoBubble();
+
   const std::vector<ToolbarActionViewController*>& toolbar_actions() const {
     return toolbar_actions_.get();
   }
@@ -149,18 +161,24 @@ class ToolbarActionsBar : public extensions::ExtensionToolbarModel::Observer {
   using ToolbarActions = ScopedVector<ToolbarActionViewController>;
 
   // ExtensionToolbarModel::Observer:
-  void ToolbarExtensionAdded(const extensions::Extension* extension,
-                             int index) override;
-  void ToolbarExtensionRemoved(const extensions::Extension* extension) override;
-  void ToolbarExtensionMoved(const extensions::Extension* extension,
-                             int index) override;
-  void ToolbarExtensionUpdated(const extensions::Extension* extension) override;
+  void OnToolbarExtensionAdded(const extensions::Extension* extension,
+                               int index) override;
+  void OnToolbarExtensionRemoved(
+      const extensions::Extension* extension) override;
+  void OnToolbarExtensionMoved(const extensions::Extension* extension,
+                               int index) override;
+  void OnToolbarExtensionUpdated(
+      const extensions::Extension* extension) override;
   bool ShowExtensionActionPopup(const extensions::Extension* extension,
                                 bool grant_active_tab) override;
-  void ToolbarVisibleCountChanged() override;
-  void ToolbarHighlightModeChanged(bool is_highlighting) override;
+  void OnToolbarVisibleCountChanged() override;
+  void OnToolbarHighlightModeChanged(bool is_highlighting) override;
   void OnToolbarModelInitialized() override;
   Browser* GetBrowser() override;
+
+  // ToolbarActionsBarBubbleDelegate:
+  void OnToolbarActionsBarBubbleShown() override;
+  void OnToolbarActionsBarBubbleClosed(CloseAction action) override;
 
   // Resizes the delegate (if necessary) to the preferred size using the given
   // |tween_type| and optionally suppressing the chevron.

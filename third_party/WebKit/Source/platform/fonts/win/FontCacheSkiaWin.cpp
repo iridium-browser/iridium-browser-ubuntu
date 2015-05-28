@@ -43,7 +43,7 @@
 
 namespace blink {
 
-HashMap<String, RefPtr<SkTypeface> >* FontCache::s_sideloadedFonts = 0;
+HashMap<String, RefPtr<SkTypeface>>* FontCache::s_sideloadedFonts = 0;
 
 // Cached system font metrics.
 AtomicString* FontCache::s_menuFontFamilyName = 0;
@@ -58,7 +58,7 @@ namespace {
 int32_t ensureMinimumFontHeightIfNeeded(int32_t fontHeight)
 {
     // Adjustment for codepage 936 to make the fonts more legible in Simplified Chinese.
-    // Please refer to RenderThemeChromiumFontProviderWin.cpp for more information.
+    // Please refer to LayoutThemeFontProviderWin.cpp for more information.
     return (fontHeight < 12.0f) && (GetACP() == 936) ? 12.0f : fontHeight;
 }
 
@@ -68,7 +68,7 @@ int32_t ensureMinimumFontHeightIfNeeded(int32_t fontHeight)
 void FontCache::addSideloadedFontForTesting(SkTypeface* typeface)
 {
     if (!s_sideloadedFonts)
-        s_sideloadedFonts = new HashMap<String, RefPtr<SkTypeface> >;
+        s_sideloadedFonts = new HashMap<String, RefPtr<SkTypeface>>;
     SkString name;
     typeface->getFamilyName(&name);
     s_sideloadedFonts->set(name.c_str(), adoptRef(typeface));
@@ -279,10 +279,9 @@ static bool typefacesHasWeightSuffix(const AtomicString& family,
         { L" heavy", 6,  FontWeight900 }
     };
     size_t numVariants = WTF_ARRAY_LENGTH(variantForSuffix);
-    bool caseSensitive = false;
     for (size_t i = 0; i < numVariants; i++) {
         const FamilyWeightSuffix& entry = variantForSuffix[i];
-        if (family.endsWith(entry.suffix, caseSensitive)) {
+        if (family.endsWith(entry.suffix, TextCaseInsensitive)) {
             String familyName = family.string();
             familyName.truncate(family.length() - entry.length);
             adjustedName = AtomicString(familyName);
@@ -318,10 +317,9 @@ static bool typefacesHasStretchSuffix(const AtomicString& family,
         { L" ultraexpanded", 14,  FontStretchUltraExpanded }
     };
     size_t numVariants = WTF_ARRAY_LENGTH(variantForSuffix);
-    bool caseSensitive = false;
     for (size_t i = 0; i < numVariants; i++) {
         const FamilyStretchSuffix& entry = variantForSuffix[i];
-        if (family.endsWith(entry.suffix, caseSensitive)) {
+        if (family.endsWith(entry.suffix, TextCaseInsensitive)) {
             String familyName = family.string();
             familyName.truncate(family.length() - entry.length);
             adjustedName = AtomicString(familyName);

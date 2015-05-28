@@ -428,20 +428,27 @@ WebInspector.ProfileHeader.prototype = {
 /**
  * @constructor
  * @implements {WebInspector.ProfileType.DataDisplayDelegate}
- * @extends {WebInspector.PanelWithSidebarTree}
+ * @extends {WebInspector.PanelWithSidebar}
  */
 WebInspector.ProfilesPanel = function()
 {
-    WebInspector.PanelWithSidebarTree.call(this, "profiles");
+    WebInspector.PanelWithSidebar.call(this, "profiles");
     this.registerRequiredCSS("ui/panelEnablerView.css");
     this.registerRequiredCSS("profiler/heapProfiler.css");
     this.registerRequiredCSS("profiler/profilesPanel.css");
+    this.registerRequiredCSS("components/objectValue.css");
 
     var mainView = new WebInspector.VBox();
     this.splitView().setMainView(mainView);
 
     this.profilesItemTreeElement = new WebInspector.ProfilesSidebarTreeElement(this);
-    this.sidebarTree.appendChild(this.profilesItemTreeElement);
+
+    this._sidebarTree = new TreeOutline();
+    this._sidebarTree.element.classList.add("sidebar-tree");
+    this.panelSidebarElement().appendChild(this._sidebarTree.element);
+    this.setDefaultFocusedElement(this._sidebarTree.element);
+
+    this._sidebarTree.appendChild(this.profilesItemTreeElement);
 
     this.profileViews = createElement("div");
     this.profileViews.id = "profile-views";
@@ -632,7 +639,7 @@ WebInspector.ProfilesPanel.prototype = {
         this._updateRecordButton(false);
         this._launcherView.profileFinished();
 
-        this.sidebarTree.element.classList.remove("some-expandable");
+        this._sidebarTree.element.classList.remove("some-expandable");
 
         this._launcherView.detach();
         this.profileViews.removeChildren();
@@ -663,7 +670,7 @@ WebInspector.ProfilesPanel.prototype = {
         this._launcherView.addProfileType(profileType);
         var profileTypeSection = new WebInspector.ProfileTypeSidebarSection(this, profileType);
         this._typeIdToSidebarSection[profileType.id] = profileTypeSection;
-        this.sidebarTree.appendChild(profileTypeSection);
+        this._sidebarTree.appendChild(profileTypeSection);
         profileTypeSection.childrenListElement.addEventListener("contextmenu", this._handleContextMenuEvent.bind(this), true);
 
         /**
@@ -902,7 +909,7 @@ WebInspector.ProfilesPanel.prototype = {
         contextMenu.appendItem(WebInspector.UIString.capitalize("Reveal in Summary ^view"), revealInView.bind(this, "Summary"));
     },
 
-    __proto__: WebInspector.PanelWithSidebarTree.prototype
+    __proto__: WebInspector.PanelWithSidebar.prototype
 }
 
 
@@ -914,7 +921,7 @@ WebInspector.ProfilesPanel.prototype = {
  */
 WebInspector.ProfileTypeSidebarSection = function(dataDisplayDelegate, profileType)
 {
-    WebInspector.SidebarSectionTreeElement.call(this, profileType.treeItemTitle, null, true);
+    WebInspector.SidebarSectionTreeElement.call(this, profileType.treeItemTitle);
     this._dataDisplayDelegate = dataDisplayDelegate;
     this._profileTreeElements = [];
     this._profileGroups = {};
@@ -958,7 +965,7 @@ WebInspector.ProfileTypeSidebarSection.prototype = {
 
                 var firstProfileTreeElement = group.profileSidebarTreeElements[0];
                 // Insert at the same index for the first profile of the group.
-                var index = this.children.indexOf(firstProfileTreeElement);
+                var index = this.children().indexOf(firstProfileTreeElement);
                 this.insertChild(group.sidebarTreeElement, index);
 
                 // Move the first profile to the group.
@@ -1003,7 +1010,8 @@ WebInspector.ProfileTypeSidebarSection.prototype = {
             groupElements.splice(groupElements.indexOf(profileTreeElement), 1);
             if (groupElements.length === 1) {
                 // Move the last profile out of its group and remove the group.
-                var pos = sidebarParent.children.indexOf(group.sidebarTreeElement);
+                var pos = sidebarParent.children().indexOf(group.sidebarTreeElement);
+                group.sidebarTreeElement.removeChild(groupElements[0]);
                 this.insertChild(groupElements[0], pos);
                 groupElements[0].small = false;
                 groupElements[0].mainTitle = group.sidebarTreeElement.title;
@@ -1015,7 +1023,7 @@ WebInspector.ProfileTypeSidebarSection.prototype = {
         sidebarParent.removeChild(profileTreeElement);
         profileTreeElement.dispose();
 
-        if (this.children.length)
+        if (this.childCount())
             return false;
         this.hidden = true;
         return true;
@@ -1081,7 +1089,7 @@ WebInspector.ProfileSidebarTreeElement = function(dataDisplayDelegate, profile, 
 {
     this._dataDisplayDelegate = dataDisplayDelegate;
     this.profile = profile;
-    WebInspector.SidebarTreeElement.call(this, className, profile.title, "", profile, false);
+    WebInspector.SidebarTreeElement.call(this, className, profile.title);
     this.refreshTitles();
     profile.addEventListener(WebInspector.ProfileHeader.Events.UpdateStatus, this._updateStatus, this);
     if (profile.canSaveToFile())
@@ -1175,7 +1183,7 @@ WebInspector.ProfileSidebarTreeElement.prototype = {
  */
 WebInspector.ProfileGroupSidebarTreeElement = function(dataDisplayDelegate, title, subtitle)
 {
-    WebInspector.SidebarTreeElement.call(this, "profile-group-sidebar-tree-item", title, subtitle, null, true);
+    WebInspector.SidebarTreeElement.call(this, "profile-group-sidebar-tree-item", title, subtitle, true);
     this._dataDisplayDelegate = dataDisplayDelegate;
 }
 
@@ -1186,9 +1194,9 @@ WebInspector.ProfileGroupSidebarTreeElement.prototype = {
      */
     onselect: function()
     {
-        var hasChildren = this.children.length > 0;
+        var hasChildren = this.childCount() > 0;
         if (hasChildren)
-            this._dataDisplayDelegate.showProfile(this.children[this.children.length - 1].profile);
+            this._dataDisplayDelegate.showProfile(this.lastChild().profile);
         return hasChildren;
     },
 
@@ -1205,7 +1213,7 @@ WebInspector.ProfilesSidebarTreeElement = function(panel)
     this._panel = panel;
     this.small = false;
 
-    WebInspector.SidebarTreeElement.call(this, "profile-launcher-view-tree-item", WebInspector.UIString("Profiles"), "", null, false);
+    WebInspector.SidebarTreeElement.call(this, "profile-launcher-view-tree-item", WebInspector.UIString("Profiles"));
 }
 
 WebInspector.ProfilesSidebarTreeElement.prototype = {

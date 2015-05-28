@@ -19,7 +19,7 @@
 
 namespace rx
 {
-class Renderer;
+class ImplFactory;
 }
 
 namespace gl
@@ -33,10 +33,10 @@ class Sampler;
 class FenceSync;
 struct Data;
 
-class ResourceManager
+class ResourceManager : angle::NonCopyable
 {
   public:
-    explicit ResourceManager(rx::Renderer *renderer);
+    explicit ResourceManager(rx::ImplFactory *factory);
     ~ResourceManager();
 
     void addRef();
@@ -68,17 +68,17 @@ class ResourceManager
 
     void setRenderbuffer(GLuint handle, Renderbuffer *renderbuffer);
 
-    void checkBufferAllocation(unsigned int buffer);
-    void checkTextureAllocation(GLuint texture, GLenum type);
-    void checkRenderbufferAllocation(GLuint renderbuffer);
+    void checkBufferAllocation(GLuint handle);
+    void checkTextureAllocation(GLuint handle, GLenum type);
+    void checkRenderbufferAllocation(GLuint handle);
     void checkSamplerAllocation(GLuint sampler);
 
     bool isSampler(GLuint sampler);
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(ResourceManager);
+    void createTextureInternal(GLuint handle);
 
-    rx::Renderer *mRenderer;
+    rx::ImplFactory *mFactory;
     std::size_t mRefCount;
 
     typedef std::map<GLuint, Buffer*> BufferMap;

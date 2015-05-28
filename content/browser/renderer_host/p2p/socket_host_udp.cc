@@ -5,11 +5,11 @@
 #include "content/browser/renderer_host/p2p/socket_host_udp.h"
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "content/browser/renderer_host/p2p/socket_host_throttler.h"
 #include "content/common/p2p_messages.h"
 #include "content/public/browser/content_browser_client.h"
@@ -39,13 +39,32 @@ const int kRecvSocketBufferSize = 65536;  // 64K
 //
 // This is caused by WSAENETRESET or WSAECONNRESET which means the
 // last send resulted in an "ICMP Port Unreachable" message.
+struct {
+  int code;
+  const char* name;
+} static const kTransientErrors[] {
+  {net::ERR_ADDRESS_UNREACHABLE, "net::ERR_ADDRESS_UNREACHABLE"},
+  {net::ERR_ADDRESS_INVALID, "net::ERR_ADDRESS_INVALID"},
+  {net::ERR_ACCESS_DENIED, "net::ERR_ACCESS_DENIED"},
+  {net::ERR_CONNECTION_RESET, "net::ERR_CONNECTION_RESET"},
+  {net::ERR_OUT_OF_MEMORY, "net::ERR_OUT_OF_MEMORY"},
+  {net::ERR_INTERNET_DISCONNECTED, "net::ERR_INTERNET_DISCONNECTED"}
+};
+
 bool IsTransientError(int error) {
-  return error == net::ERR_ADDRESS_UNREACHABLE ||
-         error == net::ERR_ADDRESS_INVALID ||
-         error == net::ERR_ACCESS_DENIED ||
-         error == net::ERR_CONNECTION_RESET ||
-         error == net::ERR_OUT_OF_MEMORY ||
-         error == net::ERR_INTERNET_DISCONNECTED;
+  for (const auto& transient_error : kTransientErrors) {
+    if (transient_error.code == error)
+      return true;
+  }
+  return false;
+}
+
+const char* GetTransientErrorName(int error) {
+  for (const auto& transient_error : kTransientErrors) {
+    if (transient_error.code == error)
+      return transient_error.name;
+  }
+  return "";
 }
 
 }  // namespace
@@ -72,13 +91,20 @@ P2PSocketHostUdp::P2PSocketHostUdp(IPC::Sender* message_sender,
                                    int socket_id,
                                    P2PMessageThrottler* throttler)
     : P2PSocketHost(message_sender, socket_id, P2PSocketHost::UDP),
-      socket_(
-          new net::UDPServerSocket(GetContentClient()->browser()->GetNetLog(),
-                                   net::NetLog::Source())),
       send_pending_(false),
       last_dscp_(net::DSCP_CS0),
       throttler_(throttler),
       send_buffer_size_(0) {
+  net::UDPServerSocket* socket = new net::UDPServerSocket(
+      GetContentClient()->browser()->GetNetLog(), net::NetLog::Source());
+#if defined(OS_WIN)
+  // If configured for finch experiment, use nonblocking IO.
+  if (base::FieldTrialList::FindFullName("WebRTC-UDPSocketNonBlockingIO") ==
+      "Enabled") {
+    socket->UseNonBlockingIO();
+  }
+#endif
+  socket_.reset(socket);
 }
 
 P2PSocketHostUdp::~P2PSocketHostUdp() {
@@ -335,7 +361,8 @@ void P2PSocketHostUdp::HandleSendResult(uint64 packet_id,
       return;
     }
     VLOG(0) << "sendto() has failed twice returning a "
-               " transient error. Dropping the packet.";
+               " transient error " << GetTransientErrorName(result)
+            << ". Dropping the packet.";
   }
 
   // UMA to track the histograms from 1ms to 1 sec for how long a packet spends

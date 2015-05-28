@@ -64,6 +64,7 @@ enum ModelTypeSelection {
   EXPERIMENTS = 1 << 12,
   SUPERVISED_USER_SETTING = 1 << 13,
   SUPERVISED_USER_WHITELIST = 1 << 14,
+  AUTOFILL_WALLET = 1 << 15,
 };
 
 }  // namespace
@@ -340,9 +341,16 @@ jboolean ProfileSyncServiceAndroid::IsSyncKeystoreMigrationDone(
   return is_status_valid && !status.keystore_migration_time.is_null();
 }
 
-jlong ProfileSyncServiceAndroid::GetEnabledDataTypes(JNIEnv* env,
-                                                     jobject obj) {
+jlong ProfileSyncServiceAndroid::GetActiveDataTypes(
+      JNIEnv* env, jobject obj) {
   syncer::ModelTypeSet types = sync_service_->GetActiveDataTypes();
+  types.PutAll(syncer::ControlTypes());
+  return ModelTypeSetToSelection(types);
+}
+
+jlong ProfileSyncServiceAndroid::GetPreferredDataTypes(
+      JNIEnv* env, jobject obj) {
+  syncer::ModelTypeSet types = sync_service_->GetPreferredDataTypes();
   types.PutAll(syncer::ControlTypes());
   return ModelTypeSetToSelection(types);
 }
@@ -453,6 +461,9 @@ jlong ProfileSyncServiceAndroid::ModelTypeSetToSelection(
   }
   if (types.Has(syncer::AUTOFILL_PROFILE)) {
     model_type_selection |= AUTOFILL_PROFILE;
+  }
+  if (types.Has(syncer::AUTOFILL_WALLET_DATA)) {
+    model_type_selection |= AUTOFILL_WALLET;
   }
   if (types.Has(syncer::PASSWORDS)) {
     model_type_selection |= PASSWORD;

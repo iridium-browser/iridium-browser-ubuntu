@@ -42,7 +42,11 @@ void DisposeOptimizedCompileJob(OptimizedCompileJob* job,
 
 class OptimizingCompilerThread::CompileTask : public v8::Task {
  public:
-  explicit CompileTask(Isolate* isolate) : isolate_(isolate) {}
+  explicit CompileTask(Isolate* isolate) : isolate_(isolate) {
+    OptimizingCompilerThread* thread = isolate_->optimizing_compiler_thread();
+    base::LockGuard<base::Mutex> lock_guard(&thread->ref_count_mutex_);
+    ++thread->ref_count_;
+  }
 
   virtual ~CompileTask() {}
 
@@ -53,38 +57,22 @@ class OptimizingCompilerThread::CompileTask : public v8::Task {
     DisallowHandleAllocation no_handles;
     DisallowHandleDereference no_deref;
 
-    TimerEventScope<TimerEventRecompileConcurrent> timer(isolate_);
-
     OptimizingCompilerThread* thread = isolate_->optimizing_compiler_thread();
-
-    if (thread->recompilation_delay_ != 0) {
-      base::OS::Sleep(thread->recompilation_delay_);
-    }
-
-    StopFlag flag;
-    OptimizedCompileJob* job = thread->NextInput(&flag);
-
-    if (flag == CONTINUE) {
-      thread->CompileNext(job);
-    } else {
-      AllowHandleDereference allow_handle_dereference;
-      if (!job->info()->is_osr()) {
-        DisposeOptimizedCompileJob(job, true);
-      }
-    }
-    bool signal = false;
     {
-      base::LockGuard<base::RecursiveMutex> lock(&thread->task_count_mutex_);
-      if (--thread->task_count_ == 0) {
-        if (static_cast<StopFlag>(base::Acquire_Load(&thread->stop_thread_)) ==
-            FLUSH) {
-          base::Release_Store(&thread->stop_thread_,
-                              static_cast<base::AtomicWord>(CONTINUE));
-          signal = true;
-        }
+      TimerEventScope<TimerEventRecompileConcurrent> timer(isolate_);
+
+      if (thread->recompilation_delay_ != 0) {
+        base::OS::Sleep(thread->recompilation_delay_);
+      }
+
+      thread->CompileNext(thread->NextInput(true));
+    }
+    {
+      base::LockGuard<base::Mutex> lock_guard(&thread->ref_count_mutex_);
+      if (--thread->ref_count_ == 0) {
+        thread->ref_count_zero_.NotifyOne();
       }
     }
-    if (signal) thread->stop_semaphore_.Signal();
   }
 
   Isolate* isolate_;
@@ -94,12 +82,18 @@ class OptimizingCompilerThread::CompileTask : public v8::Task {
 
 
 OptimizingCompilerThread::~OptimizingCompilerThread() {
+#ifdef DEBUG
+  {
+    base::LockGuard<base::Mutex> lock_guard(&ref_count_mutex_);
+    DCHECK_EQ(0, ref_count_);
+  }
+#endif
   DCHECK_EQ(0, input_queue_length_);
   DeleteArray(input_queue_);
   if (FLAG_concurrent_osr) {
 #ifdef DEBUG
     for (int i = 0; i < osr_buffer_capacity_; i++) {
-      CHECK_EQ(NULL, osr_buffer_[i]);
+      CHECK_NULL(osr_buffer_[i]);
     }
 #endif
     DeleteArray(osr_buffer_);
@@ -165,28 +159,29 @@ void OptimizingCompilerThread::Run() {
 }
 
 
-OptimizedCompileJob* OptimizingCompilerThread::NextInput(StopFlag* flag) {
+OptimizedCompileJob* OptimizingCompilerThread::NextInput(
+    bool check_if_flushing) {
   base::LockGuard<base::Mutex> access_input_queue_(&input_queue_mutex_);
-  if (input_queue_length_ == 0) {
-    if (flag) {
-      UNREACHABLE();
-      *flag = CONTINUE;
-    }
-    return NULL;
-  }
+  if (input_queue_length_ == 0) return NULL;
   OptimizedCompileJob* job = input_queue_[InputQueueIndex(0)];
-  DCHECK_NE(NULL, job);
+  DCHECK_NOT_NULL(job);
   input_queue_shift_ = InputQueueIndex(1);
   input_queue_length_--;
-  if (flag) {
-    *flag = static_cast<StopFlag>(base::Acquire_Load(&stop_thread_));
+  if (check_if_flushing) {
+    if (static_cast<StopFlag>(base::Acquire_Load(&stop_thread_)) != CONTINUE) {
+      if (!job->info()->is_osr()) {
+        AllowHandleDereference allow_handle_dereference;
+        DisposeOptimizedCompileJob(job, true);
+      }
+      return NULL;
+    }
   }
   return job;
 }
 
 
 void OptimizingCompilerThread::CompileNext(OptimizedCompileJob* job) {
-  DCHECK_NE(NULL, job);
+  if (!job) return;
 
   // The function may have already been optimized by OSR.  Simply continue.
   OptimizedCompileJob::Status status = job->OptimizeGraph();
@@ -219,7 +214,6 @@ void OptimizingCompilerThread::FlushInputQueue(bool restore_function_code) {
 
 
 void OptimizingCompilerThread::FlushOutputQueue(bool restore_function_code) {
-  base::LockGuard<base::Mutex> access_output_queue_(&output_queue_mutex_);
   OptimizedCompileJob* job;
   while (output_queue_.Dequeue(&job)) {
     // OSR jobs are dealt with separately.
@@ -242,20 +236,16 @@ void OptimizingCompilerThread::FlushOsrBuffer(bool restore_function_code) {
 
 void OptimizingCompilerThread::Flush() {
   DCHECK(!IsOptimizerThread());
-  bool block = true;
-  if (job_based_recompilation_) {
-    base::LockGuard<base::RecursiveMutex> lock(&task_count_mutex_);
-    block = task_count_ > 0 || blocked_jobs_ > 0;
-    if (block) {
-      base::Release_Store(&stop_thread_, static_cast<base::AtomicWord>(FLUSH));
-    }
-    if (FLAG_block_concurrent_recompilation) Unblock();
+  base::Release_Store(&stop_thread_, static_cast<base::AtomicWord>(FLUSH));
+  if (FLAG_block_concurrent_recompilation) Unblock();
+  if (!job_based_recompilation_) {
+    input_queue_semaphore_.Signal();
+    stop_semaphore_.Wait();
   } else {
-    base::Release_Store(&stop_thread_, static_cast<base::AtomicWord>(FLUSH));
-    if (FLAG_block_concurrent_recompilation) Unblock();
+    base::LockGuard<base::Mutex> lock_guard(&ref_count_mutex_);
+    while (ref_count_ > 0) ref_count_zero_.Wait(&ref_count_mutex_);
+    base::Release_Store(&stop_thread_, static_cast<base::AtomicWord>(CONTINUE));
   }
-  if (!job_based_recompilation_) input_queue_semaphore_.Signal();
-  if (block) stop_semaphore_.Wait();
   FlushOutputQueue(true);
   if (FLAG_concurrent_osr) FlushOsrBuffer(true);
   if (tracing_enabled_) {
@@ -266,20 +256,16 @@ void OptimizingCompilerThread::Flush() {
 
 void OptimizingCompilerThread::Stop() {
   DCHECK(!IsOptimizerThread());
-  bool block = true;
-  if (job_based_recompilation_) {
-    base::LockGuard<base::RecursiveMutex> lock(&task_count_mutex_);
-    block = task_count_ > 0 || blocked_jobs_ > 0;
-    if (block) {
-      base::Release_Store(&stop_thread_, static_cast<base::AtomicWord>(FLUSH));
-    }
-    if (FLAG_block_concurrent_recompilation) Unblock();
+  base::Release_Store(&stop_thread_, static_cast<base::AtomicWord>(STOP));
+  if (FLAG_block_concurrent_recompilation) Unblock();
+  if (!job_based_recompilation_) {
+    input_queue_semaphore_.Signal();
+    stop_semaphore_.Wait();
   } else {
-    base::Release_Store(&stop_thread_, static_cast<base::AtomicWord>(STOP));
-    if (FLAG_block_concurrent_recompilation) Unblock();
+    base::LockGuard<base::Mutex> lock_guard(&ref_count_mutex_);
+    while (ref_count_ > 0) ref_count_zero_.Wait(&ref_count_mutex_);
+    base::Release_Store(&stop_thread_, static_cast<base::AtomicWord>(CONTINUE));
   }
-  if (!job_based_recompilation_) input_queue_semaphore_.Signal();
-  if (block) stop_semaphore_.Wait();
 
   if (recompilation_delay_ != 0) {
     // At this point the optimizing compiler thread's event loop has stopped.
@@ -369,8 +355,6 @@ void OptimizingCompilerThread::QueueForOptimization(OptimizedCompileJob* job) {
   if (FLAG_block_concurrent_recompilation) {
     blocked_jobs_++;
   } else if (job_based_recompilation_) {
-    base::LockGuard<base::RecursiveMutex> lock(&task_count_mutex_);
-    ++task_count_;
     V8::GetCurrentPlatform()->CallOnBackgroundThread(
         new CompileTask(isolate_), v8::Platform::kShortRunningTask);
   } else {
@@ -381,10 +365,6 @@ void OptimizingCompilerThread::QueueForOptimization(OptimizedCompileJob* job) {
 
 void OptimizingCompilerThread::Unblock() {
   DCHECK(!IsOptimizerThread());
-  {
-    base::LockGuard<base::RecursiveMutex> lock(&task_count_mutex_);
-    task_count_ += blocked_jobs_;
-  }
   while (blocked_jobs_ > 0) {
     if (job_based_recompilation_) {
       V8::GetCurrentPlatform()->CallOnBackgroundThread(

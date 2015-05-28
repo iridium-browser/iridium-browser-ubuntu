@@ -30,6 +30,7 @@
 #include "ui/base/models/combobox_model.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/events/event_handler.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/canvas.h"
@@ -97,12 +98,6 @@ const int kDialogEdgePadding = 20;
 
 // The vertical padding between rows of manual inputs (in pixels).
 const int kManualInputRowPadding = 10;
-
-// Slight shading for mouse hover and legal document background.
-SkColor kShadingColor = SkColorSetARGB(7, 0, 0, 0);
-
-// A border color for the legal document view.
-SkColor kSubtleBorderColor = SkColorSetARGB(10, 0, 0, 0);
 
 // The top and bottom padding, in pixels, for the suggestions menu dropdown
 // arrows.
@@ -685,8 +680,6 @@ void AutofillDialogViews::OverlayView::OnPaint(gfx::Canvas* canvas) {
     paint.setStyle(SkPaint::kStroke_Style);
     canvas->DrawPath(arrow, paint);
   }
-
-  PaintChildren(canvas, views::CullSet());
 }
 
 void AutofillDialogViews::OverlayView::OnNativeThemeChanged(
@@ -761,14 +754,9 @@ const char* AutofillDialogViews::NotificationArea::GetClassName() const {
 }
 
 void AutofillDialogViews::NotificationArea::PaintChildren(
-    gfx::Canvas* canvas,
-    const views::CullSet& cull_set) {
-}
-
-void AutofillDialogViews::NotificationArea::OnPaint(gfx::Canvas* canvas) {
-  views::View::OnPaint(canvas);
-  views::View::PaintChildren(canvas, views::CullSet());
-
+    const ui::PaintContext& context) {
+  views::View::PaintChildren(context);
+  gfx::Canvas* canvas = context.canvas();
   if (HasArrow()) {
     DrawArrow(
         canvas,
@@ -864,9 +852,9 @@ void AutofillDialogViews::SectionContainer::SetActive(bool active) {
   if (is_active == !!background())
     return;
 
-  set_background(is_active ?
-      views::Background::CreateSolidBackground(kShadingColor) :
-      NULL);
+  set_background(
+      is_active ? views::Background::CreateSolidBackground(kLightShadingColor)
+                : NULL);
   SchedulePaint();
 }
 
@@ -1000,11 +988,6 @@ gfx::Size AutofillDialogViews::SuggestedButton::GetPreferredSize() const {
 
 const char* AutofillDialogViews::SuggestedButton::GetClassName() const {
   return kSuggestedButtonClassName;
-}
-
-void AutofillDialogViews::SuggestedButton::PaintChildren(
-    gfx::Canvas* canvas,
-    const views::CullSet& cull_set) {
 }
 
 void AutofillDialogViews::SuggestedButton::OnPaint(gfx::Canvas* canvas) {
@@ -1620,7 +1603,7 @@ views::View* AutofillDialogViews::CreateFootnoteView() {
   footnote_view_->SetBorder(
       views::Border::CreateSolidSidedBorder(1, 0, 0, 0, kSubtleBorderColor));
   footnote_view_->set_background(
-      views::Background::CreateSolidBackground(kShadingColor));
+      views::Background::CreateSolidBackground(kLightShadingColor));
 
   legal_document_view_ = new views::StyledLabel(base::string16(), this);
 

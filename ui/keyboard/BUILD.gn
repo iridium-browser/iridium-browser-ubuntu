@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//mojo/public/tools/bindings/mojom.gni")
+import("//testing/test.gni")
 import("//third_party/google_input_tools/closure.gni")
 import("//third_party/google_input_tools/inputview.gni")
 import("//tools/grit/grit_rule.gni")
@@ -18,49 +18,34 @@ component("keyboard") {
     "keyboard_controller_observer.h",
     "keyboard_controller_proxy.cc",
     "keyboard_controller_proxy.h",
-    "keyboard_layout_manager.h",
-    "keyboard_layout_manager.cc",
     "keyboard_export.h",
+    "keyboard_layout_manager.cc",
+    "keyboard_layout_manager.h",
     "keyboard_switches.cc",
     "keyboard_switches.h",
     "keyboard_util.cc",
     "keyboard_util.h",
-    "webui/vk_mojo_handler.cc",
-    "webui/vk_mojo_handler.h",
-    "webui/vk_webui_controller.cc",
-    "webui/vk_webui_controller.h",
   ]
 
   defines = [ "KEYBOARD_IMPLEMENTATION" ]
 
   deps = [
-    ":keyboard_mojom_bindings",
     ":resources",
     "//base",
     "//base/third_party/dynamic_annotations",
     "//content/public/browser",
     "//content/public/common",
-    "//mojo/edk/js",
-    "//mojo/edk/system",
-    "//mojo/environment:chromium",
-    "//mojo/public/cpp/bindings",
-    "//mojo/public/cpp/system",
-    "//url",
+    "//skia",
     "//ui/aura",
     "//ui/base",
+    "//ui/base/ime",
     "//ui/compositor",
     "//ui/events",
     "//ui/events:dom4_keycode_converter",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/wm",
-  ]
-}
-
-# GYP version: ui/keyboard/keyboard.gyp:keyboard_mojom_bindings
-mojom("keyboard_mojom_bindings") {
-  sources = [
-    "webui/keyboard.mojom",
+    "//url",
   ]
 }
 
@@ -73,22 +58,17 @@ grit("resources_grit") {
     "keyboard_resources.rc",
   ]
 
-  inputview_dir = "//third_party/google_input_tools/src/chrome/os/inputview"
+  input_tools_root_dir = "//third_party/google_input_tools/src/chrome/os"
   inputview_gen_js = "$root_gen_dir/ui/keyboard/resources/inputview.js"
-  keyboard_mojom_gen_js = "$root_gen_dir/ui/keyboard/webui/keyboard.mojom.js"
   grit_flags = [
     "-E",
-    "inputview_dir=" + rebase_path(inputview_dir, "."),
+    "input_tools_root_dir=" + rebase_path(input_tools_root_dir, "."),
     "-E",
     "inputview_gen_js=" + rebase_path(inputview_gen_js, root_build_dir),
-    "-E",
-    "keyboard_mojom_gen_js=" +
-        rebase_path(keyboard_mojom_gen_js, root_build_dir),
   ]
 
   deps = [
     ":inputview",
-    ":keyboard_mojom_bindings",
   ]
 }
 
@@ -115,8 +95,8 @@ build_closure("inputview") {
 
 test("keyboard_unittests") {
   sources = [
-    "test/run_all_unittests.cc",
     "keyboard_controller_unittest.cc",
+    "test/run_all_unittests.cc",
   ]
 
   deps = [
@@ -128,6 +108,8 @@ test("keyboard_unittests") {
     "//skia",
     "//testing/gtest",
     "//ui/aura:test_support",
+    "//ui/base",
+    "//ui/base/ime",
     "//ui/base:test_support",
     "//ui/compositor:test_support",
     "//ui/events:test_support",

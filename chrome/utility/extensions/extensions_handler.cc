@@ -11,14 +11,13 @@
 #include "chrome/common/extensions/chrome_utility_extensions_messages.h"
 #include "chrome/common/media_galleries/metadata_types.h"
 #include "chrome/utility/chrome_content_utility_client.h"
-#include "chrome/utility/extensions/unpacker.h"
 #include "chrome/utility/media_galleries/image_metadata_extractor.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/utility/utility_thread.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_l10n_util.h"
 #include "extensions/common/extension_utility_messages.h"
-#include "extensions/common/manifest.h"
+#include "extensions/utility/unpacker.h"
 #include "media/base/media.h"
 #include "media/base/media_file_checker.h"
 #include "third_party/zlib/google/zip.h"
@@ -59,6 +58,7 @@ const char kExtensionHandlerUnzipError[] =
 }  // namespace
 
 ExtensionsHandler::ExtensionsHandler() {
+  ExtensionsClient::Set(ChromeExtensionsClient::GetInstance());
 }
 
 ExtensionsHandler::~ExtensionsHandler() {
@@ -76,17 +76,10 @@ void ExtensionsHandler::PreSandboxStartup() {
     media::InitializeMediaLibrary(media_path);
 }
 
-// static
-void ExtensionsHandler::UtilityThreadStarted() {
-  UtilityHandler::UtilityThreadStarted();
-}
-
 bool ExtensionsHandler::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExtensionsHandler, message)
-    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_UnpackExtension, OnUnpackExtension)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_UnzipToDir, OnUnzipToDir)
-    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_DecodeImageBase64, OnDecodeImageBase64)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_CheckMediaFile, OnCheckMediaFile)
 #if defined(OS_WIN)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseITunesPrefXml,
@@ -117,30 +110,6 @@ bool ExtensionsHandler::OnMessageReceived(const IPC::Message& message) {
   return handled || utility_handler_.OnMessageReceived(message);
 }
 
-void ExtensionsHandler::OnUnpackExtension(
-    const base::FilePath& extension_path,
-    const std::string& extension_id,
-    int location,
-    int creation_flags) {
-  CHECK_GT(location, Manifest::INVALID_LOCATION);
-  CHECK_LT(location, Manifest::NUM_LOCATIONS);
-  ExtensionsClient::Set(ChromeExtensionsClient::GetInstance());
-  Unpacker unpacker(extension_path,
-                    extension_id,
-                    static_cast<Manifest::Location>(location),
-                    creation_flags);
-  if (unpacker.Run() && unpacker.DumpImagesToFile() &&
-      unpacker.DumpMessageCatalogsToFile()) {
-    Send(new ChromeUtilityHostMsg_UnpackExtension_Succeeded(
-        *unpacker.parsed_manifest()));
-  } else {
-    Send(new ChromeUtilityHostMsg_UnpackExtension_Failed(
-        unpacker.error_message()));
-  }
-
-  ReleaseProcessIfNeeded();
-}
-
 void ExtensionsHandler::OnUnzipToDir(const base::FilePath& zip_path,
                                      const base::FilePath& dir) {
   if (!zip::Unzip(zip_path, dir)) {
@@ -151,23 +120,6 @@ void ExtensionsHandler::OnUnzipToDir(const base::FilePath& zip_path,
   }
 
   ReleaseProcessIfNeeded();
-}
-
-void ExtensionsHandler::OnDecodeImageBase64(
-    const std::string& encoded_string) {
-  std::string decoded_string;
-
-  if (!base::Base64Decode(encoded_string, &decoded_string)) {
-    Send(new ChromeUtilityHostMsg_DecodeImage_Failed());
-    return;
-  }
-
-  std::vector<unsigned char> decoded_vector(decoded_string.size());
-  for (size_t i = 0; i < decoded_string.size(); ++i) {
-    decoded_vector[i] = static_cast<unsigned char>(decoded_string[i]);
-  }
-
-  ChromeContentUtilityClient::DecodeImageAndSend(decoded_vector, false);
 }
 
 void ExtensionsHandler::OnCheckMediaFile(

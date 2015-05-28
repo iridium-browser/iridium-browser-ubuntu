@@ -49,7 +49,7 @@ WebInspector.SplitView = function(isVertical, secondIsSidebar, settingName, defa
     this._sidebarElement.createChild("content").select = ".insertion-point-sidebar";
     this._resizerElement = this.contentElement.createChild("div", "shadow-split-view-resizer");
 
-    this._resizerWidget = new WebInspector.ResizerWidget();
+    this._resizerWidget = new WebInspector.SimpleResizerWidget();
     this._resizerWidget.setEnabled(true);
     this._resizerWidget.addEventListener(WebInspector.ResizerWidget.Events.ResizeStart, this._onResizeStart, this);
     this._resizerWidget.addEventListener(WebInspector.ResizerWidget.Events.ResizeUpdate, this._onResizeUpdate, this);
@@ -251,14 +251,6 @@ WebInspector.SplitView.prototype = {
     },
 
     /**
-     * @return {number}
-     */
-    preferredSidebarSize: function()
-    {
-        return this._preferredSidebarSizeDIP();
-    },
-
-    /**
      * @return {!Element}
      */
     resizerElement: function()
@@ -357,7 +349,7 @@ WebInspector.SplitView.prototype = {
      */
     showBoth: function(animate)
     {
-       if (this._showMode === WebInspector.SplitView.ShowMode.Both)
+        if (this._showMode === WebInspector.SplitView.ShowMode.Both)
             animate = false;
 
         this._cancelAnimation();
@@ -820,7 +812,7 @@ WebInspector.SplitView.prototype = {
     _restoreAndApplyShowModeFromSettings: function()
     {
         var orientationState = this._settingForOrientation();
-        this._savedShowMode = orientationState ? orientationState.showMode : WebInspector.SplitView.ShowMode.Both;
+        this._savedShowMode = orientationState && orientationState.showMode ? orientationState.showMode : WebInspector.SplitView.ShowMode.Both;
         this._showMode = this._savedShowMode;
 
         switch (this._savedShowMode) {

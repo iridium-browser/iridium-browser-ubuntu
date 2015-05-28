@@ -46,7 +46,6 @@
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_switches.h"
-#include "native_client/src/public/nacl_file_info.h"
 #include "native_client/src/shared/imc/nacl_imc_c.h"
 #include "net/base/net_util.h"
 #include "net/socket/tcp_listen_socket.h"
@@ -235,19 +234,23 @@ void CloseFile(base::File file) {
 unsigned NaClProcessHost::keepalive_throttle_interval_milliseconds_ =
     ppapi::kKeepaliveThrottleIntervalDefaultMilliseconds;
 
-NaClProcessHost::NaClProcessHost(const GURL& manifest_url,
-                                 base::File nexe_file,
-                                 const NaClFileToken& nexe_token,
-                                 ppapi::PpapiPermissions permissions,
-                                 int render_view_id,
-                                 uint32 permission_bits,
-                                 bool uses_nonsfi_mode,
-                                 bool off_the_record,
-                                 NaClAppProcessType process_type,
-                                 const base::FilePath& profile_directory)
+NaClProcessHost::NaClProcessHost(
+    const GURL& manifest_url,
+    base::File nexe_file,
+    const NaClFileToken& nexe_token,
+    const std::vector<
+      nacl::NaClResourceFileInfo>& prefetched_resource_files_info,
+    ppapi::PpapiPermissions permissions,
+    int render_view_id,
+    uint32 permission_bits,
+    bool uses_nonsfi_mode,
+    bool off_the_record,
+    NaClAppProcessType process_type,
+    const base::FilePath& profile_directory)
     : manifest_url_(manifest_url),
       nexe_file_(nexe_file.Pass()),
       nexe_token_(nexe_token),
+      prefetched_resource_files_info_(prefetched_resource_files_info),
       permissions_(permissions),
 #if defined(OS_WIN)
       process_launched_by_broker_(false),
@@ -265,7 +268,7 @@ NaClProcessHost::NaClProcessHost(const GURL& manifest_url,
       render_view_id_(render_view_id),
       weak_factory_(this) {
   process_.reset(content::BrowserChildProcessHost::Create(
-      PROCESS_TYPE_NACL_LOADER, this));
+      static_cast<content::ProcessType>(PROCESS_TYPE_NACL_LOADER), this));
 
   // Set the display name so the user knows what plugin the process is running.
   // We aren't on the UI thread so getting the pref locale for language
@@ -293,6 +296,16 @@ NaClProcessHost::~NaClProcessHost() {
       LOG(ERROR) << message;
     }
     NaClBrowser::GetInstance()->OnProcessEnd(process_->GetData().id);
+  }
+
+  for (size_t i = 0; i < prefetched_resource_files_info_.size(); ++i) {
+    // The process failed to launch for some reason. Close resource file
+    // handles.
+    base::File file(IPC::PlatformFileForTransitToFile(
+        prefetched_resource_files_info_[i].file));
+    content::BrowserThread::GetBlockingPool()->PostTask(
+        FROM_HERE,
+        base::Bind(&CloseFile, base::Passed(file.Pass())));
   }
 
   if (reply_msg_) {
@@ -613,7 +626,8 @@ bool NaClProcessHost::LaunchSelLdr() {
 #endif
   process_->Launch(
       new NaClSandboxedProcessLauncherDelegate(process_->GetHost()),
-      cmd_line.release());
+      cmd_line.release(),
+      true);
   return true;
 }
 
@@ -886,28 +900,42 @@ bool NaClProcessHost::StartNaClExecution() {
   }
 
   base::FilePath file_path;
-  // Don't retrieve the file path when using nonsfi mode; there's no validation
-  // caching in that case, so it's unnecessary work, and would expose the file
-  // path to the plugin.
-  if (!uses_nonsfi_mode_ &&
-      NaClBrowser::GetInstance()->GetFilePath(nexe_token_.lo,
-                                              nexe_token_.hi,
-                                              &file_path)) {
-    // We have to reopen the file in the browser process; we don't want a
-    // compromised renderer to pass an arbitrary fd that could get loaded
-    // into the plugin process.
-    if (base::PostTaskAndReplyWithResult(
-           content::BrowserThread::GetBlockingPool(),
-           FROM_HERE,
-           base::Bind(OpenNaClReadExecImpl,
-                      file_path,
-                      true /* is_executable */),
-           base::Bind(&NaClProcessHost::StartNaClFileResolved,
-                      weak_factory_.GetWeakPtr(),
-                      params,
-                      file_path))) {
-      return true;
+  if (uses_nonsfi_mode_) {
+    // Don't retrieve the file path when using nonsfi mode; there's no
+    // validation caching in that case, so it's unnecessary work, and would
+    // expose the file path to the plugin.
+
+    // Pass the pre-opened resource files to the loader. For the same reason
+    // as above, use an empty base::FilePath.
+    for (size_t i = 0; i < prefetched_resource_files_info_.size(); ++i) {
+      params.prefetched_resource_files.push_back(
+          NaClResourceFileInfo(prefetched_resource_files_info_[i].file,
+                               base::FilePath(),
+                               prefetched_resource_files_info_[i].file_key));
     }
+    prefetched_resource_files_info_.clear();
+  } else {
+    if (NaClBrowser::GetInstance()->GetFilePath(nexe_token_.lo,
+                                                nexe_token_.hi,
+                                                &file_path)) {
+      // We have to reopen the file in the browser process; we don't want a
+      // compromised renderer to pass an arbitrary fd that could get loaded
+      // into the plugin process.
+      if (base::PostTaskAndReplyWithResult(
+              content::BrowserThread::GetBlockingPool(),
+              FROM_HERE,
+              base::Bind(OpenNaClReadExecImpl,
+                         file_path,
+                         true /* is_executable */),
+              base::Bind(&NaClProcessHost::StartNaClFileResolved,
+                         weak_factory_.GetWeakPtr(),
+                         params,
+                         file_path))) {
+        return true;
+      }
+    }
+    // TODO(yusukes): Handle |prefetched_resource_files_info_| for SFI-NaCl.
+    DCHECK(prefetched_resource_files_info_.empty());
   }
 
   params.nexe_file = IPC::TakeFileHandleForProcess(nexe_file_.Pass(),
@@ -1143,7 +1171,6 @@ bool NaClProcessHost::AttachDebugExceptionHandler(const std::string& info,
   debug_exception_handler_requested_ = true;
 
   base::ProcessId nacl_pid = base::GetProcId(process_->GetData().handle);
-  base::ProcessHandle temp_handle;
   // We cannot use process_->GetData().handle because it does not have
   // the necessary access rights.  We open the new handle here rather
   // than in the NaCl broker process in case the NaCl loader process
@@ -1152,21 +1179,20 @@ bool NaClProcessHost::AttachDebugExceptionHandler(const std::string& info,
   // but this takes a PID.  We need to prevent the NaCl loader's PID
   // from being reused before DebugActiveProcess() is called, and
   // holding a process handle open achieves this.
-  if (!base::OpenProcessHandleWithAccess(
-           nacl_pid,
-           base::kProcessAccessQueryInformation |
-           base::kProcessAccessSuspendResume |
-           base::kProcessAccessTerminate |
-           base::kProcessAccessVMOperation |
-           base::kProcessAccessVMRead |
-           base::kProcessAccessVMWrite |
-           base::kProcessAccessDuplicateHandle |
-           base::kProcessAccessWaitForTermination,
-           &temp_handle)) {
+  base::Process process =
+      base::Process::OpenWithAccess(nacl_pid,
+                                    PROCESS_QUERY_INFORMATION |
+                                    PROCESS_SUSPEND_RESUME |
+                                    PROCESS_TERMINATE |
+                                    PROCESS_VM_OPERATION |
+                                    PROCESS_VM_READ |
+                                    PROCESS_VM_WRITE |
+                                    PROCESS_DUP_HANDLE |
+                                    SYNCHRONIZE);
+  if (!process.IsValid()) {
     LOG(ERROR) << "Failed to get process handle";
     return false;
   }
-  base::win::ScopedHandle process_handle(temp_handle);
 
   attach_debug_exception_handler_reply_msg_.reset(reply_msg);
   // If the NaCl loader is 64-bit, the process running its debug
@@ -1175,11 +1201,11 @@ bool NaClProcessHost::AttachDebugExceptionHandler(const std::string& info,
   // the 32-bit browser process to run the debug exception handler.
   if (RunningOnWOW64()) {
     return NaClBrokerService::GetInstance()->LaunchDebugExceptionHandler(
-               weak_factory_.GetWeakPtr(), nacl_pid, process_handle.Get(),
+               weak_factory_.GetWeakPtr(), nacl_pid, process.Handle(),
                info);
   } else {
     NaClStartDebugExceptionHandlerThread(
-        process_handle.Take(), info,
+        process.Pass(), info,
         base::MessageLoopProxy::current(),
         base::Bind(&NaClProcessHost::OnDebugExceptionHandlerLaunchedByBroker,
                    weak_factory_.GetWeakPtr()));

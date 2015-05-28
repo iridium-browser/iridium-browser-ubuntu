@@ -44,21 +44,27 @@ struct ColumnSpec;
 // in tests.  The concrete class used in non-test scenarios is
 // OnDiskDirectoryBackingStore.
 class SYNC_EXPORT_PRIVATE DirectoryBackingStore : public base::NonThreadSafe {
+  friend class DirectoryBackingStoreTest;
+  FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest,
+                           IncreaseDatabasePageSizeFrom4KTo32K);
+
  public:
   explicit DirectoryBackingStore(const std::string& dir_name);
   virtual ~DirectoryBackingStore();
 
   // Loads and drops all currently persisted meta entries into |handles_map|
-  // and loads appropriate persisted kernel info into |info_bucket|.
+  // and loads appropriate persisted kernel info into |kernel_load_info|.
+  // The function determines which entries can be safely dropped and inserts
+  // their keys into |metahandles_to_purge|. It is up to the caller to
+  // perform the actual cleanup.
   //
-  // This function can perform some cleanup tasks behind the scenes.  It will
-  // clean up unused entries from the database and migrate to the latest
-  // database version.  The caller can safely ignore these details.
+  // This function will migrate to the latest database version.
   //
   // NOTE: On success (return value of OPENED), the buckets are populated with
   // newly allocated items, meaning ownership is bestowed upon the caller.
   virtual DirOpenResult Load(Directory::MetahandlesMap* handles_map,
                              JournalIndex* delete_journals,
+                             MetahandleSet* metahandles_to_purge,
                              Directory::KernelLoadInfo* kernel_load_info) = 0;
 
   // Updates the on-disk store with the input |snapshot| as a database
@@ -90,16 +96,15 @@ class SYNC_EXPORT_PRIVATE DirectoryBackingStore : public base::NonThreadSafe {
   bool CreateV75ModelsTable();
   bool CreateV81ModelsTable();
 
-  // We don't need to load any synced and applied deleted entries, we can
-  // in fact just purge them forever on startup.
-  bool DropDeletedEntries();
   // Drops a table if it exists, harmless if the table did not already exist.
   bool SafeDropTable(const char* table_name);
 
   // Load helpers for entries and attributes.
-  bool LoadEntries(Directory::MetahandlesMap* handles_map);
+  bool LoadEntries(Directory::MetahandlesMap* handles_map,
+                   MetahandleSet* metahandles_to_purge);
   bool LoadDeleteJournals(JournalIndex* delete_journals);
   bool LoadInfo(Directory::KernelLoadInfo* info);
+  bool SafeToPurgeOnLoading(const EntryKernel& entry) const;
 
   // Save/update helpers for entries.  Return false if sqlite commit fails.
   static bool SaveEntryToDB(sql::Statement* save_statement,
@@ -175,19 +180,31 @@ class SYNC_EXPORT_PRIVATE DirectoryBackingStore : public base::NonThreadSafe {
   bool MigrateVersion87To88();
   bool MigrateVersion88To89();
 
+  // Accessor for needs_column_refresh_.  Used in tests.
+  bool needs_column_refresh() const;
+
+  // Destroys the existing Connection and creates a new one.
+  void ResetAndCreateConnection();
+
   scoped_ptr<sql::Connection> db_;
-  sql::Statement save_meta_statment_;
-  sql::Statement save_delete_journal_statment_;
-  std::string dir_name_;
+
+ private:
+  bool Vacuum();
+  bool IncreasePageSizeTo32K();
+  bool GetDatabasePageSize(int* page_size);
+
+  // Prepares |save_statement| for saving entries in |table|.
+  void PrepareSaveEntryStatement(EntryTable table,
+                                 sql::Statement* save_statement);
+
+  const std::string dir_name_;
+  const int database_page_size_;
+  sql::Statement save_meta_statement_;
+  sql::Statement save_delete_journal_statement_;
 
   // Set to true if migration left some old columns around that need to be
   // discarded.
   bool needs_column_refresh_;
-
- private:
-  // Prepares |save_statement| for saving entries in |table|.
-  void PrepareSaveEntryStatement(EntryTable table,
-                                 sql::Statement* save_statement);
 
   DISALLOW_COPY_AND_ASSIGN(DirectoryBackingStore);
 };

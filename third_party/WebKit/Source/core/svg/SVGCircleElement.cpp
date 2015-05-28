@@ -21,23 +21,23 @@
 #include "config.h"
 #include "core/svg/SVGCircleElement.h"
 
-#include "core/rendering/svg/RenderSVGEllipse.h"
+#include "core/layout/svg/LayoutSVGEllipse.h"
 #include "core/svg/SVGLength.h"
 
 namespace blink {
 
 inline SVGCircleElement::SVGCircleElement(Document& document)
     : SVGGeometryElement(SVGNames::circleTag, document)
-    , m_cx(SVGAnimatedLength::create(this, SVGNames::cxAttr, SVGLength::create(LengthModeWidth), AllowNegativeLengths))
-    , m_cy(SVGAnimatedLength::create(this, SVGNames::cyAttr, SVGLength::create(LengthModeHeight), AllowNegativeLengths))
-    , m_r(SVGAnimatedLength::create(this, SVGNames::rAttr, SVGLength::create(LengthModeOther), ForbidNegativeLengths))
+    , m_cx(SVGAnimatedLength::create(this, SVGNames::cxAttr, SVGLength::create(SVGLengthMode::Width), AllowNegativeLengths))
+    , m_cy(SVGAnimatedLength::create(this, SVGNames::cyAttr, SVGLength::create(SVGLengthMode::Height), AllowNegativeLengths))
+    , m_r(SVGAnimatedLength::create(this, SVGNames::rAttr, SVGLength::create(SVGLengthMode::Other), ForbidNegativeLengths))
 {
     addToPropertyMap(m_cx);
     addToPropertyMap(m_cy);
     addToPropertyMap(m_r);
 }
 
-void SVGCircleElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGCircleElement)
 {
     visitor->trace(m_cx);
     visitor->trace(m_cy);
@@ -58,9 +58,33 @@ bool SVGCircleElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGCircleElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+bool SVGCircleElement::isPresentationAttribute(const QualifiedName& attrName) const
 {
-    parseAttributeNew(name, value);
+    if (attrName == SVGNames::cxAttr || attrName == SVGNames::cyAttr
+        || attrName == SVGNames::rAttr)
+        return true;
+    return SVGGeometryElement::isPresentationAttribute(attrName);
+}
+
+bool SVGCircleElement::isPresentationAttributeWithSVGDOM(const QualifiedName& attrName) const
+{
+    if (attrName == SVGNames::cxAttr || attrName == SVGNames::cyAttr
+        || attrName == SVGNames::rAttr)
+        return true;
+    return SVGGeometryElement::isPresentationAttributeWithSVGDOM(attrName);
+}
+
+void SVGCircleElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStylePropertySet* style)
+{
+    RefPtrWillBeRawPtr<SVGAnimatedPropertyBase> property = propertyFromAttribute(name);
+    if (property == m_cx)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyCx, *m_cx->currentValue());
+    else if (property == m_cy)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyCy, *m_cy->currentValue());
+    else if (property == m_r)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyR, *m_r->currentValue());
+    else
+        SVGGeometryElement::collectStyleForPresentationAttribute(name, value, style);
 }
 
 void SVGCircleElement::svgAttributeChanged(const QualifiedName& attrName)
@@ -72,24 +96,17 @@ void SVGCircleElement::svgAttributeChanged(const QualifiedName& attrName)
 
     SVGElement::InvalidationGuard invalidationGuard(this);
 
-    bool isLengthAttribute = attrName == SVGNames::cxAttr
-                          || attrName == SVGNames::cyAttr
-                          || attrName == SVGNames::rAttr;
+    invalidateSVGPresentationAttributeStyle();
+    setNeedsStyleRecalc(LocalStyleChange,
+        StyleChangeReasonForTracing::fromAttribute(attrName));
+    updateRelativeLengthsInformation();
 
-    if (isLengthAttribute)
-        updateRelativeLengthsInformation();
-
-    RenderSVGShape* renderer = toRenderSVGShape(this->renderer());
+    LayoutSVGShape* renderer = toLayoutSVGShape(this->layoutObject());
     if (!renderer)
         return;
 
-    if (isLengthAttribute) {
-        renderer->setNeedsShapeUpdate();
-        markForLayoutAndParentResourceInvalidation(renderer);
-        return;
-    }
-
-    ASSERT_NOT_REACHED();
+    renderer->setNeedsShapeUpdate();
+    markForLayoutAndParentResourceInvalidation(renderer);
 }
 
 bool SVGCircleElement::selfHasRelativeLengths() const
@@ -99,9 +116,9 @@ bool SVGCircleElement::selfHasRelativeLengths() const
         || m_r->currentValue()->isRelative();
 }
 
-RenderObject* SVGCircleElement::createRenderer(RenderStyle*)
+LayoutObject* SVGCircleElement::createLayoutObject(const ComputedStyle&)
 {
-    return new RenderSVGEllipse(this);
+    return new LayoutSVGEllipse(this);
 }
 
 }

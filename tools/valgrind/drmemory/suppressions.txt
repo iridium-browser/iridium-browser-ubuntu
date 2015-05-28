@@ -461,11 +461,12 @@ HANDLE LEAK
 name=http://crbug.com/371348
 system call NtCreateSection
 KERNELBASE.dll!CreateFileMappingW
-base.dll!base::SharedMemory::Create
-base.dll!base::SharedMemory::CreateAnonymous
-content.dll!content::ChildThread::AllocateSharedMemory
-content.dll!content::ChildSharedBitmapManager::AllocateSharedBitmap
-cc.dll!cc::ResourceProvider::CreateBitmap
+*!base::SharedMemory::Create
+*!base::SharedMemory::CreateAnonymous
+*!content::ChildThreadImpl::AllocateSharedMemory
+...
+*!content::ChildSharedBitmapManager::AllocateSharedBitmap
+*!cc::ResourceProvider::CreateBitmap
 
 HANDLE LEAK
 name=http://crbug.com/371357
@@ -480,7 +481,6 @@ KERNELBASE.dll!CreateNamedPipeW
 ipc.dll!IPC::Channel::ChannelImpl::CreatePipe
 ipc.dll!IPC::Channel::ChannelImpl::ChannelImpl
 ipc.dll!IPC::Channel::Channel
-ipc.dll!IPC::ChannelProxy::Context::CreateChannel
 
 HANDLE LEAK
 name=http://crbug.com/371942
@@ -705,7 +705,64 @@ content.dll!base::internal::BindState<>::`scalar deleting destructor'
 base.dll!scoped_refptr<>::Release
 base.dll!base::internal::CallbackBase::~CallbackBase
 
+HANDLE LEAK
+name=http://crbug.com/449989
+system call NtOpenProcess
+KERNELBASE.dll!OpenProcess
+base.dll!base::Process::OpenWithExtraPrivileges
+content.dll!content::BrowserMessageFilter::Internal::OnChannelConnected
+
 UNADDRESSABLE ACCESS
-name=https://crbug.com/447788
+name=http://crbug.com/455060
+*!content::FrameAccessibility::GetParent
+*!content::RenderFrameHostImpl::AccessibilityGetParentFrame
+*!content::BrowserAccessibilityManager::GetDelegateFromRootManager
+*!content::BrowserAccessibilityManager::OnWindowBlurred
 ...
-*!gpu::gles2::GLES2ImplementationTest_TexImage3DSingleCommand_Test::TestBody
+*!content::RenderWidgetHostViewAura::Destroy
+
+INVALID HEAP ARGUMENT
+name=http://crbug.com/455994
+drmemorylib.dll!replace_operator_delete
+*!IPC::Listener::`vector deleting destructor'
+*!content::RenderFrameImpl::~RenderFrameImpl
+*!content::RenderFrameImpl::`vector deleting destructor'
+*!content::RenderViewImpl::~RenderViewImpl
+*!content::RenderViewImpl::`vector deleting destructor'
+*!scoped_refptr<>::Release
+*!base::internal::BindState<>::`scalar deleting destructor'
+*!scoped_refptr<>::Release
+*!base::internal::CallbackBase::~CallbackBase
+*!base::MessagePumpDefault::Run
+*!base::MessageLoop::RunHandler
+*!base::MessageLoop::Run
+*!content::RendererMain
+*!content::RunNamedProcessTypeMain
+*!content::ContentMainRunnerImpl::Run
+*!content::ContentMain
+*!content::LaunchTests
+
+UNINITIALIZED READ
+name=http://crbug.com/463204
+skia.dll!_ltod3
+skia.dll!SkPaint::measure_text
+skia.dll!SkPaint::measureText
+content.dll!content::DoPreSandboxWarmupForTypeface
+content.dll!content::`anonymous namespace'::WarmupDirectWrite
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/463261
+...
+blink_web.dll!blink::WebFrameWidgetImpl::selectionBounds
+...
+content.dll!content::RenderWidget::UpdateSelectionBounds
+content.dll!content::RenderWidget::willBeginCompositorFrame
+cc.dll!base::internal::InvokeHelper<>::MakeItSo
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/473197
+*!blink::WebURLResponse::url
+*!content::ManifestManager::OnManifestFetchComplete
+*!base::internal::InvokeHelper<>::MakeItSo
+*!base::internal::Invoker<>::Run
+*!content::ManifestFetcher::OnLoadComplete

@@ -29,17 +29,16 @@
         'ext/refptr_unittest.cc',
         'ext/skia_utils_ios_unittest.mm',
         'ext/skia_utils_mac_unittest.mm',
-        'ext/vector_canvas_unittest.cc',
       ],
       'conditions': [
-        ['OS != "win"', {
-          'sources!': [
-            'ext/vector_canvas_unittest.cc',
-          ],
-        }],
         ['OS != "win" and OS != "mac"', {
           'sources!': [
             'ext/platform_canvas_unittest.cc',
+          ],
+        }],
+        ['OS == "android"', {
+          'dependencies': [
+            '../testing/android/native_test.gyp:native_test_native_code',
           ],
         }],
       ],

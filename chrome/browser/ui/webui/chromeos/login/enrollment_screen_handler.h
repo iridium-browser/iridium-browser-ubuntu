@@ -12,12 +12,13 @@
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/chromeos/login/enrollment/enrollment_screen_actor.h"
 #include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_helper.h"
-#include "chrome/browser/chromeos/login/screens/error_screen_actor.h"
+#include "chrome/browser/chromeos/login/screens/network_error_model.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
 #include "chrome/browser/extensions/signin/scoped_gaia_auth_extension.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
+#include "net/base/net_errors.h"
 
 namespace chromeos {
 
@@ -33,48 +34,49 @@ class EnrollmentScreenHandler
  public:
   EnrollmentScreenHandler(
       const scoped_refptr<NetworkStateInformer>& network_state_informer,
-      ErrorScreenActor* error_screen_actor);
-  virtual ~EnrollmentScreenHandler();
+      NetworkErrorModel* network_error_model);
+  ~EnrollmentScreenHandler() override;
 
   // Implements WebUIMessageHandler:
-  virtual void RegisterMessages() override;
+  void RegisterMessages() override;
 
   // Implements EnrollmentScreenActor:
-  virtual void SetParameters(Controller* controller,
-                             const policy::EnrollmentConfig& config) override;
-  virtual void PrepareToShow() override;
-  virtual void Show() override;
-  virtual void Hide() override;
-  virtual void ShowSigninScreen() override;
-  virtual void ShowEnrollmentSpinnerScreen() override;
-  virtual void ShowAuthError(const GoogleServiceAuthError& error) override;
-  virtual void ShowEnrollmentStatus(policy::EnrollmentStatus status) override;
-  virtual void ShowOtherError(
+  void SetParameters(Controller* controller,
+                     const policy::EnrollmentConfig& config) override;
+  void PrepareToShow() override;
+  void Show() override;
+  void Hide() override;
+  void ShowSigninScreen() override;
+  void ShowEnrollmentSpinnerScreen() override;
+  void ShowAuthError(const GoogleServiceAuthError& error) override;
+  void ShowEnrollmentStatus(policy::EnrollmentStatus status) override;
+  void ShowOtherError(
       EnterpriseEnrollmentHelper::OtherError error_code) override;
 
   // Implements BaseScreenHandler:
-  virtual void Initialize() override;
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) override;
+  void Initialize() override;
+  void DeclareLocalizedValues(
+      ::login::LocalizedValuesBuilder* builder) override;
 
   // Implements NetworkStateInformer::NetworkStateInformerObserver
-  virtual void UpdateState(ErrorScreenActor::ErrorReason reason) override;
+  void UpdateState(NetworkError::ErrorReason reason) override;
 
   // Implements WebUILoginView::FrameObserver
-  virtual void OnFrameError(const std::string& frame_unique_name) override;
+  void OnFrameError(const std::string& frame_unique_name) override;
 
  private:
   // Handlers for WebUI messages.
   void HandleClose(const std::string& reason);
-  void HandleCompleteLogin(const std::string& user);
+  void HandleCompleteLogin(const std::string& user,
+                           const std::string& auth_code);
   void HandleRetry();
   void HandleFrameLoadingCompleted(int status);
 
-  void UpdateStateInternal(ErrorScreenActor::ErrorReason reason,
-                           bool force_update);
+  void UpdateStateInternal(NetworkError::ErrorReason reason, bool force_update);
   void SetupAndShowOfflineMessage(NetworkStateInformer::State state,
-                                  ErrorScreenActor::ErrorReason reason);
+                                  NetworkError::ErrorReason reason);
   void HideOfflineMessage(NetworkStateInformer::State state,
-                          ErrorScreenActor::ErrorReason reason);
+                          NetworkError::ErrorReason reason);
 
   net::Error frame_error() const { return frame_error_; }
   // Shows a given enrollment step.
@@ -110,9 +112,6 @@ class EnrollmentScreenHandler
   // The enrollment configuration.
   policy::EnrollmentConfig config_;
 
-  // Whether an enrollment attempt has failed.
-  bool enrollment_failed_once_;
-
   // Latest enrollment frame error.
   net::Error frame_error_;
 
@@ -126,7 +125,7 @@ class EnrollmentScreenHandler
   // Network state informer used to keep signin screen up.
   scoped_refptr<NetworkStateInformer> network_state_informer_;
 
-  ErrorScreenActor* error_screen_actor_;
+  NetworkErrorModel* network_error_model_;
 
   scoped_ptr<ErrorScreensHistogramHelper> histogram_helper_;
 

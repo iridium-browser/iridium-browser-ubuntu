@@ -49,9 +49,20 @@ class WebGLConformanceExpectations(GpuTestExpectations):
     self.Fail('conformance/glsl/misc/shader-with-array-of-structs-uniform.html',
         ['win7', 'intel', 'nvidia'], bug=373972)
 
+    # Win8 / NVIDIA failures
+    self.Fail('conformance/textures/tex-image-and-sub-image-2d-with-array-buffer-view.html',
+        ['win', 'nvidia'], bug=459265)
+
     # Win / AMD failures
     self.Fail('conformance/textures/texparameter-test.html',
         ['win', 'amd', 'd3d9'], bug=839) # angle bug ID
+
+    # Win / D3D9 failures
+    # Skipping these tests because they're causing assertion failures.
+    self.Skip('conformance/extensions/oes-texture-float-with-canvas.html',
+        ['win', 'd3d9'], bug=896) # angle bug ID
+    self.Skip('conformance/extensions/oes-texture-half-float-with-canvas.html',
+        ['win', 'd3d9'], bug=896) # angle bug ID
 
     # Mac / Intel failures
     # Radar 13499466
@@ -295,6 +306,3 @@ class WebGLConformanceExpectations(GpuTestExpectations):
         ['mac'], bug=436493)
     self.Fail('conformance/textures/texture-upload-size.html',
         ['linux'], bug=436493)
-
-    # Temporary suppression while updating this test.
-    self.Fail('conformance/misc/bad-arguments-test.html', bug=441997)

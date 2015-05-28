@@ -13,7 +13,6 @@ namespace switches {
 
 extern const char kAllowHTTPBackgroundPage[];
 extern const char kAllowLegacyExtensionManifests[];
-extern const char kDisableExtensionInfoDialog[];
 extern const char kEmbeddedExtensionOptions[];
 extern const char kSurfaceWorker[];
 extern const char kEnableAppsShowOnFirstPaint[];
@@ -35,6 +34,7 @@ extern const char kEnableScriptsRequireAction[];
 extern const char kShowComponentExtensionOptions[];
 extern const char kTraceAppSource[];
 extern const char kWhitelistedExtensionID[];
+extern const char kEnableCrxHashCheck[];
 
 }  // namespace switches
 

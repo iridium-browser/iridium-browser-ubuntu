@@ -11,6 +11,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "components/autofill/core/common/form_data_predictions.h"
 #include "components/autofill/core/common/password_form_fill_data.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_view_observer.h"
@@ -20,7 +21,6 @@ namespace blink {
 class WebInputElement;
 class WebKeyboardEvent;
 class WebSecurityOrigin;
-class WebView;
 }
 
 namespace autofill {
@@ -65,6 +65,10 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // Called when new form controls are inserted.
   void OnDynamicFormsSeen();
 
+  // Called when an XHR has succesfully completed. Used to determine if
+  // a form has been submitted by XHR without navigation.
+  void XHRSucceeded();
+
   // Called when the user first interacts with the page after a load. This is a
   // signal to make autofilled values of password input elements accessible to
   // JavaScript.
@@ -103,6 +107,8 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   typedef std::map<blink::WebElement, int> LoginToPasswordInfoKeyMap;
   typedef std::map<blink::WebInputElement, blink::WebInputElement>
       PasswordToLoginMap;
+  using FormDataFieldDataMap =
+      std::map<autofill::FormData, autofill::FormFieldData>;
 
   // This class keeps track of autofilled password input elements and makes sure
   // the autofilled password value is not accessible to JavaScript code until
@@ -161,7 +167,8 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   void DidFinishLoad() override;
   void FrameDetached() override;
   void FrameWillClose() override;
-  void DidCommitProvisionalLoad(bool is_new_navigation) override;
+  void DidCommitProvisionalLoad(bool is_new_navigation,
+                                bool is_same_page_navigation) override;
   void WillSendSubmitEvent(const blink::WebFormElement& form) override;
   void WillSubmitForm(const blink::WebFormElement& form) override;
 
@@ -173,6 +180,7 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // RenderView IPC handlers:
   void OnFillPasswordForm(int key, const PasswordFormFillData& form_data);
   void OnSetLoggingState(bool active);
+  void OnAutofillUsernameDataReceived(const FormDataFieldDataMap& predictions);
 
   // Scans the given frame for password forms and sends them up to the browser.
   // If |only_visible| is true, only forms visible in the layout are sent.
@@ -226,6 +234,10 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   void ProvisionallySavePassword(const blink::WebFormElement& form,
                                  ProvisionallySaveRestriction restriction);
 
+  // Returns true if |provisionally_saved_form_| has enough information that
+  // it is likely filled out.
+  bool ProvisionallySavedPasswordIsValid();
+
   // Passes through |RenderViewObserver| method to |this|.
   LegacyPasswordAutofillAgent legacy_;
 
@@ -239,17 +251,15 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // Used for UMA stats.
   OtherPossibleUsernamesUsage usernames_usage_;
 
-  // Pointer to the WebView. Used to access page scale factor.
-  blink::WebView* web_view_;
-
   // Set if the user might be submitting a password form on the current page,
   // but the submit may still fail (i.e. doesn't pass JavaScript validation).
   scoped_ptr<PasswordForm> provisionally_saved_form_;
 
-  // Contains the most recent text that user typed in input elements. Used for
-  // storing username/password before JavaScript changes them.
+  // Contains the most recent text that user typed or PasswordManager autofilled
+  // in input elements. Used for storing username/password before JavaScript
+  // changes them.
   std::map<const blink::WebInputElement, blink::WebString>
-      user_modified_elements_;
+      nonscript_modified_values_;
 
   PasswordValueGatekeeper gatekeeper_;
 
@@ -271,6 +281,10 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // True indicates that there is a command line flag to enable showing of
   // save password prompt on in-page navigations.
   bool save_password_on_in_page_navigation_;
+
+  // Contains server predictions for which field is the username field for forms
+  // on the page.
+  FormDataFieldDataMap form_predictions_;
 
   base::WeakPtrFactory<PasswordAutofillAgent> weak_ptr_factory_;
 

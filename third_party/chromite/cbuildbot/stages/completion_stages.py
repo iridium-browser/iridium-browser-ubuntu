@@ -19,7 +19,6 @@ from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot import tree_status
 from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import sync_stages
-from chromite.lib import alerts
 from chromite.lib import clactions
 from chromite.lib import cros_build_lib
 from chromite.lib import git
@@ -169,7 +168,9 @@ class MasterSlaveSyncCompletionStage(ManifestVersionedSyncCompletionStage):
       if not builder_names:
         # Master has no slaves.
         return {}
-      elif len(builder_names) == 1 and self._run.config.name in builder_names:
+      elif (len(builder_names) == 1 and self._run.config.name in builder_names
+            or not self._run.options.mock_slave_status and
+            self._run.options.debug):
         # Master with only itself as the slave should not wait.
         return self._GetLocalBuildStatus()
       else:
@@ -362,13 +363,6 @@ class MasterSlaveSyncCompletionStage(ManifestVersionedSyncCompletionStage):
     """
     return [self._slave_statuses[x].message for x in failing]
 
-  def ShouldDisableAlerts(self):
-    """Return whether alerts should be disabled due to debug mode.
-
-    This method only exists so that it can be overridden by tests.
-    """
-    return self._run.debug
-
   def _GetBuildersWithNoneMessages(self, failing):
     """Returns a list of failed builders with NoneType failure message.
 
@@ -421,12 +415,9 @@ class CanaryCompletionStage(MasterSlaveSyncCompletionStage):
                     self.name, builder_name, self.ConstructDashboardURL()))
     msg = '\n\n'.join(msgs)
     logging.warning(msg)
-    if not self.ShouldDisableAlerts():
-      alerts.SendEmail('Canary builder failures',
-                       tree_status.GetHealthAlertRecipients(self._run),
-                       message=msg,
-                       smtp_server=constants.GOLO_SMTP_SERVER,
-                       extra_fields={'X-cbuildbot-alert': 'canary-fail-alert'})
+    extra_fields = {'X-cbuildbot-alert': 'canary-fail-alert'}
+    tree_status.SendHealthAlert(self._run, 'Canary builder failures', msg,
+                                extra_fields=extra_fields)
 
   def _ComposeTreeStatusMessage(self, failing, inflight, no_stat):
     """Composes a tres status message.
@@ -493,15 +484,6 @@ class CanaryCompletionStage(MasterSlaveSyncCompletionStage):
 
 class CommitQueueCompletionStage(MasterSlaveSyncCompletionStage):
   """Commits or reports errors to CL's that failed to be validated."""
-
-  def _AbortCQHWTests(self):
-    """Abort any HWTests started by the CQ."""
-    if (cbuildbot_config.IsCQType(self._run.config.build_type) and
-        not self._run.config.do_not_apply_cq_patches and
-        self._run.manifest_branch == 'master'):
-      version = self._run.GetVersion()
-      if not commands.HaveCQHWTestsBeenAborted(version):
-        commands.AbortCQHWTests(version, self._run.options.debug)
 
   def HandleSuccess(self):
     if self._run.config.master:
@@ -644,9 +626,8 @@ class CommitQueueCompletionStage(MasterSlaveSyncCompletionStage):
       tot_sanity = False
 
     if inflight:
-      # Some slave(s) timed out due to unknown causes. We don't have
-      # any more information, so reject all changes.
-      # TODO: We should revise on how to handle timeouts.
+      # Some slave(s) timed out due to unknown causes, so only reject infra
+      # changes (probably just chromite changes).
       self.sync_stage.pool.HandleValidationTimeout(sanity=tot_sanity,
                                                    changes=changes)
       return
@@ -691,12 +672,10 @@ class CommitQueueCompletionStage(MasterSlaveSyncCompletionStage):
       msgs.insert(0, title)
       msgs.append('See %s' % self.ConstructDashboardURL())
       msg = '\n\n'.join(msgs)
-      if not self.ShouldDisableAlerts():
-        alerts.SendEmail('%s infra failures' % (builder_name,),
-                         tree_status.GetHealthAlertRecipients(self._run),
-                         message=msg,
-                         smtp_server=constants.GOLO_SMTP_SERVER,
-                         extra_fields={'X-cbuildbot-alert': 'cq-infra-alert'})
+      subject = '%s infra failures' % (builder_name,)
+      extra_fields = {'X-cbuildbot-alert': 'cq-infra-alert'}
+      tree_status.SendHealthAlert(self._run, subject, msg,
+                                  extra_fields=extra_fields)
 
   @staticmethod
   def _ToTSanity(sanity_check_slaves, slave_statuses):

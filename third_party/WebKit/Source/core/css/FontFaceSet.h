@@ -108,7 +108,7 @@ public:
 
     void addFontFacesToFontFaceCache(FontFaceCache*, CSSFontSelector*);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     static PassRefPtrWillBeRawPtr<FontFaceSet> create(Document& document)
@@ -143,15 +143,15 @@ private:
     bool resolveFontStyle(const String&, Font&);
     void handlePendingEventsAndPromisesSoon();
     void handlePendingEventsAndPromises();
-    const WillBeHeapListHashSet<RefPtrWillBeMember<FontFace> >& cssConnectedFontFaceList() const;
+    const WillBeHeapListHashSet<RefPtrWillBeMember<FontFace>>& cssConnectedFontFaceList() const;
     bool isCSSConnectedFontFace(FontFace*) const;
 
-    WillBeHeapHashSet<RefPtrWillBeMember<FontFace> > m_loadingFonts;
+    WillBeHeapHashSet<RefPtrWillBeMember<FontFace>> m_loadingFonts;
     bool m_shouldFireLoadingEvent;
-    WillBeHeapVector<OwnPtrWillBeMember<FontsReadyPromiseResolver> > m_readyResolvers;
+    WillBeHeapVector<OwnPtrWillBeMember<FontsReadyPromiseResolver>> m_readyResolvers;
     FontFaceArray m_loadedFonts;
     FontFaceArray m_failedFonts;
-    WillBeHeapListHashSet<RefPtrWillBeMember<FontFace> > m_nonCSSConnectedFaces;
+    WillBeHeapListHashSet<RefPtrWillBeMember<FontFace>> m_nonCSSConnectedFaces;
 
     AsyncMethodRunner<FontFaceSet> m_asyncRunner;
 

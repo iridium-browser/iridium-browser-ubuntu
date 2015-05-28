@@ -44,23 +44,26 @@ class ImageData final : public RefCountedWillBeGarbageCollectedFinalized<ImageDa
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<ImageData> create(const IntSize&);
-    static PassRefPtrWillBeRawPtr<ImageData> create(const IntSize&, PassRefPtr<Uint8ClampedArray>);
+    static PassRefPtrWillBeRawPtr<ImageData> create(const IntSize&, PassRefPtr<DOMUint8ClampedArray>);
     static PassRefPtrWillBeRawPtr<ImageData> create(unsigned width, unsigned height, ExceptionState&);
+    static PassRefPtrWillBeRawPtr<ImageData> create(DOMUint8ClampedArray*, unsigned width, ExceptionState&);
     static PassRefPtrWillBeRawPtr<ImageData> create(DOMUint8ClampedArray*, unsigned width, unsigned height, ExceptionState&);
 
     IntSize size() const { return m_size; }
     int width() const { return m_size.width(); }
     int height() const { return m_size.height(); }
-    const Uint8ClampedArray* data() const { return m_data->view(); }
-    Uint8ClampedArray* data() { return m_data->view(); }
+    const DOMUint8ClampedArray* data() const { return m_data.get(); }
+    DOMUint8ClampedArray* data() { return m_data.get(); }
 
-    void trace(Visitor*) { }
+    DEFINE_INLINE_TRACE() { }
 
     virtual v8::Handle<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper) override;
 
 private:
     explicit ImageData(const IntSize&);
     ImageData(const IntSize&, PassRefPtr<DOMUint8ClampedArray>);
+
+    static bool validateConstructorArguments(DOMUint8ClampedArray*, unsigned width, unsigned&, ExceptionState&);
 
     IntSize m_size;
     RefPtr<DOMUint8ClampedArray> m_data;

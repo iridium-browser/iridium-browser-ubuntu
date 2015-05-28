@@ -213,7 +213,7 @@ void partitionAllocGenericInit(PartitionRootGeneric* root)
     for (order = 0; order <= kBitsPerSizet; ++order) {
         for (j = 0; j < kGenericNumBucketsPerOrder; ++j) {
             if (order < kGenericMinBucketedOrder) {
-                // Use the bucket of finest granularity for malloc(0) etc.
+                // Use the bucket of the finest granularity for malloc(0) etc.
                 *bucketPtr++ = &root->buckets[0];
             } else if (order > kGenericMaxBucketedOrder) {
                 *bucketPtr++ = &PartitionRootGeneric::gPagedBucket;
@@ -359,9 +359,11 @@ static ALWAYS_INLINE void* partitionAllocPartitionPages(PartitionRootBase* root,
         return ret;
     }
 
-    // Need a new super page.
+    // Need a new super page. We want to allocate super pages in a continguous
+    // address region as much as possible. This is important for not causing
+    // page table bloat and not fragmenting address spaces in 32 bit architectures.
     char* requestedAddress = root->nextSuperPage;
-    char* superPage = reinterpret_cast<char*>(allocPages(requestedAddress, kSuperPageSize, kSuperPageSize));
+    char* superPage = reinterpret_cast<char*>(allocPages(requestedAddress, kSuperPageSize, kSuperPageSize, PageAccessible));
     if (UNLIKELY(!superPage))
         return 0;
 
@@ -383,43 +385,52 @@ static ALWAYS_INLINE void* partitionAllocPartitionPages(PartitionRootBase* root,
     setSystemPagesInaccessible(superPage + (kSuperPageSize - kPartitionPageSize), kPartitionPageSize);
 
     // If we were after a specific address, but didn't get it, assume that
-    // the system chose a lousy address and re-randomize the next
-    // allocation.
+    // the system chose a lousy address. Here most OS'es have a default
+    // algorithm that isn't randomized. For example, most Linux
+    // distributions will allocate the mapping directly before the last
+    // successful mapping, which is far from random. So we just get fresh
+    // randomness for the next mapping attempt.
     if (requestedAddress && requestedAddress != superPage)
         root->nextSuperPage = 0;
 
     // We allocated a new super page so update super page metadata.
     // First check if this is a new extent or not.
     PartitionSuperPageExtentEntry* latestExtent = reinterpret_cast<PartitionSuperPageExtentEntry*>(partitionSuperPageToMetadataArea(superPage));
+    // By storing the root in every extent metadata object, we have a fast way
+    // to go from a pointer within the partition to the root object.
+    latestExtent->root = root;
+    // Most new extents will be part of a larger extent, and these three fields
+    // are unused, but we initialize them to 0 so that we get a clear signal
+    // in case they are accidentally used.
+    latestExtent->superPageBase = 0;
+    latestExtent->superPagesEnd = 0;
+    latestExtent->next = 0;
+
     PartitionSuperPageExtentEntry* currentExtent = root->currentExtent;
     bool isNewExtent = (superPage != requestedAddress);
     if (UNLIKELY(isNewExtent)) {
-        latestExtent->next = 0;
         if (UNLIKELY(!currentExtent)) {
+            ASSERT(!root->firstExtent);
             root->firstExtent = latestExtent;
         } else {
             ASSERT(currentExtent->superPageBase);
             currentExtent->next = latestExtent;
         }
         root->currentExtent = latestExtent;
-        currentExtent = latestExtent;
-        currentExtent->superPageBase = superPage;
-        currentExtent->superPagesEnd = superPage + kSuperPageSize;
+        latestExtent->superPageBase = superPage;
+        latestExtent->superPagesEnd = superPage + kSuperPageSize;
     } else {
         // We allocated next to an existing extent so just nudge the size up a little.
+        ASSERT(currentExtent->superPagesEnd);
         currentExtent->superPagesEnd += kSuperPageSize;
         ASSERT(ret >= currentExtent->superPageBase && ret < currentExtent->superPagesEnd);
     }
-    // By storing the root in every extent metadata object, we have a fast way
-    // to go from a pointer within the partition to the root object.
-    latestExtent->root = root;
-
     return ret;
 }
 
 static ALWAYS_INLINE void partitionUnusePage(PartitionRootBase* root, PartitionPage* page)
 {
-    ASSERT(page->bucket->numSystemPagesPerSlotSpan);
+    ASSERT(!partitionBucketIsDirectMapped(page->bucket));
     void* addr = partitionPageToPointer(page);
     partitionDecommitSystemPages(root, addr, page->bucket->numSystemPagesPerSlotSpan * kSystemPageSize);
 }
@@ -477,7 +488,7 @@ static ALWAYS_INLINE char* partitionPageAllocAndFillFreelist(PartitionPage* page
     // page containing the "end" of the returned slot, and then allow freelist
     // pointers to be written up to the end of that page.
     char* subPageLimit = reinterpret_cast<char*>((reinterpret_cast<uintptr_t>(firstFreelistPointer) + kSystemPageOffsetMask) & kSystemPageBaseMask);
-    char* slotsLimit = returnObject + (size * page->numUnprovisionedSlots);
+    char* slotsLimit = returnObject + (size * numSlots);
     char* freelistLimit = subPageLimit;
     if (UNLIKELY(slotsLimit < freelistLimit))
         freelistLimit = slotsLimit;
@@ -518,7 +529,7 @@ static ALWAYS_INLINE char* partitionPageAllocAndFillFreelist(PartitionPage* page
 }
 
 // This helper function scans the active page list for a suitable new active
-// page, starting at the passed in page.
+// page, starting at the passed-in page.
 // When it finds a suitable new active page (one that has free slots), it is
 // set as the new active page and true is returned. If there is no suitable new
 // active page, false is returned and the current active page is set to null.
@@ -538,7 +549,9 @@ static ALWAYS_INLINE bool partitionSetNewActivePage(PartitionPage* page)
     for (; page; page = nextPage) {
         nextPage = page->nextPage;
         ASSERT(page->bucket == bucket);
+        // Check that the page is not at the head of the free page list.
         ASSERT(page != bucket->freePagesHead);
+        // Check one level deeper.
         ASSERT(!bucket->freePagesHead || page != bucket->freePagesHead->nextPage);
 
         // Page is usable if it has something on the freelist, or unprovisioned
@@ -548,7 +561,7 @@ static ALWAYS_INLINE bool partitionSetNewActivePage(PartitionPage* page)
             return true;
         }
 
-        ASSERT(page->numAllocatedSlots >= 0);
+        ASSERT(page->numAllocatedSlots >= 0); // Free page or full page.
         if (LIKELY(page->numAllocatedSlots == 0)) {
             ASSERT(page->freeCacheIndex == -1);
             // We hit a free page, so shepherd it on to the free page list.
@@ -587,7 +600,7 @@ static ALWAYS_INLINE void* partitionDirectMap(PartitionRootBase* root, int flags
 {
     size = partitionDirectMapSize(size);
 
-    // Because we need to fake looking like a super page, We need to allocate
+    // Because we need to fake looking like a super page, we need to allocate
     // a bunch of system pages more than "size":
     // - The first few system pages are the partition page in which the super
     // page metadata is stored. We fault just one system page out of a partition
@@ -613,7 +626,7 @@ static ALWAYS_INLINE void* partitionDirectMap(PartitionRootBase* root, int flags
     // MADV_WILLNEED on POSIX).
     // TODO: these pages will be zero-filled. Consider internalizing an
     // allocZeroed() API so we can avoid a memset() entirely in this case.
-    char* ptr = reinterpret_cast<char*>(allocPages(0, mapSize, kSuperPageSize));
+    char* ptr = reinterpret_cast<char*>(allocPages(0, mapSize, kSuperPageSize, PageAccessible));
     if (UNLIKELY(!ptr))
         return 0;
     char* ret = ptr + kPartitionPageSize;
@@ -626,6 +639,12 @@ static ALWAYS_INLINE void* partitionDirectMap(PartitionRootBase* root, int flags
 
     PartitionSuperPageExtentEntry* extent = reinterpret_cast<PartitionSuperPageExtentEntry*>(partitionSuperPageToMetadataArea(ptr));
     extent->root = root;
+    // Most new extents will be part of a larger extent, and these three fields
+    // are unused, but we initialize them to 0 so that we get a clear signal
+    // in case they are accidentally used.
+    extent->superPageBase = 0;
+    extent->superPagesEnd = 0;
+    extent->next = 0;
     PartitionPage* page = partitionPointerToPageNoAlignmentCheck(ret);
     PartitionBucket* bucket = reinterpret_cast<PartitionBucket*>(reinterpret_cast<char*>(page) + kPageMetadataSize);
     page->freelistHead = 0;
@@ -833,12 +852,13 @@ void partitionFreeSlowPath(PartitionPage* page)
         }
         partitionRegisterEmptyPage(page);
     } else {
+        ASSERT(!partitionBucketIsDirectMapped(bucket));
         // Ensure that the page is full. That's the only valid case if we
         // arrive here.
         ASSERT(page->numAllocatedSlots < 0);
         // A transition of numAllocatedSlots from 0 to -1 is not legal, and
         // likely indicates a double-free.
-        RELEASE_ASSERT(page->numAllocatedSlots != -1);
+        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(page->numAllocatedSlots != -1);
         page->numAllocatedSlots = -page->numAllocatedSlots - 2;
         ASSERT(page->numAllocatedSlots == partitionBucketSlots(bucket) - 1);
         // Fully used page became partially used. It must be put back on the
@@ -893,7 +913,8 @@ bool partitionReallocDirectMappedInPlace(PartitionRootGeneric* root, PartitionPa
         // Grow within the actually allocated memory. Just need to make the
         // pages accessible again.
         size_t recommitSize = newSize - currentSize;
-        setSystemPagesAccessible(charPtr + currentSize, recommitSize);
+        bool ret = setSystemPagesAccessible(charPtr + currentSize, recommitSize);
+        RELEASE_ASSERT(ret);
         partitionRecommitSystemPages(root, charPtr + currentSize, recommitSize);
 
 #if ENABLE(ASSERT)

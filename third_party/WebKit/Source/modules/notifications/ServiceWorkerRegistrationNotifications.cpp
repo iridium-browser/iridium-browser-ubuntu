@@ -6,22 +6,55 @@
 #include "modules/notifications/ServiceWorkerRegistrationNotifications.h"
 
 #include "bindings/core/v8/CallbackPromiseAdapter.h"
+#include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "bindings/core/v8/SerializedScriptValue.h"
+#include "bindings/core/v8/SerializedScriptValueFactory.h"
 #include "bindings/core/v8/V8ThrowException.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
+#include "modules/notifications/GetNotificationOptions.h"
 #include "modules/notifications/Notification.h"
 #include "modules/notifications/NotificationOptions.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebNotificationData.h"
-#include "public/platform/WebNotificationManager.h"
 #include "public/platform/WebSerializedOrigin.h"
+#include "public/platform/modules/notifications/WebNotificationData.h"
+#include "public/platform/modules/notifications/WebNotificationManager.h"
 
 namespace blink {
+namespace {
 
-ScriptPromise ServiceWorkerRegistrationNotifications::showNotification(ScriptState* scriptState, ServiceWorkerRegistration& serviceWorkerRegistration, const String& title, const NotificationOptions& options)
+// Allows using a CallbackPromiseAdapter with a WebVector to resolve the
+// getNotifications() promise with a HeapVector owning Notifications.
+class NotificationArray {
+public:
+    using WebType = WebVector<WebPersistentNotificationInfo>;
+
+    static HeapVector<Member<Notification>> take(ScriptPromiseResolver* resolver, WebType* notificationInfosRaw)
+    {
+        OwnPtr<WebType> notificationInfos = adoptPtr(notificationInfosRaw);
+        HeapVector<Member<Notification>> notifications;
+
+        for (const WebPersistentNotificationInfo& notificationInfo : *notificationInfos)
+            notifications.append(Notification::create(resolver->executionContext(), notificationInfo.persistentNotificationId, notificationInfo.data));
+
+        return notifications;
+    }
+
+    static void dispose(WebType* notificationInfosRaw)
+    {
+        delete notificationInfosRaw;
+    }
+
+private:
+    NotificationArray() = delete;
+};
+
+} // namespace
+
+ScriptPromise ServiceWorkerRegistrationNotifications::showNotification(ScriptState* scriptState, ServiceWorkerRegistration& serviceWorkerRegistration, const String& title, const NotificationOptions& options, ExceptionState& exceptionState)
 {
     ExecutionContext* executionContext = scriptState->executionContext();
 
@@ -33,11 +66,19 @@ ScriptPromise ServiceWorkerRegistrationNotifications::showNotification(ScriptSta
     if (Notification::checkPermission(executionContext) != WebNotificationPermissionAllowed)
         return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "No notification permission has been granted for this origin."));
 
+    // FIXME: Unify the code path here with the Notification.create() function.
+    String dataAsWireString;
+    if (options.hasData()) {
+        RefPtr<SerializedScriptValue> data = SerializedScriptValueFactory::instance().create(options.data(), nullptr, exceptionState, options.data().isolate());
+        if (exceptionState.hadException())
+            return exceptionState.reject(scriptState);
+        dataAsWireString = data->toWireString();
+    }
+
     RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     // FIXME: Do the appropriate CORS checks on the icon URL.
-    // FIXME: Determine the text direction based on the options dictionary.
 
     KURL iconUrl;
     if (options.hasIcon() && !options.icon().isEmpty()) {
@@ -46,7 +87,8 @@ ScriptPromise ServiceWorkerRegistrationNotifications::showNotification(ScriptSta
             iconUrl = KURL();
     }
 
-    WebNotificationData notification(title, WebNotificationData::DirectionLeftToRight, options.lang(), options.body(), options.tag(), iconUrl);
+    WebNotificationData::Direction dir = options.dir() == "rtl" ? WebNotificationData::DirectionRightToLeft : WebNotificationData::DirectionLeftToRight;
+    WebNotificationData notification(title, dir, options.lang(), options.body(), options.tag(), iconUrl, options.silent(), dataAsWireString);
     WebNotificationShowCallbacks* callbacks = new CallbackPromiseAdapter<void, void>(resolver);
 
     SecurityOrigin* origin = executionContext->securityOrigin();
@@ -56,6 +98,20 @@ ScriptPromise ServiceWorkerRegistrationNotifications::showNotification(ScriptSta
     ASSERT(notificationManager);
 
     notificationManager->showPersistent(WebSerializedOrigin(*origin), notification, serviceWorkerRegistration.webRegistration(), callbacks);
+    return promise;
+}
+
+ScriptPromise ServiceWorkerRegistrationNotifications::getNotifications(ScriptState* scriptState, ServiceWorkerRegistration& serviceWorkerRegistration, const GetNotificationOptions& options)
+{
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromise promise = resolver->promise();
+
+    WebNotificationGetCallbacks* callbacks = new CallbackPromiseAdapter<NotificationArray, void>(resolver);
+
+    WebNotificationManager* notificationManager = Platform::current()->notificationManager();
+    ASSERT(notificationManager);
+
+    notificationManager->getNotifications(options.tag(), serviceWorkerRegistration.webRegistration(), callbacks);
     return promise;
 }
 

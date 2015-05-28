@@ -18,6 +18,7 @@ package com.google.ipc.invalidation.ticl.android2.channel;
 import com.google.android.gcm.GCMRegistrar;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
 import com.google.ipc.invalidation.external.client.android.service.AndroidLogger;
+import com.google.ipc.invalidation.ticl.android2.AndroidTiclManifest;
 import com.google.ipc.invalidation.ticl.android2.ProtocolIntents;
 import com.google.ipc.invalidation.ticl.android2.channel.AndroidChannelConstants.AuthTokenConstants;
 import com.google.ipc.invalidation.ticl.android2.channel.AndroidChannelConstants.HttpConstants;
@@ -163,17 +164,21 @@ public class AndroidMessageSenderService extends IntentService {
     PendingIntent pendingIntent = PendingIntent.getService(
         this, Arrays.hashCode(message), tokenResponseIntent, PendingIntent.FLAG_ONE_SHOT);
 
-    // We send the pending intent as an extra in a normal intent to the application. We require that
-    // the intent be delivered only within this package, as a security check. The application must
-    // define a service with an intent filter that matches the ACTION_REQUEST_AUTH_TOKEN in order
-    // to receive this intent.
+    // We send the pending intent as an extra in a normal intent to the application. The
+    // invalidation listener service must handle AUTH_TOKEN_REQUEST intents.
     Intent requestTokenIntent = new Intent(AuthTokenConstants.ACTION_REQUEST_AUTH_TOKEN);
-    requestTokenIntent.setPackage(getPackageName());
     requestTokenIntent.putExtra(AuthTokenConstants.EXTRA_PENDING_INTENT, pendingIntent);
     if (invalidAuthToken != null) {
       requestTokenIntent.putExtra(AuthTokenConstants.EXTRA_INVALIDATE_AUTH_TOKEN, invalidAuthToken);
     }
-    startService(requestTokenIntent);
+    String simpleListenerClass =
+        new AndroidTiclManifest(getApplicationContext()).getListenerServiceClass();
+    requestTokenIntent.setClassName(getApplicationContext(), simpleListenerClass);
+    try {
+      startService(requestTokenIntent);
+    } catch (SecurityException exception) {
+      logger.warning("unable to request auth token: %s", exception);
+    }
   }
 
   /**

@@ -6,6 +6,7 @@
 
 #include "native_client/src/public/chrome_main.h"
 
+#include "native_client/src/include/build_config.h"
 #include "native_client/src/include/portability.h"
 #include "native_client/src/include/portability_io.h"
 #include "native_client/src/include/portability_sockets.h"
@@ -27,7 +28,6 @@
 #include "native_client/src/trusted/service_runtime/include/sys/fcntl.h"
 #include "native_client/src/trusted/service_runtime/nacl_all_modules.h"
 #include "native_client/src/trusted/service_runtime/nacl_app.h"
-#include "native_client/src/trusted/service_runtime/nacl_bootstrap_channel_error_reporter.h"
 #include "native_client/src/trusted/service_runtime/nacl_error_log_hook.h"
 #include "native_client/src/trusted/service_runtime/nacl_globals.h"
 #include "native_client/src/trusted/service_runtime/nacl_debug_init.h"
@@ -180,14 +180,6 @@ static int LoadApp(struct NaClApp *nap, struct NaClChromeMainArgs *args) {
 
   CHECK(g_initialized);
 
-  /*
-   * TODO(teravest): Remove this once Chromium uses NaClSetFatalErrorCallback.
-   */
-  if (has_bootstrap_channel && g_fatal_error_handler == NULL) {
-    NaClBootstrapChannelErrorReporterInit();
-    NaClErrorLogHookInit(NaClBootstrapChannelErrorReporter, nap);
-  }
-
   /* Allow or disallow dyncode API based on args. */
   nap->enable_dyncode_syscalls = args->enable_dyncode_syscalls;
   nap->initial_nexe_max_code_bytes = args->initial_nexe_max_code_bytes;
@@ -300,11 +292,10 @@ static int LoadApp(struct NaClApp *nap, struct NaClChromeMainArgs *args) {
     NaClSetUpBootstrapChannel(nap, args->imc_bootstrap_handle);
   }
 
-  if (args->nexe_desc) {
-    NaClAppLoadModule(nap, args->nexe_desc, NULL, NULL);
-    NaClDescUnref(args->nexe_desc);
-    args->nexe_desc = NULL;
-  }
+  CHECK(args->nexe_desc != NULL);
+  NaClAppLoadModule(nap, args->nexe_desc, NULL, NULL);
+  NaClDescUnref(args->nexe_desc);
+  args->nexe_desc = NULL;
 
   if (has_bootstrap_channel) {
     NACL_FI_FATAL("BeforeSecureCommandChannel");
@@ -361,13 +352,6 @@ static int LoadApp(struct NaClApp *nap, struct NaClChromeMainArgs *args) {
       NaClLoadIrt(nap, args->irt_desc);
       NaClDescUnref(args->irt_desc);
       args->irt_desc = NULL;
-    }
-  }
-
-  if (has_bootstrap_channel) {
-    if (NACL_FI_ERROR_COND("LaunchServiceThreads",
-                           !NaClAppLaunchServiceThreads(nap))) {
-      NaClLog(LOG_FATAL, "Launch service threads failed\n");
     }
   }
 
@@ -449,18 +433,6 @@ static int StartApp(struct NaClApp *nap, struct NaClChromeMainArgs *args) {
     NaClLog(LOG_INFO, "NaCl untrusted code called _exit(0x%x)\n", ret_code);
   }
   return ret_code;
-}
-
-void NaClChromeMainStartApp(struct NaClApp *nap,
-                            struct NaClChromeMainArgs *args) {
-  int status = 1;
-  NaClChromeMainStart(nap, args, &status);
-  /*
-   * exit_group or equiv kills any still running threads while module
-   * addr space is still valid.  otherwise we'd have to kill threads
-   * before we clean up the address space.
-   */
-  NaClExit(status);
 }
 
 int NaClChromeMainStart(struct NaClApp *nap,

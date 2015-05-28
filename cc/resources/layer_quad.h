@@ -20,9 +20,9 @@ namespace cc {
 
 class CC_EXPORT LayerQuad {
  public:
-  class Edge {
+  class CC_EXPORT Edge {
    public:
-    Edge() : x_(0), y_(0), z_(0) {}
+    Edge() : x_(0), y_(0), z_(0), degenerate_(false) {}
     Edge(const gfx::PointF& p, const gfx::PointF& q);
 
     float x() const { return x_; }
@@ -57,16 +57,15 @@ class CC_EXPORT LayerQuad {
     }
     void scale(float s) { scale(s, s, s); }
 
-    gfx::PointF Intersect(const Edge& e) const {
-      return gfx::PointF(
-          (y() * e.z() - e.y() * z()) / (x() * e.y() - e.x() * y()),
-          (x() * e.z() - e.x() * z()) / (e.x() * y() - x() * e.y()));
-    }
+    bool degenerate() const { return degenerate_; }
+
+    gfx::PointF Intersect(const Edge& e) const;
 
    private:
     float x_;
     float y_;
     float z_;
+    bool degenerate_;
   };
 
   LayerQuad(const Edge& left,

@@ -555,7 +555,7 @@ void NetworkChangeNotifier::GetDnsConfig(DnsConfig* config) {
 // static
 const char* NetworkChangeNotifier::ConnectionTypeToString(
     ConnectionType type) {
-  static const char* kConnectionTypeNames[] = {
+  static const char* const kConnectionTypeNames[] = {
     "CONNECTION_UNKNOWN",
     "CONNECTION_ETHERNET",
     "CONNECTION_WIFI",
@@ -565,10 +565,9 @@ const char* NetworkChangeNotifier::ConnectionTypeToString(
     "CONNECTION_NONE",
     "CONNECTION_BLUETOOTH"
   };
-  COMPILE_ASSERT(
-      arraysize(kConnectionTypeNames) ==
-          NetworkChangeNotifier::CONNECTION_LAST + 1,
-      ConnectionType_name_count_mismatch);
+  static_assert(arraysize(kConnectionTypeNames) ==
+                    NetworkChangeNotifier::CONNECTION_LAST + 1,
+                "ConnectionType name count should match");
   if (type < CONNECTION_UNKNOWN || type > CONNECTION_LAST) {
     NOTREACHED();
     return "CONNECTION_INVALID";
@@ -653,6 +652,27 @@ bool NetworkChangeNotifier::IsConnectionCellular(ConnectionType type) {
       break;
   }
   return is_cellular;
+}
+
+// static
+NetworkChangeNotifier::ConnectionType
+NetworkChangeNotifier::ConnectionTypeFromInterfaceList(
+    const NetworkInterfaceList& interfaces) {
+  bool first = true;
+  ConnectionType result = CONNECTION_NONE;
+  for (size_t i = 0; i < interfaces.size(); ++i) {
+#if defined(OS_WIN)
+    if (interfaces[i].friendly_name == "Teredo Tunneling Pseudo-Interface")
+      continue;
+#endif
+    if (first) {
+      first = false;
+      result = interfaces[i].type;
+    } else if (result != interfaces[i].type) {
+      return CONNECTION_UNKNOWN;
+    }
+  }
+  return result;
 }
 
 // static
@@ -929,29 +949,31 @@ void NetworkChangeNotifier::SetDnsConfig(const DnsConfig& config) {
 }
 
 void NetworkChangeNotifier::NotifyObserversOfIPAddressChangeImpl() {
-  ip_address_observer_list_->Notify(&IPAddressObserver::OnIPAddressChanged);
+  ip_address_observer_list_->Notify(FROM_HERE,
+                                    &IPAddressObserver::OnIPAddressChanged);
 }
 
 void NetworkChangeNotifier::NotifyObserversOfConnectionTypeChangeImpl(
     ConnectionType type) {
   connection_type_observer_list_->Notify(
-      &ConnectionTypeObserver::OnConnectionTypeChanged, type);
+      FROM_HERE, &ConnectionTypeObserver::OnConnectionTypeChanged, type);
 }
 
 void NetworkChangeNotifier::NotifyObserversOfNetworkChangeImpl(
     ConnectionType type) {
   network_change_observer_list_->Notify(
-      &NetworkChangeObserver::OnNetworkChanged, type);
+      FROM_HERE, &NetworkChangeObserver::OnNetworkChanged, type);
 }
 
 void NetworkChangeNotifier::NotifyObserversOfDNSChangeImpl() {
-  resolver_state_observer_list_->Notify(&DNSObserver::OnDNSChanged);
+  resolver_state_observer_list_->Notify(FROM_HERE, &DNSObserver::OnDNSChanged);
 }
 
 void NetworkChangeNotifier::NotifyObserversOfMaxBandwidthChangeImpl(
     double max_bandwidth_mbps) {
   max_bandwidth_observer_list_->Notify(
-      &MaxBandwidthObserver::OnMaxBandwidthChanged, max_bandwidth_mbps);
+      FROM_HERE, &MaxBandwidthObserver::OnMaxBandwidthChanged,
+      max_bandwidth_mbps);
 }
 
 NetworkChangeNotifier::DisableForTest::DisableForTest()

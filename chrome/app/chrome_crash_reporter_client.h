@@ -7,7 +7,12 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "components/crash/app/crash_reporter_client.h"
+
+namespace browser_watcher {
+class CrashReportingMetrics;
+}  // namespace browser_watcher
 
 namespace chrome {
 
@@ -17,8 +22,10 @@ class ChromeCrashReporterClient : public crash_reporter::CrashReporterClient {
   ~ChromeCrashReporterClient() override;
 
   // crash_reporter::CrashReporterClient implementation.
+#if !defined(OS_MACOSX)
   void SetCrashReporterClientIdFromGUID(
       const std::string& client_guid) override;
+#endif
 #if defined(OS_WIN)
   virtual bool GetAlternativeCrashDumpLocation(base::FilePath* crash_dir)
       override;
@@ -37,6 +44,8 @@ class ChromeCrashReporterClient : public crash_reporter::CrashReporterClient {
   virtual int GetResultCodeRespawnFailed() override;
   virtual void InitBrowserCrashDumpsRegKey() override;
   virtual void RecordCrashDumpAttempt(bool is_real_crash) override;
+  virtual void RecordCrashDumpAttemptResult(bool is_real_crash,
+                                            bool succeeded) override;
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS)
@@ -58,16 +67,16 @@ class ChromeCrashReporterClient : public crash_reporter::CrashReporterClient {
 #endif
 
 #if defined(OS_ANDROID)
-  virtual int GetAndroidMinidumpDescriptor() override;
-#endif
-
-#if defined(OS_MACOSX)
-  void InstallAdditionalFilters(BreakpadRef breakpad) override;
+  int GetAndroidMinidumpDescriptor() override;
 #endif
 
   bool EnableBreakpadForProcess(const std::string& process_type) override;
 
  private:
+#if defined(OS_WIN)
+  scoped_ptr<browser_watcher::CrashReportingMetrics> crash_reporting_metrics_;
+#endif
+
   DISALLOW_COPY_AND_ASSIGN(ChromeCrashReporterClient);
 };
 

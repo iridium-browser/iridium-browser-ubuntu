@@ -67,7 +67,7 @@ TEST_F(HostDiscardableSharedMemoryManagerTest, AllocateForChild) {
 
   base::SharedMemoryHandle shared_handle;
   manager_->AllocateLockedDiscardableSharedMemoryForChild(
-      base::GetCurrentProcessHandle(), kDataSize, &shared_handle);
+      base::GetCurrentProcessHandle(), kDataSize, 0, &shared_handle);
   ASSERT_TRUE(base::SharedMemory::IsHandleValid(shared_handle));
 
   TestDiscardableSharedMemory memory(shared_handle);
@@ -78,7 +78,7 @@ TEST_F(HostDiscardableSharedMemoryManagerTest, AllocateForChild) {
   memory.SetNow(base::Time::FromDoubleT(1));
   memory.Unlock(0, 0);
 
-  ASSERT_TRUE(memory.Lock(0, 0));
+  ASSERT_EQ(base::DiscardableSharedMemory::SUCCESS, memory.Lock(0, 0));
   EXPECT_EQ(memcmp(data, memory.memory(), kDataSize), 0);
   memory.Unlock(0, 0);
 }
@@ -88,7 +88,7 @@ TEST_F(HostDiscardableSharedMemoryManagerTest, Purge) {
 
   base::SharedMemoryHandle shared_handle1;
   manager_->AllocateLockedDiscardableSharedMemoryForChild(
-      base::GetCurrentProcessHandle(), kDataSize, &shared_handle1);
+      base::GetCurrentProcessHandle(), kDataSize, 1, &shared_handle1);
   ASSERT_TRUE(base::SharedMemory::IsHandleValid(shared_handle1));
 
   TestDiscardableSharedMemory memory1(shared_handle1);
@@ -97,7 +97,7 @@ TEST_F(HostDiscardableSharedMemoryManagerTest, Purge) {
 
   base::SharedMemoryHandle shared_handle2;
   manager_->AllocateLockedDiscardableSharedMemoryForChild(
-      base::GetCurrentProcessHandle(), kDataSize, &shared_handle2);
+      base::GetCurrentProcessHandle(), kDataSize, 2, &shared_handle2);
   ASSERT_TRUE(base::SharedMemory::IsHandleValid(shared_handle2));
 
   TestDiscardableSharedMemory memory2(shared_handle2);
@@ -122,10 +122,10 @@ TEST_F(HostDiscardableSharedMemoryManagerTest, Purge) {
   EXPECT_TRUE(memory1.IsMemoryResident());
   EXPECT_TRUE(memory2.IsMemoryResident());
 
-  rv = memory1.Lock(0, 0);
-  EXPECT_TRUE(rv);
-  rv = memory2.Lock(0, 0);
-  EXPECT_TRUE(rv);
+  auto lock_rv = memory1.Lock(0, 0);
+  EXPECT_EQ(base::DiscardableSharedMemory::SUCCESS, lock_rv);
+  lock_rv = memory2.Lock(0, 0);
+  EXPECT_EQ(base::DiscardableSharedMemory::SUCCESS, lock_rv);
 
   memory1.SetNow(base::Time::FromDoubleT(4));
   memory1.Unlock(0, 0);
@@ -141,10 +141,10 @@ TEST_F(HostDiscardableSharedMemoryManagerTest, Purge) {
   EXPECT_FALSE(memory1.IsMemoryResident());
   EXPECT_TRUE(memory2.IsMemoryResident());
 
-  rv = memory1.Lock(0, 0);
-  EXPECT_FALSE(rv);
-  rv = memory2.Lock(0, 0);
-  EXPECT_TRUE(rv);
+  lock_rv = memory1.Lock(0, 0);
+  EXPECT_EQ(base::DiscardableSharedMemory::FAILED, lock_rv);
+  lock_rv = memory2.Lock(0, 0);
+  EXPECT_EQ(base::DiscardableSharedMemory::SUCCESS, lock_rv);
 }
 
 TEST_F(HostDiscardableSharedMemoryManagerTest, EnforceMemoryPolicy) {
@@ -152,7 +152,7 @@ TEST_F(HostDiscardableSharedMemoryManagerTest, EnforceMemoryPolicy) {
 
   base::SharedMemoryHandle shared_handle;
   manager_->AllocateLockedDiscardableSharedMemoryForChild(
-      base::GetCurrentProcessHandle(), kDataSize, &shared_handle);
+      base::GetCurrentProcessHandle(), kDataSize, 0, &shared_handle);
   ASSERT_TRUE(base::SharedMemory::IsHandleValid(shared_handle));
 
   TestDiscardableSharedMemory memory(shared_handle);
@@ -181,7 +181,7 @@ TEST_F(HostDiscardableSharedMemoryManagerTest, EnforceMemoryPolicy) {
   // Memory policy should have successfully been enforced.
   EXPECT_FALSE(manager_->enforce_memory_policy_pending());
 
-  EXPECT_FALSE(memory.Lock(0, 0));
+  EXPECT_EQ(base::DiscardableSharedMemory::FAILED, memory.Lock(0, 0));
 }
 
 }  // namespace

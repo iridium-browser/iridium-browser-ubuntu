@@ -44,6 +44,7 @@
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_promo.h"
+#include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/ui/browser.h"
@@ -58,8 +59,6 @@
 #import "chrome/browser/ui/cocoa/apps/app_shim_menu_controller_mac.h"
 #include "chrome/browser/ui/cocoa/apps/quit_with_apps_controller_mac.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
-#import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
-#import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/confirm_quit.h"
 #import "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
 #import "chrome/browser/ui/cocoa/encoding_menu_controller_delegate_mac.h"
@@ -67,13 +66,11 @@
 #import "chrome/browser/ui/cocoa/history_menu_bridge.h"
 #include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
 #import "chrome/browser/ui/cocoa/profiles/profile_menu_controller.h"
-#import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
-#import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
-#include "chrome/browser/ui/cocoa/task_manager_mac.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/web_applications/web_app_mac.h"
 #include "chrome/common/chrome_paths_internal.h"
@@ -110,13 +107,6 @@ using content::BrowserThread;
 using content::DownloadManager;
 
 namespace {
-
-// Declare notification names from the 10.7 SDK.
-#if !defined(MAC_OS_X_VERSION_10_7) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-NSString* NSPopoverDidShowNotification = @"NSPopoverDidShowNotification";
-NSString* NSPopoverDidCloseNotification = @"NSPopoverDidCloseNotification";
-#endif
 
 // How long we allow a workspace change notification to wait to be
 // associated with a dock activation. The animation lasts 250ms. See
@@ -226,7 +216,6 @@ bool IsProfileSignedOut(Profile* profile) {
 - (void)registerServicesMenuTypesTo:(NSApplication*)app;
 - (void)getUrl:(NSAppleEventDescriptor*)event
      withReply:(NSAppleEventDescriptor*)reply;
-- (void)windowLayeringDidChange:(NSNotification*)inNotification;
 - (void)activeSpaceDidChange:(NSNotification*)inNotification;
 - (void)checkForAnyKeyWindows;
 - (BOOL)userWillWaitForInProgressDownloads:(int)downloadCount;
@@ -314,6 +303,38 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 
 @synthesize startupComplete = startupComplete_;
 
++ (void)updateSigninItem:(id)signinItem
+              shouldShow:(BOOL)showSigninMenuItem
+          currentProfile:(Profile*)profile {
+  DCHECK([signinItem isKindOfClass:[NSMenuItem class]]);
+  NSMenuItem* signinMenuItem = static_cast<NSMenuItem*>(signinItem);
+
+  // Look for a separator immediately after the menu item so it can be hidden
+  // or shown appropriately along with the signin menu item.
+  NSMenuItem* followingSeparator = nil;
+  NSMenu* menu = [signinItem menu];
+  if (menu) {
+    NSInteger signinItemIndex = [menu indexOfItem:signinMenuItem];
+    DCHECK_NE(signinItemIndex, -1);
+    if ((signinItemIndex + 1) < [menu numberOfItems]) {
+      NSMenuItem* menuItem = [menu itemAtIndex:(signinItemIndex + 1)];
+      if ([menuItem isSeparatorItem]) {
+        followingSeparator = menuItem;
+      }
+    }
+  }
+
+  base::string16 label = signin_ui_util::GetSigninMenuLabel(profile);
+  [signinMenuItem setTitle:l10n_util::FixUpWindowsStyleLabel(label)];
+  [signinMenuItem setHidden:!showSigninMenuItem];
+  [followingSeparator setHidden:!showSigninMenuItem];
+}
+
+- (void)dealloc {
+  [[closeTabMenuItem_ menu] setDelegate:nil];
+  [super dealloc];
+}
+
 // This method is called very early in application startup (ie, before
 // the profile is loaded or any preferences have been registered). Defer any
 // user-data initialization until -applicationDidFinishLaunching:.
@@ -331,44 +352,23 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
         forEventClass:'WWW!'    // A particularly ancient AppleEvent that dates
            andEventID:'OURL'];  // back to the Spyglass days.
 
-  // Register for various window layering changes. We use these to update
-  // various UI elements (command-key equivalents, etc) when the frontmost
-  // window changes.
   NSNotificationCenter* notificationCenter =
       [NSNotificationCenter defaultCenter];
   [notificationCenter
       addObserver:self
-         selector:@selector(windowLayeringDidChange:)
-             name:NSWindowDidBecomeKeyNotification
-           object:nil];
-  [notificationCenter
-      addObserver:self
-         selector:@selector(windowLayeringDidChange:)
+         selector:@selector(windowDidResignKey:)
              name:NSWindowDidResignKeyNotification
            object:nil];
   [notificationCenter
       addObserver:self
-         selector:@selector(windowLayeringDidChange:)
+         selector:@selector(windowDidBecomeMain:)
              name:NSWindowDidBecomeMainNotification
            object:nil];
   [notificationCenter
       addObserver:self
-         selector:@selector(windowLayeringDidChange:)
+         selector:@selector(windowDidResignMain:)
              name:NSWindowDidResignMainNotification
            object:nil];
-
-  if (base::mac::IsOSLionOrLater()) {
-    [notificationCenter
-        addObserver:self
-           selector:@selector(popoverDidShow:)
-               name:NSPopoverDidShowNotification
-             object:nil];
-    [notificationCenter
-        addObserver:self
-           selector:@selector(popoverDidClose:)
-               name:NSPopoverDidCloseNotification
-             object:nil];
-  }
 
   // Register for space change notifications.
   [[[NSWorkspace sharedWorkspace] notificationCenter]
@@ -376,6 +376,12 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
        selector:@selector(activeSpaceDidChange:)
            name:NSWorkspaceActiveSpaceDidChangeNotification
          object:nil];
+
+  [[[NSWorkspace sharedWorkspace] notificationCenter]
+      addObserver:self
+         selector:@selector(willPowerOff:)
+             name:NSWorkspaceWillPowerOffNotification
+           object:nil];
 
   // Set up the command updater for when there are no windows open
   [self initMenuState];
@@ -408,6 +414,10 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 }
 
 - (BOOL)tryToTerminateApplication:(NSApplication*)app {
+  // Reset this now that we've received the call to terminate.
+  BOOL isPoweringOff = isPoweringOff_;
+  isPoweringOff_ = NO;
+
   // Check for in-process downloads, and prompt the user if they really want
   // to quit (and thus cancel downloads). Only check if we're not already
   // shutting down, else the user might be prompted multiple times if the
@@ -428,8 +438,8 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 
   // Check for active apps. If quitting is prevented, only close browsers and
   // sessions.
-  if (!browser_shutdown::IsTryingToQuit() && quitWithAppsController_.get() &&
-      !quitWithAppsController_->ShouldQuit()) {
+  if (!browser_shutdown::IsTryingToQuit() && !isPoweringOff &&
+      quitWithAppsController_.get() && !quitWithAppsController_->ShouldQuit()) {
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kHostedAppQuitNotification)) {
       return NO;
@@ -552,97 +562,53 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   }
 }
 
-// Explicitly remove any command-key equivalents from the close tab/window
-// menus so that nothing can go haywire if we get a user action during pending
-// updates.
-- (void)clearCloseMenuItemKeyEquivalents {
-  [closeTabMenuItem_ setKeyEquivalent:@""];
-  [closeTabMenuItem_ setKeyEquivalentModifierMask:0];
-  [closeWindowMenuItem_ setKeyEquivalent:@""];
-  [closeWindowMenuItem_ setKeyEquivalentModifierMask:0];
-}
-
 // See if the focused window window has tabs, and adjust the key equivalents for
 // Close Tab/Close Window accordingly.
-- (void)fixCloseMenuItemKeyEquivalents {
-  fileMenuUpdatePending_ = NO;
+- (void)menuNeedsUpdate:(NSMenu*)menu {
+  DCHECK(menu == [closeTabMenuItem_ menu]);
 
-  NSWindow* window = [NSApp keyWindow];
-  NSWindow* mainWindow = [NSApp mainWindow];
-  if (!window || ([window parentWindow] == mainWindow)) {
-    // If the key window is a child of the main window (e.g. a bubble), the main
-    // window should be the one that handles the close menu item action.
-    // Also, there might be a small amount of time where there is no key window;
-    // in that case as well, just use our main browser window if there is one.
-    // You might think that we should just always use the main window, but the
-    // "About Chrome" window serves as a counterexample.
-    window = mainWindow;
+  BOOL enableCloseTabShortcut = NO;
+  id target = [NSApp targetForAction:@selector(performClose:)];
+
+  // |target| is an instance of NSPopover or NSWindow.
+  // If a popover (likely the dictionary lookup popover), we want Cmd-W to
+  // close the popover so map it to "Close Window".
+  // Otherwise, map Cmd-W to "Close Tab" if it's a browser window.
+  if ([target isKindOfClass:[NSWindow class]]) {
+    NSWindow* window = target;
+    NSWindow* mainWindow = [NSApp mainWindow];
+    if (!window || ([window parentWindow] == mainWindow)) {
+      // If the target window is a child of the main window (e.g. a bubble), the
+      // main window should be the one that handles the close menu item action.
+      window = mainWindow;
+    }
+    Browser* browser = chrome::FindBrowserWithWindow(window);
+    enableCloseTabShortcut = browser && browser->is_type_tabbed();
   }
 
-  BOOL hasTabs =
-      [[window windowController] isKindOfClass:[TabWindowController class]];
-  BOOL enableCloseTabShortcut = hasTabs && !hasPopover_;
   [self adjustCloseWindowMenuItemKeyEquivalent:enableCloseTabShortcut];
   [self adjustCloseTabMenuItemKeyEquivalent:enableCloseTabShortcut];
 }
 
-// Fix up the "close tab/close window" command-key equivalents. We do this
-// after a delay to ensure that window layer state has been set by the time
-// we do the enabling. This should only be called on the main thread, code that
-// calls this (even as a side-effect) from other threads needs to be fixed.
-- (void)delayedFixCloseMenuItemKeyEquivalents {
-  DCHECK([NSThread isMainThread]);
-  if (!fileMenuUpdatePending_) {
-    // The OS prefers keypresses to timers, so it's possible that a cmd-w
-    // can sneak in before this timer fires. In order to prevent that from
-    // having any bad consequences, just clear the keys combos altogether. They
-    // will be reset when the timer eventually fires.
-    if ([NSThread isMainThread]) {
-      fileMenuUpdatePending_ = YES;
-      [self clearCloseMenuItemKeyEquivalents];
-      [self performSelector:@selector(fixCloseMenuItemKeyEquivalents)
-                 withObject:nil
-                 afterDelay:0];
-    } else {
-      // This shouldn't be happening, but if it does, force it to the main
-      // thread to avoid dropping the update. Don't mess with
-      // |fileMenuUpdatePending_| as it's not expected to be threadsafe and
-      // there could be a race between the selector finishing and setting the
-      // flag.
-      [self
-          performSelectorOnMainThread:@selector(fixCloseMenuItemKeyEquivalents)
-                           withObject:nil
-                        waitUntilDone:NO];
-    }
-  }
+- (void)windowDidResignKey:(NSNotification*)notify {
+  // If a window is closed, this notification is fired but |[NSApp keyWindow]|
+  // returns nil regardless of whether any suitable candidates for the key
+  // window remain. It seems that the new key window for the app is not set
+  // until after this notification is fired, so a check is performed after the
+  // run loop is allowed to spin.
+  [self performSelector:@selector(checkForAnyKeyWindows)
+             withObject:nil
+             afterDelay:0.0];
 }
 
-// Called when we get a notification about the window layering changing to
-// update the UI based on the new main window.
-- (void)windowLayeringDidChange:(NSNotification*)notify {
-  [self delayedFixCloseMenuItemKeyEquivalents];
+- (void)windowDidBecomeMain:(NSNotification*)notify {
+  Browser* browser = chrome::FindBrowserWithWindow([notify object]);
+  if (browser)
+    [self windowChangedToProfile:browser->profile()->GetOriginalProfile()];
+}
 
-  if ([notify name] == NSWindowDidResignKeyNotification) {
-    // If a window is closed, this notification is fired but |[NSApp keyWindow]|
-    // returns nil regardless of whether any suitable candidates for the key
-    // window remain. It seems that the new key window for the app is not set
-    // until after this notification is fired, so a check is performed after the
-    // run loop is allowed to spin.
-    [self performSelector:@selector(checkForAnyKeyWindows)
-               withObject:nil
-               afterDelay:0.0];
-  }
-
-  // If the window changed to a new BrowserWindowController, update the profile.
-  id windowController = [[notify object] windowController];
-  if (![windowController isKindOfClass:[BrowserWindowController class]])
-    return;
-
-  if ([notify name] == NSWindowDidBecomeMainNotification) {
-    // If the profile is incognito, use the original profile.
-    Profile* newProfile = [windowController profile]->GetOriginalProfile();
-    [self windowChangedToProfile:newProfile];
-  } else if (chrome::GetTotalBrowserCount() == 0) {
+- (void)windowDidResignMain:(NSNotification*)notify {
+  if (chrome::GetTotalBrowserCount() == 0) {
     [self windowChangedToProfile:
         g_browser_process->profile_manager()->GetLastUsedProfile()];
   }
@@ -670,16 +636,11 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   }
 }
 
-// Called on Lion and later when a popover (e.g. dictionary) is shown.
-- (void)popoverDidShow:(NSNotification*)notify {
-  hasPopover_ = YES;
-  [self fixCloseMenuItemKeyEquivalents];
-}
-
-// Called on Lion and later when a popover (e.g. dictionary) is closed.
-- (void)popoverDidClose:(NSNotification*)notify {
-  hasPopover_ = NO;
-  [self fixCloseMenuItemKeyEquivalents];
+// Called when shutting down or logging out.
+- (void)willPowerOff:(NSNotification*)notify {
+  // Don't attempt any shutdown here. Cocoa will shortly call
+  // -[BrowserCrApplication terminate:].
+  isPoweringOff_ = YES;
 }
 
 - (void)checkForAnyKeyWindows {
@@ -775,6 +736,9 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   // If enabled, keep Chrome alive when apps are open instead of quitting all
   // apps.
   quitWithAppsController_ = new QuitWithAppsController();
+
+  // Dynamically update shortcuts for "Close Window" and "Close Tab" menu items.
+  [[closeTabMenuItem_ menu] setDelegate:self];
 
   // Build up the encoding menu, the order of the items differs based on the
   // current locale (see http://crbug.com/7647 for details).
@@ -923,18 +887,16 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 
 // Called from the AppControllerProfileObserver every time a profile is deleted.
 - (void)profileWasRemoved:(const base::FilePath&)profilePath {
-  Profile* lastProfile = [self lastProfile];
-
   // If the lastProfile has been deleted, the profile manager has
   // already loaded a new one, so the pointer needs to be updated;
   // otherwise we will try to start up a browser window with a pointer
   // to the old profile.
-  if (profilePath == lastProfile->GetPath())
+  // In a browser test, the application is not brought to the front, so
+  // |lastProfile_| might be null.
+  if (!lastProfile_ || profilePath == lastProfile_->GetPath())
     lastProfile_ = g_browser_process->profile_manager()->GetLastUsedProfile();
 
-  Profile* profile =
-      g_browser_process->profile_manager()->GetProfile(profilePath);
-  auto it = profileBookmarkMenuBridgeMap_.find(profile);
+  auto it = profileBookmarkMenuBridgeMap_.find(profilePath);
   if (it != profileBookmarkMenuBridgeMap_.end()) {
     delete it->second;
     profileBookmarkMenuBridgeMap_.erase(it);
@@ -1007,11 +969,10 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
           }
           SigninManager* signin = SigninManagerFactory::GetForProfile(
               lastProfile->GetOriginalProfile());
-          enable = signin->IsSigninAllowed() &&
-              ![self keyWindowIsModal];
-          [BrowserWindowController updateSigninItem:item
-                                         shouldShow:enable
-                                     currentProfile:lastProfile];
+          enable = signin->IsSigninAllowed() && ![self keyWindowIsModal];
+          [AppController updateSigninItem:item
+                               shouldShow:enable
+                           currentProfile:lastProfile];
           break;
         }
 #if defined(GOOGLE_CHROME_BUILD)
@@ -1058,7 +1019,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   // and is getting here because the foreground window is not a browser window.
   if ([sender respondsToSelector:@selector(window)]) {
     id delegate = [[sender window] windowController];
-    if ([delegate isKindOfClass:[BrowserWindowController class]]) {
+    if ([delegate respondsToSelector:@selector(commandDispatch:)]) {
       [delegate commandDispatch:sender];
       return;
     }
@@ -1166,7 +1127,8 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
       break;
     case IDC_SHOW_SYNC_SETUP:
       if (Browser* browser = ActivateBrowser(lastProfile)) {
-        chrome::ShowBrowserSignin(browser, signin_metrics::SOURCE_MENU);
+        chrome::ShowBrowserSigninOrSettings(browser,
+                                            signin_metrics::SOURCE_MENU);
       } else {
         chrome::OpenSyncSetupWindow(lastProfile, signin_metrics::SOURCE_MENU);
       }
@@ -1201,7 +1163,8 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   DCHECK(sender);
   if ([sender respondsToSelector:@selector(window)]) {
     id delegate = [[sender window] windowController];
-    if ([delegate isKindOfClass:[BrowserWindowController class]]) {
+    if ([delegate respondsToSelector:
+            @selector(commandDispatchUsingKeyModifiers:)]) {
       [delegate commandDispatchUsingKeyModifiers:sender];
     }
   }
@@ -1374,7 +1337,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 }
 
 - (Profile*)lastProfile {
-  // Return the profile of the last-used BrowserWindowController, if available.
+  // Return the profile of the last-used Browser, if available.
   if (lastProfile_)
     return lastProfile_;
 
@@ -1611,12 +1574,12 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   // Rebuild the menus with the new profile.
   lastProfile_ = profile;
 
-  auto it = profileBookmarkMenuBridgeMap_.find(profile);
+  auto it = profileBookmarkMenuBridgeMap_.find(profile->GetPath());
   if (it == profileBookmarkMenuBridgeMap_.end()) {
     base::scoped_nsobject<NSMenu> submenu(
         [[[[NSApp mainMenu] itemWithTag:IDC_BOOKMARKS_MENU] submenu] copy]);
-    bookmarkMenuBridge_ = new BookmarkMenuBridge(lastProfile_, submenu);
-    profileBookmarkMenuBridgeMap_[profile] = bookmarkMenuBridge_;
+    bookmarkMenuBridge_ = new BookmarkMenuBridge(profile, submenu);
+    profileBookmarkMenuBridgeMap_[profile->GetPath()] = bookmarkMenuBridge_;
   } else {
     bookmarkMenuBridge_ = it->second;
   }

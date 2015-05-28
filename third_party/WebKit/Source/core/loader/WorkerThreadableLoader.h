@@ -50,7 +50,7 @@ namespace blink {
     struct CrossThreadResourceRequestData;
 
     class WorkerThreadableLoader final : public ThreadableLoader {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_FAST_ALLOCATED(WorkerThreadableLoader);
     public:
         static void loadResourceSynchronously(WorkerGlobalScope&, const ResourceRequest&, ThreadableLoaderClient&, const ThreadableLoaderOptions&, const ResourceLoaderOptions&);
         static PassRefPtr<WorkerThreadableLoader> create(WorkerGlobalScope& workerGlobalScope, PassRefPtr<ThreadableLoaderClientWrapper> clientWrapper, PassOwnPtr<ThreadableLoaderClient> clientBridge, const ResourceRequest& request, const ThreadableLoaderOptions& options, const ResourceLoaderOptions& resourceLoaderOptions)
@@ -87,7 +87,7 @@ namespace blink {
         class MainThreadBridge final : public ThreadableLoaderClient {
         public:
             // All executed on the worker context's thread.
-            MainThreadBridge(PassRefPtr<ThreadableLoaderClientWrapper>, PassOwnPtr<ThreadableLoaderClient>, WorkerLoaderProxy&, const ResourceRequest&, const ThreadableLoaderOptions&, const ResourceLoaderOptions&, const String& outgoingReferrer);
+            MainThreadBridge(PassRefPtr<ThreadableLoaderClientWrapper>, PassOwnPtr<ThreadableLoaderClient>, PassRefPtr<WorkerLoaderProxy>, const ResourceRequest&, const ThreadableLoaderOptions&, const ResourceLoaderOptions&, const String& outgoingReferrer);
             void overrideTimeout(unsigned long timeoutMilliseconds);
             void cancel();
             void destroy();
@@ -122,7 +122,7 @@ namespace blink {
             RefPtr<ThreadableLoaderClientWrapper> m_workerClientWrapper;
 
             // Used on the worker context thread.
-            WorkerLoaderProxy& m_loaderProxy;
+            RefPtr<WorkerLoaderProxy> m_loaderProxy;
         };
 
         WorkerThreadableLoader(WorkerGlobalScope&, PassRefPtr<ThreadableLoaderClientWrapper>, PassOwnPtr<ThreadableLoaderClient>, const ResourceRequest&, const ThreadableLoaderOptions&, const ResourceLoaderOptions&);

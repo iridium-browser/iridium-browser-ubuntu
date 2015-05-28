@@ -91,9 +91,9 @@ namespace blink {
         virtual void dispatchDidStartProvisionalLoad(bool isTransitionNavigation, double triggeringEventTime) = 0;
         virtual void dispatchDidReceiveTitle(const String&) = 0;
         virtual void dispatchDidChangeIcons(IconType) = 0;
-        virtual void dispatchDidCommitLoad(LocalFrame*, HistoryItem*, HistoryCommitType) = 0;
-        virtual void dispatchDidFailProvisionalLoad(const ResourceError&) = 0;
-        virtual void dispatchDidFailLoad(const ResourceError&) = 0;
+        virtual void dispatchDidCommitLoad(HistoryItem*, HistoryCommitType) = 0;
+        virtual void dispatchDidFailProvisionalLoad(const ResourceError&, HistoryCommitType) = 0;
+        virtual void dispatchDidFailLoad(const ResourceError&, HistoryCommitType) = 0;
         virtual void dispatchDidFinishDocumentLoad() = 0;
         virtual void dispatchDidFinishLoad() = 0;
         virtual void dispatchDidFirstVisuallyNonEmptyLayout() = 0;
@@ -143,7 +143,7 @@ namespace blink {
 
         virtual void transitionToCommittedForNewPage() = 0;
 
-        virtual PassRefPtrWillBeRawPtr<LocalFrame> createFrame(const KURL&, const AtomicString& name, HTMLFrameOwnerElement*, ContentSecurityPolicyDisposition shouldCheckContentSecurityPolicy) = 0;
+        virtual PassRefPtrWillBeRawPtr<LocalFrame> createFrame(const FrameLoadRequest&, const AtomicString& name, HTMLFrameOwnerElement*) = 0;
         // Whether or not plugin creation should fail if the HTMLPlugInElement isn't in the DOM after plugin initialization.
         enum DetachedPluginPolicy {
             FailOnDetachedPlugin,
@@ -194,6 +194,8 @@ namespace blink {
 
         virtual void didChangeName(const String&) { }
 
+        virtual void didChangeSandboxFlags(Frame* childFrame, SandboxFlags) { }
+
         virtual void dispatchWillOpenWebSocket(blink::WebSocketHandle*) { }
 
         virtual void dispatchWillStartUsingPeerConnectionHandler(blink::WebRTCPeerConnectionHandler*) { }
@@ -224,9 +226,21 @@ namespace blink {
 
         virtual void dispatchDidChangeManifest() { }
 
+        virtual void dispatchDidChangeDefaultPresentation() { }
+
         virtual unsigned backForwardLength() { return 0; }
 
         virtual bool isFrameLoaderClientImpl() const { return false; }
+
+        // Called when elements preventing the sudden termination of the frame
+        // become present or stop being present. |type| is the type of element
+        // (BeforeUnload handler, Unload handler).
+        enum SuddenTerminationDisablerType {
+            BeforeUnloadHandler,
+            UnloadHandler,
+        };
+        virtual void suddenTerminationDisablerChanged(bool present, SuddenTerminationDisablerType) { }
+
     };
 
 } // namespace blink

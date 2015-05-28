@@ -207,7 +207,7 @@ DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
   DisplayInfo display_info(
       id, base::StringPrintf("Display-%d", static_cast<int>(id)), has_overscan);
   display_info.set_device_scale_factor(device_scale_factor);
-  display_info.set_rotation(rotation);
+  display_info.SetRotation(rotation, gfx::Display::ROTATION_SOURCE_ACTIVE);
   display_info.set_configured_ui_scale(ui_scale);
   display_info.SetBounds(bounds_in_native);
   display_info.SetDisplayModes(display_modes);
@@ -228,7 +228,6 @@ DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
 DisplayInfo::DisplayInfo()
     : id_(gfx::Display::kInvalidDisplayID),
       has_overscan_(false),
-      rotation_(gfx::Display::ROTATE_0),
       touch_support_(gfx::Display::TOUCH_SUPPORT_UNKNOWN),
       touch_device_id_(0),
       device_scale_factor_(1.0f),
@@ -246,7 +245,6 @@ DisplayInfo::DisplayInfo(int64 id,
     : id_(id),
       name_(name),
       has_overscan_(has_overscan),
-      rotation_(gfx::Display::ROTATE_0),
       touch_support_(gfx::Display::TOUCH_SUPPORT_UNKNOWN),
       touch_device_id_(0),
       device_scale_factor_(1.0f),
@@ -261,18 +259,37 @@ DisplayInfo::DisplayInfo(int64 id,
 DisplayInfo::~DisplayInfo() {
 }
 
+void DisplayInfo::SetRotation(gfx::Display::Rotation rotation,
+                              gfx::Display::RotationSource source) {
+  rotations_[source] = rotation;
+  rotations_[gfx::Display::ROTATION_SOURCE_ACTIVE] = rotation;
+}
+
+gfx::Display::Rotation DisplayInfo::GetActiveRotation() const {
+  return GetRotation(gfx::Display::ROTATION_SOURCE_ACTIVE);
+}
+
+gfx::Display::Rotation DisplayInfo::GetRotation(
+    gfx::Display::RotationSource source) const {
+  if (rotations_.find(source) == rotations_.end())
+    return gfx::Display::ROTATE_0;
+  return rotations_.at(source);
+}
+
 void DisplayInfo::Copy(const DisplayInfo& native_info) {
   DCHECK(id_ == native_info.id_);
   name_ = native_info.name_;
   has_overscan_ = native_info.has_overscan_;
 
+  touch_support_ = native_info.touch_support_;
+  touch_device_id_ = native_info.touch_device_id_;
+  device_scale_factor_ = native_info.device_scale_factor_;
   DCHECK(!native_info.bounds_in_native_.IsEmpty());
   bounds_in_native_ = native_info.bounds_in_native_;
   size_in_pixel_ = native_info.size_in_pixel_;
-  device_scale_factor_ = native_info.device_scale_factor_;
+  is_aspect_preserving_scaling_ = native_info.is_aspect_preserving_scaling_;
   display_modes_ = native_info.display_modes_;
-  touch_support_ = native_info.touch_support_;
-  touch_device_id_ = native_info.touch_device_id_;
+  available_color_profiles_ = native_info.available_color_profiles_;
 
   // Rotation, ui_scale, color_profile and overscan are given by preference,
   // or unit tests. Don't copy if this native_info came from
@@ -285,16 +302,10 @@ void DisplayInfo::Copy(const DisplayInfo& native_info) {
     else if (!native_info.overscan_insets_in_dip_.empty())
       overscan_insets_in_dip_ = native_info.overscan_insets_in_dip_;
 
-    rotation_ = native_info.rotation_;
+    rotations_ = native_info.rotations_;
     configured_ui_scale_ = native_info.configured_ui_scale_;
     color_profile_ = native_info.color_profile();
   }
-
-  available_color_profiles_ = native_info.available_color_profiles();
-
-  // Don't copy insets as it may be given by preference.  |rotation_|
-  // is treated as a native so that it can be specified in
-  // |CreateFromSpec|.
 }
 
 void DisplayInfo::SetBounds(const gfx::Rect& new_bounds_in_native) {
@@ -329,9 +340,10 @@ void DisplayInfo::UpdateDisplaySize() {
     overscan_insets_in_dip_.Set(0, 0, 0, 0);
   }
 
-  if (rotation_ == gfx::Display::ROTATE_90 ||
-      rotation_ == gfx::Display::ROTATE_270)
+  if (GetActiveRotation() == gfx::Display::ROTATE_90 ||
+      GetActiveRotation() == gfx::Display::ROTATE_270) {
     size_in_pixel_.SetSize(size_in_pixel_.height(), size_in_pixel_.width());
+  }
   gfx::SizeF size_f(size_in_pixel_);
   size_f.Scale(GetEffectiveUIScale());
   size_in_pixel_ = gfx::ToFlooredSize(size_f);
@@ -362,7 +374,7 @@ gfx::Size DisplayInfo::GetNativeModeSize() const {
 }
 
 std::string DisplayInfo::ToString() const {
-  int rotation_degree = static_cast<int>(rotation_) * 90;
+  int rotation_degree = static_cast<int>(GetActiveRotation()) * 90;
   return base::StringPrintf(
       "DisplayInfo[%lld] native bounds=%s, size=%s, scale=%f, "
       "overscan=%s, rotation=%d, ui-scale=%f, touchscreen=%s, "

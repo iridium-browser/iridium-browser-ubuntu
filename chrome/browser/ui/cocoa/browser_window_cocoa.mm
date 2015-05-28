@@ -10,21 +10,17 @@
 #import "base/mac/sdk_forward_declarations.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/download_shelf.h"
-#include "chrome/browser/extensions/bookmark_app_helper.h"
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/fullscreen.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
-#include "chrome/browser/ui/app_list/app_list_util.h"
-#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands_mac.h"
@@ -52,7 +48,6 @@
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "chrome/browser/web_applications/web_app_mac.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
@@ -64,7 +59,6 @@
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/browser/pref_names.h"
 #include "extensions/common/constants.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/geometry/rect.h"
@@ -89,9 +83,46 @@ const int kAppTextFieldHeight = 22;
 const int kBookmarkAppBubbleViewWidth = 200;
 const int kBookmarkAppBubbleViewHeight = 46;
 
-const int kIconPreviewTargetSize = 64;
+const int kIconPreviewTargetSize = 128;
+
+base::string16 TrimText(NSString* controlText) {
+  base::string16 text = base::SysNSStringToUTF16(controlText);
+  base::TrimWhitespace(text, base::TRIM_ALL, &text);
+  return text;
+}
 
 }  // namespace
+
+@interface TextRequiringDelegate : NSObject<NSTextFieldDelegate> {
+ @private
+  // Disable |control_| when text changes to just whitespace or empty string.
+  NSControl* control_;
+}
+- (id)initWithControl:(NSControl*)control text:(NSString*)text;
+- (void)controlTextDidChange:(NSNotification*)notification;
+@end
+
+@interface TextRequiringDelegate ()
+- (void)validateText:(NSString*)text;
+@end
+
+@implementation TextRequiringDelegate
+- (id)initWithControl:(NSControl*)control text:(NSString*)text {
+  if ((self = [super init])) {
+    control_ = control;
+    [self validateText:text];
+  }
+  return self;
+}
+
+- (void)controlTextDidChange:(NSNotification*)notification {
+  [self validateText:[[notification object] stringValue]];
+}
+
+- (void)validateText:(NSString*)text {
+  [control_ setEnabled:TrimText(text).empty() ? NO : YES];
+}
+@end
 
 BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
                                        BrowserWindowController* controller)
@@ -361,7 +392,9 @@ void BrowserWindowCocoa::Restore() {
 void BrowserWindowCocoa::EnterFullscreen(const GURL& url,
                                          ExclusiveAccessBubbleType bubble_type,
                                          bool with_toolbar) {
-  if (browser_->fullscreen_controller()->IsWindowFullscreenForTabOrPending())
+  if (browser_->exclusive_access_manager()
+          ->fullscreen_controller()
+          ->IsWindowFullscreenForTabOrPending())
     [controller_ enterWebContentFullscreenForURL:url bubbleType:bubble_type];
   else if (!url.is_empty())
     [controller_ enterExtensionFullscreenForURL:url bubbleType:bubble_type];
@@ -373,7 +406,7 @@ void BrowserWindowCocoa::ExitFullscreen() {
   [controller_ exitAnyFullscreen];
 }
 
-void BrowserWindowCocoa::UpdateFullscreenExitBubbleContent(
+void BrowserWindowCocoa::UpdateExclusiveAccessExitBubbleContent(
     const GURL& url,
     ExclusiveAccessBubbleType bubble_type) {
   [controller_ updateFullscreenExitBubbleURL:url bubbleType:bubble_type];
@@ -501,11 +534,10 @@ void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
 
 void BrowserWindowCocoa::ShowBookmarkAppBubble(
     const WebApplicationInfo& web_app_info,
-    const std::string& extension_id) {
-  Profile* profile = browser_->profile();
-
+    const ShowBookmarkAppBubbleCallback& callback) {
   base::scoped_nsobject<NSAlert> alert([[NSAlert alloc] init]);
-  [alert setMessageText:l10n_util::GetNSString(IDS_BOOKMARK_APP_BUBBLE_TITLE)];
+  [alert setMessageText:l10n_util::GetNSString(
+      IDS_ADD_TO_APPLICATIONS_BUBBLE_TITLE)];
   [alert setAlertStyle:NSInformationalAlertStyle];
 
   NSButton* continue_button =
@@ -515,16 +547,13 @@ void BrowserWindowCocoa::ShowBookmarkAppBubble(
       [alert addButtonWithTitle:l10n_util::GetNSString(IDS_CANCEL)];
   [cancel_button setKeyEquivalent:kKeyEquivalentEscape];
 
-  base::scoped_nsobject<NSButton> open_as_tab_checkbox(
+  base::scoped_nsobject<NSButton> open_as_window_checkbox(
       [[NSButton alloc] initWithFrame:NSZeroRect]);
-  [open_as_tab_checkbox setButtonType:NSSwitchButton];
-  [open_as_tab_checkbox
-      setTitle:l10n_util::GetNSString(IDS_BOOKMARK_APP_BUBBLE_OPEN_AS_TAB)];
-  [open_as_tab_checkbox setState:
-      profile->GetPrefs()->GetInteger(
-          extensions::pref_names::kBookmarkAppCreationLaunchType) ==
-      extensions::LAUNCH_TYPE_REGULAR];
-  [open_as_tab_checkbox sizeToFit];
+  [open_as_window_checkbox setButtonType:NSSwitchButton];
+  [open_as_window_checkbox
+      setTitle:l10n_util::GetNSString(IDS_BOOKMARK_APP_BUBBLE_OPEN_AS_WINDOW)];
+  [open_as_window_checkbox setState:web_app_info.open_as_window];
+  [open_as_window_checkbox sizeToFit];
 
   base::scoped_nsobject<NSTextField> app_title([[NSTextField alloc]
       initWithFrame:NSMakeRect(0, kAppTextFieldHeight +
@@ -534,77 +563,46 @@ void BrowserWindowCocoa::ShowBookmarkAppBubble(
   [[app_title cell] setWraps:NO];
   [[app_title cell] setScrollable:YES];
   [app_title setStringValue:original_title];
+  base::scoped_nsobject<TextRequiringDelegate> delegate(
+      [[TextRequiringDelegate alloc] initWithControl:continue_button
+                                                text:[app_title stringValue]]);
+  [app_title setDelegate:delegate];
 
   base::scoped_nsobject<NSView> view([[NSView alloc]
       initWithFrame:NSMakeRect(0, 0, kBookmarkAppBubbleViewWidth,
                                kBookmarkAppBubbleViewHeight)]);
-  [view addSubview:open_as_tab_checkbox];
+  [view addSubview:open_as_window_checkbox];
   [view addSubview:app_title];
   [alert setAccessoryView:view];
 
   // Find the image with target size.
   // Assumes that the icons are sorted in ascending order of size.
   if (!web_app_info.icons.empty()) {
-    const WebApplicationInfo::IconInfo& info = web_app_info.icons.back();
-    gfx::Image icon_image = gfx::Image::CreateFrom1xBitmap(info.data);
-    [icon_image.ToNSImage()
-        setSize:NSMakeSize(kIconPreviewTargetSize, kIconPreviewTargetSize)];
-    [alert setIcon:icon_image.ToNSImage()];
-  }
-
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
-  if ([alert runModal] == NSAlertFirstButtonReturn) {
-    // Save launch type preferences for later when creating another hosted app.
-    extensions::LaunchType launch_type =
-        [open_as_tab_checkbox state] == NSOnState
-            ? extensions::LAUNCH_TYPE_REGULAR
-            : extensions::LAUNCH_TYPE_WINDOW;
-    profile->GetPrefs()->SetInteger(
-        extensions::pref_names::kBookmarkAppCreationLaunchType, launch_type);
-    extensions::SetLaunchType(service, extension_id, launch_type);
-
-    // Update name of app.
-    NSString* new_title = [app_title stringValue];
-    if (![original_title isEqualToString:new_title]) {
-      WebApplicationInfo new_web_app_info(web_app_info);
-      new_web_app_info.title = base::SysNSStringToUTF16(new_title);
-      extensions::CreateOrUpdateBookmarkApp(service, &new_web_app_info);
-    }
-
-    // If we're not creating app shims, no need to reveal it in Finder.
-    // Otherwise reveal the app in the app launcher. If not installed,
-    // then open the chrome://apps page.
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableHostedAppShimCreation)) {
-      extensions::ExtensionRegistry* registry =
-          extensions::ExtensionRegistry::Get(profile);
-      const extensions::Extension* app = registry->GetExtensionById(
-          extension_id, extensions::ExtensionRegistry::ENABLED);
-
-      web_app::RevealAppShimInFinderForApp(profile, app);
-    } else {
-      if (IsAppLauncherEnabled()) {
-        AppListService::Get(chrome::GetHostDesktopTypeForNativeWindow(
-                                browser_->window()->GetNativeWindow()))
-            ->ShowForAppInstall(profile, extension_id, false);
-      } else {
-        chrome::NavigateParams params(profile, GURL(chrome::kChromeUIAppsURL),
-                                      ui::PAGE_TRANSITION_LINK);
-        params.disposition = NEW_FOREGROUND_TAB;
-        chrome::Navigate(&params);
-
-        content::NotificationService::current()->Notify(
-            chrome::NOTIFICATION_APP_INSTALLED_TO_NTP,
-            content::Source<content::WebContents>(params.target_contents),
-            content::Details<const std::string>(&extension_id));
+    for (const WebApplicationInfo::IconInfo& info : web_app_info.icons) {
+      if (info.width == kIconPreviewTargetSize &&
+          info.height == kIconPreviewTargetSize) {
+        gfx::Image icon_image = gfx::Image::CreateFrom1xBitmap(info.data);
+        [alert setIcon:icon_image.ToNSImage()];
+        break;
       }
     }
-  } else {
-    service->UninstallExtension(extension_id,
-                                extensions::UNINSTALL_REASON_INSTALL_CANCELED,
-                                base::Bind(&base::DoNothing), NULL);
   }
+
+  NSInteger response = [alert runModal];
+
+  // Prevent |app_title| from accessing |delegate| after it's destroyed.
+  [app_title setDelegate:nil];
+
+  if (response == NSAlertFirstButtonReturn) {
+    WebApplicationInfo updated_info = web_app_info;
+    updated_info.open_as_window = [open_as_window_checkbox state] == NSOnState;
+    updated_info.title = TrimText([app_title stringValue]);
+
+    callback.Run(true, updated_info);
+    return;
+  }
+
+  callback.Run(false, web_app_info);
 }
 
 void BrowserWindowCocoa::ShowTranslateBubble(
@@ -683,11 +681,6 @@ void BrowserWindowCocoa::ConfirmBrowserCloseWithPendingDownloads(
 
 void BrowserWindowCocoa::UserChangedTheme() {
   [controller_ userChangedTheme];
-}
-
-int BrowserWindowCocoa::GetExtraRenderViewHeight() const {
-  // Currently this is only used on linux.
-  return 0;
 }
 
 void BrowserWindowCocoa::WebContentsFocused(WebContents* contents) {
@@ -821,4 +814,27 @@ void BrowserWindowCocoa::ExecuteExtensionCommand(
     const extensions::Extension* extension,
     const extensions::Command& command) {
   [cocoa_controller() executeExtensionCommand:extension->id() command:command];
+}
+
+ExclusiveAccessContext* BrowserWindowCocoa::GetExclusiveAccessContext() {
+  return this;
+}
+
+Profile* BrowserWindowCocoa::GetProfile() {
+  return browser_->profile();
+}
+
+WebContents* BrowserWindowCocoa::GetActiveWebContents() {
+  return browser_->tab_strip_model()->GetActiveWebContents();
+}
+
+void BrowserWindowCocoa::UnhideDownloadShelf() {
+  GetDownloadShelf()->Unhide();
+}
+
+void BrowserWindowCocoa::HideDownloadShelf() {
+  GetDownloadShelf()->Hide();
+  StatusBubble* statusBubble = GetStatusBubble();
+  if (statusBubble)
+    statusBubble->Hide();
 }

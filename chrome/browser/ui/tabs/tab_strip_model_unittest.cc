@@ -39,7 +39,6 @@
 using content::SiteInstance;
 using content::WebContents;
 using extensions::Extension;
-using web_modal::NativeWebContentsModalDialog;
 
 namespace {
 
@@ -108,7 +107,7 @@ class DummySingleWebContentsDialogManager
     : public web_modal::SingleWebContentsDialogManager {
  public:
   explicit DummySingleWebContentsDialogManager(
-      NativeWebContentsModalDialog dialog,
+      gfx::NativeWindow dialog,
       web_modal::SingleWebContentsDialogManagerDelegate* delegate)
       : delegate_(delegate),
         dialog_(dialog) {}
@@ -120,11 +119,11 @@ class DummySingleWebContentsDialogManager
   void Focus() override {}
   void Pulse() override {}
   void HostChanged(web_modal::WebContentsModalDialogHost* new_host) override {}
-  NativeWebContentsModalDialog dialog() override { return dialog_; }
+  gfx::NativeWindow dialog() override { return dialog_; }
 
  private:
   web_modal::SingleWebContentsDialogManagerDelegate* delegate_;
-  NativeWebContentsModalDialog dialog_;
+  gfx::NativeWindow dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(DummySingleWebContentsDialogManager);
 };
@@ -858,6 +857,126 @@ TEST_F(TabStripModelTest, TestInsertionIndexDetermination) {
   EXPECT_EQ(-1, tabstrip.GetIndexOfNextWebContentsOpenedBy(opener, 3, false));
   EXPECT_EQ(-1, tabstrip.GetIndexOfNextWebContentsOpenedBy(opener, 3, false));
   EXPECT_EQ(-1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener, 1));
+
+  tabstrip.CloseAllTabs();
+  EXPECT_TRUE(tabstrip.empty());
+}
+
+// Tests that non-adjacent tabs with an opener are ignored when deciding where
+// to position tabs.
+TEST_F(TabStripModelTest, TestInsertionIndexDeterminationAfterDragged) {
+  TabStripDummyDelegate delegate;
+  TabStripModel tabstrip(&delegate, profile());
+  EXPECT_TRUE(tabstrip.empty());
+
+  // Start with three tabs, of which the first is active.
+  WebContents* opener1 = CreateWebContentsWithID(1);
+  tabstrip.AppendWebContents(opener1, true /* foreground */);
+  tabstrip.AppendWebContents(CreateWebContentsWithID(2), false);
+  tabstrip.AppendWebContents(CreateWebContentsWithID(3), false);
+  EXPECT_EQ("1 2 3", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  EXPECT_EQ(-1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+
+  // Open a link in a new background tab.
+  tabstrip.InsertWebContentsAt(GetInsertionIndex(&tabstrip),
+                               CreateWebContentsWithID(11),
+                               TabStripModel::ADD_INHERIT_GROUP);
+  EXPECT_EQ("1 11 2 3", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  EXPECT_EQ(1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+
+  // Drag that tab (which activates it) one to the right.
+  tabstrip.MoveWebContentsAt(1, 2, true /* select_after_move */);
+  EXPECT_EQ("1 2 11 3", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(11, GetID(tabstrip.GetActiveWebContents()));
+  // It should no longer be counted by GetIndexOfLastWebContentsOpenedBy,
+  // since there is a tab in between, even though its opener is unchanged.
+  // TODO(johnme): Maybe its opener should be reset when it's dragged away.
+  EXPECT_EQ(-1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+  EXPECT_EQ(opener1, tabstrip.GetOpenerOfWebContentsAt(2));
+
+  // Activate the parent tab again.
+  tabstrip.ActivateTabAt(0, true /* user_gesture */);
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+
+  // Open another link in a new background tab.
+  tabstrip.InsertWebContentsAt(GetInsertionIndex(&tabstrip),
+                               CreateWebContentsWithID(12),
+                               TabStripModel::ADD_INHERIT_GROUP);
+  // Tab 12 should be next to 1, and considered opened by it.
+  EXPECT_EQ("1 12 2 11 3", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  EXPECT_EQ(1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+
+  tabstrip.CloseAllTabs();
+  EXPECT_TRUE(tabstrip.empty());
+}
+
+// Tests that grandchild tabs are considered to be opened by their grandparent
+// tab when deciding where to position tabs.
+TEST_F(TabStripModelTest, TestInsertionIndexDeterminationNestedOpener) {
+  TabStripDummyDelegate delegate;
+  TabStripModel tabstrip(&delegate, profile());
+  EXPECT_TRUE(tabstrip.empty());
+
+  // Start with two tabs, of which the first is active:
+  WebContents* opener1 = CreateWebContentsWithID(1);
+  tabstrip.AppendWebContents(opener1, true /* foreground */);
+  tabstrip.AppendWebContents(CreateWebContentsWithID(2), false);
+  EXPECT_EQ("1 2", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  EXPECT_EQ(-1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+
+  // Open a link in a new background child tab.
+  WebContents* child11 = CreateWebContentsWithID(11);
+  tabstrip.InsertWebContentsAt(GetInsertionIndex(&tabstrip),
+                               child11,
+                               TabStripModel::ADD_INHERIT_GROUP);
+  EXPECT_EQ("1 11 2", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  EXPECT_EQ(1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+
+  // Activate the child tab:
+  tabstrip.ActivateTabAt(1, true /* user_gesture */);
+  EXPECT_EQ(11, GetID(tabstrip.GetActiveWebContents()));
+
+  // Open a link in a new background grandchild tab.
+  tabstrip.InsertWebContentsAt(GetInsertionIndex(&tabstrip),
+                               CreateWebContentsWithID(111),
+                               TabStripModel::ADD_INHERIT_GROUP);
+  EXPECT_EQ("1 11 111 2", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(11, GetID(tabstrip.GetActiveWebContents()));
+  // The grandchild tab should be counted by GetIndexOfLastWebContentsOpenedBy
+  // as opened by both its parent (child11) and grandparent (opener1).
+  EXPECT_EQ(2, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+  EXPECT_EQ(2, tabstrip.GetIndexOfLastWebContentsOpenedBy(child11, 1));
+
+  // Activate the parent tab again:
+  tabstrip.ActivateTabAt(0, true /* user_gesture */);
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+
+  // Open another link in a new background child tab (a sibling of child11).
+  tabstrip.InsertWebContentsAt(GetInsertionIndex(&tabstrip),
+                               CreateWebContentsWithID(12),
+                               TabStripModel::ADD_INHERIT_GROUP);
+  EXPECT_EQ("1 11 111 12 2", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  // opener1 has three adjacent descendants (11, 111, 12)
+  EXPECT_EQ(3, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+  // child11 has only one adjacent descendant (111)
+  EXPECT_EQ(2, tabstrip.GetIndexOfLastWebContentsOpenedBy(child11, 1));
+
+  // Closing a tab should cause its children to inherit the tab's opener.
+  EXPECT_EQ(true, tabstrip.CloseWebContentsAt(
+      1,
+      TabStripModel::CLOSE_USER_GESTURE |
+      TabStripModel::CLOSE_CREATE_HISTORICAL_TAB));
+  EXPECT_EQ("1 111 12 2", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  // opener1 is now the opener of 111, so has two adjacent descendants (111, 12)
+  EXPECT_EQ(opener1, tabstrip.GetOpenerOfWebContentsAt(1));
+  EXPECT_EQ(2, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
 
   tabstrip.CloseAllTabs();
   EXPECT_TRUE(tabstrip.empty());
@@ -2548,13 +2667,12 @@ TEST_F(TabStripModelTest, TabBlockedState) {
 
   // Show a dialog that blocks tab |contents2|.
   // DummySingleWebContentsDialogManager doesn't care about the
-  // NativeWebContentsModalDialog value, so any dummy value works.
+  // dialog window value, so any dummy value works.
   DummySingleWebContentsDialogManager* native_manager =
       new DummySingleWebContentsDialogManager(
-          reinterpret_cast<NativeWebContentsModalDialog>(0),
-          modal_dialog_manager);
+          reinterpret_cast<gfx::NativeWindow>(0), modal_dialog_manager);
   modal_dialog_manager->ShowDialogWithManager(
-      reinterpret_cast<NativeWebContentsModalDialog>(0),
+      reinterpret_cast<gfx::NativeWindow>(0),
       scoped_ptr<web_modal::SingleWebContentsDialogManager>(
           native_manager).Pass());
   EXPECT_TRUE(strip_src.IsTabBlocked(1));

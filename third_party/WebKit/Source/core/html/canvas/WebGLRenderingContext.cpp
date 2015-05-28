@@ -27,6 +27,7 @@
 #include "core/html/canvas/WebGLRenderingContext.h"
 
 #include "core/frame/LocalFrame.h"
+#include "core/frame/Settings.h"
 #include "core/html/canvas/ANGLEInstancedArrays.h"
 #include "core/html/canvas/CHROMIUMSubscribeUniform.h"
 #include "core/html/canvas/ContextAttributeHelpers.h"
@@ -52,80 +53,31 @@
 #include "core/html/canvas/WebGLDepthTexture.h"
 #include "core/html/canvas/WebGLDrawBuffers.h"
 #include "core/html/canvas/WebGLLoseContext.h"
+#include "core/layout/LayoutBox.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
-#include "core/frame/Settings.h"
-#include "core/rendering/RenderBox.h"
 #include "platform/CheckedInt.h"
 #include "platform/graphics/gpu/DrawingBuffer.h"
 #include "public/platform/Platform.h"
 
 namespace blink {
 
-static bool shouldFailContextCreationForTesting = false;
-
 PassOwnPtrWillBeRawPtr<WebGLRenderingContext> WebGLRenderingContext::create(HTMLCanvasElement* canvas, const CanvasContextCreationAttributes& attrs)
 {
-    Document& document = canvas->document();
-    LocalFrame* frame = document.frame();
-    if (!frame) {
-        canvas->dispatchEvent(WebGLContextEvent::create(EventTypeNames::webglcontextcreationerror, false, true, "Web page was not allowed to create a WebGL context."));
-        return nullptr;
-    }
-    Settings* settings = frame->settings();
-
-    // The FrameLoaderClient might block creation of a new WebGL context despite the page settings; in
-    // particular, if WebGL contexts were lost one or more times via the GL_ARB_robustness extension.
-    if (!frame->loader().client()->allowWebGL(settings && settings->webGLEnabled())) {
-        canvas->dispatchEvent(WebGLContextEvent::create(EventTypeNames::webglcontextcreationerror, false, true, "Web page was not allowed to create a WebGL context."));
-        return nullptr;
-    }
-
     WebGLContextAttributes attributes = toWebGLContextAttributes(attrs);
-    blink::WebGraphicsContext3D::Attributes wgc3dAttributes = toWebGraphicsContext3DAttributes(attributes, document.topDocument().url().string(), settings, 1);
-    blink::WebGLInfo glInfo;
-    OwnPtr<blink::WebGraphicsContext3D> context = adoptPtr(blink::Platform::current()->createOffscreenGraphicsContext3D(wgc3dAttributes, 0, &glInfo));
-    if (!context || shouldFailContextCreationForTesting) {
-        shouldFailContextCreationForTesting = false;
-        String statusMessage;
-        if (!glInfo.contextInfoCollectionFailure.isEmpty()) {
-            statusMessage.append("Could not create a WebGL context. ");
-            statusMessage.append(glInfo.contextInfoCollectionFailure);
-        } else {
-            statusMessage.append("Could not create a WebGL context");
-            if (!glInfo.vendorInfo.isEmpty()) {
-                statusMessage.append(" VendorInfo = ");
-                statusMessage.append(glInfo.vendorInfo);
-            } else {
-                statusMessage.append(" VendorInfo = Not Available");
-            }
-            if (!glInfo.rendererInfo.isEmpty()) {
-                statusMessage.append(", RendererInfo = ");
-                statusMessage.append(glInfo.rendererInfo);
-            } else {
-                statusMessage.append(", RendererInfo = Not Available");
-            }
-            if (!glInfo.driverVersion.isEmpty()) {
-                statusMessage.append(", DriverInfo = ");
-                statusMessage.append(glInfo.driverVersion);
-            } else {
-                statusMessage.append(", DriverInfo = Not Available");
-            }
-            statusMessage.append(".");
-        }
-        canvas->dispatchEvent(WebGLContextEvent::create(EventTypeNames::webglcontextcreationerror, false, true, statusMessage));
+    OwnPtr<blink::WebGraphicsContext3D> context(createWebGraphicsContext3D(canvas, attributes, 1));
+    if (!context)
         return nullptr;
-    }
-
     OwnPtr<Extensions3DUtil> extensionsUtil = Extensions3DUtil::create(context.get());
     if (!extensionsUtil)
         return nullptr;
-    if (extensionsUtil->supportsExtension("GL_EXT_debug_marker"))
-        context->pushGroupMarkerEXT("WebGLRenderingContext");
+    if (extensionsUtil->supportsExtension("GL_EXT_debug_marker")) {
+        String contextLabel(String::format("WebGLRenderingContext-%p", context.get()));
+        context->pushGroupMarkerEXT(contextLabel.ascii().data());
+    }
 
     OwnPtrWillBeRawPtr<WebGLRenderingContext> renderingContext = adoptPtrWillBeNoop(new WebGLRenderingContext(canvas, context.release(), attributes));
     renderingContext->registerContextExtensions();
-    renderingContext->suspendIfNeeded();
 
     if (!renderingContext->drawingBuffer()) {
         canvas->dispatchEvent(WebGLContextEvent::create(EventTypeNames::webglcontextcreationerror, false, true, "Could not create a WebGL context."));
@@ -174,7 +126,7 @@ void WebGLRenderingContext::registerContextExtensions()
     registerExtension<WebGLLoseContext>(m_webglLoseContext, ApprovedExtension, bothPrefixes);
 }
 
-void WebGLRenderingContext::trace(Visitor* visitor)
+DEFINE_TRACE(WebGLRenderingContext)
 {
     visitor->trace(m_angleInstancedArrays);
     visitor->trace(m_chromiumSubscribeUniform);
@@ -200,11 +152,6 @@ void WebGLRenderingContext::trace(Visitor* visitor)
     visitor->trace(m_webglCompressedTextureS3TC);
     visitor->trace(m_webglDepthTexture);
     WebGLRenderingContextBase::trace(visitor);
-}
-
-void WebGLRenderingContext::forceNextWebGLContextCreationToFail()
-{
-    shouldFailContextCreationForTesting = true;
 }
 
 } // namespace blink

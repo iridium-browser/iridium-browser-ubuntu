@@ -3,11 +3,15 @@
 // found in the LICENSE file.
 
 /**
+ * This partially describes the network list entries passed to
+ * refreshNetworkData. The contents of those lists actually match
+ * CrOnc.NetworkConfigType with the addition of the policyManaged property.
+ * TODO(stevenjb): Use networkingPrivate.getNetworks.
  * @typedef {{
  *   ConnectionState: string,
- *   iconURL: string,
- *   policyManaged: boolean,
- *   servicePath: string
+ *   GUID: string,
+ *   Type: string,
+ *   policyManaged: boolean
  * }}
  * @see chrome/browser/ui/webui/options/chromeos/internet_options_handler.cc
  */
@@ -28,12 +32,19 @@ cr.define('options.network', function() {
    */
   function Constants() {}
 
-  // Cellular activation states:
-  Constants.ACTIVATION_STATE_UNKNOWN = 0;
-  Constants.ACTIVATION_STATE_ACTIVATED = 1;
-  Constants.ACTIVATION_STATE_ACTIVATING = 2;
-  Constants.ACTIVATION_STATE_NOT_ACTIVATED = 3;
-  Constants.ACTIVATION_STATE_PARTIALLY_ACTIVATED = 4;
+  /**
+   * Valid network type names.
+   */
+  Constants.NETWORK_TYPES = ['Ethernet', 'WiFi', 'WiMAX', 'Cellular', 'VPN'];
+
+  /**
+   * Helper function to check whether |type| is a valid network type.
+   * @param {string} type A string that may contain a valid network type.
+   * @return {boolean} Whether the string represents a valid network type.
+   */
+  function isNetworkType(type) {
+    return (Constants.NETWORK_TYPES.indexOf(type) != -1);
+  }
 
   /**
    * Order in which controls are to appear in the network list sorted by key.
@@ -109,19 +120,14 @@ cr.define('options.network', function() {
   var enableDataRoaming_ = false;
 
   /**
-   * Icon to use when not connected to a particular type of network.
-   * @type {!Object.<string, string>} Mapping of network type to icon data url.
-   * @private
-   */
-  var defaultIcons_ = {};
-
-  /**
    * Returns the display name for 'network'.
    * @param {Object} data The network data dictionary.
    */
   function getNetworkName(data) {
     if (data.Type == 'Ethernet')
       return loadTimeData.getString('ethernetName');
+    if (data.Type == 'VPN')
+      return options.VPNProviders.formatNetworkName(new cr.onc.OncData(data));
     return data.Name;
   }
 
@@ -149,13 +155,11 @@ cr.define('options.network', function() {
   }
 
   /**
-   * @param {string} servicePath The network service path.
+   * @param {string} guid The network GUID.
    */
-  function showDetails(servicePath) {
-    // TODO(stevenjb): chrome.networkingPrivate.getManagedProperties
-    // (Note: we will need to provide DetailsInternetPage.initializeDetailsPage
-    // as the callback).
-    chrome.send('getManagedProperties', [servicePath]);
+  function showDetails(guid) {
+    chrome.networkingPrivate.getManagedProperties(
+      guid, DetailsInternetPage.initializeDetailsPage);
   }
 
   /**
@@ -172,7 +176,7 @@ cr.define('options.network', function() {
 
     /**
      * Description of the network group or control.
-     * @type {Object.<string,Object>}
+     * @type {Object<string,Object>}
      * @private
      */
     data_: null,
@@ -185,18 +189,11 @@ cr.define('options.network', function() {
     subtitle_: null,
 
     /**
-     * Icon for the network control.
+     * Div containing the list item icon.
      * @type {?Element}
      * @private
      */
-    icon_: null,
-
-    /**
-     * Indicates if in the process of connecting to a network.
-     * @type {boolean}
-     * @private
-     */
-    connecting_: false,
+    iconDiv_: null,
 
     /**
      * Description of the network control.
@@ -217,42 +214,51 @@ cr.define('options.network', function() {
     },
 
     /**
-     * URL for the network icon.
-     * @type {string}
+     * Sets the icon based on a network state object.
+     * @param {!Object} data Object containing network state data.
      */
-    set iconURL(iconURL) {
-      this.icon_.style.backgroundImage = url(iconURL);
+    set iconData(data) {
+      if (!isNetworkType(data.Type))
+        return;
+      var networkIcon = this.getNetworkIcon();
+      networkIcon.networkState = CrOncDataElement.create(
+          /** @type {CrOnc.NetworkConfigType} */ (data));
     },
 
     /**
-     * Type of network icon.  Each type corresponds to a CSS rule.
+     * Sets the icon based on a network type or a special type indecator, e.g.
+     * 'add-connection'
      * @type {string}
      */
     set iconType(type) {
-      if (defaultIcons_[type])
-        this.iconURL = defaultIcons_[type];
-      else
-        this.icon_.classList.add('network-' + type.toLowerCase());
+      if (isNetworkType(type)) {
+        var networkIcon = this.getNetworkIcon();
+        networkIcon.networkType = type;
+      } else {
+        // Special cases. e.g. 'add-connection'. Background images are
+        // defined in browser_options.css.
+        var oldIcon = /** @type {CrNetworkIconElement} */ (
+            this.iconDiv_.querySelector('cr-network-icon'));
+        if (oldIcon)
+          this.iconDiv_.removeChild(oldIcon);
+        this.iconDiv_.classList.add('network-' + type.toLowerCase());
+      }
     },
 
     /**
-     * Indicates if the network is in the process of being connected.
-     * @type {boolean}
+     * Returns any existing network icon for the list item or creates a new one.
+     * @return {!CrNetworkIconElement} The network icon for the list item.
      */
-    set connecting(state) {
-      this.connecting_ = state;
-      if (state)
-        this.icon_.classList.add('network-connecting');
-      else
-        this.icon_.classList.remove('network-connecting');
-    },
-
-    /**
-     * Indicates if the network is in the process of being connected.
-     * @type {boolean}
-     */
-    get connecting() {
-      return this.connecting_;
+    getNetworkIcon: function() {
+      var networkIcon = /** @type {CrNetworkIconElement} */ (
+          this.iconDiv_.querySelector('cr-network-icon'));
+      if (!networkIcon) {
+        networkIcon = /** @type {!CrNetworkIconElement} */ (
+            document.createElement('cr-network-icon'));
+        networkIcon.isListItem = false;
+        this.iconDiv_.appendChild(networkIcon);
+      }
+      return networkIcon;
     },
 
     /**
@@ -281,9 +287,9 @@ cr.define('options.network', function() {
     decorate: function() {
       ListItem.prototype.decorate.call(this);
       this.className = 'network-group';
-      this.icon_ = this.ownerDocument.createElement('div');
-      this.icon_.className = 'network-icon';
-      this.appendChild(this.icon_);
+      this.iconDiv_ = this.ownerDocument.createElement('div');
+      this.iconDiv_.className = 'network-icon';
+      this.appendChild(this.iconDiv_);
       var textContent = this.ownerDocument.createElement('div');
       textContent.className = 'network-group-labels';
       this.appendChild(textContent);
@@ -362,8 +368,26 @@ cr.define('options.network', function() {
       return null;
     },
 
+    /**
+     * Determines if a menu can be updated on the fly. Menus that cannot be
+     * updated are fully regenerated using createMenu. The advantage of
+     * updating a menu is that it can preserve ordering of networks avoiding
+     * entries from jumping around after an update.
+     * @return {boolean} Whether the menu can be updated on the fly.
+     */
     canUpdateMenu: function() {
       return false;
+    },
+
+    /**
+     * Removes the current menu contents, causing it to be regenerated when the
+     * menu is shown the next time. If the menu is showing right now, its
+     * contents are regenerated immediately and the menu remains visible.
+     */
+    refreshMenu: function() {
+      this.menu_ = null;
+      if (activeMenu_ == this.getMenuName())
+        this.showMenu();
     },
 
     /**
@@ -380,7 +404,7 @@ cr.define('options.network', function() {
         rebuild = true;
         var existing = $(this.getMenuName());
         if (existing) {
-          if (this.updateMenu())
+          if (this.canUpdateMenu() && this.updateMenu())
             return;
           closeMenu_();
         }
@@ -404,8 +428,7 @@ cr.define('options.network', function() {
         this.menu_.hidden = false;
       }
       if (rescan) {
-        // TODO(stevenjb): chrome.networkingPrivate.requestNetworkScan
-        chrome.send('requestNetworkScan');
+        chrome.networkingPrivate.requestNetworkScan();
       }
     }
   };
@@ -413,7 +436,7 @@ cr.define('options.network', function() {
   /**
    * Creates a control for selecting or configuring a network connection based
    * on the type of connection (e.g. wifi versus vpn).
-   * @param {{key: string, networkList: Array.<NetworkInfo>}} data Description
+   * @param {{key: string, networkList: Array<NetworkInfo>}} data Description
    *     of the network.
    * @constructor
    * @extends {NetworkMenuItem}
@@ -434,7 +457,7 @@ cr.define('options.network', function() {
       var policyManaged = false;
       this.subtitle = loadTimeData.getString('OncConnectionStateNotConnected');
       var list = this.data_.networkList;
-      var candidateURL = null;
+      var candidateData = null;
       for (var i = 0; i < list.length; i++) {
         var networkDetails = list[i];
         if (networkDetails.ConnectionState == 'Connecting' ||
@@ -442,19 +465,16 @@ cr.define('options.network', function() {
           this.subtitle = getNetworkName(networkDetails);
           this.setSubtitleDirection('ltr');
           policyManaged = networkDetails.policyManaged;
-          candidateURL = networkDetails.iconURL;
+          candidateData = networkDetails;
           // Only break when we see a connecting network as it is possible to
           // have a connected network and a connecting network at the same
           // time.
-          if (networkDetails.ConnectionState == 'Connecting') {
-            this.connecting = true;
-            candidateURL = null;
+          if (networkDetails.ConnectionState == 'Connecting')
             break;
-          }
         }
       }
-      if (candidateURL)
-        this.iconURL = candidateURL;
+      if (candidateData)
+        this.iconData = candidateData;
       else
         this.iconType = this.data.key;
 
@@ -488,14 +508,14 @@ cr.define('options.network', function() {
       if (this.data_.key == 'WiFi') {
         addendum.push({
           label: loadTimeData.getString('joinOtherNetwork'),
-          command: createAddConnectionCallback_('WiFi'),
+          command: createAddNonVPNConnectionCallback_('WiFi'),
           data: {}
         });
       } else if (this.data_.key == 'Cellular') {
         if (cellularEnabled_ && cellularSupportsScan_) {
           addendum.push({
             label: loadTimeData.getString('otherCellularNetworks'),
-            command: createAddConnectionCallback_('Cellular'),
+            command: createAddNonVPNConnectionCallback_('Cellular'),
             addClass: ['other-cellulars'],
             data: {}
           });
@@ -522,11 +542,7 @@ cr.define('options.network', function() {
         }
         addendum.push(entry);
       } else if (this.data_.key == 'VPN') {
-        addendum.push({
-          label: loadTimeData.getString('joinOtherNetwork'),
-          command: createAddConnectionCallback_('VPN'),
-          data: {}
-        });
+        addendum = addendum.concat(createAddVPNConnectionEntries_());
       }
 
       var list = this.data.rememberedNetworks;
@@ -548,22 +564,21 @@ cr.define('options.network', function() {
       list = this.data.networkList;
       var empty = !list || list.length == 0;
       if (list) {
-        var connectedVpnServicePath = '';
+        var connectedVpnGuid = '';
         for (var i = 0; i < list.length; i++) {
           var data = list[i];
           this.createNetworkOptionsCallback_(networkGroup, data);
           // For VPN only, append a 'Disconnect' item to the dropdown menu.
-          if (!connectedVpnServicePath && data.Type == 'VPN' &&
+          if (!connectedVpnGuid && data.Type == 'VPN' &&
               (data.ConnectionState == 'Connected' ||
                data.ConnectionState == 'Connecting')) {
-            connectedVpnServicePath = data.servicePath;
+            connectedVpnGuid = data.GUID;
           }
         }
-        if (connectedVpnServicePath) {
+        if (connectedVpnGuid) {
           var disconnectCallback = function() {
             sendChromeMetricsAction('Options_NetworkDisconnectVPN');
-            // TODO(stevenjb): chrome.networkingPrivate.startDisconnect
-            chrome.send('startDisconnect', [connectedVpnServicePath]);
+            chrome.networkingPrivate.startDisconnect(connectedVpnGuid);
           };
           // Add separator
           addendum.push({});
@@ -580,24 +595,21 @@ cr.define('options.network', function() {
             label: loadTimeData.getString('turnOffWifi'),
             command: function() {
               sendChromeMetricsAction('Options_NetworkWifiToggle');
-              // TODO(stevenjb): chrome.networkingPrivate.disableNetworkType
-              chrome.send('disableNetworkType', ['WiFi']);
+              chrome.networkingPrivate.disableNetworkType('WiFi');
             },
             data: {}});
         } else if (this.data_.key == 'WiMAX') {
           addendum.push({
             label: loadTimeData.getString('turnOffWimax'),
             command: function() {
-              // TODO(stevenjb): chrome.networkingPrivate.disableNetworkType
-              chrome.send('disableNetworkType', ['WiMAX']);
+              chrome.networkingPrivate.disableNetworkType('WiMAX');
             },
             data: {}});
         } else if (this.data_.key == 'Cellular') {
           addendum.push({
             label: loadTimeData.getString('turnOffCellular'),
             command: function() {
-              // TODO(stevenjb): chrome.networkingPrivate.disableNetworkType
-              chrome.send('disableNetworkType', ['Cellular']);
+              chrome.networkingPrivate.disableNetworkType('Cellular');
             },
             data: {}});
         }
@@ -629,12 +641,7 @@ cr.define('options.network', function() {
       return menu;
     },
 
-    /**
-     * Determines if a menu can be updated on the fly. Menus that cannot be
-     * updated are fully regenerated using createMenu. The advantage of
-     * updating a menu is that it can preserve ordering of networks avoiding
-     * entries from jumping around after an update.
-     */
+    /** @override */
     canUpdateMenu: function() {
       return this.data_.key == 'WiFi' && activeMenu_ == this.getMenuName();
     },
@@ -645,12 +652,11 @@ cr.define('options.network', function() {
      * preferred ordering as determined by the network library.  If the
      * ordering becomes potentially out of sync, then the updated menu is
      * marked for disposal on close.  Reopening the menu will force a
-     * regeneration, which will in turn fix the ordering.
+     * regeneration, which will in turn fix the ordering. This method must only
+     * be called if canUpdateMenu() returned |true|.
      * @return {boolean} True if successfully updated.
      */
     updateMenu: function() {
-      if (!this.canUpdateMenu())
-        return false;
       var oldMenu = $(this.getMenuName());
       var group = oldMenu.getElementsByClassName('network-menu-group')[0];
       if (!group)
@@ -687,7 +693,7 @@ cr.define('options.network', function() {
     /**
      * Extracts a mapping of network names to menu element and position.
      * @param {!Element} menu The menu to process.
-     * @return {Object.<string, ?{index: number, button: Element}>}
+     * @return {Object<string, ?{index: number, button: Element}>}
      *     Network mapping.
      * @private
      */
@@ -711,12 +717,10 @@ cr.define('options.network', function() {
      * @private
      */
     createNetworkOptionsCallback_: function(parent, data) {
-      var servicePath = data.servicePath;
       var menuItem = createCallback_(parent,
                                      data,
                                      getNetworkName(data),
-                                     showDetails.bind(null, servicePath),
-                                     data.iconURL);
+                                     showDetails.bind(null, data.GUID));
       if (data.policyManaged)
         menuItem.appendChild(new ManagedNetworkIndicator());
       if (data.ConnectionState == 'Connected' ||
@@ -753,8 +757,8 @@ cr.define('options.network', function() {
        this.subtitle = null;
       if (this.data.command)
         this.addEventListener('click', this.data.command);
-      if (this.data.iconURL)
-        this.iconURL = this.data.iconURL;
+      if (this.data.iconData)
+        this.iconData = this.data.iconData;
       else if (this.data.iconType)
         this.iconType = this.data.iconType;
       if (this.data.policyManaged)
@@ -768,19 +772,23 @@ cr.define('options.network', function() {
    * @param {Object} data Description of the network.
    * @param {!string} label Display name for the menu item.
    * @param {!Function} command Callback function.
-   * @param {string=} opt_iconURL Optional URL to an icon for the menu item.
    * @return {!Element} The created menu item.
    * @private
    */
-  function createCallback_(menu, data, label, command, opt_iconURL) {
+  function createCallback_(menu, data, label, command) {
     var button = menu.ownerDocument.createElement('div');
     button.className = 'network-menu-item';
 
-    var buttonIcon = menu.ownerDocument.createElement('div');
-    buttonIcon.className = 'network-menu-item-icon';
-    button.appendChild(buttonIcon);
-    if (opt_iconURL)
-      buttonIcon.style.backgroundImage = url(opt_iconURL);
+    var buttonIconDiv = menu.ownerDocument.createElement('div');
+    buttonIconDiv.className = 'network-icon';
+    button.appendChild(buttonIconDiv);
+    if (data && isNetworkType(data.Type)) {
+      var networkIcon = /** @type {!CrNetworkIconElement} */ (
+          document.createElement('cr-network-icon'));
+      buttonIconDiv.appendChild(networkIcon);
+      networkIcon.isListItem = true;
+      networkIcon.networkState = CrOncDataElement.create(data);
+    }
 
     var buttonLabel = menu.ownerDocument.createElement('span');
     buttonLabel.className = 'network-menu-item-label';
@@ -835,18 +843,7 @@ cr.define('options.network', function() {
       // Wi-Fi control is always visible.
       this.update({key: 'WiFi', networkList: []});
 
-      var entryAddWifi = {
-        label: loadTimeData.getString('addConnectionWifi'),
-        command: createAddConnectionCallback_('WiFi')
-      };
-      var entryAddVPN = {
-        label: loadTimeData.getString('addConnectionVPN'),
-        command: createAddConnectionCallback_('VPN')
-      };
-      this.update({key: 'addConnection',
-                   iconType: 'add-connection',
-                   menu: [entryAddWifi, entryAddVPN]
-                  });
+      this.updateAddConnectionMenuEntries_();
 
       var prefs = options.Preferences.getInstance();
       prefs.addEventListener('cros.signed.data_roaming_enabled',
@@ -854,6 +851,43 @@ cr.define('options.network', function() {
             enableDataRoaming_ = event.value.value;
           });
       this.endBatchUpdates();
+
+      options.VPNProviders.addObserver(this.onVPNProvidersChanged_.bind(this));
+    },
+
+    /**
+     * Called when the list of VPN providers changes. Refreshes the contents of
+     * menus that list VPN providers.
+     * @private
+     */
+    onVPNProvidersChanged_: function() {
+      // Refresh the contents of the VPN menu.
+      var index = this.indexOf('VPN');
+      if (index != undefined)
+        this.getListItemByIndex(index).refreshMenu();
+
+      // Refresh the contents of the "add connection" menu.
+      this.updateAddConnectionMenuEntries_();
+      index = this.indexOf('addConnection');
+      if (index != undefined)
+        this.getListItemByIndex(index).refreshMenu();
+    },
+
+    /**
+     * Updates the entries in the "add connection" menu, based on the VPN
+     * providers currently enabled in the primary user's profile.
+     * @private
+     */
+    updateAddConnectionMenuEntries_: function() {
+      var entries = [{
+        label: loadTimeData.getString('addConnectionWifi'),
+        command: createAddNonVPNConnectionCallback_('WiFi')
+      }];
+      entries = entries.concat(createAddVPNConnectionEntries_());
+      this.update({key: 'addConnection',
+                   iconType: 'add-connection',
+                   menu: entries
+                  });
     },
 
     /**
@@ -908,7 +942,7 @@ cr.define('options.network', function() {
 
     /**
      * Updates a network control.
-     * @param {Object.<string,string>} data Description of the entry.
+     * @param {Object<string,string>} data Description of the entry.
      */
     update: function(data) {
       this.startBatchUpdates();
@@ -956,7 +990,7 @@ cr.define('options.network', function() {
     createItem: function(entry) {
       if (entry.networkList)
         return new NetworkSelectorItem(
-            /** @type {{key: string, networkList: Array.<NetworkInfo>}} */(
+            /** @type {{key: string, networkList: Array<NetworkInfo>}} */(
                 entry));
       if (entry.command)
         return new NetworkButtonItem(
@@ -986,20 +1020,10 @@ cr.define('options.network', function() {
       var index = this.indexOf(key);
       if (index != undefined) {
         var entry = this.dataModel.item(index);
-        entry.iconType = active ? 'control-active' :
-            'control-inactive';
+        entry.iconType = active ? 'control-active' : 'control-inactive';
         this.update(entry);
       }
     }
-  };
-
-  /**
-   * Sets the default icon to use for each network type if disconnected.
-   * @param {!Object.<string, string>} data Mapping of network type to icon
-   *     data url.
-   */
-  NetworkList.setDefaultNetworkIcons = function(data) {
-    defaultIcons_ = Object.create(data);
   };
 
   /**
@@ -1009,14 +1033,14 @@ cr.define('options.network', function() {
    *          cellularSimAbsent: boolean,
    *          cellularSimLockType: string,
    *          cellularSupportsScan: boolean,
-   *          rememberedList: Array.<NetworkInfo>,
-   *          vpnList: Array.<NetworkInfo>,
+   *          rememberedList: Array<NetworkInfo>,
+   *          vpnList: Array<NetworkInfo>,
    *          wifiAvailable: boolean,
    *          wifiEnabled: boolean,
    *          wimaxAvailable: boolean,
    *          wimaxEnabled: boolean,
-   *          wiredList: Array.<NetworkInfo>,
-   *          wirelessList: Array.<NetworkInfo>}} data Description of available
+   *          wiredList: Array<NetworkInfo>,
+   *          wirelessList: Array<NetworkInfo>}} data Description of available
    *     network devices and their corresponding state.
    */
   NetworkList.refreshNetworkData = function(data) {
@@ -1034,14 +1058,11 @@ cr.define('options.network', function() {
     var ethernetConnection = getConnection_(data.wiredList);
     if (ethernetConnection) {
       var type = String('Ethernet');
-      var path = ethernetConnection.servicePath;
-      var ethernetOptions = function() {
-        showDetails(path);
-      };
+      var ethernetOptions = showDetails.bind(null, ethernetConnection.GUID);
       networkList.update(
           { key: 'Ethernet',
             subtitle: loadTimeData.getString('OncConnectionStateConnected'),
-            iconURL: ethernetConnection.iconURL,
+            iconData: ethernetConnection,
             command: ethernetOptions,
             policyManaged: ethernetConnection.policyManaged }
           );
@@ -1089,7 +1110,6 @@ cr.define('options.network', function() {
    */
   function addEnableNetworkButton_(type) {
     var subtitle = loadTimeData.getString('networkDisabled');
-    var icon = (type == 'WiMAX') ? 'Cellular' : type;
     var enableNetwork = function() {
       if (type == 'WiFi')
         sendChromeMetricsAction('Options_NetworkWifiToggle');
@@ -1102,12 +1122,11 @@ cr.define('options.network', function() {
           return;
         }
       }
-      // TODO(stevenjb): chrome.networkingPrivate.enableNetworkType
-      chrome.send('enableNetworkType', [type]);
+      chrome.networkingPrivate.enableNetworkType(type);
     };
     $('network-list').update({key: type,
                               subtitle: subtitle,
-                              iconType: icon,
+                              iconType: type,
                               command: enableNetwork});
   }
 
@@ -1209,7 +1228,7 @@ cr.define('options.network', function() {
 
   /**
    * Fetches the active connection.
-   * @param {Array.<Object>} networkList List of networks.
+   * @param {Array<Object>} networkList List of networks.
    * @return {Object}
    * @private
    */
@@ -1226,19 +1245,60 @@ cr.define('options.network', function() {
   }
 
   /**
-   * Create a callback function that adds a new connection of the given type.
+   * Creates a callback function that adds a new connection of the given type.
+   * This method may be used for all network types except VPN.
    * @param {string} type An ONC network type
    * @return {function()} The created callback.
    * @private
    */
-  function createAddConnectionCallback_(type) {
+  function createAddNonVPNConnectionCallback_(type) {
     return function() {
       if (type == 'WiFi')
         sendChromeMetricsAction('Options_NetworkJoinOtherWifi');
-      else if (type == 'VPN')
-        sendChromeMetricsAction('Options_NetworkJoinOtherVPN');
-      chrome.send('addConnection', [type]);
+      chrome.send('addNonVPNConnection', [type]);
     };
+  }
+
+  /**
+   * Creates a callback function that shows the "add network" dialog for a VPN
+   * provider. If |opt_extensionID| is omitted, the dialog for the built-in
+   * OpenVPN/L2TP provider is shown. Otherwise, |opt_extensionID| identifies the
+   * third-party provider for which the dialog should be shown.
+   * @param {string=} opt_extensionID Extension ID identifying the third-party
+   *     VPN provider for which the dialog should be shown.
+   * @return {function()} The created callback.
+   * @private
+   */
+  function createVPNConnectionCallback_(opt_extensionID) {
+    return function() {
+      sendChromeMetricsAction(opt_extensionID ?
+          'Options_NetworkAddVPNThirdParty' :
+          'Options_NetworkAddVPNBuiltIn');
+      chrome.send('addVPNConnection',
+                  opt_extensionID ? [opt_extensionID] : undefined);
+    };
+  }
+
+  /**
+   * Generates an "add network" entry for each VPN provider currently enabled in
+   * the primary user's profile.
+   * @return {!Array<{label: string, command: function(), data: !Object}>} The
+   *     list of entries.
+   * @private
+   */
+  function createAddVPNConnectionEntries_() {
+    var entries = [];
+    var providers = options.VPNProviders.getProviders();
+    for (var i = 0; i < providers.length; ++i) {
+      entries.push({
+        label: loadTimeData.getStringF('addConnectionVPNTemplate',
+                                       providers[i].name),
+        command: createVPNConnectionCallback_(
+            providers[i].extensionID || undefined),
+        data: {}
+      });
+    }
+    return entries;
   }
 
   /**

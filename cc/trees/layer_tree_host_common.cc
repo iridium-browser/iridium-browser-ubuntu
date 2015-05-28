@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/base/math_util.h"
 #include "cc/layers/heads_up_display_layer_impl.h"
 #include "cc/layers/layer.h"
@@ -15,12 +15,12 @@
 #include "cc/layers/render_surface.h"
 #include "cc/layers/render_surface_impl.h"
 #include "cc/trees/draw_property_utils.h"
-#include "cc/trees/layer_sorter.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
 #include "ui/gfx/transform.h"
+#include "ui/gfx/transform_util.h"
 
 namespace cc {
 
@@ -30,35 +30,30 @@ ScrollAndScaleSet::ScrollAndScaleSet()
 
 ScrollAndScaleSet::~ScrollAndScaleSet() {}
 
-static void SortLayers(LayerList::iterator forst,
-                       LayerList::iterator end,
-                       void* layer_sorter) {
-  NOTREACHED();
-}
-
-static void SortLayers(LayerImplList::iterator first,
-                       LayerImplList::iterator end,
-                       LayerSorter* layer_sorter) {
-  DCHECK(layer_sorter);
-  TRACE_EVENT0("cc", "LayerTreeHostCommon::SortLayers");
-  layer_sorter->Sort(first, end);
-}
-
 template <typename LayerType>
 static gfx::Vector2dF GetEffectiveScrollDelta(LayerType* layer) {
-  gfx::Vector2dF scroll_delta = layer->ScrollDelta();
+  // Layer's scroll offset can have an integer part and fractional part.
+  // Due to Blink's limitation, it only counter-scrolls the position-fixed
+  // layer using the integer part of Layer's scroll offset.
+  // CC scrolls the layer using the full scroll offset, so we have to
+  // add the ScrollCompensationAdjustment (fractional part of the scroll
+  // offset) to the effective scroll delta which is used to counter-scroll
+  // the position-fixed layer.
+  gfx::Vector2dF scroll_delta =
+      layer->ScrollDelta() + layer->ScrollCompensationAdjustment();
   // The scroll parent's scroll delta is the amount we've scrolled on the
   // compositor thread since the commit for this layer tree's source frame.
   // we last reported to the main thread. I.e., it's the discrepancy between
   // a scroll parent's scroll delta and offset, so we must add it here.
   if (layer->scroll_parent())
-    scroll_delta += layer->scroll_parent()->ScrollDelta();
+    scroll_delta += layer->scroll_parent()->ScrollDelta() +
+        layer->ScrollCompensationAdjustment();
   return scroll_delta;
 }
 
 template <typename LayerType>
-static gfx::ScrollOffset GetEffectiveTotalScrollOffset(LayerType* layer) {
-  gfx::ScrollOffset offset = layer->TotalScrollOffset();
+static gfx::ScrollOffset GetEffectiveCurrentScrollOffset(LayerType* layer) {
+  gfx::ScrollOffset offset = layer->CurrentScrollOffset();
   // The scroll parent's total scroll offset (scroll offset + scroll delta)
   // can't be used because its scroll offset has already been applied to the
   // scroll children's positions by the main thread layer positioning code.
@@ -151,8 +146,8 @@ static gfx::Vector2dF ComputeChangeOfBasisTranslation(
 }
 
 enum TranslateRectDirection {
-  TranslateRectDirectionToAncestor,
-  TranslateRectDirectionToDescendant
+  TRANSLATE_RECT_DIRECTION_TO_ANCESTOR,
+  TRANSLATE_RECT_DIRECTION_TO_DESCENDANT
 };
 
 template <typename LayerType>
@@ -162,7 +157,7 @@ static gfx::Rect TranslateRectToTargetSpace(const LayerType& ancestor_layer,
                                             TranslateRectDirection direction) {
   gfx::Vector2dF translation = ComputeChangeOfBasisTranslation<LayerType>(
       ancestor_layer, descendant_layer);
-  if (direction == TranslateRectDirectionToDescendant)
+  if (direction == TRANSLATE_RECT_DIRECTION_TO_DESCENDANT)
     translation.Scale(-1.f);
   return gfx::ToEnclosingRect(
       gfx::RectF(rect.origin() + translation, rect.size()));
@@ -201,20 +196,16 @@ static void UpdateClipRectsForClipChild(
   // clip rects will want to be in its target space, not ours.
   if (clip_parent == layer->clip_parent()) {
     *clip_rect_in_parent_target_space = TranslateRectToTargetSpace<LayerType>(
-        *clip_parent,
-        *layer->parent(),
-        *clip_rect_in_parent_target_space,
-        TranslateRectDirectionToDescendant);
+        *clip_parent, *layer->parent(), *clip_rect_in_parent_target_space,
+        TRANSLATE_RECT_DIRECTION_TO_DESCENDANT);
   } else {
     // If we're being clipped by our scroll parent, we must translate through
     // our common ancestor. This happens to be our parent, so it is sufficent to
     // translate from our clip parent's space to the space of its ancestor (our
     // parent).
-    *clip_rect_in_parent_target_space =
-        TranslateRectToTargetSpace<LayerType>(*layer->parent(),
-                                              *clip_parent,
-                                              *clip_rect_in_parent_target_space,
-                                              TranslateRectDirectionToAncestor);
+    *clip_rect_in_parent_target_space = TranslateRectToTargetSpace<LayerType>(
+        *layer->parent(), *clip_parent, *clip_rect_in_parent_target_space,
+        TRANSLATE_RECT_DIRECTION_TO_ANCESTOR);
   }
 }
 
@@ -276,10 +267,8 @@ void UpdateAccumulatedSurfaceState(
     // so we'll need to transform it before it is applied.
     if (layer->clip_parent()) {
       clip_rect = TranslateRectToTargetSpace<LayerType>(
-          *layer->clip_parent(),
-          *layer,
-          clip_rect,
-          TranslateRectDirectionToDescendant);
+          *layer->clip_parent(), *layer, clip_rect,
+          TRANSLATE_RECT_DIRECTION_TO_DESCENDANT);
     }
     target_rect.Intersect(clip_rect);
   }
@@ -333,7 +322,8 @@ template <typename LayerType> static inline bool IsRootLayer(LayerType* layer) {
 template <typename LayerType>
 static inline bool LayerIsInExisting3DRenderingContext(LayerType* layer) {
   return layer->Is3dSorted() && layer->parent() &&
-         layer->parent()->Is3dSorted();
+         layer->parent()->Is3dSorted() &&
+         (layer->parent()->sorting_context_id() == layer->sorting_context_id());
 }
 
 template <typename LayerType>
@@ -586,6 +576,13 @@ static bool SubtreeShouldRenderToSeparateSurface(
     return true;
   }
 
+  // If the layer will use a CSS filter.  In this case, the animation
+  // will start and add a filter to this layer, so it needs a surface.
+  if (layer->FilterIsAnimating()) {
+    DCHECK(!is_root);
+    return true;
+  }
+
   int num_descendants_that_draw_content =
       layer->NumDescendantsThatDrawContent();
 
@@ -684,9 +681,10 @@ static bool SubtreeShouldRenderToSeparateSurface(
 // This function returns a translation matrix that can be applied on a vector
 // that's in the layer's target surface coordinate, while the position offset is
 // specified in some ancestor layer's coordinate.
+template <typename LayerType>
 gfx::Transform ComputeSizeDeltaCompensation(
-    LayerImpl* layer,
-    LayerImpl* container,
+    LayerType* layer,
+    LayerType* container,
     const gfx::Vector2dF& position_offset) {
   gfx::Transform result_transform;
 
@@ -701,8 +699,8 @@ gfx::Transform ComputeSizeDeltaCompensation(
 
   gfx::Transform target_surface_space_to_container_layer_space;
   // Calculate step 1a
-  LayerImpl* container_target_surface = container->render_target();
-  for (LayerImpl* current_target_surface = NextTargetSurface(layer);
+  LayerType* container_target_surface = container->render_target();
+  for (LayerType* current_target_surface = NextTargetSurface(layer);
       current_target_surface &&
           current_target_surface != container_target_surface;
       current_target_surface = NextTargetSurface(current_target_surface)) {
@@ -749,14 +747,10 @@ gfx::Transform ComputeSizeDeltaCompensation(
   return result_transform;
 }
 
+template <typename LayerType>
 void ApplyPositionAdjustment(
-    Layer* layer,
-    Layer* container,
-    const gfx::Transform& scroll_compensation,
-    gfx::Transform* combined_transform) {}
-void ApplyPositionAdjustment(
-    LayerImpl* layer,
-    LayerImpl* container,
+    LayerType* layer,
+    LayerType* container,
     const gfx::Transform& scroll_compensation,
     gfx::Transform* combined_transform) {
   if (!layer->position_constraint().is_fixed_position())
@@ -787,8 +781,9 @@ void ApplyPositionAdjustment(
       ComputeSizeDeltaCompensation(layer, container, position_offset));
 }
 
+template <typename LayerType>
 gfx::Transform ComputeScrollCompensationForThisLayer(
-    LayerImpl* scrolling_layer,
+    LayerType* scrolling_layer,
     const gfx::Transform& parent_matrix,
     const gfx::Vector2dF& scroll_delta) {
   // For every layer that has non-zero scroll_delta, we have to compute a
@@ -826,18 +821,9 @@ gfx::Transform ComputeScrollCompensationForThisLayer(
   return scroll_compensation_for_this_layer;
 }
 
+template <typename LayerType>
 gfx::Transform ComputeScrollCompensationMatrixForChildren(
-    Layer* current_layer,
-    const gfx::Transform& current_parent_matrix,
-    const gfx::Transform& current_scroll_compensation,
-    const gfx::Vector2dF& scroll_delta) {
-  // The main thread (i.e. Layer) does not need to worry about scroll
-  // compensation.  So we can just return an identity matrix here.
-  return gfx::Transform();
-}
-
-gfx::Transform ComputeScrollCompensationMatrixForChildren(
-    LayerImpl* layer,
+    LayerType* layer,
     const gfx::Transform& parent_matrix,
     const gfx::Transform& current_scroll_compensation_matrix,
     const gfx::Vector2dF& scroll_delta) {
@@ -1116,6 +1102,8 @@ static inline void MarkLayerWithRenderSurfaceLayerListId(
     int current_render_surface_layer_list_id) {
   layer->draw_properties().last_drawn_render_surface_layer_list_id =
       current_render_surface_layer_list_id;
+  layer->draw_properties().layer_or_descendant_is_drawn =
+      !!current_render_surface_layer_list_id;
 }
 
 template <typename LayerTypePtr>
@@ -1188,25 +1176,26 @@ struct PreCalculateMetaInformationRecursiveData {
         data.layer_or_descendant_has_copy_request;
     layer_or_descendant_has_input_handler |=
         data.layer_or_descendant_has_input_handler;
-    num_unclipped_descendants +=
-        data.num_unclipped_descendants;
+    num_unclipped_descendants += data.num_unclipped_descendants;
   }
 };
 
-static bool ValidateRenderSurface(LayerImpl* layer) {
-  // There are a few cases in which it is incorrect to not have a
-  // render_surface.
+static void ValidateRenderSurface(LayerImpl* layer) {
+  // This test verifies that there are no cases where a LayerImpl needs
+  // a render surface, but doesn't have one.
   if (layer->render_surface())
-    return true;
+    return;
 
-  return layer->filters().IsEmpty() && layer->background_filters().IsEmpty() &&
-         !layer->mask_layer() && !layer->replica_layer() &&
-         !IsRootLayer(layer) && !layer->is_root_for_isolated_group() &&
-         !layer->HasCopyRequest();
+  DCHECK(layer->filters().IsEmpty()) << "layer: " << layer->id();
+  DCHECK(layer->background_filters().IsEmpty()) << "layer: " << layer->id();
+  DCHECK(!layer->mask_layer()) << "layer: " << layer->id();
+  DCHECK(!layer->replica_layer()) << "layer: " << layer->id();
+  DCHECK(!IsRootLayer(layer)) << "layer: " << layer->id();
+  DCHECK(!layer->is_root_for_isolated_group()) << "layer: " << layer->id();
+  DCHECK(!layer->HasCopyRequest()) << "layer: " << layer->id();
 }
 
-static bool ValidateRenderSurface(Layer* layer) {
-  return true;
+static void ValidateRenderSurface(Layer* layer) {
 }
 
 // Recursively walks the layer tree to compute any information that is needed
@@ -1215,10 +1204,12 @@ template <typename LayerType>
 static void PreCalculateMetaInformation(
     LayerType* layer,
     PreCalculateMetaInformationRecursiveData* recursive_data) {
-  DCHECK(ValidateRenderSurface(layer));
+  ValidateRenderSurface(layer);
 
   layer->draw_properties().sorted_for_recursion = false;
   layer->draw_properties().has_child_with_a_scroll_parent = false;
+  layer->draw_properties().layer_or_descendant_is_drawn = false;
+  layer->draw_properties().visited = false;
 
   if (!HasInvertibleOrAnimatedTransform(layer)) {
     // Layers with singular transforms should not be drawn, the whole subtree
@@ -1262,14 +1253,8 @@ static void PreCalculateMetaInformation(
       recursive_data->layer_or_descendant_has_input_handler;
 }
 
-static void RoundTranslationComponents(gfx::Transform* transform) {
-  transform->matrix().set(0, 3, MathUtil::Round(transform->matrix().get(0, 3)));
-  transform->matrix().set(1, 3, MathUtil::Round(transform->matrix().get(1, 3)));
-}
-
 template <typename LayerType>
 struct SubtreeGlobals {
-  LayerSorter* layer_sorter;
   int max_texture_size;
   float device_scale_factor;
   float page_scale_factor;
@@ -1591,6 +1576,9 @@ static void CalculateDrawPropertiesInternal(
   DCHECK(globals.page_scale_application_layer ||
          (globals.page_scale_factor == 1.f));
 
+  CHECK(!layer->draw_properties().visited);
+  layer->draw_properties().visited = true;
+
   DataForRecursion<LayerType> data_for_children;
   typename LayerType::RenderSurfaceType*
       nearest_occlusion_immune_ancestor_surface =
@@ -1666,7 +1654,7 @@ static void CalculateDrawPropertiesInternal(
         layer->parent()->screen_space_transform_is_animating();
   }
   gfx::Point3F transform_origin = layer->transform_origin();
-  gfx::ScrollOffset scroll_offset = GetEffectiveTotalScrollOffset(layer);
+  gfx::ScrollOffset scroll_offset = GetEffectiveCurrentScrollOffset(layer);
   gfx::PointF position =
       layer->position() - ScrollOffsetToVector2dF(scroll_offset);
   gfx::Transform combined_transform = data_from_ancestor.parent_matrix;
@@ -1692,7 +1680,7 @@ static void CalculateDrawPropertiesInternal(
     // blurriness.  To avoid side-effects, do this only if the transform is
     // simple.
     gfx::Vector2dF previous_translation = combined_transform.To2dTranslation();
-    RoundTranslationComponents(&combined_transform);
+    combined_transform.RoundTranslationComponents();
     gfx::Vector2dF current_translation = combined_transform.To2dTranslation();
 
     // This rounding changes the scroll delta, and so must be included
@@ -1801,8 +1789,6 @@ static void CalculateDrawPropertiesInternal(
   // layer's "screen space" and local content space.
   layer_draw_properties.screen_space_transform =
       data_from_ancestor.full_hierarchy_matrix;
-  if (layer->should_flatten_transform())
-    layer_draw_properties.screen_space_transform.FlattenTo2d();
   layer_draw_properties.screen_space_transform.PreconcatTransform
       (layer_draw_properties.target_space_transform);
 
@@ -1830,14 +1816,6 @@ static void CalculateDrawPropertiesInternal(
   // RenderSurfaceImpl, otherwise remains the same.
   data_for_children.full_hierarchy_matrix =
       data_from_ancestor.full_hierarchy_matrix;
-
-  // If the subtree will scale layer contents by the transform hierarchy, then
-  // we should scale things into the render surface by the transform hierarchy
-  // to take advantage of that.
-  gfx::Vector2dF render_surface_sublayer_scale =
-      globals.can_adjust_raster_scales
-      ? combined_transform_scales
-      : gfx::Vector2dF(layer_scale_factors, layer_scale_factors);
 
   bool render_to_separate_surface =
       IsRootLayer(layer) ||
@@ -1873,17 +1851,19 @@ static void CalculateDrawPropertiesInternal(
       // space which we do not want; so here we use the combined_transform
       // instead of the draw_transform. However, we do need to add a different
       // scale factor that accounts for the surface's pixel dimensions.
-      combined_transform.Scale(1.0 / render_surface_sublayer_scale.x(),
-                               1.0 / render_surface_sublayer_scale.y());
-      render_surface->SetDrawTransform(combined_transform);
+      // Remove the combined_transform scale from the draw transform.
+      gfx::Transform draw_transform = combined_transform;
+      draw_transform.Scale(1.0 / combined_transform_scales.x(),
+                           1.0 / combined_transform_scales.y());
+      render_surface->SetDrawTransform(draw_transform);
 
       // The owning layer's transform was re-parented by the surface, so the
       // layer's new draw_transform only needs to scale the layer to surface
       // space.
       layer_draw_properties.target_space_transform.MakeIdentity();
-      layer_draw_properties.target_space_transform.
-          Scale(render_surface_sublayer_scale.x() / layer->contents_scale_x(),
-                render_surface_sublayer_scale.y() / layer->contents_scale_y());
+      layer_draw_properties.target_space_transform.Scale(
+          combined_transform_scales.x() / layer->contents_scale_x(),
+          combined_transform_scales.y() / layer->contents_scale_y());
 
       // Inside the surface's subtree, we scale everything to the owning layer's
       // scale.  The sublayer matrix transforms layer rects into target surface
@@ -1892,8 +1872,8 @@ static void CalculateDrawPropertiesInternal(
       // but we apply it explicitly to the owning layer and the remainder of the
       // subtree independently.
       DCHECK(data_for_children.parent_matrix.IsIdentity());
-      data_for_children.parent_matrix.Scale(render_surface_sublayer_scale.x(),
-                            render_surface_sublayer_scale.y());
+      data_for_children.parent_matrix.Scale(combined_transform_scales.x(),
+                                            combined_transform_scales.y());
 
       // Even if the |layer_is_drawn|, it only contributes to a drawn surface
       // when the |layer_is_visible|.
@@ -1926,6 +1906,10 @@ static void CalculateDrawPropertiesInternal(
     // newly created RenderSurfaceImpl.
     data_for_children.full_hierarchy_matrix.PreconcatTransform(
         render_surface->draw_transform());
+
+    // A render surface inherently acts as a flattening point for the content of
+    // its descendants.
+    data_for_children.full_hierarchy_matrix.FlattenTo2d();
 
     if (layer->mask_layer()) {
       DrawProperties<LayerType>& mask_layer_draw_properties =
@@ -2205,6 +2189,8 @@ static void CalculateDrawPropertiesInternal(
         render_surface_layer_list->size() -
         child->draw_properties()
             .index_of_first_render_surface_layer_list_addition;
+    layer_draw_properties.layer_or_descendant_is_drawn |=
+        child->draw_properties().layer_or_descendant_is_drawn;
   }
 
   // Add the unsorted layer list contributions, if necessary.
@@ -2311,14 +2297,14 @@ static void CalculateDrawPropertiesInternal(
     // surface's subtree into layer space.
     gfx::Transform screen_space_transform = layer->screen_space_transform();
     screen_space_transform.Scale(
-        layer->contents_scale_x() / render_surface_sublayer_scale.x(),
-        layer->contents_scale_y() / render_surface_sublayer_scale.y());
+        layer->contents_scale_x() / combined_transform_scales.x(),
+        layer->contents_scale_y() / combined_transform_scales.y());
     render_surface->SetScreenSpaceTransform(screen_space_transform);
 
     if (layer->replica_layer()) {
       gfx::Transform surface_origin_to_replica_origin_transform;
       surface_origin_to_replica_origin_transform.Scale(
-          render_surface_sublayer_scale.x(), render_surface_sublayer_scale.y());
+          combined_transform_scales.x(), combined_transform_scales.y());
       surface_origin_to_replica_origin_transform.Translate(
           layer->replica_layer()->position().x() +
               layer->replica_layer()->transform_origin().x(),
@@ -2330,8 +2316,8 @@ static void CalculateDrawPropertiesInternal(
           -layer->replica_layer()->transform_origin().x(),
           -layer->replica_layer()->transform_origin().y());
       surface_origin_to_replica_origin_transform.Scale(
-          1.0 / render_surface_sublayer_scale.x(),
-          1.0 / render_surface_sublayer_scale.y());
+          1.0 / combined_transform_scales.x(),
+          1.0 / combined_transform_scales.y());
 
       // Compute the replica's "originTransform" that maps from the replica's
       // origin space to the target surface origin space.
@@ -2356,17 +2342,6 @@ static void CalculateDrawPropertiesInternal(
   if (sorting_start_index == descendants.size()) {
     DCHECK(!render_to_separate_surface || IsRootLayer(layer));
     return;
-  }
-
-  // If preserves-3d then sort all the descendants in 3D so that they can be
-  // drawn from back to front. If the preserves-3d property is also set on the
-  // parent then skip the sorting as the parent will sort all the descendants
-  // anyway.
-  if (globals.layer_sorter && descendants.size() && layer->Is3dSorted() &&
-      !LayerIsInExisting3DRenderingContext(layer)) {
-    SortLayers(descendants.begin() + sorting_start_index,
-               descendants.end(),
-               globals.layer_sorter);
   }
 
   UpdateAccumulatedSurfaceState<LayerType>(
@@ -2406,7 +2381,6 @@ static void ProcessCalcDrawPropsInputs(
   scaled_device_transform.Scale(inputs.device_scale_factor,
                                 inputs.device_scale_factor);
 
-  globals->layer_sorter = NULL;
   globals->max_texture_size = inputs.max_texture_size;
   globals->device_scale_factor =
       inputs.device_scale_factor * device_transform_scale;
@@ -2481,11 +2455,18 @@ void LayerTreeHostCommon::UpdateRenderSurfaces(
 }
 
 static bool ApproximatelyEqual(const gfx::Rect& r1, const gfx::Rect& r2) {
-  static const int tolerance = 1;
+  // TODO(vollick): This tolerance should be lower: crbug.com/471786
+  static const int tolerance = 2;
   return std::abs(r1.x() - r2.x()) <= tolerance &&
          std::abs(r1.y() - r2.y()) <= tolerance &&
-         std::abs(r1.width() - r2.width()) <= tolerance &&
-         std::abs(r1.height() - r2.height()) <= tolerance;
+         std::abs(r1.right() - r2.right()) <= tolerance &&
+         std::abs(r1.bottom() - r2.bottom()) <= tolerance;
+}
+
+static bool ApproximatelyEqual(const gfx::Transform& a,
+                               const gfx::Transform& b) {
+  static const float tolerance = 0.1f;
+  return gfx::MatrixDistance(a, b) <= tolerance;
 }
 
 void LayerTreeHostCommon::CalculateDrawProperties(
@@ -2499,52 +2480,76 @@ void LayerTreeHostCommon::CalculateDrawProperties(
   ProcessCalcDrawPropsInputs(*inputs, &globals, &data_for_recursion);
 
   PreCalculateMetaInformationRecursiveData recursive_data;
-  PreCalculateMetaInformation(inputs->root_layer, &recursive_data);
-  std::vector<AccumulatedSurfaceState<Layer>> accumulated_surface_state;
-  CalculateDrawPropertiesInternal<Layer>(
-      inputs->root_layer,
-      globals,
-      data_for_recursion,
-      inputs->render_surface_layer_list,
-      &dummy_layer_list,
-      &accumulated_surface_state,
-      inputs->current_render_surface_layer_list_id);
+
+  if (!inputs->verify_property_trees) {
+    PreCalculateMetaInformation(inputs->root_layer, &recursive_data);
+    std::vector<AccumulatedSurfaceState<Layer>> accumulated_surface_state;
+    CalculateDrawPropertiesInternal<Layer>(
+        inputs->root_layer, globals, data_for_recursion,
+        inputs->render_surface_layer_list, &dummy_layer_list,
+        &accumulated_surface_state,
+        inputs->current_render_surface_layer_list_id);
+  } else {
+    {
+      TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.cdp-perf"),
+                   "LayerTreeHostCommon::CalculateDrawProperties");
+      PreCalculateMetaInformation(inputs->root_layer, &recursive_data);
+      std::vector<AccumulatedSurfaceState<Layer>> accumulated_surface_state;
+      CalculateDrawPropertiesInternal<Layer>(
+          inputs->root_layer, globals, data_for_recursion,
+          inputs->render_surface_layer_list, &dummy_layer_list,
+          &accumulated_surface_state,
+          inputs->current_render_surface_layer_list_id);
+    }
+
+    // The translation from layer to property trees is an intermediate state. We
+    // will eventually get these data passed directly to the compositor.
+    TransformTree transform_tree;
+    ClipTree clip_tree;
+    OpacityTree opacity_tree;
+    {
+      TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.cdp-perf"),
+                   "LayerTreeHostCommon::ComputeVisibleRectsWithPropertyTrees");
+      ComputeVisibleRectsUsingPropertyTrees(
+          inputs->root_layer, inputs->page_scale_application_layer,
+          inputs->page_scale_factor, inputs->device_scale_factor,
+          gfx::Rect(inputs->device_viewport_size), inputs->device_transform,
+          &transform_tree, &clip_tree, &opacity_tree);
+    }
+
+    LayerIterator<Layer> it, end;
+    for (it = LayerIterator<Layer>::Begin(inputs->render_surface_layer_list),
+        end = LayerIterator<Layer>::End(inputs->render_surface_layer_list);
+         it != end; ++it) {
+      Layer* current_layer = *it;
+      if (!it.represents_itself() || !current_layer->DrawsContent())
+        continue;
+
+      const bool visible_rects_match =
+          ApproximatelyEqual(current_layer->visible_content_rect(),
+                             current_layer->visible_rect_from_property_trees());
+      CHECK(visible_rects_match)
+          << "expected: " << current_layer->visible_content_rect().ToString()
+          << " actual: "
+          << current_layer->visible_rect_from_property_trees().ToString();
+
+      const bool draw_transforms_match = ApproximatelyEqual(
+          current_layer->draw_transform(),
+          current_layer->draw_transform_from_property_trees(transform_tree));
+      CHECK(draw_transforms_match);
+
+      const bool draw_opacities_match =
+          current_layer->draw_opacity() ==
+          current_layer->DrawOpacityFromPropertyTrees(opacity_tree);
+      CHECK(draw_opacities_match);
+    }
+  }
 
   // The dummy layer list should not have been used.
   DCHECK_EQ(0u, dummy_layer_list.size());
   // A root layer render_surface should always exist after
   // CalculateDrawProperties.
   DCHECK(inputs->root_layer->render_surface());
-
-  if (inputs->verify_property_trees) {
-    // TODO(ajuma): Can we efficiently cache some of this rather than
-    // starting from scratch every frame?
-    TransformTree transform_tree;
-    ClipTree clip_tree;
-    ComputeVisibleRectsUsingPropertyTrees(
-        inputs->root_layer, inputs->page_scale_application_layer,
-        inputs->page_scale_factor, inputs->device_scale_factor,
-        gfx::Rect(inputs->device_viewport_size), inputs->device_transform,
-        &transform_tree, &clip_tree);
-
-    bool failed = false;
-    LayerIterator<Layer> it, end;
-    for (it = LayerIterator<Layer>::Begin(inputs->render_surface_layer_list),
-        end = LayerIterator<Layer>::End(inputs->render_surface_layer_list);
-         it != end; ++it) {
-      Layer* current_layer = *it;
-      if (it.represents_itself()) {
-        if (!failed && current_layer->DrawsContent() &&
-            !ApproximatelyEqual(
-                current_layer->visible_content_rect(),
-                current_layer->visible_rect_from_property_trees())) {
-          failed = true;
-        }
-      }
-    }
-
-    CHECK(!failed);
-  }
 }
 
 void LayerTreeHostCommon::CalculateDrawProperties(
@@ -2553,9 +2558,6 @@ void LayerTreeHostCommon::CalculateDrawProperties(
   SubtreeGlobals<LayerImpl> globals;
   DataForRecursion<LayerImpl> data_for_recursion;
   ProcessCalcDrawPropsInputs(*inputs, &globals, &data_for_recursion);
-
-  LayerSorter layer_sorter;
-  globals.layer_sorter = &layer_sorter;
 
   PreCalculateMetaInformationRecursiveData recursive_data;
   PreCalculateMetaInformation(inputs->root_layer, &recursive_data);

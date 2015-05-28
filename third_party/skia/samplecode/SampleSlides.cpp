@@ -438,7 +438,7 @@ static void mesh_slide(SkCanvas* canvas) {
 
     SkPaint paint;
     paint.setDither(true);
-    paint.setFilterLevel(SkPaint::kLow_FilterLevel);
+    paint.setFilterQuality(kLow_SkFilterQuality);
 
     for (size_t i = 0; i < SK_ARRAY_COUNT(fRecs); i++) {
         canvas->save();
@@ -697,7 +697,7 @@ public:
 
 protected:
     // overrides from SkEventSink
-    virtual bool onQuery(SkEvent* evt) SK_OVERRIDE {
+    bool onQuery(SkEvent* evt) override {
         if (SampleCode::TitleQ(*evt)) {
             SampleCode::TitleR(evt, "Slides");
             return true;
@@ -705,12 +705,12 @@ protected:
         return this->INHERITED::onQuery(evt);
     }
 
-    virtual void onDrawContent(SkCanvas* canvas) SK_OVERRIDE {
+    void onDrawContent(SkCanvas* canvas) override {
         this->init();
         gProc[fIndex](canvas);
     }
 
-    virtual SkView::Click* onFindClickHandler(SkScalar x, SkScalar y, unsigned) SK_OVERRIDE {
+    SkView::Click* onFindClickHandler(SkScalar x, SkScalar y, unsigned) override {
         this->init();
         fIndex = (fIndex + 1) % SK_ARRAY_COUNT(gProc);
         this->inval(NULL);

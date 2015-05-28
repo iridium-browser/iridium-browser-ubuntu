@@ -15,7 +15,6 @@
 #include "net/http/http_proxy_client_socket.h"
 #include "net/http/http_response_headers.h"
 #include "net/socket/client_socket_handle.h"
-#include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/socket_test_util.h"
 #include "net/spdy/spdy_protocol.h"
@@ -156,17 +155,12 @@ class HttpProxyClientSocketPoolTest
  protected:
   HttpProxyClientSocketPoolTest()
       : session_deps_(GetParam().protocol),
-        tcp_histograms_("MockTCP"),
         transport_socket_pool_(
             kMaxSockets,
             kMaxSocketsPerGroup,
-            &tcp_histograms_,
             session_deps_.deterministic_socket_factory.get()),
-        ssl_histograms_("MockSSL"),
         ssl_socket_pool_(kMaxSockets,
                          kMaxSocketsPerGroup,
-                         &ssl_histograms_,
-                         session_deps_.host_resolver.get(),
                          session_deps_.cert_verifier.get(),
                          NULL /* channel_id_store */,
                          NULL /* transport_security_state */,
@@ -178,15 +172,11 @@ class HttpProxyClientSocketPoolTest
                          NULL,
                          NULL,
                          session_deps_.ssl_config_service.get(),
-                         false,
                          BoundNetLog().net_log()),
         session_(CreateNetworkSession()),
-        http_proxy_histograms_("HttpProxyUnitTest"),
         spdy_util_(GetParam().protocol),
         pool_(kMaxSockets,
               kMaxSocketsPerGroup,
-              &http_proxy_histograms_,
-              NULL,
               &transport_socket_pool_,
               &ssl_socket_pool_,
               NULL) {}
@@ -313,15 +303,12 @@ class HttpProxyClientSocketPoolTest
  private:
   SpdySessionDependencies session_deps_;
 
-  ClientSocketPoolHistograms tcp_histograms_;
   MockTransportClientSocketPool transport_socket_pool_;
-  ClientSocketPoolHistograms ssl_histograms_;
   MockHostResolver host_resolver_;
   scoped_ptr<CertVerifier> cert_verifier_;
   SSLClientSocketPool ssl_socket_pool_;
 
   const scoped_refptr<HttpNetworkSession> session_;
-  ClientSocketPoolHistograms http_proxy_histograms_;
 
  protected:
   SpdyTestUtil spdy_util_;
@@ -348,9 +335,9 @@ INSTANTIATE_TEST_CASE_P(
         HttpProxyClientSocketPoolTestParams(HTTP, kProtoSPDY4_14),
         HttpProxyClientSocketPoolTestParams(HTTPS, kProtoSPDY4_14),
         HttpProxyClientSocketPoolTestParams(SPDY, kProtoSPDY4_14),
-        HttpProxyClientSocketPoolTestParams(HTTP, kProtoSPDY4_15),
-        HttpProxyClientSocketPoolTestParams(HTTPS, kProtoSPDY4_15),
-        HttpProxyClientSocketPoolTestParams(SPDY, kProtoSPDY4_15)));
+        HttpProxyClientSocketPoolTestParams(HTTP, kProtoSPDY4),
+        HttpProxyClientSocketPoolTestParams(HTTPS, kProtoSPDY4),
+        HttpProxyClientSocketPoolTestParams(SPDY, kProtoSPDY4)));
 
 TEST_P(HttpProxyClientSocketPoolTest, NoTunnel) {
   Initialize(NULL, 0, NULL, 0, NULL, 0, NULL, 0);
@@ -528,9 +515,7 @@ TEST_P(HttpProxyClientSocketPoolTest, AsyncHaveAuth) {
   EXPECT_EQ(OK, callback_.WaitForResult());
   EXPECT_TRUE(handle_.is_initialized());
   ASSERT_TRUE(handle_.socket());
-  HttpProxyClientSocket* tunnel_socket =
-          static_cast<HttpProxyClientSocket*>(handle_.socket());
-  EXPECT_TRUE(tunnel_socket->IsConnected());
+  EXPECT_TRUE(handle_.socket()->IsConnected());
   proxy_delegate->VerifyOnTunnelRequestCompleted(
       "www.google.com:443",
       proxy_host_port.c_str());

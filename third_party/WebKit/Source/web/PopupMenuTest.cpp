@@ -32,18 +32,21 @@
 #include "platform/PopupMenu.h"
 
 #include "core/dom/Element.h"
+#include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
+#include "core/frame/PinchViewport.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLSelectElement.h"
 #include "core/html/forms/PopupMenuClient.h"
+#include "core/layout/LayoutMenuList.h"
 #include "core/page/EventHandler.h"
-#include "core/rendering/RenderMenuList.h"
-#include "core/testing/URLTestHelpers.h"
+#include "core/page/Page.h"
 #include "platform/KeyboardCodes.h"
 #include "platform/PlatformMouseEvent.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/Color.h"
 #include "platform/scroll/ScrollbarTheme.h"
+#include "platform/testing/URLTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebScreenInfo.h"
 #include "public/platform/WebString.h"
@@ -59,7 +62,6 @@
 #include "public/web/WebSettings.h"
 #include "public/web/WebView.h"
 #include "public/web/WebViewClient.h"
-#include "v8.h"
 #include "web/PopupContainer.h"
 #include "web/PopupListBox.h"
 #include "web/PopupMenuChromium.h"
@@ -77,7 +79,7 @@ namespace {
 class TestPopupMenuClient : public PopupMenuClient {
 public:
     // Item at index 0 is selected by default.
-    TestPopupMenuClient() : m_selectIndex(0), m_node(0), m_listSize(10) { }
+    TestPopupMenuClient() : m_selectIndex(0), m_node(0), m_listSize(10), m_indexToSelectOnCancel(-1) { }
     virtual ~TestPopupMenuClient() { }
     virtual void valueChanged(unsigned listIndex, bool fireEvents = true)
     {
@@ -110,18 +112,23 @@ public:
         return PopupMenuStyle(Color::black, Color::white, font, true, false, Length(), TextDirection(), false /* has text direction override */);
     }
     virtual PopupMenuStyle menuStyle() const { return itemStyle(0); }
-    virtual int clientInsetLeft() const { return 0; }
-    virtual int clientInsetRight() const { return 0; }
     virtual LayoutUnit clientPaddingLeft() const { return 0; }
     virtual LayoutUnit clientPaddingRight() const { return 0; }
     virtual int listSize() const { return m_listSize; }
     virtual int selectedIndex() const { return m_selectIndex; }
     virtual void popupDidHide() { }
+    virtual void popupDidCancel()
+    {
+        if (m_indexToSelectOnCancel >= 0)
+            m_selectIndex = m_indexToSelectOnCancel;
+    }
     virtual bool itemIsSeparator(unsigned listIndex) const { return false; }
     virtual bool itemIsLabel(unsigned listIndex) const { return false; }
     virtual bool itemIsSelected(unsigned listIndex) const { return listIndex == m_selectIndex; }
-    virtual bool valueShouldChangeOnHotTrack() const { return false; }
-    virtual void setTextFromItem(unsigned listIndex) { }
+    virtual void provisionalSelectionChanged(unsigned listIndex) { m_indexToSelectOnCancel = listIndex; }
+    virtual IntRect elementRectRelativeToViewport() const override { return IntRect(); }
+    virtual Element& ownerElement() const override { return *toElement(m_node); }
+    virtual ComputedStyle* computedStyleForItem(Element& element) const override { return nullptr; }
 
     virtual FontSelector* fontSelector() const { return 0; }
     virtual HostWindow* hostWindow() const { return 0; }
@@ -137,11 +144,16 @@ private:
     std::set<unsigned> m_disabledIndexSet;
     Node* m_node;
     int m_listSize;
+    int m_indexToSelectOnCancel;
 };
 
 class TestWebWidgetClient : public WebWidgetClient {
 public:
     ~TestWebWidgetClient() { }
+    virtual WebRect windowRect() { return m_windowRect; }
+    virtual void setWindowRect(const WebRect& rect) { m_windowRect = rect; }
+private:
+    WebRect m_windowRect;
 };
 
 class TestWebPopupMenuImpl : public WebPopupMenuImpl {
@@ -173,6 +185,8 @@ public:
         screenInfo.availableRect.width = 2000;
         return screenInfo;
     }
+
+    WebWidgetClient* webWidgetClient() { return &m_webWidgetClient; }
 
 private:
     TestWebWidgetClient m_webWidgetClient;
@@ -337,6 +351,20 @@ TEST_F(SelectPopupMenuTest, SelectWithKeys)
     simulateKeyDownEvent(VKEY_TAB);
     EXPECT_FALSE(popupOpen());
     EXPECT_EQ(4, selectedIndex());
+}
+
+TEST_F(SelectPopupMenuTest, PinchZoomedIn)
+{
+    FrameTestHelpers::loadFrame(webView()->mainFrame(), "about:blank");
+    webView()->resize(WebSize(1000, 1000));
+    webView()->layout();
+    webView()->setPageScaleFactor(2);
+    webView()->page()->frameHost().pinchViewport().setLocation(IntPoint(30, 50));
+
+    m_popupMenu->show(FloatQuad(FloatRect(80, 90, 100, 100)), IntSize(100, 100), 0);
+
+    EXPECT_EQ(100, m_webviewClient.webWidgetClient()->windowRect().x);
+    EXPECT_EQ(280, m_webviewClient.webWidgetClient()->windowRect().y);
 }
 
 // Tests that selecting an item with the mouse does select the item and close
@@ -596,10 +624,11 @@ TEST_F(SelectPopupMenuStyleTest, DISABLED_PopupListBoxRTLRowWidth)
 TEST_F(SelectPopupMenuStyleTest, PopupListBoxRTLRowWidth)
 #endif
 {
+    RuntimeEnabledFeatures::setHTMLPopupMenuEnabled(false);
     registerMockedURLLoad("select_rtl_width.html");
     loadFrame(mainFrame(), "select_rtl_width.html");
     HTMLSelectElement* select = toHTMLSelectElement(mainFrame()->frame()->document()->focusedElement());
-    RenderMenuList* menuList = toRenderMenuList(select->renderer());
+    LayoutMenuList* menuList = toLayoutMenuList(select->layoutObject());
     ASSERT(menuList);
     menuList->showPopup();
     ASSERT(popupOpen());

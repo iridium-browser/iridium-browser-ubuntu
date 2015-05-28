@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
@@ -87,13 +87,13 @@ void WaitForLoadStopWithoutSuccessCheck(WebContents* web_contents);
 // navigations should be refactored to do EXPECT_TRUE(WaitForLoadStop()).
 bool WaitForLoadStop(WebContents* web_contents);
 
-#if defined(USE_AURA)
+#if defined(USE_AURA) || defined(OS_ANDROID)
 // If WebContent's view is currently being resized, this will wait for the ack
 // from the renderer that the resize is complete and for the
 // WindowEventDispatcher to release the pointer moves. If there's no resize in
 // progress, the method will return right away.
 void WaitForResizeComplete(WebContents* web_contents);
-#endif  // USE_AURA
+#endif  // defined(USE_AURA) || defined(OS_ANDROID)
 
 // Causes the specified web_contents to crash. Blocks until it is crashed.
 void CrashTab(WebContents* web_contents);
@@ -118,6 +118,11 @@ void SimulateMouseEvent(WebContents* web_contents,
 
 // Taps the screen at |point|.
 void SimulateTapAt(WebContents* web_contents, const gfx::Point& point);
+
+// Taps the screen with modifires at |point|.
+void SimulateTapWithModifiersAt(WebContents* web_contents,
+                                unsigned Modifiers,
+                                const gfx::Point& point);
 
 // Sends a key press asynchronously.
 // The native code of the key event will be set to InvalidNativeKeycode().
@@ -243,6 +248,12 @@ void WaitForInterstitialDetach(content::WebContents* web_contents);
 void RunTaskAndWaitForInterstitialDetach(content::WebContents* web_contents,
                                          const base::Closure& task);
 
+// Waits until all resources have loaded in the given RenderFrameHost.
+// When the load completes, this function sends a "pageLoadComplete" message
+// via domAutomationController. The caller should make sure this extra
+// message is handled properly.
+bool WaitForRenderFrameReady(RenderFrameHost* rfh) WARN_UNUSED_RESULT;
+
 // Watches title changes on a WebContents, blocking until an expected title is
 // set.
 class TitleWatcher : public WebContentsObserver {
@@ -264,7 +275,7 @@ class TitleWatcher : public WebContentsObserver {
 
  private:
   // Overridden WebContentsObserver methods.
-  void DidStopLoading(RenderViewHost* render_view_host) override;
+  void DidStopLoading() override;
   void TitleWasSet(NavigationEntry* entry, bool explicit_set) override;
 
   void TestTitle();

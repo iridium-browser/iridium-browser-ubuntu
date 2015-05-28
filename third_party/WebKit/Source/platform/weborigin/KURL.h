@@ -46,6 +46,10 @@ enum ParsedURLStringTag { ParsedURLString };
 
 class PLATFORM_EXPORT KURL {
 public:
+    // This must be called during initialization (before we create
+    // other threads).
+    static void initialize();
+
     KURL();
     KURL(const KURL&);
     KURL& operator=(const KURL&);
@@ -80,6 +84,7 @@ public:
     ~KURL();
 
     String strippedForUseAsReferrer() const;
+    String strippedForUseAsHref() const;
 
     // FIXME: The above functions should be harmonized so that passing a
     // base of null or the empty string gives the same result as the

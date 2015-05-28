@@ -39,8 +39,8 @@ namespace blink {
 struct SameSizeAsFontDescription {
     FontFamily familyList;
     RefPtr<FontFeatureSettings> m_featureSettings;
-    String locale;
-    float sizes[4];
+    AtomicString locale;
+    float sizes[6];
     // FXIME: Make them fit into one word.
     uint32_t bitfields;
     uint32_t bitfields2 : 7;
@@ -123,6 +123,21 @@ FontDescription::VariantLigatures FontDescription::variantLigatures() const
     return ligatures;
 }
 
+static const AtomicString& defaultLocale()
+{
+    DEFINE_STATIC_LOCAL(AtomicString, locale, ());
+    if (locale.isNull())
+        locale = AtomicString("en");
+    return locale;
+}
+
+const AtomicString& FontDescription::locale() const
+{
+    if (m_locale.isNull())
+        return defaultLocale();
+    return m_locale;
+}
+
 void FontDescription::setTraits(FontTraits traits)
 {
     setStyle(traits.style());
@@ -145,7 +160,8 @@ float FontDescription::effectiveFontSize() const
 {
     // Ensure that the effective precision matches the font-cache precision.
     // This guarantees that the same precision is used regardless of cache status.
-    return floorf(computedSize() * FontCacheKey::precisionMultiplier()) / FontCacheKey::precisionMultiplier();
+    float computedOrAdjustedSize = hasSizeAdjust() ? adjustedSize() : computedSize();
+    return floorf(computedOrAdjustedSize * FontCacheKey::precisionMultiplier()) / FontCacheKey::precisionMultiplier();
 }
 
 FontCacheKey FontDescription::cacheKey(const FontFaceCreationParams& creationParams, FontTraits desiredTraits) const

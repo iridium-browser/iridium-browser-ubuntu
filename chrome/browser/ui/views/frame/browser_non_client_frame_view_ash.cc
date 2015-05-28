@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,10 @@
 #include "ash/frame/frame_border_hit_test_controller.h"
 #include "ash/frame/header_painter_util.h"
 #include "ash/shell.h"
+#include "base/profiler/scoped_tracker.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -24,8 +26,10 @@
 #include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/browser/web_applications/web_app.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/extension_registry.h"
 #include "grit/theme_resources.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/aura/client/aura_constants.h"
@@ -125,12 +129,7 @@ void BrowserNonClientFrameViewAsh::Init() {
     window_icon_->Update();
   }
 
-  if (browser_view()->IsRegularOrGuestSession() &&
-      switches::IsNewAvatarMenu()) {
-    UpdateNewStyleAvatarInfo(this, NewAvatarButton::NATIVE_BUTTON);
-  } else {
-    UpdateAvatarInfo();
-  }
+  UpdateAvatar();
 
   // HeaderPainter handles layout.
   if (UsePackagedAppHeaderStyle()) {
@@ -205,6 +204,11 @@ int BrowserNonClientFrameViewAsh::GetThemeBackgroundXInset() const {
 }
 
 void BrowserNonClientFrameViewAsh::UpdateThrobber(bool running) {
+  // TODO(robliao): Remove ScopedTracker below once crbug.com/461137 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "461137 BrowserNonClientFrameViewAsh::UpdateThrobber"));
+
   if (window_icon_)
     window_icon_->Update();
 }
@@ -246,7 +250,15 @@ int BrowserNonClientFrameViewAsh::NonClientHitTest(const gfx::Point& point) {
   // See if the point is actually within either of the avatar menu buttons.
   if (hit_test == HTCAPTION && avatar_button() &&
       ConvertedHitTest(this, avatar_button(), point)) {
+#if defined(OS_CHROMEOS)
+    // In ChromeOS, a browser window which has an avatar badging on the top
+    // left corner means it's a teleported browser window. We should treat the
+    // avatar as part of the browser non client frame (e.g., clicking on it
+    // allows the user to drag the browser window around.)
+    return HTCAPTION;
+#else
     return HTCLIENT;
+#endif
   }
 
   if (hit_test == HTCAPTION && new_avatar_button() &&
@@ -397,9 +409,10 @@ void BrowserNonClientFrameViewAsh::
   // UpdateSizeButtonVisibility(false). Due to this a new size is not available
   // until the completion of the animation. Layout in response to the preferred
   // size changes.
-  if (child != caption_button_container_)
-    return;
-  frame()->GetRootView()->Layout();
+  if (child == caption_button_container_ || child == new_avatar_button()) {
+    InvalidateLayout();
+    frame()->GetRootView()->Layout();
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -443,7 +456,20 @@ gfx::ImageSkia BrowserNonClientFrameViewAsh::GetFaviconForTabIconView() {
 void BrowserNonClientFrameViewAsh::ButtonPressed(views::Button* sender,
                                                  const ui::Event& event) {
   DCHECK(sender == new_avatar_button());
-  chrome::ExecuteCommand(browser_view()->browser(), IDC_SHOW_AVATAR_MENU);
+  int command = IDC_SHOW_AVATAR_MENU;
+  if (event.IsMouseEvent() &&
+      static_cast<const ui::MouseEvent&>(event).IsRightMouseButton()) {
+    command = IDC_SHOW_FAST_USER_SWITCHER;
+  }
+  chrome::ExecuteCommand(browser_view()->browser(), command);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// BrowserNonClientFrameViewAsh, protected:
+
+// BrowserNonClientFrameView:
+void BrowserNonClientFrameViewAsh::UpdateNewAvatarButtonImpl() {
+  UpdateNewAvatarButton(this, NewAvatarButton::NATIVE_BUTTON);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -504,8 +530,17 @@ bool BrowserNonClientFrameViewAsh::UseImmersiveLightbarHeaderStyle() const {
 
 bool BrowserNonClientFrameViewAsh::UsePackagedAppHeaderStyle() const {
   // Use the packaged app style for apps that aren't using the newer WebApp
-  // style.
-  return browser_view()->browser()->is_app() && !UseWebAppHeaderStyle();
+  // style, and that aren't bookmark apps.
+  if (!browser_view()->browser()->is_app() || UseWebAppHeaderStyle())
+    return false;
+
+  const std::string extension_id = web_app::GetExtensionIdFromApplicationName(
+      browser_view()->browser()->app_name());
+  const extensions::Extension* extension =
+      extensions::ExtensionRegistry::Get(browser_view()->browser()->profile())
+          ->GetExtensionById(extension_id,
+                             extensions::ExtensionRegistry::EVERYTHING);
+  return !extension || !extension->from_bookmark();
 }
 
 bool BrowserNonClientFrameViewAsh::UseWebAppHeaderStyle() const {

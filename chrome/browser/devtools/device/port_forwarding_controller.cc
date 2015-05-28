@@ -4,7 +4,6 @@
 
 #include "chrome/browser/devtools/device/port_forwarding_controller.h"
 
-#include <algorithm>
 #include <map>
 
 #include "base/bind.h"
@@ -47,7 +46,6 @@ enum {
 namespace tethering = ::chrome::devtools::Tethering;
 
 static const char kDevToolsRemoteBrowserTarget[] = "/devtools/browser";
-const int kMinVersionPortForwarding = 28;
 
 class SocketTunnel : public base::NonThreadSafe {
  public:
@@ -224,36 +222,6 @@ class SocketTunnel : public base::NonThreadSafe {
   bool about_to_destroy_;
 };
 
-typedef DevToolsAndroidBridge::RemoteBrowser::ParsedVersion ParsedVersion;
-
-static bool IsVersionLower(const ParsedVersion& left,
-                           const ParsedVersion& right) {
-  return std::lexicographical_compare(
-    left.begin(), left.end(), right.begin(), right.end());
-}
-
-static bool IsPortForwardingSupported(const ParsedVersion& version) {
-  return !version.empty() && version[0] >= kMinVersionPortForwarding;
-}
-
-static scoped_refptr<DevToolsAndroidBridge::RemoteBrowser>
-FindBestBrowserForTethering(
-    const DevToolsAndroidBridge::RemoteBrowsers browsers) {
-  scoped_refptr<DevToolsAndroidBridge::RemoteBrowser> best_browser;
-  ParsedVersion newest_version;
-  for (DevToolsAndroidBridge::RemoteBrowsers::const_iterator it =
-      browsers.begin(); it != browsers.end(); ++it) {
-    scoped_refptr<DevToolsAndroidBridge::RemoteBrowser> browser = *it;
-    ParsedVersion current_version = browser->GetParsedVersion();
-    if (IsPortForwardingSupported(current_version) &&
-        IsVersionLower(newest_version, current_version)) {
-      best_browser = browser;
-      newest_version = current_version;
-    }
-  }
-  return best_browser;
-}
-
 }  // namespace
 
 class PortForwardingController::Connection
@@ -323,7 +291,7 @@ PortForwardingController::Connection::Connection(
       connected_(false),
       forwarding_map_(forwarding_map),
       weak_factory_(this) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   controller_->registry_[browser->serial()] = this;
   scoped_refptr<AndroidDeviceManager::Device> device(
       controller_->bridge_->FindDevice(browser->serial()));
@@ -334,7 +302,7 @@ PortForwardingController::Connection::Connection(
 }
 
 PortForwardingController::Connection::~Connection() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(controller_->registry_.find(browser_->serial()) !=
          controller_->registry_.end());
   controller_->registry_.erase(browser_->serial());
@@ -342,7 +310,7 @@ PortForwardingController::Connection::~Connection() {
 
 void PortForwardingController::Connection::UpdateForwardingMap(
     const ForwardingMap& new_forwarding_map) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (connected_) {
     SerializeChanges(tethering::unbind::kName,
         new_forwarding_map, forwarding_map_);
@@ -356,7 +324,7 @@ void PortForwardingController::Connection::SerializeChanges(
     const std::string& method,
     const ForwardingMap& old_map,
     const ForwardingMap& new_map) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   for (ForwardingMap::const_iterator new_it(new_map.begin());
       new_it != new_map.end(); ++new_it) {
     int port = new_it->first;
@@ -371,7 +339,7 @@ void PortForwardingController::Connection::SerializeChanges(
 
 void PortForwardingController::Connection::SendCommand(
     const std::string& method, int port) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   scoped_ptr<base::DictionaryValue> params(new base::DictionaryValue);
   if (method == tethering::bind::kName) {
     params->SetInteger(tethering::bind::kParamPort, port);
@@ -451,7 +419,7 @@ void PortForwardingController::Connection::UpdateSocketCountOnHandlerThread(
 void PortForwardingController::Connection::UpdateSocketCount(
     int port, int increment) {
 #if defined(DEBUG_DEVTOOLS)
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   PortStatusMap::iterator it = port_status_.find(port);
   if (it == port_status_.end())
     return;
@@ -463,12 +431,12 @@ void PortForwardingController::Connection::UpdateSocketCount(
 
 const PortForwardingController::PortStatusMap&
 PortForwardingController::Connection::GetPortStatusMap() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return port_status_;
 }
 
 void PortForwardingController::Connection::OnSocketOpened() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   connected_ = true;
   SerializeChanges(tethering::bind::kName, ForwardingMap(), forwarding_map_);
 }
@@ -479,7 +447,7 @@ void PortForwardingController::Connection::OnSocketClosed() {
 
 void PortForwardingController::Connection::OnFrameRead(
     const std::string& message) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (ProcessResponse(message))
     return;
 
@@ -528,8 +496,7 @@ void PortForwardingController::Connection::OnFrameRead(
 PortForwardingController::PortForwardingController(
     Profile* profile,
     DevToolsAndroidBridge* bridge)
-    : profile_(profile),
-      bridge_(bridge),
+    : bridge_(bridge),
       pref_service_(profile->GetPrefs()) {
   pref_change_registrar_.Init(pref_service_);
   base::Closure callback = base::Bind(
@@ -553,10 +520,8 @@ PortForwardingController::DeviceListChanged(
       continue;
     Registry::iterator rit = registry_.find(device->serial());
     if (rit == registry_.end()) {
-      scoped_refptr<DevToolsAndroidBridge::RemoteBrowser> browser(
-          FindBestBrowserForTethering(device->browsers()));
-      if (browser.get())
-        new Connection(this, browser, forwarding_map_);
+      if (device->browsers().size() > 0)
+        new Connection(this, device->browsers()[0], forwarding_map_);
     } else {
       status.push_back(std::make_pair(rit->second->browser(),
                                       rit->second->GetPortStatusMap()));

@@ -24,6 +24,8 @@ from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.value import list_of_scalar_values
 
+from metrics import keychain_metric
+
 
 class SpeedometerMeasurement(page_test.PageTest):
   enabled_suites = [
@@ -37,8 +39,11 @@ class SpeedometerMeasurement(page_test.PageTest):
   ]
 
   def __init__(self):
-    super(SpeedometerMeasurement, self).__init__(
-        action_name_to_run='RunPageInteractions')
+    super(SpeedometerMeasurement, self).__init__()
+
+  def CustomizeBrowserOptions(self, options):
+    keychain_metric.KeychainMetric.CustomizeBrowserOptions(options)
+    options.AppendExtraBrowserArgs(['--js-flags=--expose_gc'])
 
   def ValidateAndMeasurePage(self, page, tab, results):
     tab.WaitForDocumentReadyStateToBeComplete()
@@ -54,6 +59,11 @@ class SpeedometerMeasurement(page_test.PageTest):
         benchmarkClient.didRunSuites = function(measuredValues) {
           benchmarkClient._measuredValues.push(measuredValues);
           benchmarkClient._timeValues.push(measuredValues.total);
+        };
+        benchmarkClient.willRunTest = function(suite, test) {
+          for (var i = 0; i < 5; i++) {
+            gc();
+          }
         };
         benchmarkClient.iterationCount = %d;
         startTest();
@@ -76,9 +86,14 @@ class SpeedometerMeasurement(page_test.PageTest):
               };
               suite_times;
               """ % suite_name), important=False))
+    keychain_metric.KeychainMetric().AddResults(tab, results)
 
 class Speedometer(benchmark.Benchmark):
   test = SpeedometerMeasurement
+
+  @classmethod
+  def Name(cls):
+    return 'speedometer'
 
   def CreatePageSet(self, options):
     ps = page_set.PageSet(

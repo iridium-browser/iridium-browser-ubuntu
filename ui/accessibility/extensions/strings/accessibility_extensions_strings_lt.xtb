@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="lt">
 <translation id="1408730541890277710">Pakeisti vaizdus jų „alt“ tekstu.</translation>
+<translation id="6017514345406065928">Žalia</translation>
 <translation id="595639123821853262">Invertuotasis pilkumo tonas</translation>
 <translation id="8260673944985561857">„Caret Browsing“ parinktys</translation>
 <translation id="3410969471888629217">Pamiršti svetainės tinkinimus</translation>
 <translation id="6050189528197190982">Pilkumo tonas</translation>
+<translation id="8261559421026395104">Patobulinti rodinį:</translation>
 <translation id="5094574508723441140">Didesnis kontrastas</translation>
 <translation id="8609925175482059018">Paspauskite &lt;span class='key'&gt;F7&lt;/span&gt;, kad įjungtumėte „Caret Browsing“. Paspauskite klavišą dar kartą, kad funkciją išjungtumėte.</translation>
 <translation id="3435896845095436175">Įgalinti</translation>
@@ -14,6 +16,8 @@
 <translation id="2394933097471027016">Išbandykite dabar – „Caret Browsing“ visada įgalinta šiame puslapyje!</translation>
 <translation id="3622586652998721735">Nustatyti kaip numatytąją schemą</translation>
 <translation id="2179565792157161713">Atidaryti ilgą aprašą naujame skirtuke</translation>
+<translation id="7942349550061667556">Raudona</translation>
+<translation id="1555130319947370107">Mėlyna</translation>
 <translation id="2471847333270902538">Spalvų schema, skirta svetainei <ph name="SITE"/>:</translation>
 <translation id="381767806621926835">Dešiniuoju pelės klavišu spustelėkite bet kurį elementą su atributu „aria-describedat“ arba „longdesc“, kad peržiūrėtumėte ilgą aprašą.</translation>
 <translation id="786423340267544509">Pridėkite kraštines prie elementų naudodami atributą „aria-describedat“ arba „longdesc“.</translation>
@@ -31,6 +35,7 @@
 <translation id="4896660567607030658">Jokių atsiliepimų, tik rodyti žymeklį.</translation>
 <translation id="5631241868147802353">Numatytoji spalvų schema:</translation>
 <translation id="5173942593318174089">Paryškinti žymeklio vietą naudojant animaciją.</translation>
+<translation id="7379645913608427028">Laipsnis</translation>
 <translation id="894241283505723656">Long Descriptions in Context Menu</translation>
 <translation id="5555153510860501336">Didelis kontrastas išjungtas</translation>
 <translation id="1703735871906654364">Caret Browsing</translation>
@@ -38,6 +43,7 @@
 <translation id="6550675742724504774">Parinktys</translation>
 <translation id="5650358096585648000">Vizuali reakcija</translation>
 <translation id="4388820049312272371">Paryškinti žymeklio vietą naudojant greito mirksėjimo funkciją.</translation>
+<translation id="2223143012868735942">Visiems tinklalapiams pritaikytas tinkintas spalvų filtras, kad spalvos būtų rodomos geriau.</translation>
 <translation id="4023902424053835668">Naršykite tinklalapių tekstą naudodami rodyklių klavišus.</translation>
 <translation id="2795227192542594043">Naudojant šį plėtinį tinklalapyje pateikiamas perkeliamas žymeklis, kad galėtumėte pasirinkti tekstą naudodami klaviatūrą.</translation>
 <translation id="4394049700291259645">Neleisti</translation>

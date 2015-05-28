@@ -10,9 +10,9 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/rtp_rtcp/interface/receive_statistics.h"
 #include "webrtc/system_wrappers/interface/clock.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 
@@ -36,7 +36,7 @@ class ReceiveStatisticsTest : public ::testing::Test {
 
  protected:
   SimulatedClock clock_;
-  scoped_ptr<ReceiveStatistics> receive_statistics_;
+  rtc::scoped_ptr<ReceiveStatistics> receive_statistics_;
   RTPHeader header1_;
   RTPHeader header2_;
 };
@@ -141,18 +141,18 @@ TEST_F(ReceiveStatisticsTest, GetReceiveStreamDataCounters) {
   StreamDataCounters counters;
   statistician->GetReceiveStreamDataCounters(&counters);
   EXPECT_GT(counters.first_packet_time_ms, -1);
-  EXPECT_EQ(1u, counters.packets);
+  EXPECT_EQ(1u, counters.transmitted.packets);
 
   statistician->ResetStatistics();
   // GetReceiveStreamDataCounters includes reset counter values.
   statistician->GetReceiveStreamDataCounters(&counters);
   EXPECT_GT(counters.first_packet_time_ms, -1);
-  EXPECT_EQ(1u, counters.packets);
+  EXPECT_EQ(1u, counters.transmitted.packets);
 
   receive_statistics_->IncomingPacket(header1_, kPacketSize1, false);
   statistician->GetReceiveStreamDataCounters(&counters);
   EXPECT_GT(counters.first_packet_time_ms, -1);
-  EXPECT_EQ(2u, counters.packets);
+  EXPECT_EQ(2u, counters.transmitted.packets);
 }
 
 TEST_F(ReceiveStatisticsTest, RtcpCallbacks) {
@@ -169,7 +169,7 @@ TEST_F(ReceiveStatisticsTest, RtcpCallbacks) {
       ++num_calls_;
     }
 
-    virtual void CNameChanged(const char* cname, uint32_t ssrc) OVERRIDE {}
+    void CNameChanged(const char* cname, uint32_t ssrc) override {}
 
     uint32_t num_calls_;
     uint32_t ssrc_;
@@ -257,22 +257,22 @@ class RtpTestCallback : public StreamDataCountersCallback {
     ++num_calls_;
   }
 
+  void MatchPacketCounter(const RtpPacketCounter& expected,
+                          const RtpPacketCounter& actual) {
+    EXPECT_EQ(expected.payload_bytes, actual.payload_bytes);
+    EXPECT_EQ(expected.header_bytes, actual.header_bytes);
+    EXPECT_EQ(expected.padding_bytes, actual.padding_bytes);
+    EXPECT_EQ(expected.packets, actual.packets);
+  }
+
   void Matches(uint32_t num_calls,
                uint32_t ssrc,
                const StreamDataCounters& expected) {
     EXPECT_EQ(num_calls, num_calls_);
     EXPECT_EQ(ssrc, ssrc_);
-    EXPECT_EQ(expected.bytes, stats_.bytes);
-    EXPECT_EQ(expected.header_bytes, stats_.header_bytes);
-    EXPECT_EQ(expected.padding_bytes, stats_.padding_bytes);
-    EXPECT_EQ(expected.packets, stats_.packets);
-    EXPECT_EQ(expected.retransmitted_bytes, stats_.retransmitted_bytes);
-    EXPECT_EQ(expected.retransmitted_header_bytes,
-              stats_.retransmitted_header_bytes);
-    EXPECT_EQ(expected.retransmitted_padding_bytes,
-              stats_.retransmitted_padding_bytes);
-    EXPECT_EQ(expected.retransmitted_packets, stats_.retransmitted_packets);
-    EXPECT_EQ(expected.fec_packets, stats_.fec_packets);
+    MatchPacketCounter(expected.transmitted, stats_.transmitted);
+    MatchPacketCounter(expected.retransmitted, stats_.retransmitted);
+    MatchPacketCounter(expected.fec, stats_.fec);
   }
 
   uint32_t num_calls_;
@@ -292,15 +292,15 @@ TEST_F(ReceiveStatisticsTest, RtpCallbacks) {
   receive_statistics_->IncomingPacket(
       header1_, kPacketSize1 + kHeaderLength, false);
   StreamDataCounters expected;
-  expected.bytes = kPacketSize1;
-  expected.header_bytes = kHeaderLength;
-  expected.padding_bytes = 0;
-  expected.packets = 1;
-  expected.retransmitted_bytes = 0;
-  expected.retransmitted_header_bytes = 0;
-  expected.retransmitted_padding_bytes = 0;
-  expected.retransmitted_packets = 0;
-  expected.fec_packets = 0;
+  expected.transmitted.payload_bytes = kPacketSize1;
+  expected.transmitted.header_bytes = kHeaderLength;
+  expected.transmitted.padding_bytes = 0;
+  expected.transmitted.packets = 1;
+  expected.retransmitted.payload_bytes = 0;
+  expected.retransmitted.header_bytes = 0;
+  expected.retransmitted.padding_bytes = 0;
+  expected.retransmitted.packets = 0;
+  expected.fec.packets = 0;
   callback.Matches(1, kSsrc1, expected);
 
   ++header1_.sequenceNumber;
@@ -309,37 +309,40 @@ TEST_F(ReceiveStatisticsTest, RtpCallbacks) {
   // Another packet of size kPacketSize1 with 9 bytes padding.
   receive_statistics_->IncomingPacket(
       header1_, kPacketSize1 + kHeaderLength + kPaddingLength, false);
-  expected.bytes = kPacketSize1 * 2;
-  expected.header_bytes = kHeaderLength * 2;
-  expected.padding_bytes = kPaddingLength;
-  expected.packets = 2;
+  expected.transmitted.payload_bytes = kPacketSize1 * 2;
+  expected.transmitted.header_bytes = kHeaderLength * 2;
+  expected.transmitted.padding_bytes = kPaddingLength;
+  expected.transmitted.packets = 2;
   callback.Matches(2, kSsrc1, expected);
 
   clock_.AdvanceTimeMilliseconds(5);
   // Retransmit last packet.
   receive_statistics_->IncomingPacket(
       header1_, kPacketSize1 + kHeaderLength + kPaddingLength, true);
-  expected.bytes = kPacketSize1 * 3;
-  expected.header_bytes = kHeaderLength * 3;
-  expected.padding_bytes = kPaddingLength * 2;
-  expected.packets = 3;
-  expected.retransmitted_bytes = kPacketSize1;
-  expected.retransmitted_header_bytes = kHeaderLength;
-  expected.retransmitted_padding_bytes = kPaddingLength;
-  expected.retransmitted_packets = 1;
+  expected.transmitted.payload_bytes = kPacketSize1 * 3;
+  expected.transmitted.header_bytes = kHeaderLength * 3;
+  expected.transmitted.padding_bytes = kPaddingLength * 2;
+  expected.transmitted.packets = 3;
+  expected.retransmitted.payload_bytes = kPacketSize1;
+  expected.retransmitted.header_bytes = kHeaderLength;
+  expected.retransmitted.padding_bytes = kPaddingLength;
+  expected.retransmitted.packets = 1;
   callback.Matches(3, kSsrc1, expected);
 
   header1_.paddingLength = 0;
   ++header1_.sequenceNumber;
   clock_.AdvanceTimeMilliseconds(5);
-  // One recovered packet.
+  // One FEC packet.
   receive_statistics_->IncomingPacket(
       header1_, kPacketSize1 + kHeaderLength, false);
-  receive_statistics_->FecPacketReceived(kSsrc1);
-  expected.bytes = kPacketSize1 * 4;
-  expected.header_bytes = kHeaderLength * 4;
-  expected.packets = 4;
-  expected.fec_packets = 1;
+  receive_statistics_->FecPacketReceived(header1_,
+                                         kPacketSize1 + kHeaderLength);
+  expected.transmitted.payload_bytes = kPacketSize1 * 4;
+  expected.transmitted.header_bytes = kHeaderLength * 4;
+  expected.transmitted.packets = 4;
+  expected.fec.payload_bytes = kPacketSize1;
+  expected.fec.header_bytes = kHeaderLength;
+  expected.fec.packets = 1;
   callback.Matches(5, kSsrc1, expected);
 
   receive_statistics_->RegisterRtpStatisticsCallback(NULL);
@@ -357,24 +360,28 @@ TEST_F(ReceiveStatisticsTest, RtpCallbacksFecFirst) {
   receive_statistics_->RegisterRtpStatisticsCallback(&callback);
 
   const uint32_t kHeaderLength = 20;
+  header1_.headerLength = kHeaderLength;
 
   // If first packet is FEC, ignore it.
-  receive_statistics_->FecPacketReceived(kSsrc1);
+  receive_statistics_->FecPacketReceived(header1_,
+                                         kPacketSize1 + kHeaderLength);
   EXPECT_EQ(0u, callback.num_calls_);
 
-  header1_.headerLength = kHeaderLength;
   receive_statistics_->IncomingPacket(
       header1_, kPacketSize1 + kHeaderLength, false);
   StreamDataCounters expected;
-  expected.bytes = kPacketSize1;
-  expected.header_bytes = kHeaderLength;
-  expected.padding_bytes = 0;
-  expected.packets = 1;
-  expected.fec_packets = 0;
+  expected.transmitted.payload_bytes = kPacketSize1;
+  expected.transmitted.header_bytes = kHeaderLength;
+  expected.transmitted.padding_bytes = 0;
+  expected.transmitted.packets = 1;
+  expected.fec.packets = 0;
   callback.Matches(1, kSsrc1, expected);
 
-  receive_statistics_->FecPacketReceived(kSsrc1);
-  expected.fec_packets = 1;
+  receive_statistics_->FecPacketReceived(header1_,
+                                         kPacketSize1 + kHeaderLength);
+  expected.fec.payload_bytes = kPacketSize1;
+  expected.fec.header_bytes = kHeaderLength;
+  expected.fec.packets = 1;
   callback.Matches(2, kSsrc1, expected);
 }
 }  // namespace webrtc

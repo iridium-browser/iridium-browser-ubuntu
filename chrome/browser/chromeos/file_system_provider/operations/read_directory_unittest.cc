@@ -69,7 +69,6 @@ class CallbackLogger {
 
  private:
   ScopedVector<Event> events_;
-  bool dispatch_reply_;
 
   DISALLOW_COPY_AND_ASSIGN(CallbackLogger);
 };
@@ -99,9 +98,9 @@ void CreateRequestValueFromJSON(const std::string& json,
 class FileSystemProviderOperationsReadDirectoryTest : public testing::Test {
  protected:
   FileSystemProviderOperationsReadDirectoryTest() {}
-  virtual ~FileSystemProviderOperationsReadDirectoryTest() {}
+  ~FileSystemProviderOperationsReadDirectoryTest() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     file_system_info_ = ProvidedFileSystemInfo(
         kExtensionId,
         MountOptions(kFileSystemId, "" /* display_name */),

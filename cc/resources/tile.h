@@ -68,18 +68,8 @@ class CC_EXPORT Tile : public RefCountedManaged<Tile> {
   void set_shared(bool is_shared) { is_shared_ = is_shared; }
   bool is_shared() const { return is_shared_; }
 
-  bool is_occluded_for_tree_priority(TreePriority tree_priority) const {
-    switch (tree_priority) {
-      case SMOOTHNESS_TAKES_PRIORITY:
-        return is_occluded_[ACTIVE_TREE];
-      case NEW_CONTENT_TAKES_PRIORITY:
-        return is_occluded_[PENDING_TREE];
-      case SAME_PRIORITY_FOR_BOTH_TREES:
-        return is_occluded_[ACTIVE_TREE] && is_occluded_[PENDING_TREE];
-      default:
-        NOTREACHED();
-        return false;
-    }
+  bool is_occluded_combined() const {
+    return is_occluded_[ACTIVE_TREE] && is_occluded_[PENDING_TREE];
   }
 
   // TODO(vmpstr): Move this to the iterators.
@@ -98,11 +88,12 @@ class CC_EXPORT Tile : public RefCountedManaged<Tile> {
 
   bool HasResource() const { return draw_info_.has_resource(); }
   bool NeedsRaster() const {
-    return draw_info_.mode() == TileDrawInfo::PICTURE_PILE_MODE ||
+    return draw_info_.mode() == TileDrawInfo::OOM_MODE ||
            !draw_info_.IsReadyToDraw();
   }
 
-  void AsValueInto(base::debug::TracedValue* dict) const;
+  void AsValueWithPriorityInto(const TilePriority& priority,
+                               base::trace_event::TracedValue* dict) const;
 
   inline bool IsReadyToDraw() const { return draw_info_.IsReadyToDraw(); }
 
@@ -160,9 +151,9 @@ class CC_EXPORT Tile : public RefCountedManaged<Tile> {
   gfx::Size desired_texture_size_;
   gfx::Rect content_rect_;
   float contents_scale_;
-  bool is_occluded_[NUM_TREES];
+  bool is_occluded_[LAST_TREE + 1];
 
-  TilePriority priority_[NUM_TREES];
+  TilePriority priority_[LAST_TREE + 1];
   TileDrawInfo draw_info_;
 
   int layer_id_;

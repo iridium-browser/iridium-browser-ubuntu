@@ -22,11 +22,15 @@
         'base/decrypt_context_clearkey.h',
         'base/key_systems_common.cc',
         'base/key_systems_common.h',
+        'base/media_caps.cc',
+        'base/media_caps.h',
+        'base/switching_media_renderer.cc',
+        'base/switching_media_renderer.h',
       ],
       'conditions': [
         ['chromecast_branding=="Chrome"', {
           'dependencies': [
-            '<(cast_internal_gyp):media_base_internal',
+            '../internal/chromecast_internal.gyp:media_base_internal',
           ],
         }, {
           'sources': [
@@ -116,7 +120,7 @@
       'conditions': [
         ['chromecast_branding=="Chrome"', {
           'dependencies': [
-            '<(cast_internal_gyp):cma_backend_internal',
+            '../internal/chromecast_internal.gyp:cma_backend_internal',
           ],
         }, {
           'sources': [

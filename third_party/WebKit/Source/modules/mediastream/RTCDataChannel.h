@@ -90,7 +90,7 @@ public:
     virtual ExecutionContext* executionContext() const override;
 
     void clearWeakMembers(Visitor*);
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     // WebRTCDataChannelHandlerClient
     virtual void didChangeReadyState(WebRTCDataChannelHandlerClient::ReadyState) override;
@@ -119,7 +119,7 @@ private:
     BinaryType m_binaryType;
 
     Timer<RTCDataChannel> m_scheduledEventTimer;
-    WillBeHeapVector<RefPtrWillBeMember<Event> > m_scheduledEvents;
+    WillBeHeapVector<RefPtrWillBeMember<Event>> m_scheduledEvents;
 
     WeakMember<RTCPeerConnection> m_connection;
 };

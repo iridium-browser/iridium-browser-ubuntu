@@ -6,6 +6,7 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/base/extension_registry.html">
+<link rel="import" href="/core/analysis/util.html">
 <link rel="import" href="/core/trace_model/slice.html">
 
 <script>
@@ -22,8 +23,11 @@ tv.exportTo('tv.c.trace_model', function() {
    *
    * @constructor
    */
-  function AsyncSlice(category, title, colorId, start, args) {
-    tv.c.trace_model.Slice.apply(this, arguments);
+  function AsyncSlice(category, title, colorId, start, args, duration,
+                      opt_isTopLevel) {
+    tv.c.trace_model.Slice.call(this, category, title, colorId, start, args,
+                                duration);
+    this.isTopLevel = (opt_isTopLevel === true);
   };
 
   AsyncSlice.prototype = {
@@ -55,6 +59,11 @@ tv.exportTo('tv.c.trace_model', function() {
 
     get viewSubGroupTitle() {
       return this.title;
+    },
+
+    get userFriendlyName() {
+      return 'Async slice ' + this.title + ' at ' +
+          tv.c.analysis.tsString(this.start);
     }
   };
 
@@ -68,7 +77,8 @@ tv.exportTo('tv.c.trace_model', function() {
       });
 
 
-  var options = new tv.b.ExtensionRegistryOptions(tv.b.TYPE_BASED_REGISTRY_MODE);
+  var options = new tv.b.ExtensionRegistryOptions(
+      tv.b.TYPE_BASED_REGISTRY_MODE);
   options.mandatoryBaseClass = AsyncSlice;
   options.defaultConstructor = AsyncSlice;
   tv.b.decorateExtensionRegistry(AsyncSlice, options);
@@ -78,4 +88,3 @@ tv.exportTo('tv.c.trace_model', function() {
   };
 });
 </script>
-

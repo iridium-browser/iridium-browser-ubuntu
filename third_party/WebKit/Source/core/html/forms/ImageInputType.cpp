@@ -34,8 +34,8 @@
 #include "core/html/HTMLImageLoader.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "core/rendering/RenderBlockFlow.h"
-#include "core/rendering/RenderImage.h"
+#include "core/layout/LayoutBlockFlow.h"
+#include "core/layout/LayoutImage.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/text/StringBuilder.h"
 
@@ -121,19 +121,19 @@ void ImageInputType::handleDOMActivateEvent(Event* event)
     event->setDefaultHandled();
 }
 
-RenderObject* ImageInputType::createRenderer(RenderStyle* style) const
+LayoutObject* ImageInputType::createLayoutObject(const ComputedStyle& style) const
 {
     if (m_useFallbackContent)
-        return new RenderBlockFlow(&element());
-    RenderImage* image = new RenderImage(&element());
-    image->setImageResource(RenderImageResource::create());
+        return new LayoutBlockFlow(&element());
+    LayoutImage* image = new LayoutImage(&element());
+    image->setImageResource(LayoutImageResource::create());
     return image;
 }
 
 void ImageInputType::altAttributeChanged()
 {
-    if (element().userAgentShadowRoot()) {
-        Element* text = element().userAgentShadowRoot()->getElementById("alttext");
+    if (element().closedShadowRoot()) {
+        Element* text = element().closedShadowRoot()->getElementById("alttext");
         String value = element().altText();
         if (text && text->textContent() != value)
             text->setTextContent(element().altText());
@@ -142,7 +142,7 @@ void ImageInputType::altAttributeChanged()
 
 void ImageInputType::srcAttributeChanged()
 {
-    if (!element().renderer())
+    if (!element().layoutObject())
         return;
     element().ensureImageLoader().updateFromElement(ImageLoader::UpdateIgnorePreviousError);
 }
@@ -161,11 +161,11 @@ void ImageInputType::startResourceLoading()
     HTMLImageLoader& imageLoader = element().ensureImageLoader();
     imageLoader.updateFromElement();
 
-    RenderObject* renderer = element().renderer();
-    if (!renderer || !renderer->isRenderImage())
+    LayoutObject* renderer = element().layoutObject();
+    if (!renderer || !renderer->isLayoutImage())
         return;
 
-    RenderImageResource* imageResource = toRenderImage(renderer)->imageResource();
+    LayoutImageResource* imageResource = toLayoutImage(renderer)->imageResource();
     imageResource->setImageResource(imageLoader.image());
 }
 
@@ -198,7 +198,7 @@ unsigned ImageInputType::height() const
 {
     RefPtrWillBeRawPtr<HTMLInputElement> element(this->element());
 
-    if (!element->renderer()) {
+    if (!element->layoutObject()) {
         // Check the attribute first for an explicit pixel value.
         unsigned height;
         if (parseHTMLNonNegativeInteger(element->fastGetAttribute(heightAttr), height))
@@ -207,12 +207,12 @@ unsigned ImageInputType::height() const
         // If the image is available, use its height.
         HTMLImageLoader* imageLoader = element->imageLoader();
         if (imageLoader && imageLoader->image())
-            return imageLoader->image()->imageSizeForRenderer(element->renderer(), 1).height();
+            return imageLoader->image()->imageSizeForLayoutObject(element->layoutObject(), 1).height();
     }
 
     element->document().updateLayout();
 
-    RenderBox* box = element->renderBox();
+    LayoutBox* box = element->layoutBox();
     return box ? adjustForAbsoluteZoom(box->contentHeight(), box) : 0;
 }
 
@@ -220,7 +220,7 @@ unsigned ImageInputType::width() const
 {
     RefPtrWillBeRawPtr<HTMLInputElement> element(this->element());
 
-    if (!element->renderer()) {
+    if (!element->layoutObject()) {
         // Check the attribute first for an explicit pixel value.
         unsigned width;
         if (parseHTMLNonNegativeInteger(element->fastGetAttribute(widthAttr), width))
@@ -229,12 +229,12 @@ unsigned ImageInputType::width() const
         // If the image is available, use its width.
         HTMLImageLoader* imageLoader = element->imageLoader();
         if (imageLoader && imageLoader->image())
-            return imageLoader->image()->imageSizeForRenderer(element->renderer(), 1).width();
+            return imageLoader->image()->imageSizeForLayoutObject(element->layoutObject(), 1).width();
     }
 
     element->document().updateLayout();
 
-    RenderBox* box = element->renderBox();
+    LayoutBox* box = element->layoutBox();
     return box ? adjustForAbsoluteZoom(box->contentWidth(), box) : 0;
 }
 
@@ -263,7 +263,7 @@ void ImageInputType::setUseFallbackContent()
     m_useFallbackContent = true;
     if (element().document().inStyleRecalc())
         return;
-    if (ShadowRoot* root = element().userAgentShadowRoot())
+    if (ShadowRoot* root = element().closedShadowRoot())
         root->removeChildren();
     createShadowSubtree();
 }
@@ -295,7 +295,7 @@ void ImageInputType::createShadowSubtree()
     HTMLImageFallbackHelper::createAltTextShadowTree(element());
 }
 
-PassRefPtr<RenderStyle> ImageInputType::customStyleForRenderer(PassRefPtr<RenderStyle> newStyle)
+PassRefPtr<ComputedStyle> ImageInputType::customStyleForLayoutObject(PassRefPtr<ComputedStyle> newStyle)
 {
     if (!m_useFallbackContent)
         return newStyle;

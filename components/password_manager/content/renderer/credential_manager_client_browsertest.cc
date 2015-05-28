@@ -73,7 +73,7 @@ class CredentialManagerClientTest : public content::RenderViewTest {
       }
 
       case CredentialManagerHostMsg_RequestCredential::ID: {
-        Tuple<int, bool, std::vector<GURL> > param;
+        Tuple<int, bool, std::vector<GURL>> param;
         CredentialManagerHostMsg_RequestCredential::Read(message, &param);
         request_id = get<0>(param);
         break;
@@ -209,7 +209,7 @@ TEST_F(CredentialManagerClientTest, SendRequestCredential) {
                                request_id));
 
   CredentialInfo info;
-  info.type = CREDENTIAL_TYPE_LOCAL;
+  info.type = CredentialType::CREDENTIAL_TYPE_LOCAL;
   client_->OnSendCredential(request_id, info);
   EXPECT_TRUE(callback_succeeded());
   EXPECT_FALSE(callback_errored());
@@ -227,7 +227,7 @@ TEST_F(CredentialManagerClientTest, SendRequestCredentialEmpty) {
   EXPECT_TRUE(ExtractRequestId(CredentialManagerHostMsg_RequestCredential::ID,
                                request_id));
 
-  CredentialInfo info; // Send an empty credential in response.
+  CredentialInfo info;  // Send an empty credential in response.
   client_->OnSendCredential(request_id, info);
   EXPECT_TRUE(callback_succeeded());
   EXPECT_FALSE(callback_errored());

@@ -47,7 +47,6 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) override;
   void OverrideWebkitPrefs(RenderViewHost* render_view_host,
-                           const GURL& url,
                            WebPreferences* prefs) override;
   void ResourceDispatcherHostCreated() override;
   AccessTokenStore* CreateAccessTokenStore() override;
@@ -55,6 +54,11 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   WebContentsViewDelegate* GetWebContentsViewDelegate(
       WebContents* web_contents) override;
   QuotaPermissionContext* CreateQuotaPermissionContext() override;
+  void SelectClientCertificate(
+      WebContents* web_contents,
+      net::SSLCertRequestInfo* cert_request_info,
+      scoped_ptr<ClientCertificateDelegate> delegate) override;
+
   SpeechRecognitionManagerDelegate* CreateSpeechRecognitionManagerDelegate()
       override;
   net::NetLog* GetNetLog() override;
@@ -62,6 +66,10 @@ class ShellContentBrowserClient : public ContentBrowserClient {
                                       const GURL& current_url,
                                       const GURL& new_url) override;
   DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
+
+  void OpenURL(BrowserContext* browser_context,
+               const OpenURLParams& params,
+               const base::Callback<void(WebContents*)>& callback) override;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   void GetAdditionalMappedFilesForChildProcess(
@@ -83,12 +91,25 @@ class ShellContentBrowserClient : public ContentBrowserClient {
     return shell_browser_main_parts_;
   }
 
+  // Used for content_browsertests.
+  void set_select_client_certificate_callback(
+      base::Closure select_client_certificate_callback) {
+    select_client_certificate_callback_ = select_client_certificate_callback;
+  }
+
  private:
   ShellBrowserContext* ShellBrowserContextForBrowserContext(
       BrowserContext* content_browser_context);
 
   scoped_ptr<ShellResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+  base::ScopedFD v8_natives_fd_;
+  base::ScopedFD v8_snapshot_fd_;
+#endif
+
+  base::Closure select_client_certificate_callback_;
 
   ShellBrowserMainParts* shell_browser_main_parts_;
 };

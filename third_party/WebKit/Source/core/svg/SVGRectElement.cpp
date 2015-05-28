@@ -21,19 +21,19 @@
 #include "config.h"
 #include "core/svg/SVGRectElement.h"
 
-#include "core/rendering/svg/RenderSVGRect.h"
+#include "core/layout/svg/LayoutSVGRect.h"
 #include "core/svg/SVGLength.h"
 
 namespace blink {
 
 inline SVGRectElement::SVGRectElement(Document& document)
     : SVGGeometryElement(SVGNames::rectTag, document)
-    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(LengthModeWidth), AllowNegativeLengths))
-    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(LengthModeHeight), AllowNegativeLengths))
-    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(LengthModeWidth), ForbidNegativeLengths))
-    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(LengthModeHeight), ForbidNegativeLengths))
-    , m_rx(SVGAnimatedLength::create(this, SVGNames::rxAttr, SVGLength::create(LengthModeWidth), ForbidNegativeLengths))
-    , m_ry(SVGAnimatedLength::create(this, SVGNames::ryAttr, SVGLength::create(LengthModeHeight), ForbidNegativeLengths))
+    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(SVGLengthMode::Width), AllowNegativeLengths))
+    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(SVGLengthMode::Height), AllowNegativeLengths))
+    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(SVGLengthMode::Width), ForbidNegativeLengths))
+    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(SVGLengthMode::Height), ForbidNegativeLengths))
+    , m_rx(SVGAnimatedLength::create(this, SVGNames::rxAttr, SVGLength::create(SVGLengthMode::Width), ForbidNegativeLengths))
+    , m_ry(SVGAnimatedLength::create(this, SVGNames::ryAttr, SVGLength::create(SVGLengthMode::Height), ForbidNegativeLengths))
 {
     addToPropertyMap(m_x);
     addToPropertyMap(m_y);
@@ -43,7 +43,7 @@ inline SVGRectElement::SVGRectElement(Document& document)
     addToPropertyMap(m_ry);
 }
 
-void SVGRectElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGRectElement)
 {
     visitor->trace(m_x);
     visitor->trace(m_y);
@@ -70,9 +70,41 @@ bool SVGRectElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGRectElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+bool SVGRectElement::isPresentationAttribute(const QualifiedName& attrName) const
 {
-    parseAttributeNew(name, value);
+    if (attrName == SVGNames::xAttr || attrName == SVGNames::yAttr
+        || attrName == SVGNames::widthAttr || attrName == SVGNames::heightAttr
+        || attrName == SVGNames::rxAttr || attrName == SVGNames::ryAttr)
+        return true;
+    return SVGGeometryElement::isPresentationAttribute(attrName);
+}
+
+bool SVGRectElement::isPresentationAttributeWithSVGDOM(const QualifiedName& attrName) const
+{
+    if (attrName == SVGNames::xAttr || attrName == SVGNames::yAttr
+        || attrName == SVGNames::widthAttr || attrName == SVGNames::heightAttr
+        || attrName == SVGNames::rxAttr || attrName == SVGNames::ryAttr)
+        return true;
+    return SVGGeometryElement::isPresentationAttributeWithSVGDOM(attrName);
+}
+
+void SVGRectElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStylePropertySet* style)
+{
+    RefPtrWillBeRawPtr<SVGAnimatedPropertyBase> property = propertyFromAttribute(name);
+    if (property == m_x)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyX, *m_x->currentValue());
+    else if (property == m_y)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyY, *m_y->currentValue());
+    else if (property == m_width)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyWidth, *m_width->currentValue());
+    else if (property == m_height)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyHeight, *m_height->currentValue());
+    else if (property == m_rx)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyRx, *m_rx->currentValue());
+    else if (property == m_ry)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyRy, *m_ry->currentValue());
+    else
+        SVGGeometryElement::collectStyleForPresentationAttribute(name, value, style);
 }
 
 void SVGRectElement::svgAttributeChanged(const QualifiedName& attrName)
@@ -84,27 +116,17 @@ void SVGRectElement::svgAttributeChanged(const QualifiedName& attrName)
 
     SVGElement::InvalidationGuard invalidationGuard(this);
 
-    bool isLengthAttribute = attrName == SVGNames::xAttr
-                          || attrName == SVGNames::yAttr
-                          || attrName == SVGNames::widthAttr
-                          || attrName == SVGNames::heightAttr
-                          || attrName == SVGNames::rxAttr
-                          || attrName == SVGNames::ryAttr;
+    invalidateSVGPresentationAttributeStyle();
+    setNeedsStyleRecalc(LocalStyleChange,
+        StyleChangeReasonForTracing::fromAttribute(attrName));
+    updateRelativeLengthsInformation();
 
-    if (isLengthAttribute)
-        updateRelativeLengthsInformation();
-
-    RenderSVGShape* renderer = toRenderSVGShape(this->renderer());
+    LayoutSVGShape* renderer = toLayoutSVGShape(this->layoutObject());
     if (!renderer)
         return;
 
-    if (isLengthAttribute) {
-        renderer->setNeedsShapeUpdate();
-        markForLayoutAndParentResourceInvalidation(renderer);
-        return;
-    }
-
-    ASSERT_NOT_REACHED();
+    renderer->setNeedsShapeUpdate();
+    markForLayoutAndParentResourceInvalidation(renderer);
 }
 
 bool SVGRectElement::selfHasRelativeLengths() const
@@ -117,9 +139,9 @@ bool SVGRectElement::selfHasRelativeLengths() const
         || m_ry->currentValue()->isRelative();
 }
 
-RenderObject* SVGRectElement::createRenderer(RenderStyle*)
+LayoutObject* SVGRectElement::createLayoutObject(const ComputedStyle&)
 {
-    return new RenderSVGRect(this);
+    return new LayoutSVGRect(this);
 }
 
 } // namespace blink

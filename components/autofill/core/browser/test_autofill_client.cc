@@ -8,21 +8,32 @@
 
 namespace autofill {
 
-TestAutofillClient::TestAutofillClient() {
+TestAutofillClient::TestAutofillClient()
+    : token_service_(new FakeOAuth2TokenService()),
+      identity_provider_(new FakeIdentityProvider(token_service_.get())),
+      rappor_service_(new rappor::TestRapporService()) {
 }
 TestAutofillClient::~TestAutofillClient() {
 }
 
 PersonalDataManager* TestAutofillClient::GetPersonalDataManager() {
-  return NULL;
+  return nullptr;
 }
 
 scoped_refptr<AutofillWebDataService> TestAutofillClient::GetDatabase() {
-  return scoped_refptr<AutofillWebDataService>(NULL);
+  return scoped_refptr<AutofillWebDataService>(nullptr);
 }
 
 PrefService* TestAutofillClient::GetPrefs() {
   return prefs_.get();
+}
+
+IdentityProvider* TestAutofillClient::GetIdentityProvider() {
+  return identity_provider_.get();
+}
+
+rappor::RapporService* TestAutofillClient::GetRapporService() {
+  return rappor_service_.get();
 }
 
 void TestAutofillClient::HideRequestAutocompleteDialog() {
@@ -36,7 +47,7 @@ void TestAutofillClient::ShowUnmaskPrompt(
     base::WeakPtr<CardUnmaskDelegate> delegate) {
 }
 
-void TestAutofillClient::OnUnmaskVerificationResult(bool success) {
+void TestAutofillClient::OnUnmaskVerificationResult(GetRealPanResult result) {
 }
 
 void TestAutofillClient::ConfirmSaveCreditCard(
@@ -76,7 +87,7 @@ bool TestAutofillClient::IsAutocompleteEnabled() {
   return true;
 }
 
-void TestAutofillClient::DetectAccountCreationForms(
+void TestAutofillClient::PropagateAutofillPredictions(
     content::RenderFrameHost* rfh,
     const std::vector<autofill::FormStructure*>& forms) {
 }
@@ -87,6 +98,10 @@ void TestAutofillClient::DidFillOrPreviewField(
 }
 
 void TestAutofillClient::OnFirstUserGestureObserved() {
+}
+
+void TestAutofillClient::LinkClicked(const GURL& url,
+                                     WindowOpenDisposition disposition) {
 }
 
 }  // namespace autofill

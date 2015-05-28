@@ -10,9 +10,6 @@ namespace sync_driver {
 
 namespace prefs {
 
-extern const char kEnhancedBookmarksExperimentEnabled[];
-extern const char kEnhancedBookmarksExtensionId[];
-
 extern const char kSyncLastSyncedTime[];
 extern const char kSyncHasAuthError[];
 extern const char kSyncHasSetupCompleted[];
@@ -24,6 +21,7 @@ extern const char kSyncAppSettings[];
 extern const char kSyncApps[];
 extern const char kSyncArticles[];
 extern const char kSyncAutofillProfile[];
+extern const char kSyncAutofillWallet[];
 extern const char kSyncAutofill[];
 extern const char kSyncBookmarks[];
 extern const char kSyncDeviceInfo[];
@@ -55,8 +53,6 @@ extern const char kSyncSuppressStart[];
 extern const char kSyncUsingSecondaryPassphrase[];
 extern const char kSyncEncryptionBootstrapToken[];
 extern const char kSyncKeystoreEncryptionBootstrapToken[];
-
-extern const char kSyncAcknowledgedSyncTypes[];
 
 extern const char kSyncSessionsGUID[];
 

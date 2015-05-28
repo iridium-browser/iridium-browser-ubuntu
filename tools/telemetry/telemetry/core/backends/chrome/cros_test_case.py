@@ -7,8 +7,8 @@ import unittest
 
 from telemetry.core import browser_finder
 from telemetry.core import extension_to_load
-from telemetry.core import util
 from telemetry.core.platform import cros_interface
+from telemetry.core import util
 from telemetry.unittest_util import options_for_unittests
 
 
@@ -16,6 +16,7 @@ class CrOSTestCase(unittest.TestCase):
   def setUp(self):
     options = options_for_unittests.GetCopy()
     self._cri = cros_interface.CrOSInterface(options.cros_remote,
+                                             options.cros_remote_ssh_port,
                                              options.cros_ssh_identity)
     self._is_guest = options.browser_type == 'cros-chrome-guest'
     self._username = options.browser_options.username

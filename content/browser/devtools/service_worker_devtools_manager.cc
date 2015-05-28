@@ -7,9 +7,6 @@
 #include "content/browser/devtools/devtools_manager.h"
 #include "content/browser/devtools/ipc_devtools_agent_host.h"
 #include "content/browser/devtools/service_worker_devtools_agent_host.h"
-#include "content/browser/devtools/shared_worker_devtools_agent_host.h"
-#include "content/browser/shared_worker/shared_worker_instance.h"
-#include "content/common/devtools_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/worker_service.h"
@@ -47,32 +44,112 @@ bool ServiceWorkerDevToolsManager::ServiceWorkerIdentifier::Matches(
 
 // static
 ServiceWorkerDevToolsManager* ServiceWorkerDevToolsManager::GetInstance() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return Singleton<ServiceWorkerDevToolsManager>::get();
+}
+
+DevToolsAgentHostImpl*
+ServiceWorkerDevToolsManager::GetDevToolsAgentHostForWorker(
+    int worker_process_id,
+    int worker_route_id) {
+  AgentHostMap::iterator it = workers_.find(
+      WorkerId(worker_process_id, worker_route_id));
+  return it == workers_.end() ? NULL : it->second;
+}
+
+void ServiceWorkerDevToolsManager::AddAllAgentHosts(
+    ServiceWorkerDevToolsAgentHost::List* result) {
+  for (auto& worker : workers_) {
+    if (!worker.second->IsTerminated())
+      result->push_back(worker.second);
+  }
 }
 
 bool ServiceWorkerDevToolsManager::WorkerCreated(
     int worker_process_id,
     int worker_route_id,
     const ServiceWorkerIdentifier& service_worker_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   const WorkerId id(worker_process_id, worker_route_id);
   AgentHostMap::iterator it = FindExistingWorkerAgentHost(service_worker_id);
-  if (it == workers().end()) {
-    workers()[id] = new ServiceWorkerDevToolsAgentHost(
-        id, service_worker_id, debug_service_worker_on_start_);
-    DevToolsManager::GetInstance()->AgentHostChanged(workers()[id]);
-    return debug_service_worker_on_start_;
+  if (it == workers_.end()) {
+    scoped_refptr<ServiceWorkerDevToolsAgentHost> host =
+        new ServiceWorkerDevToolsAgentHost(
+            id, service_worker_id);
+    workers_[id] = host.get();
+    FOR_EACH_OBSERVER(Observer, observer_list_, WorkerCreated(host.get()));
+    DevToolsManager::GetInstance()->AgentHostChanged(host.get());
+    if (debug_service_worker_on_start_)
+        host->PauseForDebugOnStart();
+    return host->IsPausedForDebugOnStart();
   }
-  WorkerRestarted(id, it);
-  return true;
+
+  // Worker was restarted.
+  ServiceWorkerDevToolsAgentHost* agent_host = it->second;
+  agent_host->WorkerRestarted(id);
+  workers_.erase(it);
+  workers_[id] = agent_host;
+  DevToolsManager::GetInstance()->AgentHostChanged(agent_host);
+
+  return it->second->IsAttached();
+}
+
+void ServiceWorkerDevToolsManager::WorkerReadyForInspection(
+    int worker_process_id,
+    int worker_route_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  const WorkerId id(worker_process_id, worker_route_id);
+  AgentHostMap::iterator it = workers_.find(id);
+  DCHECK(it != workers_.end());
+  scoped_refptr<ServiceWorkerDevToolsAgentHost> host = it->second;
+  host->WorkerReadyForInspection();
+  FOR_EACH_OBSERVER(Observer, observer_list_,
+                    WorkerReadyForInspection(host.get()));
+
+  // Then bring up UI for the ones not picked by other clients.
+  if (host->IsPausedForDebugOnStart() && !host->IsAttached()) {
+    host->Inspect(RenderProcessHost::FromID(worker_process_id)->
+        GetBrowserContext());
+  }
 }
 
 void ServiceWorkerDevToolsManager::WorkerStopIgnored(int worker_process_id,
                                                       int worker_route_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // TODO(pfeldman): Show a console message to tell the user that UA didn't
   // terminate the worker because devtools is attached.
+}
+
+void ServiceWorkerDevToolsManager::WorkerDestroyed(int worker_process_id,
+                                                   int worker_route_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  const WorkerId id(worker_process_id, worker_route_id);
+  AgentHostMap::iterator it = workers_.find(id);
+  DCHECK(it != workers_.end());
+  scoped_refptr<WorkerDevToolsAgentHost> agent_host(it->second);
+  agent_host->WorkerDestroyed();
+  DevToolsManager::GetInstance()->AgentHostChanged(agent_host);
+  FOR_EACH_OBSERVER(Observer, observer_list_, WorkerDestroyed(it->second));
+}
+
+void ServiceWorkerDevToolsManager::RemoveInspectedWorkerData(WorkerId id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  workers_.erase(id);
+}
+
+void ServiceWorkerDevToolsManager::AddObserver(Observer* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void ServiceWorkerDevToolsManager::RemoveObserver(Observer* observer) {
+  observer_list_.RemoveObserver(observer);
+}
+
+void ServiceWorkerDevToolsManager::set_debug_service_worker_on_start(
+    bool debug_on_start) {
+  debug_service_worker_on_start_ = debug_on_start;
+  FOR_EACH_OBSERVER(Observer, observer_list_,
+                    DebugOnStartUpdated(debug_on_start));
 }
 
 ServiceWorkerDevToolsManager::ServiceWorkerDevToolsManager()
@@ -85,13 +162,17 @@ ServiceWorkerDevToolsManager::~ServiceWorkerDevToolsManager() {
 ServiceWorkerDevToolsManager::AgentHostMap::iterator
 ServiceWorkerDevToolsManager::FindExistingWorkerAgentHost(
     const ServiceWorkerIdentifier& service_worker_id) {
-  AgentHostMap::iterator it = workers().begin();
-  for (; it != workers().end(); ++it) {
+  AgentHostMap::iterator it = workers_.begin();
+  for (; it != workers_.end(); ++it) {
     if (static_cast<ServiceWorkerDevToolsAgentHost*>(
             it->second)->Matches(service_worker_id))
       break;
   }
   return it;
+}
+
+void ServiceWorkerDevToolsManager::ResetForTesting() {
+  workers_.clear();
 }
 
 }  // namespace content

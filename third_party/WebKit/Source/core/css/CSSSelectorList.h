@@ -33,7 +33,7 @@ namespace blink {
 class CSSParserSelector;
 
 class CSSSelectorList {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(CSSSelectorList);
 public:
     CSSSelectorList() : m_selectorArray(0) { }
     CSSSelectorList(const CSSSelectorList&);
@@ -41,7 +41,7 @@ public:
     ~CSSSelectorList();
 
     void adopt(CSSSelectorList& list);
-    void adoptSelectorVector(Vector<OwnPtr<CSSParserSelector> >& selectorVector);
+    void adoptSelectorVector(Vector<OwnPtr<CSSParserSelector>>& selectorVector);
 
     bool isValid() const { return !!m_selectorArray; }
     const CSSSelector* first() const { return m_selectorArray; }

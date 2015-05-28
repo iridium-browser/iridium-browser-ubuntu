@@ -15,6 +15,11 @@ from telemetry.wpr import archive_info
 
 class PageSetSmokeTest(unittest.TestCase):
 
+  def setUp(self):
+    # Make sure the added failure message is appended to the default failure
+    # message.
+    self.longMessage = True
+
   def CheckArchive(self, page_set):
     """Verify that all URLs of pages in page_set have an associated archive. """
     # TODO: Eventually these should be fatal.
@@ -61,35 +66,11 @@ class PageSetSmokeTest(unittest.TestCase):
     for page in page_set.pages:
       self.CheckAttributesOfPageBasicAttributes(page)
 
-  def CheckNoMixedInBetweenLegacyRunMethodsAndRunPageInteractions(
-      self, page_set):
-    # This test is to make sure that page has been converted to use single
-    # RunPageInteractions does not contain legacy run method.
-    # For more context see: crbug.com/418375
-    # TODO(nednguyen, ernstm): remove this test when crbug.com/418375 is marked
-    # fixed.
-    LEGACY_RUN_METHODS = [
-        'RunMediaMetrics',
-        'RunNoOp',
-        'RunRepaint',
-        'RunPrepareForScreenShot',
-        'RunSmoothness',
-        'RunWebrtc'
-        ]
-    for page in page_set.pages:
-      if hasattr(page, 'RunPageInteractions'):
-        for legacy_run_method in LEGACY_RUN_METHODS:
-          self.assertTrue(
-              not hasattr(page, legacy_run_method),
-              msg=('page %s in page_set %s has both legacy Run.. methods and '
-                   'RunPageInteractions defined. ' % (
-                       page, page_set.file_path)))
-
   def CheckAttributesOfPageSetBasicAttributes(self, page_set):
-    if page_set.file_path is not None:
+    if page_set.base_dir is not None:
       self.assertTrue(
-          isinstance(page_set.file_path, str),
-          msg='page_set %\'s file_path must have type string')
+          isinstance(page_set.base_dir, str),
+          msg='page_set %\'s base_dir must have type string')
 
     self.assertTrue(
         isinstance(page_set.archive_data_file, str),
@@ -103,7 +84,9 @@ class PageSetSmokeTest(unittest.TestCase):
   def CheckAttributesOfPageBasicAttributes(self, page):
     self.assertTrue(not hasattr(page, 'disabled'))
     self.assertTrue(
-       isinstance(page.url, str),
+       # We use basestring instead of str because page's url can be string of
+       # unicode.
+       isinstance(page.url, basestring),
        msg='page %s \'s url must have type string' % page.display_name)
     self.assertTrue(
        isinstance(page.page_set, page_set_module.PageSet),
@@ -129,6 +112,19 @@ class PageSetSmokeTest(unittest.TestCase):
          msg='label %s in page %s \'s labels must have type string'
          % (str(l), page.display_name))
 
+  def CheckSharedStates(self, page_set):
+    if not page_set.allow_mixed_story_states:
+      shared_user_story_state_class = (
+          page_set.user_stories[0].shared_user_story_state_class)
+      for p in page_set:
+        self.assertIs(
+            shared_user_story_state_class,
+            p.shared_user_story_state_class,
+            msg='page %s\'s shared_user_story_state_class field is different '
+            'from other pages\'s shared_user_story_state_class whereas '
+            'page set %s disallow having mixed states' %
+            (p, page_set))
+
   def RunSmokeTest(self, page_sets_dir, top_level_dir):
     """Run smoke test on all page sets in page_sets_dir.
 
@@ -147,4 +143,4 @@ class PageSetSmokeTest(unittest.TestCase):
       self.CheckArchive(page_set)
       self.CheckCredentials(page_set)
       self.CheckAttributes(page_set)
-      self.CheckNoMixedInBetweenLegacyRunMethodsAndRunPageInteractions(page_set)
+      self.CheckSharedStates(page_set)

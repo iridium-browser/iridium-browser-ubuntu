@@ -19,6 +19,7 @@ tv.exportTo('tv.c.trace_model', function() {
   /**
    * A group of AsyncSlices associated with a thread.
    * @constructor
+   * @extends {tv.c.trace_model.EventContainer}
    */
   function AsyncSliceGroup(parentThread, opt_name) {
     this.parentThread_ = parentThread;
@@ -30,7 +31,7 @@ tv.exportTo('tv.c.trace_model', function() {
   }
 
   AsyncSliceGroup.prototype = {
-    __proto__: Object.prototype,
+    __proto__: tv.c.trace_model.EventContainer.prototype,
 
     get guid() {
       return this.guid_;
@@ -42,6 +43,10 @@ tv.exportTo('tv.c.trace_model', function() {
 
     get model() {
       return this.parentThread_.parent.model;
+    },
+
+    get stableId() {
+      return this.parentThread_.stableId + '.AsyncSliceGroup';
     },
 
     getSettingsKey: function() {
@@ -76,7 +81,7 @@ tv.exportTo('tv.c.trace_model', function() {
         var slice = this.slices[sI];
         slice.start = (slice.start + amount);
         // Shift all nested subSlices recursively.
-        var shiftSubSlices = function (subSlices) {
+        var shiftSubSlices = function(subSlices) {
           if (subSlices === undefined || subSlices.length === 0)
             return;
           for (var sJ = 0; sJ < subSlices.length; sJ++) {
@@ -135,6 +140,10 @@ tv.exportTo('tv.c.trace_model', function() {
         if (slice.subSlices)
           slice.subSlices.forEach(callback, opt_this);
       }
+    },
+
+    iterateAllEventContainers: function(callback) {
+      callback(this);
     },
 
     toJSON: function() {

@@ -28,6 +28,7 @@
 #define Internals_h
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/Iterable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
@@ -73,7 +74,7 @@ class UnionTypesTest;
 template <typename NodeType> class StaticNodeTypeList;
 typedef StaticNodeTypeList<Node> StaticNodeList;
 
-class Internals final : public GarbageCollectedFinalized<Internals>, public ScriptWrappable, public ContextLifecycleObserver {
+class Internals final : public GarbageCollectedFinalized<Internals>, public ScriptWrappable, public ContextLifecycleObserver, public ValueIterable<int> {
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Internals);
 public:
@@ -82,7 +83,7 @@ public:
 
     static void resetToConsistentState(Page*);
 
-    String elementRenderTreeAsText(Element*, ExceptionState&);
+    String elementLayoutTreeAsText(Element*, ExceptionState&);
 
     String address(Node*);
 
@@ -95,7 +96,7 @@ public:
 
     PassRefPtrWillBeRawPtr<CSSStyleDeclaration> computedStyleIncludingVisitedInfo(Node*) const;
 
-    PassRefPtrWillBeRawPtr<ShadowRoot> createUserAgentShadowRoot(Element* host);
+    PassRefPtrWillBeRawPtr<ShadowRoot> createClosedShadowRoot(Element* host);
 
     ShadowRoot* shadowRoot(Element* host);
     ShadowRoot* youngestShadowRoot(Element* host);
@@ -233,8 +234,6 @@ public:
     PassRefPtrWillBeRawPtr<LocalDOMWindow> openDummyInspectorFrontend(const String& url);
     void closeDummyInspectorFrontend();
     Vector<unsigned long> setMemoryCacheCapacities(unsigned long minDeadBytes, unsigned long maxDeadBytes, unsigned long totalBytes);
-    void setInspectorResourcesDataSizeLimits(int maximumResourcesContentSize, int maximumSingleResourceContentSize, ExceptionState&);
-    String inspectorHighlightJSON(Node*, ExceptionState&);
 
     String counterValue(Element*);
 
@@ -269,7 +268,6 @@ public:
 
     void startTrackingRepaints(Document*, ExceptionState&);
     void stopTrackingRepaints(Document*, ExceptionState&);
-    void updateLayoutIgnorePendingStylesheetsAndRunPostLayoutTasks(ExceptionState&);
     void updateLayoutIgnorePendingStylesheetsAndRunPostLayoutTasks(Node*, ExceptionState&);
     void forceFullRepaint(Document*, ExceptionState&);
 
@@ -287,6 +285,7 @@ public:
 
     String getImageSourceURL(Element*);
 
+    String selectMenuListText(HTMLSelectElement*);
     bool isSelectPopupVisible(Node*);
     bool selectPopupItemStyleIsRtl(Node*, int);
     int selectPopupItemStyleFontHeight(Node*, int);
@@ -311,13 +310,14 @@ public:
     ScriptPromise promiseCheckOverload(ScriptState*, Document*);
     ScriptPromise promiseCheckOverload(ScriptState*, Location*, long, long);
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     void setValueForUser(Element*, const String&);
 
     String textSurroundingNode(Node*, int x, int y, unsigned long maxLength);
 
     void setFocused(bool);
+    void setInitialFocus(bool);
 
     bool ignoreLayoutWithPendingStylesheets(Document*);
 
@@ -325,7 +325,7 @@ public:
     // Test must call setNetworkStateNotifierTestOnly(true) before calling setNetworkConnectionInfo.
     void setNetworkConnectionInfo(const String&, ExceptionState&);
 
-    PassRefPtrWillBeRawPtr<ClientRect> boundsInRootViewSpace(Element*);
+    PassRefPtrWillBeRawPtr<ClientRect> boundsInViewportSpace(Element*);
     String serializeNavigationMarkup();
     Vector<String> getTransitionElementIds();
     PassRefPtrWillBeRawPtr<ClientRectList> getTransitionElementRects();
@@ -338,12 +338,15 @@ public:
     void forcePluginPlaceholder(HTMLElement* plugin, PassRefPtrWillBeRawPtr<DocumentFragment>, ExceptionState&);
     void forcePluginPlaceholder(HTMLElement* plugin, const PluginPlaceholderOptions&, ExceptionState&);
 
-    Iterator* iterator(ScriptState*, ExceptionState&);
-
     // Scheudle a forced Blink GC run (Oilpan) at the end of event loop.
     // Note: This is designed to be only used from PerformanceTests/BlinkGC to explicitly measure only Blink GC time.
     //       Normal LayoutTests should use gc() instead as it would trigger both Blink GC and V8 GC.
     void forceBlinkGCWithoutV8GC();
+
+    String selectedHTMLForClipboard();
+    String selectedTextForClipboard();
+
+    void setVisualViewportOffset(int x, int y);
 
 private:
     explicit Internals(Document*);
@@ -354,6 +357,8 @@ private:
 
     DocumentMarker* markerAt(Node*, const String& markerType, unsigned index, ExceptionState&);
     Member<InternalRuntimeFlags> m_runtimeFlags;
+
+    IterationSource* startIteration(ScriptState*, ExceptionState&) override;
 };
 
 } // namespace blink

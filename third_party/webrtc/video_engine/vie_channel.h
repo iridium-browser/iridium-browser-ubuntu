@@ -13,12 +13,13 @@
 
 #include <list>
 
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/remote_bitrate_estimator/include/remote_bitrate_estimator.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
 #include "webrtc/modules/video_coding/main/interface/video_coding_defines.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/scoped_refptr.h"
 #include "webrtc/system_wrappers/interface/tick_util.h"
 #include "webrtc/typedefs.h"
 #include "webrtc/video_engine/include/vie_network.h"
@@ -38,11 +39,14 @@ class CriticalSectionWrapper;
 class EncodedImageCallback;
 class I420FrameCallback;
 class PacedSender;
+class PacketRouter;
+class PayloadRouter;
 class ProcessThread;
 class ReceiveStatisticsProxy;
 class ReportBlockStats;
 class RtcpRttStats;
 class ThreadWrapper;
+class ViEChannelProtectionCallback;
 class ViEDecoderObserver;
 class ViEEffectFilter;
 class ViERTPObserver;
@@ -61,6 +65,7 @@ class ViEChannel
       public ViEFrameProviderBase {
  public:
   friend class ChannelStatsObserver;
+  friend class ViEChannelProtectionCallback;
 
   ViEChannel(int32_t channel_id,
              int32_t engine_id,
@@ -72,8 +77,9 @@ class ViEChannel
              RemoteBitrateEstimator* remote_bitrate_estimator,
              RtcpRttStats* rtt_stats,
              PacedSender* paced_sender,
-             RtpRtcp* default_rtp_rtcp,
-             bool sender);
+             PacketRouter* packet_router,
+             bool sender,
+             bool disable_default_encoder);
   ~ViEChannel();
 
   int32_t Init();
@@ -117,6 +123,7 @@ class ViEChannel
   int32_t SetHybridNACKFECStatus(const bool enable,
                                  const unsigned char payload_typeRED,
                                  const unsigned char payload_typeFEC);
+  bool IsSendingFecEnabled();
   int SetSenderBufferingMode(int target_delay_ms);
   int SetReceiverBufferingMode(int target_delay_ms);
   int32_t SetKeyFrameRequestMethod(const KeyFrameRequestMethod method);
@@ -126,6 +133,8 @@ class ViEChannel
   int SetSendAbsoluteSendTimeStatus(bool enable, int id);
   int SetReceiveAbsoluteSendTimeStatus(bool enable, int id);
   bool GetReceiveAbsoluteSendTimeStatus() const;
+  int SetSendVideoRotationStatus(bool enable, int id);
+  int SetReceiveVideoRotationStatus(bool enable, int id);
   void SetRtcpXrRrtrStatus(bool enable);
   void SetTransmissionSmoothingStatus(bool enable);
   void EnableTMMBR(bool enable);
@@ -171,7 +180,7 @@ class ViEChannel
                                 uint32_t* cumulative_lost,
                                 uint32_t* extended_max,
                                 uint32_t* jitter_samples,
-                                int32_t* rtt_ms);
+                                int64_t* rtt_ms);
 
   // Called on receipt of RTCP report block from remote side.
   void RegisterSendChannelRtcpStatisticsCallback(
@@ -182,7 +191,7 @@ class ViEChannel
                                     uint32_t* cumulative_lost,
                                     uint32_t* extended_max,
                                     uint32_t* jitter_samples,
-                                    int32_t* rtt_ms);
+                                    int64_t* rtt_ms);
 
   // Called on generation of RTCP stats
   void RegisterReceiveChannelRtcpStatisticsCallback(
@@ -210,8 +219,11 @@ class ViEChannel
   void RegisterReceiveChannelRtpStatisticsCallback(
       StreamDataCountersCallback* callback);
 
-  void GetRtcpPacketTypeCounters(RtcpPacketTypeCounter* packets_sent,
-                                 RtcpPacketTypeCounter* packets_received) const;
+  void GetSendRtcpPacketTypeCounter(
+      RtcpPacketTypeCounter* packet_counter) const;
+
+  void GetReceiveRtcpPacketTypeCounter(
+      RtcpPacketTypeCounter* packet_counter) const;
 
   void GetBandwidthUsage(uint32_t* total_bitrate_sent,
                          uint32_t* video_bitrate_sent,
@@ -221,8 +233,6 @@ class ViEChannel
   // to avoid deadlocks.
   bool GetSendSideDelay(int* avg_send_delay, int* max_send_delay) const;
   void RegisterSendSideDelayObserver(SendSideDelayObserver* observer);
-  void GetReceiveBandwidthEstimatorStats(
-      ReceiveBandwidthEstimatorStats* output) const;
 
   // Called on any new send bitrate estimate.
   void RegisterSendBitrateObserver(BitrateStatisticsObserver* observer);
@@ -301,6 +311,9 @@ class ViEChannel
 
   // Gets the modules used by the channel.
   RtpRtcp* rtp_rtcp();
+  scoped_refptr<PayloadRouter> send_payload_router();
+  VCMProtectionCallback* vcm_protection_callback();
+
 
   CallStatsObserver* GetStatsObserver();
 
@@ -315,10 +328,9 @@ class ViEChannel
   virtual void IncomingCodecChanged(const VideoCodec& codec);
 
   // Implements VCMReceiveStatisticsCallback.
-  virtual void OnReceiveRatesUpdated(uint32_t bit_rate,
-                                     uint32_t frame_rate) OVERRIDE;
-  virtual void OnDiscardedPacketsUpdated(int discarded_packets) OVERRIDE;
-  virtual void OnFrameCountsUpdated(const FrameCounts& frame_counts) OVERRIDE;
+  void OnReceiveRatesUpdated(uint32_t bit_rate, uint32_t frame_rate) override;
+  void OnDiscardedPacketsUpdated(int discarded_packets) override;
+  void OnFrameCountsUpdated(const FrameCounts& frame_counts) override;
 
   // Implements VCMDecoderTimingCallback.
   virtual void OnDecoderTiming(int decode_ms,
@@ -355,6 +367,8 @@ class ViEChannel
       EncodedImageCallback* pre_decode_callback);
 
   void RegisterSendFrameCountObserver(FrameCountObserver* observer);
+  void RegisterRtcpPacketTypeCounterObserver(
+      RtcpPacketTypeCounterObserver* observer);
   void RegisterReceiveStatisticsProxy(
       ReceiveStatisticsProxy* receive_statistics_proxy);
   void ReceivedBWEPacket(int64_t arrival_time_ms, size_t payload_size,
@@ -364,7 +378,13 @@ class ViEChannel
   static bool ChannelDecodeThreadFunction(void* obj);
   bool ChannelDecodeProcess();
 
-  void OnRttUpdate(uint32_t rtt);
+  void OnRttUpdate(int64_t rtt);
+
+  int ProtectionRequest(const FecProtectionParams* delta_fec_params,
+                        const FecProtectionParams* key_fec_params,
+                        uint32_t* sent_video_rate_bps,
+                        uint32_t* sent_nack_rate_bps,
+                        uint32_t* sent_fec_rate_bps);
 
  private:
   void ReserveRtpRtcpModules(size_t total_modules)
@@ -409,7 +429,7 @@ class ViEChannel
     // Note: this should be implemented with a RW-lock to allow simultaneous
     // calls into the callback. However that doesn't seem to be needed for the
     // current type of callbacks covered by this class.
-    scoped_ptr<CriticalSectionWrapper> critsect_;
+    rtc::scoped_ptr<CriticalSectionWrapper> critsect_;
     T* callback_ GUARDED_BY(critsect_);
 
    private:
@@ -425,8 +445,7 @@ class ViEChannel
       if (callback_)
         callback_->Notify(total_stats, retransmit_stats, ssrc);
     }
-  }
-  send_bitrate_observer_;
+  } send_bitrate_observer_;
 
   class RegisterableFrameCountObserver
       : public RegisterableCallback<FrameCountObserver> {
@@ -443,14 +462,37 @@ class ViEChannel
 
   class RegisterableSendSideDelayObserver :
       public RegisterableCallback<SendSideDelayObserver> {
-    virtual void SendSideDelayUpdated(int avg_delay_ms,
-                                      int max_delay_ms,
-                                      uint32_t ssrc) OVERRIDE {
+    void SendSideDelayUpdated(int avg_delay_ms,
+                              int max_delay_ms,
+                              uint32_t ssrc) override {
       CriticalSectionScoped cs(critsect_.get());
       if (callback_)
         callback_->SendSideDelayUpdated(avg_delay_ms, max_delay_ms, ssrc);
     }
   } send_side_delay_observer_;
+
+  class RegisterableRtcpPacketTypeCounterObserver
+      : public RegisterableCallback<RtcpPacketTypeCounterObserver> {
+   public:
+    void RtcpPacketTypesCounterUpdated(
+        uint32_t ssrc,
+        const RtcpPacketTypeCounter& packet_counter) override {
+      CriticalSectionScoped cs(critsect_.get());
+      if (callback_)
+        callback_->RtcpPacketTypesCounterUpdated(ssrc, packet_counter);
+      counter_map_[ssrc] = packet_counter;
+    }
+
+    virtual std::map<uint32_t, RtcpPacketTypeCounter> GetPacketTypeCounterMap()
+        const {
+      CriticalSectionScoped cs(critsect_.get());
+      return counter_map_;
+    }
+
+   private:
+    std::map<uint32_t, RtcpPacketTypeCounter> counter_map_
+        GUARDED_BY(critsect_);
+  } rtcp_packet_type_counter_observer_;
 
   int32_t channel_id_;
   int32_t engine_id_;
@@ -458,22 +500,23 @@ class ViEChannel
   uint8_t num_socket_threads_;
 
   // Used for all registered callbacks except rendering.
-  scoped_ptr<CriticalSectionWrapper> callback_cs_;
-  scoped_ptr<CriticalSectionWrapper> rtp_rtcp_cs_;
-
-  RtpRtcp* default_rtp_rtcp_;
+  rtc::scoped_ptr<CriticalSectionWrapper> callback_cs_;
+  rtc::scoped_ptr<CriticalSectionWrapper> rtp_rtcp_cs_;
 
   // Owned modules/classes.
-  scoped_ptr<RtpRtcp> rtp_rtcp_;
+  rtc::scoped_ptr<RtpRtcp> rtp_rtcp_;
   std::list<RtpRtcp*> simulcast_rtp_rtcp_;
   std::list<RtpRtcp*> removed_rtp_rtcp_;
+  scoped_refptr<PayloadRouter> send_payload_router_;
+  rtc::scoped_ptr<ViEChannelProtectionCallback> vcm_protection_callback_;
+
   VideoCodingModule* const vcm_;
   ViEReceiver vie_receiver_;
   ViESender vie_sender_;
   ViESyncModule vie_sync_;
 
   // Helper to report call statistics.
-  scoped_ptr<ChannelStatsObserver> stats_observer_;
+  rtc::scoped_ptr<ChannelStatsObserver> stats_observer_;
 
   // Not owned.
   VCMReceiveStatisticsCallback* vcm_receive_stats_callback_
@@ -486,10 +529,12 @@ class ViEChannel
   RtcpIntraFrameObserver* intra_frame_observer_;
   RtcpRttStats* rtt_stats_;
   PacedSender* paced_sender_;
+  PacketRouter* packet_router_;
 
-  scoped_ptr<RtcpBandwidthObserver> bandwidth_observer_;
+  rtc::scoped_ptr<RtcpBandwidthObserver> bandwidth_observer_;
   int send_timestamp_extension_id_;
   int absolute_send_time_extension_id_;
+  int video_rotation_extension_id_;
 
   Transport* external_transport_;
 
@@ -497,7 +542,7 @@ class ViEChannel
   // Current receive codec used for codec change callback.
   VideoCodec receive_codec_;
   bool wait_for_key_frame_;
-  ThreadWrapper* decode_thread_;
+  rtc::scoped_ptr<ThreadWrapper> decode_thread_;
 
   ViEEffectFilter* effect_filter_;
   bool color_enhancement_;
@@ -505,13 +550,15 @@ class ViEChannel
   // User set MTU, -1 if not set.
   uint16_t mtu_;
   const bool sender_;
+  // Used to skip default encoder in the new API.
+  const bool disable_default_encoder_;
 
   int nack_history_size_sender_;
   int max_nack_reordering_threshold_;
   I420FrameCallback* pre_render_callback_;
 
-  scoped_ptr<ReportBlockStats> report_block_stats_sender_;
-  scoped_ptr<ReportBlockStats> report_block_stats_receiver_;
+  rtc::scoped_ptr<ReportBlockStats> report_block_stats_sender_;
+  rtc::scoped_ptr<ReportBlockStats> report_block_stats_receiver_;
 };
 
 }  // namespace webrtc

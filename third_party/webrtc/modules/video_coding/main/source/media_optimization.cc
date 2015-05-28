@@ -200,7 +200,7 @@ void MediaOptimization::SetEncodingDataInternal(VideoCodecType send_codec_type,
 uint32_t MediaOptimization::SetTargetRates(
     uint32_t target_bitrate,
     uint8_t fraction_lost,
-    uint32_t round_trip_time_ms,
+    int64_t round_trip_time_ms,
     VCMProtectionCallback* protection_callback,
     VCMQMSettingsCallback* qmsettings_callback) {
   CriticalSectionScoped lock(crit_sect_.get());
@@ -214,7 +214,6 @@ uint32_t MediaOptimization::SetTargetRates(
   float target_bitrate_kbps = static_cast<float>(target_bitrate) / 1000.0f;
   loss_prot_logic_->UpdateBitRate(target_bitrate_kbps);
   loss_prot_logic_->UpdateRtt(round_trip_time_ms);
-  loss_prot_logic_->UpdateResidualPacketLoss(static_cast<float>(fraction_lost));
 
   // Get frame rate for encoder: this is the actual/sent frame rate.
   float actual_frame_rate = SentFrameRateInternal();
@@ -321,15 +320,11 @@ uint32_t MediaOptimization::SetTargetRates(
 void MediaOptimization::EnableProtectionMethod(bool enable,
                                                VCMProtectionMethodEnum method) {
   CriticalSectionScoped lock(crit_sect_.get());
-  bool updated = false;
-  if (enable) {
-    updated = loss_prot_logic_->SetMethod(method);
-  } else {
-    loss_prot_logic_->RemoveMethod(method);
-  }
-  if (updated) {
-    loss_prot_logic_->UpdateMethod();
-  }
+  if (!enable && loss_prot_logic_->SelectedType() != method)
+    return;
+  if (!enable)
+    method = kNone;
+  loss_prot_logic_->SetMethod(method);
 }
 
 uint32_t MediaOptimization::InputFrameRate() {

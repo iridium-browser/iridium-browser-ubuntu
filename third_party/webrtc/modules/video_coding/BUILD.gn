@@ -85,6 +85,7 @@ source_set("video_coding") {
     ":webrtc_i420",
     ":webrtc_vp8",
     ":webrtc_vp9",
+    "../..:webrtc_common",
     "../../common_video",
     "../../system_wrappers",
   ]
@@ -164,34 +165,29 @@ source_set("webrtc_vp8") {
     ]
   }
 
-  # TODO(kjellander): Remove once libvpx has changed it's libvpx_config to be
-  # in direct_dependent_configs.
-  configs += [ "//third_party/libvpx:libvpx_config" ]
-
   deps = [
     ":video_coding_utility",
+    "../..:webrtc_common",
     "../../common_video",
     "../../system_wrappers",
   ]
   if (rtc_build_libvpx) {
     deps += [
-      "//third_party/libvpx",
+      rtc_libvpx_dir,
     ]
-  }
-  if (rtc_build_libyuv) {
-    deps += [ "//third_party/libyuv" ]
-  } else {
-    # Need to add a directory normally exported by libyuv.
-    include_dirs += [ "//third_party/libyuv/include" ]
   }
 }
 
 source_set("webrtc_vp9") {
-  sources = [
-    "codecs/vp9/include/vp9.h",
-    "codecs/vp9/vp9_impl.cc",
-    "codecs/vp9/vp9_impl.h",
-  ]
+  if (rtc_build_vp9) {
+    sources = [
+      "codecs/vp9/include/vp9.h",
+      "codecs/vp9/vp9_impl.cc",
+      "codecs/vp9/vp9_impl.h",
+    ]
+  } else {
+    sources = [ "codecs/vp9/vp9_dummy_impl.cc" ]
+  }
 
   configs += [ "../..:common_config" ]
   public_configs = [ "../..:common_inherited_config" ]
@@ -202,10 +198,6 @@ source_set("webrtc_vp9") {
     configs -= [ "//build/config/clang:find_bad_constructs" ]
   }
 
-  # TODO(kjellander): Remove once libvpx has changed it's libvpx_config to be
-  # in direct_dependent_configs.
-  configs += [ "//third_party/libvpx:libvpx_config" ]
-
   deps = [
     ":video_coding_utility",
     "../../common_video",
@@ -213,7 +205,7 @@ source_set("webrtc_vp9") {
   ]
   if (rtc_build_libvpx) {
     deps += [
-      "//third_party/libvpx",
+      rtc_libvpx_dir,
     ]
   }
 }

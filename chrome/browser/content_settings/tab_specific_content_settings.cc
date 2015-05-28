@@ -21,8 +21,8 @@
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/chrome_content_settings_utils.h"
+#include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/media_stream_capture_indicator.h"
-#include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -69,6 +69,16 @@ TabSpecificContentSettings* GetForFrame(int render_process_id,
   return TabSpecificContentSettings::FromWebContents(web_contents);
 }
 
+ContentSettingsUsagesState::CommittedDetails GetCommittedDetails(
+    const content::LoadCommittedDetails& details) {
+  ContentSettingsUsagesState::CommittedDetails committed_details;
+  committed_details.current_url_valid = !!details.entry;
+  if (details.entry)
+    committed_details.current_url = details.entry->GetURL();
+  committed_details.previous_url = details.previous_url;
+  return committed_details;
+}
+
 }  // namespace
 
 TabSpecificContentSettings::SiteDataObserver::SiteDataObserver(
@@ -95,13 +105,15 @@ TabSpecificContentSettings::TabSpecificContentSettings(WebContents* tab)
       geolocation_usages_state_(
           Profile::FromBrowserContext(tab->GetBrowserContext())
               ->GetHostContentSettingsMap(),
-          Profile::FromBrowserContext(tab->GetBrowserContext())->GetPrefs(),
-          CONTENT_SETTINGS_TYPE_GEOLOCATION),
+          CONTENT_SETTINGS_TYPE_GEOLOCATION,
+          prefs::kAcceptLanguages,
+          Profile::FromBrowserContext(tab->GetBrowserContext())->GetPrefs()),
       midi_usages_state_(
           Profile::FromBrowserContext(tab->GetBrowserContext())
               ->GetHostContentSettingsMap(),
-          Profile::FromBrowserContext(tab->GetBrowserContext())->GetPrefs(),
-          CONTENT_SETTINGS_TYPE_MIDI_SYSEX),
+          CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
+          prefs::kAcceptLanguages,
+          Profile::FromBrowserContext(tab->GetBrowserContext())->GetPrefs()),
       pending_protocol_handler_(ProtocolHandler::EmptyProtocolHandler()),
       previous_protocol_handler_(ProtocolHandler::EmptyProtocolHandler()),
       pending_protocol_handler_setting_(CONTENT_SETTING_DEFAULT),
@@ -143,8 +155,7 @@ void TabSpecificContentSettings::CookiesRead(int render_process_id,
                                              const GURL& url,
                                              const GURL& frame_url,
                                              const net::CookieList& cookie_list,
-                                             bool blocked_by_policy,
-                                             bool is_for_blocking_resource) {
+                                             bool blocked_by_policy) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TabSpecificContentSettings* settings =
       GetForFrame(render_process_id, render_frame_id);
@@ -152,14 +163,6 @@ void TabSpecificContentSettings::CookiesRead(int render_process_id,
     settings->OnCookiesRead(url, frame_url, cookie_list,
                             blocked_by_policy);
   }
-  prerender::PrerenderManager::RecordCookieEvent(
-      render_process_id,
-      render_frame_id,
-      url,
-      frame_url,
-      is_for_blocking_resource,
-      prerender::PrerenderContents::COOKIE_EVENT_SEND,
-      &cookie_list);
 }
 
 // static
@@ -177,14 +180,6 @@ void TabSpecificContentSettings::CookieChanged(
   if (settings)
     settings->OnCookieChanged(url, frame_url, cookie_line, options,
                               blocked_by_policy);
-  prerender::PrerenderManager::RecordCookieEvent(
-      render_process_id,
-      render_frame_id,
-      url,
-      frame_url,
-      false /*is_critical_request*/,
-      prerender::PrerenderContents::COOKIE_EVENT_CHANGE,
-      NULL);
 }
 
 // static
@@ -239,10 +234,6 @@ void TabSpecificContentSettings::FileSystemAccessed(int render_process_id,
       render_process_id, render_frame_id);
   if (settings)
     settings->OnFileSystemAccessed(url, blocked_by_policy);
-}
-
-const base::string16 TabSpecificContentSettings::GetBlockedPluginNames() const {
-  return JoinString(blocked_plugin_names_, base::ASCIIToUTF16(", "));
 }
 
 bool TabSpecificContentSettings::IsContentBlocked(
@@ -514,7 +505,7 @@ void TabSpecificContentSettings::OnGeolocationPermissionSet(
       content::NotificationService::NoDetails());
 }
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
 void TabSpecificContentSettings::OnProtectedMediaIdentifierPermissionSet(
     const GURL& requesting_origin,
     bool allowed) {
@@ -800,11 +791,11 @@ void TabSpecificContentSettings::ClearMidiContentSettings() {
 }
 
 void TabSpecificContentSettings::GeolocationDidNavigate(
-      const content::LoadCommittedDetails& details) {
-  geolocation_usages_state_.DidNavigate(details);
+    const content::LoadCommittedDetails& details) {
+  geolocation_usages_state_.DidNavigate(GetCommittedDetails(details));
 }
 
 void TabSpecificContentSettings::MidiDidNavigate(
     const content::LoadCommittedDetails& details) {
-  midi_usages_state_.DidNavigate(details);
+  midi_usages_state_.DidNavigate(GetCommittedDetails(details));
 }

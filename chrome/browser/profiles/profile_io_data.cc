@@ -48,15 +48,15 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_names_io_thread.h"
+#include "chrome/browser/ui/search/new_tab_page_interceptor_service.h"
+#include "chrome/browser/ui/search/new_tab_page_interceptor_service_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/content_settings/core/browser/content_settings_provider.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/sync_driver/pref_names.h"
@@ -109,9 +109,6 @@
 #endif
 
 #if defined(OS_ANDROID)
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "content/public/browser/android/content_protocol_handler.h"
 #endif  // defined(OS_ANDROID)
 
@@ -403,6 +400,13 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   params->protocol_handler_interceptor =
       protocol_handler_registry->CreateJobInterceptorFactory();
 
+  NewTabPageInterceptorService* new_tab_interceptor_service =
+      NewTabPageInterceptorServiceFactory::GetForProfile(profile);
+  if (new_tab_interceptor_service) {
+    params->new_tab_page_interceptor =
+        new_tab_interceptor_service->CreateInterceptor();
+  }
+
   params->proxy_config_service
       .reset(ProxyServiceFactory::CreateProxyConfigService(
            profile->GetProxyConfigTracker()));
@@ -415,7 +419,7 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
 #if defined(OS_CHROMEOS)
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   if (user_manager) {
-    user_manager::User* user =
+    const user_manager::User* user =
         chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
     // No need to initialize NSS for users with empty username hash:
     // Getters for a user's NSS slots always return NULL slot if the user's
@@ -444,7 +448,6 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
 #endif
 
   params->profile = profile;
-  params->prerender_tracker = g_browser_process->prerender_tracker();
   profile_params_.reset(params.release());
 
   ChromeNetworkDelegate::InitializePrefsOnUIThread(
@@ -469,22 +472,6 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
     google_services_user_account_id_.Init(
         prefs::kGoogleServicesUserAccountId, pref_service);
     google_services_user_account_id_.MoveToThread(io_message_loop_proxy);
-
-    google_services_username_.Init(
-        prefs::kGoogleServicesUsername, pref_service);
-    google_services_username_.MoveToThread(io_message_loop_proxy);
-
-    google_services_username_pattern_.Init(
-        prefs::kGoogleServicesUsernamePattern, local_state_pref_service);
-    google_services_username_pattern_.MoveToThread(io_message_loop_proxy);
-
-    reverse_autologin_enabled_.Init(
-        prefs::kReverseAutologinEnabled, pref_service);
-    reverse_autologin_enabled_.MoveToThread(io_message_loop_proxy);
-
-    one_click_signin_rejected_email_list_.Init(
-        prefs::kReverseAutologinRejectedEmailList, pref_service);
-    one_click_signin_rejected_email_list_.MoveToThread(io_message_loop_proxy);
 
     sync_disabled_.Init(sync_driver::prefs::kSyncManaged, pref_service);
     sync_disabled_.MoveToThread(io_message_loop_proxy);
@@ -883,7 +870,14 @@ bool ProfileIOData::GetMetricsEnabledStateOnIOThread() const {
 }
 
 bool ProfileIOData::IsDataReductionProxyEnabled() const {
-  return false;
+  return data_reduction_proxy_io_data() &&
+      data_reduction_proxy_io_data()->IsEnabled();
+}
+
+void ProfileIOData::set_data_reduction_proxy_io_data(
+    scoped_ptr<data_reduction_proxy::DataReductionProxyIOData>
+        data_reduction_proxy_io_data) const {
+  data_reduction_proxy_io_data_ = data_reduction_proxy_io_data.Pass();
 }
 
 base::WeakPtr<net::HttpServerProperties>
@@ -1034,8 +1028,6 @@ void ProfileIOData::Init(
           NULL,
 #endif
           &enable_referrers_));
-  if (command_line.HasSwitch(switches::kEnableClientHints))
-    network_delegate->SetEnableClientHints();
 #if defined(ENABLE_EXTENSIONS)
   network_delegate->set_extension_info_map(
       profile_params_->extension_info_map.get());
@@ -1050,7 +1042,6 @@ void ProfileIOData::Init(
   network_delegate->set_force_safe_search(&force_safesearch_);
   network_delegate->set_force_google_safe_search(&force_google_safesearch_);
   network_delegate->set_force_youtube_safety_mode(&force_youtube_safety_mode_);
-  network_delegate->set_prerender_tracker(profile_params_->prerender_tracker);
   fraudulent_certificate_reporter_.reset(
       new chrome_browser_net::ChromeFraudulentCertificateReporter(
           main_request_context_.get()));
@@ -1127,6 +1118,12 @@ void ProfileIOData::Init(
   // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
   tracked_objects::ScopedTracker tracking_profile5(
       FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 ProfileIOData::Init5"));
+
+  // Install the New Tab Page Interceptor.
+  if (profile_params_->new_tab_page_interceptor.get()) {
+    request_interceptors.push_back(
+        profile_params_->new_tab_page_interceptor.release());
+  }
 
   InitializeInternal(
       network_delegate.Pass(), profile_params_.get(),
@@ -1234,10 +1231,6 @@ void ProfileIOData::ShutdownOnUIThread(
     signin_names_->ReleaseResourcesOnUIThread();
 
   google_services_user_account_id_.Destroy();
-  google_services_username_.Destroy();
-  google_services_username_pattern_.Destroy();
-  reverse_autologin_enabled_.Destroy();
-  one_click_signin_rejected_email_list_.Destroy();
   enable_referrers_.Destroy();
   enable_do_not_track_.Destroy();
   force_safesearch_.Destroy();
@@ -1307,6 +1300,8 @@ scoped_ptr<net::HttpCache> ProfileIOData::CreateMainHttpFactory(
   params.network_delegate = context->network_delegate();
   params.http_server_properties = context->http_server_properties();
   params.net_log = context->net_log();
+  if (data_reduction_proxy_io_data_.get())
+    params.proxy_delegate = data_reduction_proxy_io_data_->proxy_delegate();
 
   network_controller_.reset(new DevToolsNetworkController());
 

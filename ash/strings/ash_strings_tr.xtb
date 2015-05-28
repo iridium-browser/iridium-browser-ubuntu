@@ -3,11 +3,13 @@
 <translation id="6895424601869865703"><ph name="GIVEN_NAME"/> için bir hesap ekle</translation>
 <translation id="1270290102613614947">Dokunmatik klavye devre dışı</translation>
 <translation id="1057289296854808272">Döndürme açık (Değiştirmek için buraya hafifçe vurun)</translation>
+<translation id="5548285847212963613">&quot;<ph name="EXTENSION_NAME"/>&quot; uzantısı bu ağa bağlanmaya yardımcı olabilir.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> ve <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">Taşma Düğmesi</translation>
 <translation id="7904094684485781019">Bu hesabın yöneticisi, çoklu oturum açmayı engelledi.</translation>
 <translation id="8673028979667498656">270°</translation>
 <translation id="5571066253365925590">Bluetooth etkin</translation>
+<translation id="5895138241574237353">Yeniden başlat</translation>
 <translation id="6310121235600822547"><ph name="DISPLAY_NAME"/> dönme ayarı <ph name="ROTATION"/> olarak değiştirildi</translation>
 <translation id="9074739597929991885">Bluetooth</translation>
 <translation id="2268130516524549846">Bluetooth devre dışı</translation>
@@ -58,7 +60,9 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="8676770494376880701">Düşük güçlü şarj cihazı bağlandı</translation>
 <translation id="5238774010593222950">Başka bir hesapta oturum açamıyorum.</translation>
 <translation id="1723752762323179280">Oturumdan Çıkış Yapılıyor</translation>
+<translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">Evet</translation>
+<translation id="4804818685124855865">Bağlantıyı kes</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">Çıkış</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -77,7 +81,6 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="5825747213122829519">Giriş yönteminiz <ph name="INPUT_METHOD_ID"/> olarak değiştirildi.
 Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="2562916301614567480">Özel Ağ</translation>
-<translation id="2982222131142145681"><ph name="DEVICE_NAME"/> (HDMI)</translation>
 <translation id="4250680216510889253">Hayır</translation>
 <translation id="4379753398862151997">Sevgili Monitör, aramızdaki bu ilişki yürümüyor. (Bu monitör desteklenmiyor)</translation>
 <translation id="6426039856985689743">Mobil verileri devre dışı bırak</translation>
@@ -159,6 +162,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="9201131092683066720">Pil %<ph name="PERCENTAGE"/> dolu.</translation>
 <translation id="2983818520079887040">Ayarlar...</translation>
 <translation id="6452181791372256707">Reddet</translation>
+<translation id="1330145147221172764">Ekran klavyesini etkinleştir</translation>
 <translation id="1195412055398077112">fazla tarama</translation>
 <translation id="607652042414456612">Bilgisayarınız yakındaki Bluetooth cihazlar tarafından keşfedilebilir durumdadır. Ayrıca,
 <ph name="ADDRESS"/> adresine sahip &quot;<ph name="NAME"/>&quot; olarak görünecek</translation>
@@ -191,15 +195,18 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="7097613348211027502">ChromeVox (sesli geri bildirim) etkin.
 Devre dışı bırakmak için Ctrl+Alt+Z tuşlarına basın.</translation>
 <translation id="5045002648206642691">Google Drive ayarları...</translation>
+<translation id="1510238584712386396">Başlatıcı</translation>
 <translation id="7209101170223508707">CAPS LOCK açık.
 İptal için Alt+Arama veya Üst Karakter tuşlarına basın.</translation>
 <translation id="8940956008527784070">Pil gücü az (%<ph name="PERCENTAGE"/>)</translation>
 <translation id="4918086044614829423">Kabul et</translation>
 <translation id="5102001756192215136"><ph name="HOUR"/>:<ph name="MINUTE"/> kaldı</translation>
 <translation id="3009178788565917040">Çıkış</translation>
+<translation id="3147142846278915599">Launcher (uygulamalar senkronize ediliyor...)</translation>
 <translation id="6911468394164995108">Başka ağa katıl...</translation>
 <translation id="3678715477168044796"><ph name="DISPLAY_NAME"/>: <ph name="ANNOTATION"/></translation>
 <translation id="412065659894267608">Tam dolana kadar <ph name="HOUR"/> sa <ph name="MINUTE"/> dk var</translation>
 <translation id="3077734595579995578">üstkrktr</translation>
 <translation id="6359806961507272919"><ph name="PHONE_NUMBER"/> numaradan SMS alındı</translation>
+<translation id="4053612967614057854">Ekran klavyesini devre dışı bırak</translation>
 </translationbundle>

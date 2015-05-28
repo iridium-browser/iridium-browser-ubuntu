@@ -12,7 +12,6 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.shell.ChromeShellActivity;
-import org.chromium.chrome.shell.ChromeShellApplication;
 import org.chromium.chrome.shell.ChromeShellTestBase;
 
 /**
@@ -28,11 +27,8 @@ public class AddToHomescreenDialogTest extends ChromeShellTestBase {
 
     @Override
     public void setUp() throws Exception {
-        mActivity = launchChromeShellWithBlankPage();
-        ChromeShellApplication application =
-                (ChromeShellApplication) mActivity.getApplication();
-
         super.setUp();
+        mActivity = launchChromeShellWithBlankPage();
     }
 
     @SmallTest

@@ -45,12 +45,13 @@ class NetErrorHelper
 
   // Button press notification from error page.
   void ReloadButtonPressed();
-  void LoadStaleButtonPressed();
+  void ShowSavedCopyButtonPressed();
   void MoreButtonPressed();
 
   // RenderFrameObserver implementation.
   void DidStartProvisionalLoad() override;
-  void DidCommitProvisionalLoad(bool is_new_navigation) override;
+  void DidCommitProvisionalLoad(bool is_new_navigation,
+                                bool is_same_page_navigation) override;
   void DidFinishLoad() override;
   void OnStop() override;
   void WasShown() override;
@@ -82,6 +83,9 @@ class NetErrorHelper
   // Called when a link with the given tracking ID is pressed.
   void TrackClick(int tracking_id);
 
+  // Tracks easter egg activations on the offline interstitial.
+  void TrackActivatedEasterEgg();
+
  private:
   // NetErrorHelperCore::Delegate implementation:
   void GenerateLocalizedErrorPage(
@@ -89,7 +93,7 @@ class NetErrorHelper
       bool is_failed_post,
       scoped_ptr<error_page::ErrorPageParams> params,
       bool* reload_button_shown,
-      bool* load_stale_button_shown,
+      bool* show_saved_copy_button_shown,
       std::string* html) const override;
   void LoadErrorPageInMainFrame(const std::string& html,
                                 const GURL& failed_url) override;

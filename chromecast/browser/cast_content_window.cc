@@ -12,6 +12,7 @@
 #if defined(USE_AURA)
 #include "ui/aura/env.h"
 #include "ui/aura/layout_manager.h"
+#include "ui/aura/test/test_focus_client.h"
 #include "ui/aura/test/test_screen.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
@@ -84,6 +85,12 @@ void CastContentWindow::CreateWindowTree(
   window_tree_host_->InitHost();
   window_tree_host_->window()->SetLayoutManager(
       new CastFillLayout(window_tree_host_->window()));
+  window_tree_host_->compositor()->SetBackgroundColor(SK_ColorBLACK);
+
+  focus_client_.reset(new aura::test::TestFocusClient());
+  aura::client::SetFocusClient(
+      window_tree_host_->window(), focus_client_.get());
+
   window_tree_host_->Show();
 
   // Add and show content's view/window
@@ -110,6 +117,14 @@ scoped_ptr<content::WebContents> CastContentWindow::CreateWebContents(
 
 void CastContentWindow::DidFirstVisuallyNonEmptyPaint() {
   metrics::CastMetricsHelper::GetInstance()->LogTimeToFirstPaint();
+}
+
+void CastContentWindow::MediaPaused() {
+  metrics::CastMetricsHelper::GetInstance()->LogMediaPause();
+}
+
+void CastContentWindow::MediaStartedPlaying() {
+  metrics::CastMetricsHelper::GetInstance()->LogMediaPlay();
 }
 
 }  // namespace chromecast

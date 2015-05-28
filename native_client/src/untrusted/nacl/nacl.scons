@@ -39,6 +39,7 @@ SRCS_NEWLIB_SYSCALL =  [
     'fsync.c',
     'ftruncate.c',
     'getcwd.c',
+    'getcwd_without_malloc.c',
     'getdents.c',
     'gethostname.c',
     'getpagesize.c',
@@ -271,9 +272,7 @@ if not env.Bit('nonsfi_nacl'):
   env.ComponentLibrary(
       'libnacl_random_private',
       [env.ComponentObject('irt_random',
-                           '${MAIN_DIR}/src/untrusted/irt/irt_random.c'),
-       env.ComponentObject('irt_nameservice',
-                           '${MAIN_DIR}/src/untrusted/irt/irt_nameservice.c')])
+                           '${MAIN_DIR}/src/untrusted/irt/irt_random.c')])
 
 
 imc_syscalls = [
@@ -284,7 +283,6 @@ imc_syscalls = [
     'imc_recvmsg.c',
     'imc_sendmsg.c',
     'imc_socketpair.c',
-    'nameservice.c',
     ]
 
 libimc_syscalls = env.NaClSdkLibrary('libimc_syscalls', imc_syscalls)

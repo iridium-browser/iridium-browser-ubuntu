@@ -33,17 +33,17 @@ namespace blink {
 
 class NodeMutationObserverData final : public NoBaseWillBeGarbageCollected<NodeMutationObserverData> {
     WTF_MAKE_NONCOPYABLE(NodeMutationObserverData);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(NodeMutationObserverData);
 public:
-    WillBeHeapVector<OwnPtrWillBeMember<MutationObserverRegistration> > registry;
-    WillBeHeapHashSet<RawPtrWillBeMember<MutationObserverRegistration> > transientRegistry;
+    WillBeHeapVector<OwnPtrWillBeMember<MutationObserverRegistration>> registry;
+    WillBeHeapHashSet<RawPtrWillBeMember<MutationObserverRegistration>> transientRegistry;
 
     static PassOwnPtrWillBeRawPtr<NodeMutationObserverData> create()
     {
         return adoptPtrWillBeNoop(new NodeMutationObserverData);
     }
 
-    void trace(Visitor* visitor)
+    DEFINE_INLINE_TRACE()
     {
 #if ENABLE(OILPAN)
         visitor->trace(registry);
@@ -57,9 +57,9 @@ private:
 
 class NodeRareData : public NoBaseWillBeGarbageCollectedFinalized<NodeRareData>, public NodeRareDataBase {
     WTF_MAKE_NONCOPYABLE(NodeRareData);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(NodeRareData);
 public:
-    static NodeRareData* create(RenderObject* renderer)
+    static NodeRareData* create(LayoutObject* renderer)
     {
         return new NodeRareData(renderer);
     }
@@ -106,13 +106,13 @@ public:
         ConnectedFrameCountBits = 10, // Must fit Page::maxNumberOfFrames.
     };
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
-    void traceAfterDispatch(Visitor*);
+    DECLARE_TRACE_AFTER_DISPATCH();
     void finalizeGarbageCollectedObject();
 
 protected:
-    explicit NodeRareData(RenderObject* renderer)
+    explicit NodeRareData(LayoutObject* renderer)
         : NodeRareDataBase(renderer)
         , m_connectedFrameCount(0)
         , m_elementFlags(0)

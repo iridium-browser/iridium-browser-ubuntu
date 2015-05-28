@@ -15,8 +15,9 @@
 #include "ipc/ipc_export.h"
 #include "ipc/mojo/ipc_message_pipe_reader.h"
 #include "ipc/mojo/ipc_mojo_bootstrap.h"
-#include "mojo/edk/embedder/channel_info_forward.h"
-#include "mojo/public/cpp/system/core.h"
+#include "ipc/mojo/scoped_ipc_support.h"
+#include "third_party/mojo/src/mojo/edk/embedder/channel_info_forward.h"
+#include "third_party/mojo/src/mojo/public/cpp/system/core.h"
 
 namespace IPC {
 
@@ -75,6 +76,7 @@ class IPC_MOJO_EXPORT ChannelMojo
       const ChannelHandle& channel_handle);
 
   static scoped_ptr<ChannelFactory> CreateClientFactory(
+      Delegate* delegate,
       const ChannelHandle& channel_handle);
 
   ~ChannelMojo() override;
@@ -92,16 +94,16 @@ class IPC_MOJO_EXPORT ChannelMojo
 #if defined(OS_POSIX) && !defined(OS_NACL)
   int GetClientFileDescriptor() const override;
   base::ScopedFD TakeClientFileDescriptor() override;
+#endif  // defined(OS_POSIX) && !defined(OS_NACL)
 
   // These access protected API of IPC::Message, which has ChannelMojo
   // as a friend class.
-  static MojoResult WriteToFileDescriptorSet(
+  static MojoResult WriteToMessageAttachmentSet(
       const std::vector<MojoHandle>& handle_buffer,
       Message* message);
-  static MojoResult ReadFromFileDescriptorSet(Message* message,
-                                              std::vector<MojoHandle>* handles);
-
-#endif  // defined(OS_POSIX) && !defined(OS_NACL)
+  static MojoResult ReadFromMessageAttachmentSet(
+      Message* message,
+      std::vector<MojoHandle>* handles);
 
   // MojoBootstrapDelegate implementation
   void OnBootstrapError() override;
@@ -146,6 +148,8 @@ class IPC_MOJO_EXPORT ChannelMojo
 
   scoped_ptr<internal::MessagePipeReader, ReaderDeleter> message_reader_;
   ScopedVector<Message> pending_messages_;
+
+  scoped_ptr<ScopedIPCSupport> ipc_support_;
 
   base::WeakPtrFactory<ChannelMojo> weak_factory_;
 

@@ -944,8 +944,8 @@ bool Texture::ClearLevel(
   // but only the decoder knows all the state (like unpack_alignment_) that's
   // needed to be able to call GL correctly.
   bool cleared = decoder->ClearLevel(
-      service_id_, target_, info.target, info.level, info.internal_format,
-      info.format, info.type, info.width, info.height, immutable_);
+      this, info.target, info.level, info.internal_format, info.format,
+      info.type, info.width, info.height, immutable_);
   UpdateMipCleared(&info, cleared);
   return info.cleared;
 }
@@ -1718,13 +1718,13 @@ void TextureManager::DoTexImage2D(
 ScopedTextureUploadTimer::ScopedTextureUploadTimer(
     DecoderTextureState* texture_state)
     : texture_state_(texture_state),
-      begin_time_(base::TimeTicks::HighResNow()) {
+      begin_time_(base::TimeTicks::Now()) {
 }
 
 ScopedTextureUploadTimer::~ScopedTextureUploadTimer() {
   texture_state_->texture_upload_count++;
   texture_state_->total_texture_upload_time +=
-      base::TimeTicks::HighResNow() - begin_time_;
+      base::TimeTicks::Now() - begin_time_;
 }
 
 }  // namespace gles2

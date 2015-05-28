@@ -45,9 +45,7 @@ bool MessagePipeReader::Send(scoped_ptr<Message> message) {
   message->TraceMessageBegin();
   std::vector<MojoHandle> handles;
   MojoResult result = MOJO_RESULT_OK;
-#if defined(OS_POSIX) && !defined(OS_NACL)
-  result = ChannelMojo::ReadFromFileDescriptorSet(message.get(), &handles);
-#endif
+  result = ChannelMojo::ReadFromMessageAttachmentSet(message.get(), &handles);
   if (result == MOJO_RESULT_OK) {
     result = MojoWriteMessage(handle(),
                               message->data(),
@@ -72,16 +70,12 @@ void MessagePipeReader::OnMessageReceived() {
 
   std::vector<MojoHandle> handle_buffer;
   TakeHandleBuffer(&handle_buffer);
-#if defined(OS_POSIX) && !defined(OS_NACL)
   MojoResult write_result =
-      ChannelMojo::WriteToFileDescriptorSet(handle_buffer, &message);
+      ChannelMojo::WriteToMessageAttachmentSet(handle_buffer, &message);
   if (write_result != MOJO_RESULT_OK) {
     CloseWithError(write_result);
     return;
   }
-#else
-  DCHECK(handle_buffer.empty());
-#endif
 
   message.TraceMessageEnd();
   delegate_->OnMessageReceived(message);
@@ -168,7 +162,7 @@ void MessagePipeReader::ReadMessagesThenWait() {
     // We have to consume then and retry in that case.
     if (result != MOJO_RESULT_ALREADY_EXISTS) {
       if (result != MOJO_RESULT_OK) {
-        DLOG(ERROR) << "Result is " << result;
+        LOG(ERROR) << "Failed to wait on the pipe. Result is " << result;
         OnPipeError(result);
         Close();
       }
@@ -183,7 +177,7 @@ void MessagePipeReader::PipeIsReady(MojoResult wait_result) {
     if (wait_result != MOJO_RESULT_ABORTED) {
       // FAILED_PRECONDITION happens every time the peer is dead so
       // it isn't worth polluting the log message.
-      DLOG_IF(WARNING, wait_result != MOJO_RESULT_FAILED_PRECONDITION)
+      LOG_IF(WARNING, wait_result != MOJO_RESULT_FAILED_PRECONDITION)
           << "Pipe got error from the waiter. Closing: " << wait_result;
       OnPipeError(wait_result);
     }

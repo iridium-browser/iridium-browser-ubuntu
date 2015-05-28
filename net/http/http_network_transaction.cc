@@ -14,7 +14,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/metrics/stats_counters.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -55,7 +54,6 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/ssl_client_socket_pool.h"
 #include "net/socket/transport_client_socket_pool.h"
-#include "net/spdy/hpack_huffman_aggregator.h"
 #include "net/spdy/spdy_http_stream.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
@@ -80,7 +78,11 @@ void ProcessAlternateProtocol(
   std::string alternate_protocol_str;
   while (headers.EnumerateHeader(&iter, kAlternateProtocolHeader,
                                  &alternate_protocol_str)) {
-    alternate_protocol_values.push_back(alternate_protocol_str);
+    base::TrimWhitespaceASCII(alternate_protocol_str, base::TRIM_ALL,
+                              &alternate_protocol_str);
+    if (!alternate_protocol_str.empty()) {
+      alternate_protocol_values.push_back(alternate_protocol_str);
+    }
   }
 
   session->http_stream_factory()->ProcessAlternateProtocol(
@@ -101,6 +103,15 @@ base::Value* NetLogSSLVersionFallbackCallback(
   dict->SetInteger("net_error", net_error);
   dict->SetInteger("version_before", version_before);
   dict->SetInteger("version_after", version_after);
+  return dict;
+}
+
+base::Value* NetLogSSLCipherFallbackCallback(const GURL* url,
+                                             int net_error,
+                                             NetLog::LogLevel /* log_level */) {
+  base::DictionaryValue* dict = new base::DictionaryValue();
+  dict->SetString("host_and_port", GetHostAndPort(*url));
+  dict->SetInteger("net_error", net_error);
   return dict;
 }
 
@@ -163,8 +174,6 @@ HttpNetworkTransaction::~HttpNetworkTransaction() {
 int HttpNetworkTransaction::Start(const HttpRequestInfo* request_info,
                                   const CompletionCallback& callback,
                                   const BoundNetLog& net_log) {
-  SIMPLE_STATS_COUNTER("HttpNetworkTransaction.Count");
-
   net_log_ = net_log;
   request_ = request_info;
 
@@ -173,9 +182,18 @@ int HttpNetworkTransaction::Start(const HttpRequestInfo* request_info,
     proxy_ssl_config_.rev_checking_enabled = false;
   }
 
+  if (request_->load_flags & LOAD_PREFETCH)
+    response_.unused_since_prefetch = true;
+
   // Channel ID is disabled if privacy mode is enabled for this request.
   if (request_->privacy_mode == PRIVACY_MODE_ENABLED)
     server_ssl_config_.channel_id_enabled = false;
+
+  if (server_ssl_config_.fastradio_padding_enabled) {
+    server_ssl_config_.fastradio_padding_eligible =
+        session_->ssl_config_service()->SupportsFastradioPadding(
+            request_info->url);
+  }
 
   next_state_ = STATE_NOTIFY_BEFORE_CREATE_STREAM;
   int rv = DoLoop(OK);
@@ -563,12 +581,13 @@ void HttpNetworkTransaction::OnHttpsProxyTunnelResponse(
   OnIOComplete(ERR_HTTPS_PROXY_TUNNEL_RESPONSE);
 }
 
-bool HttpNetworkTransaction::is_https_request() const {
-  return request_->url.SchemeIs("https");
+bool HttpNetworkTransaction::IsSecureRequest() const {
+  return request_->url.SchemeIsSecure();
 }
 
 bool HttpNetworkTransaction::UsingHttpProxyWithoutTunnel() const {
-  return (proxy_info_.is_http() || proxy_info_.is_https()) &&
+  return (proxy_info_.is_http() || proxy_info_.is_https() ||
+          proxy_info_.is_quic()) &&
          !(request_->url.SchemeIs("https") || request_->url.SchemeIsWSOrWSS());
 }
 
@@ -962,7 +981,7 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
   } else if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
     // TODO(wtc): Need a test case for this code path!
     DCHECK(stream_.get());
-    DCHECK(is_https_request());
+    DCHECK(IsSecureRequest());
     response_.cert_request_info = new SSLCertRequestInfo;
     stream_->GetSSLCertRequestInfo(response_.cert_request_info.get());
     result = HandleCertificateRequest(result);
@@ -1043,18 +1062,10 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
   if (rv != OK)
     return rv;
 
-  if (is_https_request())
+  if (IsSecureRequest())
     stream_->GetSSLInfo(&response_.ssl_info);
 
   headers_valid_ = true;
-
-  if (session_->huffman_aggregator()) {
-    session_->huffman_aggregator()->AggregateTransactionCharacterCounts(
-        *request_,
-        request_headers_,
-        proxy_info_.proxy_server(),
-        *response_.headers.get());
-  }
   return OK;
 }
 
@@ -1237,6 +1248,21 @@ void HttpNetworkTransaction::HandleClientAuthError(int error) {
 int HttpNetworkTransaction::HandleSSLHandshakeError(int error) {
   DCHECK(request_);
   HandleClientAuthError(error);
+
+  // Accept deprecated cipher suites, but only on a fallback. This makes UMA
+  // reflect servers require a deprecated cipher rather than merely prefer
+  // it. This, however, has no security benefit until the ciphers are actually
+  // removed.
+  if (!server_ssl_config_.enable_deprecated_cipher_suites &&
+      (error == ERR_SSL_VERSION_OR_CIPHER_MISMATCH ||
+       error == ERR_CONNECTION_CLOSED || error == ERR_CONNECTION_RESET)) {
+    net_log_.AddEvent(
+        NetLog::TYPE_SSL_CIPHER_FALLBACK,
+        base::Bind(&NetLogSSLCipherFallbackCallback, &request_->url, error));
+    server_ssl_config_.enable_deprecated_cipher_suites = true;
+    ResetConnectionAndRequestForResend();
+    return OK;
+  }
 
   bool should_fallback = false;
   uint16 version_max = server_ssl_config_.version_max;

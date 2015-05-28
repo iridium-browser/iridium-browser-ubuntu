@@ -274,6 +274,11 @@ void DownloadItemView::OnExtractIconComplete(gfx::Image* icon_bitmap) {
 void DownloadItemView::OnDownloadUpdated(DownloadItem* download_item) {
   DCHECK_EQ(download(), download_item);
 
+  if (!model_.ShouldShowInShelf()) {
+    shelf_->RemoveDownloadView(this);  // This will delete us!
+    return;
+  }
+
   if (IsShowingWarningDialog() && !model_.IsDangerous()) {
     // We have been approved.
     ClearWarningDialog();
@@ -1029,10 +1034,9 @@ void DownloadItemView::ShowContextMenuImpl(const gfx::Point& p,
                  weak_ptr_factory_.GetWeakPtr()));
   views::View::ConvertPointToScreen(this, &point);
 
-  if (!context_menu_.get()) {
-    context_menu_.reset(
-        new DownloadShelfContextMenuView(download(), shelf_->GetNavigator()));
-  }
+  if (!context_menu_.get())
+    context_menu_.reset(new DownloadShelfContextMenuView(download()));
+
   context_menu_->Run(GetWidget()->GetTopLevelWidget(),
                      gfx::Rect(point, size), source_type);
   // We could be deleted now.

@@ -21,17 +21,17 @@
 #include "config.h"
 #include "core/svg/SVGLineElement.h"
 
-#include "core/rendering/svg/RenderSVGShape.h"
+#include "core/layout/svg/LayoutSVGShape.h"
 #include "core/svg/SVGLength.h"
 
 namespace blink {
 
 inline SVGLineElement::SVGLineElement(Document& document)
     : SVGGeometryElement(SVGNames::lineTag, document)
-    , m_x1(SVGAnimatedLength::create(this, SVGNames::x1Attr, SVGLength::create(LengthModeWidth), AllowNegativeLengths))
-    , m_y1(SVGAnimatedLength::create(this, SVGNames::y1Attr, SVGLength::create(LengthModeHeight), AllowNegativeLengths))
-    , m_x2(SVGAnimatedLength::create(this, SVGNames::x2Attr, SVGLength::create(LengthModeWidth), AllowNegativeLengths))
-    , m_y2(SVGAnimatedLength::create(this, SVGNames::y2Attr, SVGLength::create(LengthModeHeight), AllowNegativeLengths))
+    , m_x1(SVGAnimatedLength::create(this, SVGNames::x1Attr, SVGLength::create(SVGLengthMode::Width), AllowNegativeLengths))
+    , m_y1(SVGAnimatedLength::create(this, SVGNames::y1Attr, SVGLength::create(SVGLengthMode::Height), AllowNegativeLengths))
+    , m_x2(SVGAnimatedLength::create(this, SVGNames::x2Attr, SVGLength::create(SVGLengthMode::Width), AllowNegativeLengths))
+    , m_y2(SVGAnimatedLength::create(this, SVGNames::y2Attr, SVGLength::create(SVGLengthMode::Height), AllowNegativeLengths))
 {
     addToPropertyMap(m_x1);
     addToPropertyMap(m_y1);
@@ -39,7 +39,7 @@ inline SVGLineElement::SVGLineElement(Document& document)
     addToPropertyMap(m_y2);
 }
 
-void SVGLineElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGLineElement)
 {
     visitor->trace(m_x1);
     visitor->trace(m_y1);
@@ -62,11 +62,6 @@ bool SVGLineElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGLineElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
-}
-
 void SVGLineElement::svgAttributeChanged(const QualifiedName& attrName)
 {
     if (!isSupportedAttribute(attrName)) {
@@ -84,7 +79,7 @@ void SVGLineElement::svgAttributeChanged(const QualifiedName& attrName)
     if (isLengthAttribute)
         updateRelativeLengthsInformation();
 
-    RenderSVGShape* renderer = toRenderSVGShape(this->renderer());
+    LayoutSVGShape* renderer = toLayoutSVGShape(this->layoutObject());
     if (!renderer)
         return;
 

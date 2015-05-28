@@ -38,13 +38,12 @@
 #include "public/platform/WebThread.h"
 #include "wtf/Assertions.h"
 #include "wtf/Atomics.h"
+#include "wtf/ContainerAnnotations.h"
+#include "wtf/Forward.h"
 #include "wtf/HashCountedSet.h"
 #include "wtf/LinkedHashSet.h"
 #include "wtf/ListHashSet.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/PageAllocator.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/ThreadSafeRefCounted.h"
 #include <stdint.h>
 
 namespace blink {
@@ -89,26 +88,29 @@ static const intptr_t zappedVTable = 0xd0d;
 
 class CallbackStack;
 class PageMemory;
+class NormalPageHeap;
 template<ThreadAffinity affinity> class ThreadLocalPersistents;
 template<typename T, typename RootsAccessor = ThreadLocalPersistents<ThreadingTrait<T>::Affinity>> class Persistent;
 
-#if ENABLE(GC_PROFILE_HEAP)
+#if ENABLE(GC_PROFILING)
 class TracedValue;
 #endif
 
 // HeapObjectHeader is 4 byte (32 bit) that has the following layout:
 //
-// | gcInfoIndex (15 bit) | size (14 bit) | dead bit (1 bit) | freed bit (1 bit) | mark bit (1 bit) |
+// | gcInfoIndex (14 bit) | DOM mark bit (1 bit) | size (14 bit) | dead bit (1 bit) | freed bit (1 bit) | mark bit (1 bit) |
 //
 // - For non-large objects, 14 bit is enough for |size| because the blink
 //   page size is 2^17 byte and each object is guaranteed to be aligned with
 //   2^3 byte.
 // - For large objects, |size| is 0. The actual size of a large object is
-//   stored in LargeObject::m_payloadSize.
-// - 15 bit is enough for gcInfoIndex because there are less than 2^15 types
+//   stored in LargeObjectPage::m_payloadSize.
+// - 1 bit used to mark DOM trees for V8.
+// - 14 bit is enough for gcInfoIndex because there are less than 2^14 types
 //   in Blink.
-const size_t headerGCInfoIndexShift = 17;
-const size_t headerGCInfoIndexMask = (static_cast<size_t>((1 << 15) - 1)) << headerGCInfoIndexShift;
+const size_t headerDOMMarkBitMask = 1u << 17;
+const size_t headerGCInfoIndexShift = 18;
+const size_t headerGCInfoIndexMask = (static_cast<size_t>((1 << 14) - 1)) << headerGCInfoIndexShift;
 const size_t headerSizeMask = (static_cast<size_t>((1 << 14) - 1)) << 3;
 const size_t headerMarkBitMask = 1;
 const size_t headerFreedBitMask = 2;
@@ -124,12 +126,9 @@ const size_t headerDeadBitMask = 4;
 const size_t headerPromptlyFreedBitMask = headerFreedBitMask | headerDeadBitMask;
 const size_t largeObjectSizeInHeader = 0;
 const size_t gcInfoIndexForFreeListHeader = 0;
-const size_t nonLargeObjectSizeMax = 1 << 17;
-#if ENABLE(GC_PROFILE_HEAP)
-const size_t maxHeapObjectAge = 7;
-#endif
+const size_t nonLargeObjectPageSizeMax = 1 << 17;
 
-static_assert(nonLargeObjectSizeMax >= blinkPageSize, "max size supported by HeapObjectHeader must at least be blinkPageSize");
+static_assert(nonLargeObjectPageSizeMax >= blinkPageSize, "max size supported by HeapObjectHeader must at least be blinkPageSize");
 
 class PLATFORM_EXPORT HeapObjectHeader {
 public:
@@ -140,7 +139,7 @@ public:
 #if ENABLE(ASSERT)
         m_magic = magic;
 #endif
-#if ENABLE(GC_PROFILE_HEAP)
+#if ENABLE(GC_PROFILING)
         m_age = 0;
 #endif
         // sizeof(HeapObjectHeader) must be equal to or smaller than
@@ -153,7 +152,7 @@ public:
 #endif
 
         ASSERT(gcInfoIndex < GCInfoTable::maxIndex);
-        ASSERT(size < nonLargeObjectSizeMax);
+        ASSERT(size < nonLargeObjectPageSizeMax);
         ASSERT(!(size & allocationMask));
         m_encoded = (gcInfoIndex << headerGCInfoIndexShift) | size | (gcInfoIndex ? 0 : headerFreedBitMask);
     }
@@ -164,23 +163,23 @@ public:
     bool isPromptlyFreed() const { return (m_encoded & headerPromptlyFreedBitMask) == headerPromptlyFreedBitMask; }
     NO_SANITIZE_ADDRESS
     void markPromptlyFreed() { m_encoded |= headerPromptlyFreedBitMask; }
-    inline size_t size() const;
+    size_t size() const;
 
     NO_SANITIZE_ADDRESS
     size_t gcInfoIndex() const { return (m_encoded & headerGCInfoIndexMask) >> headerGCInfoIndexShift; }
     NO_SANITIZE_ADDRESS
     void setSize(size_t size) { m_encoded = size | (m_encoded & ~headerSizeMask); }
-    inline bool isMarked() const;
-    inline void mark();
-    inline void unmark();
-    inline void markDead();
-    inline bool isDead() const;
+    bool isMarked() const;
+    void mark();
+    void unmark();
+    void markDead();
+    bool isDead() const;
 
-    inline Address payload();
-    inline size_t payloadSize();
-    inline Address payloadEnd();
+    Address payload();
+    size_t payloadSize();
+    Address payloadEnd();
 
-    inline void checkHeader() const;
+    void checkHeader() const;
 #if ENABLE(ASSERT)
     // Zap magic number with a new magic number that means there was once an
     // object allocated here, but it was freed because nobody marked it during
@@ -194,7 +193,7 @@ public:
     static const uint16_t magic = 0xfff1;
     static const uint16_t zappedMagic = 0x4321;
 
-#if ENABLE(GC_PROFILE_HEAP)
+#if ENABLE(GC_PROFILING)
     NO_SANITIZE_ADDRESS
     size_t encodedSize() const { return m_encoded; }
 
@@ -202,14 +201,14 @@ public:
     size_t age() const { return m_age; }
 
     NO_SANITIZE_ADDRESS
-    void incAge()
+    void incrementAge()
     {
         if (m_age < maxHeapObjectAge)
             m_age++;
     }
 #endif
 
-#if !ENABLE(ASSERT) && !ENABLE(GC_PROFILE_HEAP) && CPU(64BIT)
+#if !ENABLE(ASSERT) && !ENABLE(GC_PROFILING) && CPU(64BIT)
     // This method is needed just to avoid compilers from removing m_padding.
     uint64_t unusedMethod() const { return m_padding; }
 #endif
@@ -219,7 +218,7 @@ private:
 #if ENABLE(ASSERT)
     uint16_t m_magic;
 #endif
-#if ENABLE(GC_PROFILE_HEAP)
+#if ENABLE(GC_PROFILING)
     uint8_t m_age;
 #endif
 
@@ -235,7 +234,7 @@ private:
     // ^4 byte aligned             ^8 byte aligned               ^4 byte aligned
     //
     // since the former layout aligns both header and payload to 8 byte.
-#if !ENABLE(ASSERT) && !ENABLE(GC_PROFILE_HEAP) && CPU(64BIT)
+#if !ENABLE(ASSERT) && !ENABLE(GC_PROFILING) && CPU(64BIT)
     uint32_t m_padding;
 #endif
 };
@@ -243,8 +242,7 @@ private:
 inline HeapObjectHeader* HeapObjectHeader::fromPayload(const void* payload)
 {
     Address addr = reinterpret_cast<Address>(const_cast<void*>(payload));
-    HeapObjectHeader* header =
-        reinterpret_cast<HeapObjectHeader*>(addr - sizeof(HeapObjectHeader));
+    HeapObjectHeader* header = reinterpret_cast<HeapObjectHeader*>(addr - sizeof(HeapObjectHeader));
     return header;
 }
 
@@ -333,13 +331,6 @@ inline Address roundToBlinkPageEnd(Address address)
     return reinterpret_cast<Address>(reinterpret_cast<uintptr_t>(address - 1) & blinkPageBaseMask) + blinkPageSize;
 }
 
-// Compute the amount of padding we have to add to a header to make
-// the size of the header plus the padding a multiple of 8 bytes.
-inline size_t headerPadding()
-{
-    return (allocationGranularity - (sizeof(HeapObjectHeader) % allocationGranularity)) % allocationGranularity;
-}
-
 // Masks an address down to the enclosing blink page base address.
 inline Address blinkPageAddress(Address address)
 {
@@ -357,20 +348,42 @@ inline bool isPageHeaderAddress(Address address)
 }
 #endif
 
-// FIXME: Add a good comment about the heap layout once heap relayout work
-// is done.
-class BaseHeapPage {
+// BasePage is a base class for NormalPage and LargeObjectPage.
+//
+// - NormalPage is a page whose size is |blinkPageSize|. NormalPage can contain
+//   multiple objects in the page. An object whose size is smaller than
+//   |largeObjectSizeThreshold| is stored in NormalPage.
+//
+// - LargeObjectPage is a page that contains only one object. The object size
+//   is arbitrary. An object whose size is larger than |blinkPageSize| is stored
+//   as a single project in LargeObjectPage.
+//
+// Note: An object whose size is between |largeObjectSizeThreshold| and
+// |blinkPageSize| can go to either of NormalPage or LargeObjectPage.
+class BasePage {
 public:
-    BaseHeapPage(PageMemory*, ThreadState*);
-    virtual ~BaseHeapPage() { }
+    BasePage(PageMemory*, BaseHeap*);
+    virtual ~BasePage() { }
+
+    void link(BasePage** previousNext)
+    {
+        m_next = *previousNext;
+        *previousNext = this;
+    }
+    void unlink(BasePage** previousNext)
+    {
+        *previousNext = m_next;
+        m_next = nullptr;
+    }
+    BasePage* next() const { return m_next; }
 
     // virtual methods are slow. So performance-sensitive methods
-    // should be defined as non-virtual methods on HeapPage and LargeObject.
+    // should be defined as non-virtual methods on NormalPage and LargeObjectPage.
     // The following methods are not performance-sensitive.
     virtual size_t objectPayloadSizeForTesting() = 0;
     virtual bool isEmpty() = 0;
-    virtual void removeFromHeap(ThreadHeap*) = 0;
-    virtual void sweep(ThreadHeap*) = 0;
+    virtual void removeFromHeap() = 0;
+    virtual void sweep() = 0;
     virtual void markUnmarkedObjectsDead() = 0;
     // Check if the given address points to an object in this
     // heap page. If so, find the start of that object and mark it
@@ -382,118 +395,119 @@ public:
     // the stack.
     virtual void checkAndMarkPointer(Visitor*, Address) = 0;
     virtual void markOrphaned();
-#if ENABLE(GC_PROFILE_MARKING)
+#if ENABLE(GC_PROFILING)
     virtual const GCInfo* findGCInfo(Address) = 0;
-#endif
-#if ENABLE(GC_PROFILE_HEAP)
     virtual void snapshot(TracedValue*, ThreadState::SnapshotInfo*) = 0;
+    virtual void incrementMarkedObjectsAge() = 0;
+    virtual void countMarkedObjects(ClassAgeCountsMap&) = 0;
+    virtual void countObjectsToSweep(ClassAgeCountsMap&) = 0;
 #endif
-#if ENABLE(ASSERT)
+#if ENABLE(ASSERT) || ENABLE(GC_PROFILING)
     virtual bool contains(Address) = 0;
 #endif
     virtual size_t size() = 0;
-    virtual bool isLargeObject() { return false; }
+    virtual bool isLargeObjectPage() { return false; }
 
     Address address() { return reinterpret_cast<Address>(this); }
     PageMemory* storage() const { return m_storage; }
-    ThreadState* threadState() const { return m_threadState; }
-    bool orphaned() { return !m_threadState; }
+    BaseHeap* heap() const { return m_heap; }
+    bool orphaned() { return !m_heap; }
     bool terminating() { return m_terminating; }
     void setTerminating() { m_terminating = true; }
 
+    // Returns true if this page has been swept by the ongoing lazy sweep.
+    bool hasBeenSwept() const { return m_swept; }
+
+    void markAsSwept()
+    {
+        ASSERT(!m_swept);
+        m_swept = true;
+    }
+
+    void markAsUnswept()
+    {
+        ASSERT(m_swept);
+        m_swept = false;
+    }
+
 private:
     PageMemory* m_storage;
-    ThreadState* m_threadState;
+    BaseHeap* m_heap;
+    BasePage* m_next;
     // Whether the page is part of a terminating thread or not.
     bool m_terminating;
+
+    // Track the sweeping state of a page. Set to true once
+    // the lazy sweep completes has processed it.
+    //
+    // Set to false at the start of a sweep, true  upon completion
+    // of lazy sweeping.
+    bool m_swept;
+    friend class BaseHeap;
 };
 
-class HeapPage final : public BaseHeapPage {
+class NormalPage final : public BasePage {
 public:
-    HeapPage(PageMemory*, ThreadHeap*);
+    NormalPage(PageMemory*, BaseHeap*);
 
     Address payload()
     {
-        return address() + sizeof(HeapPage) + headerPadding();
+        return address() + pageHeaderSize();
     }
     size_t payloadSize()
     {
-        return (blinkPagePayloadSize() - sizeof(HeapPage) - headerPadding()) & ~allocationMask;
+        return (blinkPagePayloadSize() - pageHeaderSize()) & ~allocationMask;
     }
     Address payloadEnd() { return payload() + payloadSize(); }
-    bool containedInObjectPayload(Address address) { return payload() <= address && address < payloadEnd(); }
-
-    void link(HeapPage** previousNext)
+    bool containedInObjectPayload(Address address)
     {
-        m_next = *previousNext;
-        *previousNext = this;
-    }
-
-    void unlink(HeapPage** previousNext)
-    {
-        *previousNext = m_next;
-        m_next = nullptr;
+        return payload() <= address && address < payloadEnd();
     }
 
     virtual size_t objectPayloadSizeForTesting() override;
     virtual bool isEmpty() override;
-    virtual void removeFromHeap(ThreadHeap*) override;
-    virtual void sweep(ThreadHeap*) override;
+    virtual void removeFromHeap() override;
+    virtual void sweep() override;
     virtual void markUnmarkedObjectsDead() override;
     virtual void checkAndMarkPointer(Visitor*, Address) override;
-    virtual void markOrphaned() override
-    {
-        // Zap the payload with a recognizable value to detect any incorrect
-        // cross thread pointer usage.
-#if defined(ADDRESS_SANITIZER)
-        // This needs to zap poisoned memory as well.
-        // Force unpoison memory before memset.
-        ASAN_UNPOISON_MEMORY_REGION(payload(), payloadSize());
-#endif
-        memset(payload(), orphanedZapValue, payloadSize());
-        BaseHeapPage::markOrphaned();
-    }
-#if ENABLE(GC_PROFILE_MARKING)
+    virtual void markOrphaned() override;
+#if ENABLE(GC_PROFILING)
     const GCInfo* findGCInfo(Address) override;
+    void snapshot(TracedValue*, ThreadState::SnapshotInfo*) override;
+    void incrementMarkedObjectsAge() override;
+    void countMarkedObjects(ClassAgeCountsMap&) override;
+    void countObjectsToSweep(ClassAgeCountsMap&) override;
 #endif
-#if ENABLE(GC_PROFILE_HEAP)
-    virtual void snapshot(TracedValue*, ThreadState::SnapshotInfo*);
-#endif
-#if ENABLE(ASSERT)
+#if ENABLE(ASSERT) || ENABLE(GC_PROFILING)
     // Returns true for the whole blinkPageSize page that the page is on, even
     // for the header, and the unmapped guard page at the start. That ensures
     // the result can be used to populate the negative page cache.
-    virtual bool contains(Address addr) override
-    {
-        Address blinkPageStart = roundToBlinkPageStart(address());
-        ASSERT(blinkPageStart == address() - WTF::kSystemPageSize); // Page is at aligned address plus guard page size.
-        return blinkPageStart <= addr && addr < blinkPageStart + blinkPageSize;
-    }
+    virtual bool contains(Address) override;
 #endif
     virtual size_t size() override { return blinkPageSize; }
+    static size_t pageHeaderSize()
+    {
+        // Compute the amount of padding we have to add to a header to make
+        // the size of the header plus the padding a multiple of 8 bytes.
+        size_t paddingSize = (sizeof(NormalPage) + allocationGranularity - (sizeof(HeapObjectHeader) % allocationGranularity)) % allocationGranularity;
+        return sizeof(NormalPage) + paddingSize;
+    }
 
-    HeapPage* next() { return m_next; }
 
+    NormalPageHeap* heapForNormalPage();
     void clearObjectStartBitMap();
 
 #if defined(ADDRESS_SANITIZER)
     void poisonUnmarkedObjects();
 #endif
 
-    // This method is needed just to avoid compilers from removing m_padding.
-    uint64_t unusedMethod() const { return m_padding; }
-
 private:
     HeapObjectHeader* findHeaderFromAddress(Address);
     void populateObjectStartBitMap();
     bool isObjectStartBitMapComputed() { return m_objectStartBitMapComputed; }
 
-    HeapPage* m_next;
     bool m_objectStartBitMapComputed;
     uint8_t m_objectStartBitMap[reservedForObjectBitMap];
-    uint64_t m_padding; // Preserve 8-byte alignment on 32-bit systems.
-
-    friend class ThreadHeap;
 };
 
 // Large allocations are allocated as separate objects and linked in a list.
@@ -501,89 +515,69 @@ private:
 // In order to use the same memory allocation routines for everything allocated
 // in the heap, large objects are considered heap pages containing only one
 // object.
-class LargeObject final : public BaseHeapPage {
+class LargeObjectPage final : public BasePage {
 public:
-    LargeObject(PageMemory* storage, ThreadState* state, size_t payloadSize)
-        : BaseHeapPage(storage, state)
-        , m_payloadSize(payloadSize)
-    {
-    }
+    LargeObjectPage(PageMemory*, BaseHeap*, size_t);
 
     Address payload() { return heapObjectHeader()->payload(); }
     size_t payloadSize() { return m_payloadSize; }
     Address payloadEnd() { return payload() + payloadSize(); }
-    bool containedInObjectPayload(Address address) { return payload() <= address && address < payloadEnd(); }
+    bool containedInObjectPayload(Address address)
+    {
+        return payload() <= address && address < payloadEnd();
+    }
 
     virtual size_t objectPayloadSizeForTesting() override;
     virtual bool isEmpty() override;
-    virtual void removeFromHeap(ThreadHeap*) override;
-    virtual void sweep(ThreadHeap*) override;
+    virtual void removeFromHeap() override;
+    virtual void sweep() override;
     virtual void markUnmarkedObjectsDead() override;
     virtual void checkAndMarkPointer(Visitor*, Address) override;
-    virtual void markOrphaned() override
-    {
-        // Zap the payload with a recognizable value to detect any incorrect
-        // cross thread pointer usage.
-        memset(payload(), orphanedZapValue, payloadSize());
-        BaseHeapPage::markOrphaned();
-    }
-#if ENABLE(GC_PROFILE_MARKING)
-    virtual const GCInfo* findGCInfo(Address address) override
-    {
-        if (!objectContains(address))
-            return nullptr;
-        return gcInfo();
-    }
+    virtual void markOrphaned() override;
+
+#if ENABLE(GC_PROFILING)
+    const GCInfo* findGCInfo(Address) override;
+    void snapshot(TracedValue*, ThreadState::SnapshotInfo*) override;
+    void incrementMarkedObjectsAge() override;
+    void countMarkedObjects(ClassAgeCountsMap&) override;
+    void countObjectsToSweep(ClassAgeCountsMap&) override;
 #endif
-#if ENABLE(GC_PROFILE_HEAP)
-    virtual void snapshot(TracedValue*, ThreadState::SnapshotInfo*) override;
-#endif
-#if ENABLE(ASSERT)
+#if ENABLE(ASSERT) || ENABLE(GC_PROFILING)
     // Returns true for any address that is on one of the pages that this
     // large object uses. That ensures that we can use a negative result to
     // populate the negative page cache.
-    virtual bool contains(Address object) override
-    {
-        return roundToBlinkPageStart(address()) <= object && object < roundToBlinkPageEnd(address() + size());
-    }
+    virtual bool contains(Address) override;
 #endif
     virtual size_t size()
     {
-        return sizeof(LargeObject) + headerPadding() +  sizeof(HeapObjectHeader) + m_payloadSize;
+        return pageHeaderSize() +  sizeof(HeapObjectHeader) + m_payloadSize;
     }
-    virtual bool isLargeObject() override { return true; }
-
-    void link(LargeObject** previousNext)
+    static size_t pageHeaderSize()
     {
-        m_next = *previousNext;
-        *previousNext = this;
+        // Compute the amount of padding we have to add to a header to make
+        // the size of the header plus the padding a multiple of 8 bytes.
+        size_t paddingSize = (sizeof(LargeObjectPage) + allocationGranularity - (sizeof(HeapObjectHeader) % allocationGranularity)) % allocationGranularity;
+        return sizeof(LargeObjectPage) + paddingSize;
     }
-
-    void unlink(LargeObject** previousNext)
-    {
-        *previousNext = m_next;
-        m_next = nullptr;
-    }
-
-    LargeObject* next()
-    {
-        return m_next;
-    }
+    virtual bool isLargeObjectPage() override { return true; }
 
     HeapObjectHeader* heapObjectHeader()
     {
-        Address headerAddress = address() + sizeof(LargeObject) + headerPadding();
+        Address headerAddress = address() + pageHeaderSize();
         return reinterpret_cast<HeapObjectHeader*>(headerAddress);
     }
 
-    // This method is needed just to avoid compilers from removing m_padding.
-    uint64_t unusedMethod() const { return m_padding; }
+#ifdef ANNOTATE_CONTIGUOUS_CONTAINER
+    void setIsVectorBackingPage() { m_isVectorBackingPage = true; }
+    bool isVectorBackingPage() const { return m_isVectorBackingPage; }
+#endif
 
 private:
-    friend class ThreadHeap;
-    LargeObject* m_next;
+
     size_t m_payloadSize;
-    uint64_t m_padding; // Preserve 8-byte alignment on 32-bit systems.
+#ifdef ANNOTATE_CONTIGUOUS_CONTAINER
+    bool m_isVectorBackingPage;
+#endif
 };
 
 // A HeapDoesNotContainCache provides a fast way of taking an arbitrary
@@ -672,10 +666,10 @@ private:
     Mutex m_mutex[NumberOfHeaps];
 };
 
-class OrphanedPagePool : public PagePool<BaseHeapPage> {
+class OrphanedPagePool : public PagePool<BasePage> {
 public:
     ~OrphanedPagePool();
-    void addOrphanedPage(int, BaseHeapPage*);
+    void addOrphanedPage(int, BasePage*);
     void decommitOrphanedPages();
 #if ENABLE(ASSERT)
     bool contains(void*);
@@ -695,116 +689,161 @@ public:
     // All FreeListEntries in the given bucket, n, have size >= 2^n.
     static int bucketIndexForSize(size_t);
 
+#if ENABLE(GC_PROFILING)
+    struct PerBucketFreeListStats {
+        size_t entryCount;
+        size_t freeSize;
+
+        PerBucketFreeListStats() : entryCount(0), freeSize(0) { }
+    };
+
+    void getFreeSizeStats(PerBucketFreeListStats bucketStats[], size_t& totalSize) const;
+#endif
+
 private:
     int m_biggestFreeListIndex;
 
     // All FreeListEntries in the nth list have size >= 2^n.
     FreeListEntry* m_freeLists[blinkPageSizeLog2];
 
-    friend class ThreadHeap;
+    friend class NormalPageHeap;
 };
 
-// Thread heaps represent a part of the per-thread Blink heap.
+// Each thread has a number of thread heaps (e.g., Generic heaps,
+// typed heaps for Node, heaps for collection backings etc)
+// and BaseHeap represents each thread heap.
 //
-// Each Blink thread has a number of thread heaps: one general heap
-// that contains any type of object and a number of heaps specialized
-// for specific object types (such as Node).
-//
-// Each thread heap contains the functionality to allocate new objects
-// (potentially adding new pages to the heap), to find and mark
-// objects during conservative stack scanning and to sweep the set of
-// pages after a GC.
-class PLATFORM_EXPORT ThreadHeap final {
+// BaseHeap is a parent class of NormalPageHeap and LargeObjectHeap.
+// NormalPageHeap represents a heap that contains NormalPages
+// and LargeObjectHeap represents a heap that contains LargeObjectPages.
+class PLATFORM_EXPORT BaseHeap {
 public:
-    ThreadHeap(ThreadState*, int);
-    ~ThreadHeap();
+    BaseHeap(ThreadState*, int);
+    virtual ~BaseHeap();
     void cleanupPages();
 
-#if ENABLE(ASSERT)
-    BaseHeapPage* findPageFromAddress(Address);
+#if ENABLE(ASSERT) || ENABLE(GC_PROFILING)
+    BasePage* findPageFromAddress(Address);
 #endif
-#if ENABLE(GC_PROFILE_HEAP)
+#if ENABLE(GC_PROFILING)
     void snapshot(TracedValue*, ThreadState::SnapshotInfo*);
+    virtual void snapshotFreeList(TracedValue&) { };
+
+    void countMarkedObjects(ClassAgeCountsMap&) const;
+    void countObjectsToSweep(ClassAgeCountsMap&) const;
+    void incrementMarkedObjectsAge();
 #endif
 
-    void clearFreeLists();
+    virtual void clearFreeLists() { }
     void makeConsistentForSweeping();
 #if ENABLE(ASSERT)
-    bool isConsistentForSweeping();
+    virtual bool isConsistentForSweeping() = 0;
 #endif
     size_t objectPayloadSizeForTesting();
+    void prepareHeapForTermination();
+    void prepareForSweep();
+    Address lazySweep(size_t, size_t gcInfoIndex);
+    void sweepUnsweptPage();
+    // Returns true if we have swept all pages within the deadline.
+    // Returns false otherwise.
+    bool lazySweepWithDeadline(double deadlineSeconds);
+    void completeSweep();
 
     ThreadState* threadState() { return m_threadState; }
+    int heapIndex() const { return m_index; }
 
+protected:
+    BasePage* m_firstPage;
+    BasePage* m_firstUnsweptPage;
+
+private:
+    virtual Address lazySweepPages(size_t, size_t gcInfoIndex) = 0;
+
+    ThreadState* m_threadState;
+
+    // Index into the page pools.  This is used to ensure that the pages of the
+    // same type go into the correct page pool and thus avoid type confusion.
+    int m_index;
+};
+
+class PLATFORM_EXPORT NormalPageHeap final : public BaseHeap {
+public:
+    NormalPageHeap(ThreadState*, int);
     void addToFreeList(Address address, size_t size)
     {
         ASSERT(findPageFromAddress(address));
         ASSERT(findPageFromAddress(address + size - 1));
         m_freeList.addToFreeList(address, size);
     }
+    virtual void clearFreeLists() override;
+#if ENABLE(ASSERT)
+    virtual bool isConsistentForSweeping() override;
+    bool pagesToBeSweptContains(Address);
+#endif
+#if ENABLE(GC_PROFILING)
+    void snapshotFreeList(TracedValue&) override;
+#endif
 
-    inline Address allocate(size_t payloadSize, size_t gcInfoIndex);
-    inline static size_t roundedAllocationSize(size_t size)
-    {
-        return allocationSizeFromSize(size) - sizeof(HeapObjectHeader);
-    }
-    inline static size_t allocationSizeFromSize(size_t);
+    Address allocateObject(size_t allocationSize, size_t gcInfoIndex);
 
-    void prepareHeapForTermination();
-    void prepareForSweep();
-    void completeSweep();
+    void freePage(NormalPage*);
 
-    void freePage(HeapPage*);
-    void freeLargeObject(LargeObject*);
-
+    bool coalesce();
     void promptlyFreeObject(HeapObjectHeader*);
     bool expandObject(HeapObjectHeader*, size_t);
-    void shrinkObject(HeapObjectHeader*, size_t);
+    bool shrinkObject(HeapObjectHeader*, size_t);
     void decreasePromptlyFreedSize(size_t size) { m_promptlyFreedSize -= size; }
 
 private:
+    void allocatePage();
+    virtual Address lazySweepPages(size_t, size_t gcInfoIndex) override;
     Address outOfLineAllocate(size_t allocationSize, size_t gcInfoIndex);
     Address currentAllocationPoint() const { return m_currentAllocationPoint; }
     size_t remainingAllocationSize() const { return m_remainingAllocationSize; }
     bool hasCurrentAllocationArea() const { return currentAllocationPoint() && remainingAllocationSize(); }
-    inline void setAllocationPoint(Address, size_t);
+    void setAllocationPoint(Address, size_t);
     void updateRemainingAllocationSize();
     Address allocateFromFreeList(size_t, size_t gcInfoIndex);
-    Address lazySweepPages(size_t, size_t gcInfoIndex);
-    bool lazySweepLargeObjects(size_t);
 
-    void allocatePage();
-    Address allocateLargeObject(size_t, size_t gcInfoIndex);
-
-    inline Address allocateObject(size_t allocationSize, size_t gcInfoIndex);
-
-#if ENABLE(ASSERT)
-    bool pagesToBeSweptContains(Address);
-#endif
-
-    bool coalesce();
-    void markUnmarkedObjectsDead();
-
+    FreeList m_freeList;
     Address m_currentAllocationPoint;
     size_t m_remainingAllocationSize;
     size_t m_lastRemainingAllocationSize;
 
-    HeapPage* m_firstPage;
-    LargeObject* m_firstLargeObject;
-    HeapPage* m_firstUnsweptPage;
-    LargeObject* m_firstUnsweptLargeObject;
-
-    ThreadState* m_threadState;
-
-    FreeList m_freeList;
-
-    // Index into the page pools.  This is used to ensure that the pages of the
-    // same type go into the correct page pool and thus avoid type confusion.
-    int m_index;
-
     // The size of promptly freed objects in the heap.
     size_t m_promptlyFreedSize;
+
+#if ENABLE(GC_PROFILING)
+    size_t m_cumulativeAllocationSize;
+    size_t m_allocationCount;
+    size_t m_inlineAllocationCount;
+#endif
 };
+
+class LargeObjectHeap final : public BaseHeap {
+public:
+    LargeObjectHeap(ThreadState*, int);
+    Address allocateLargeObjectPage(size_t, size_t gcInfoIndex);
+    void freeLargeObjectPage(LargeObjectPage*);
+#if ENABLE(ASSERT)
+    virtual bool isConsistentForSweeping() override { return true; }
+#endif
+private:
+    Address doAllocateLargeObjectPage(size_t, size_t gcInfoIndex);
+    virtual Address lazySweepPages(size_t, size_t gcInfoIndex) override;
+};
+
+// Mask an address down to the enclosing oilpan heap base page.  All oilpan heap
+// pages are aligned at blinkPageBase plus an OS page size.
+// FIXME: Remove PLATFORM_EXPORT once we get a proper public interface to our
+// typed heaps.  This is only exported to enable tests in HeapTest.cpp.
+PLATFORM_EXPORT inline BasePage* pageFromObject(const void* object)
+{
+    Address address = reinterpret_cast<Address>(const_cast<void*>(object));
+    BasePage* page = reinterpret_cast<BasePage*>(blinkPageAddress(address) + WTF::kSystemPageSize);
+    ASSERT(page->contains(address));
+    return page;
+}
 
 class PLATFORM_EXPORT Heap {
 public:
@@ -812,11 +851,37 @@ public:
     static void shutdown();
     static void doShutdown();
 
-#if ENABLE(ASSERT)
-    static BaseHeapPage* findPageFromAddress(Address);
-    static BaseHeapPage* findPageFromAddress(void* pointer) { return findPageFromAddress(reinterpret_cast<Address>(pointer)); }
+#if ENABLE(ASSERT) || ENABLE(GC_PROFILING)
+    static BasePage* findPageFromAddress(Address);
+    static BasePage* findPageFromAddress(void* pointer) { return findPageFromAddress(reinterpret_cast<Address>(pointer)); }
     static bool containedInHeapOrOrphanedPage(void*);
 #endif
+
+    // Is the finalizable GC object still alive, but slated for lazy sweeping?
+    // If a lazy sweep is in progress, returns true if the object was found
+    // to be not reachable during the marking phase, but it has yet to be swept
+    // and finalized. The predicate returns false in all other cases.
+    //
+    // Holding a reference to an already-dead object is not a valid state
+    // to be in; willObjectBeLazilySwept() has undefined behavior if passed
+    // such a reference.
+    template<typename T>
+    static bool willObjectBeLazilySwept(const T* objectPointer)
+    {
+        static_assert(IsGarbageCollectedType<T>::value, "only objects deriving from GarbageCollected can be used.");
+#if ENABLE(OILPAN)
+        BasePage* page = pageFromObject(objectPointer);
+        if (page->hasBeenSwept())
+            return false;
+        ASSERT(page->heap()->threadState()->isSweepingInProgress());
+
+        return !ObjectAliveTrait<T>::isHeapObjectAlive(s_markingVisitor, const_cast<T*>(objectPointer));
+#else
+        // FIXME: remove when lazy sweeping is always on
+        // (cf. ThreadState::preSweep()).
+        return false;
+#endif
+    }
 
     // Push a trace callback on the marking stack.
     static void pushTraceCallback(void* containerObject, TraceCallback);
@@ -861,11 +926,36 @@ public:
     static bool weakTableRegistered(const void*);
 #endif
 
-    template<typename T> static Address allocateOnHeapIndex(size_t, int heapIndex, size_t gcInfoIndex);
+    static inline size_t allocationSizeFromSize(size_t size)
+    {
+        // Check the size before computing the actual allocation size.  The
+        // allocation size calculation can overflow for large sizes and the check
+        // therefore has to happen before any calculation on the size.
+        RELEASE_ASSERT(size < maxHeapObjectSize);
+
+        // Add space for header.
+        size_t allocationSize = size + sizeof(HeapObjectHeader);
+        // Align size with allocation granularity.
+        allocationSize = (allocationSize + allocationMask) & ~allocationMask;
+        return allocationSize;
+    }
+    static inline size_t roundedAllocationSize(size_t size)
+    {
+        return allocationSizeFromSize(size) - sizeof(HeapObjectHeader);
+    }
+    static Address allocateOnHeapIndex(ThreadState*, size_t, int heapIndex, size_t gcInfoIndex);
     template<typename T> static Address allocate(size_t);
     template<typename T> static Address reallocate(void* previous, size_t);
 
-    static void collectGarbage(ThreadState::StackState, ThreadState::GCType = ThreadState::GCWithSweep);
+    enum GCReason {
+        IdleGC,
+        PreciseGC,
+        ConservativeGC,
+        ForcedGCForTesting,
+        NumberOfGCReason
+    };
+    static const char* gcReasonString(GCReason);
+    static void collectGarbage(ThreadState::StackState, ThreadState::GCType, GCReason);
     static void collectGarbageForTerminatingThread(ThreadState*);
     static void collectAllGarbage();
 
@@ -881,7 +971,7 @@ public:
     // thread heaps.  If so marks the object pointed to as live.
     static Address checkAndMarkPointer(Visitor*, Address);
 
-#if ENABLE(GC_PROFILE_MARKING)
+#if ENABLE(GC_PROFILING)
     // Dump the path to specified object on the next GC.  This method is to be
     // invoked from GDB.
     static void dumpPathToObjectOnNextGC(void* p);
@@ -908,7 +998,7 @@ public:
     // This look-up uses the region search tree and a negative contains cache to
     // provide an efficient mapping from arbitrary addresses to the containing
     // heap-page if one exists.
-    static BaseHeapPage* lookup(Address);
+    static BasePage* lookup(Address);
     static void addPageMemoryRegion(PageMemoryRegion*);
     static void removePageMemoryRegion(PageMemoryRegion*);
 
@@ -927,9 +1017,37 @@ public:
     static size_t allocatedObjectSize() { return acquireLoad(&s_allocatedObjectSize); }
     static void increaseMarkedObjectSize(size_t delta) { atomicAdd(&s_markedObjectSize, static_cast<long>(delta)); }
     static size_t markedObjectSize() { return acquireLoad(&s_markedObjectSize); }
-    static void increaseAllocatedSpace(size_t delta) { atomicAdd(&s_allocatedSpace, static_cast<long>(delta)); }
-    static void decreaseAllocatedSpace(size_t delta) { atomicSubtract(&s_allocatedSpace, static_cast<long>(delta)); }
+    static void increaseAllocatedSpace(size_t delta)
+    {
+        atomicAdd(&s_allocatedSpace, static_cast<long>(delta));
+        Heap::reportMemoryUsage();
+    }
+    static void decreaseAllocatedSpace(size_t delta)
+    {
+        atomicSubtract(&s_allocatedSpace, static_cast<long>(delta));
+        // We don't need to report memory usage here because we report the usage
+        // only when we see the highest memory usage we've ever seen.
+    }
     static size_t allocatedSpace() { return acquireLoad(&s_allocatedSpace); }
+
+    static double estimatedMarkingTime();
+    static void reportMemoryUsage();
+
+    // On object allocation, register the object's externally allocated memory.
+    static void increaseExternallyAllocatedBytes(size_t);
+    static size_t externallyAllocatedBytes() { return acquireLoad(&s_externallyAllocatedBytes); }
+
+    // On object tracing, register the object's externally allocated memory (as still live.)
+    static void increaseExternallyAllocatedBytesAlive(size_t delta)
+    {
+        ASSERT(ThreadState::current()->isInGC());
+        s_externallyAllocatedBytesAlive += delta;
+    }
+    static size_t externallyAllocatedBytesAlive() { return s_externallyAllocatedBytesAlive; }
+
+    static void requestUrgentGC();
+    static void clearUrgentGC() { releaseStore(&s_requestedUrgentGC, 0); }
+    static bool isUrgentGCRequested() { return acquireLoad(&s_requestedUrgentGC); }
 
 private:
     // A RegionTree is a simple binary search tree of PageMemoryRegions sorted
@@ -951,8 +1069,8 @@ private:
         RegionTree* m_right;
     };
 
-    static void resetAllocatedObjectSize() { ASSERT(ThreadState::current()->isInGC()); s_allocatedObjectSize = 0; }
-    static void resetMarkedObjectSize() { ASSERT(ThreadState::current()->isInGC()); s_markedObjectSize = 0; }
+    // Reset counters that track live and allocated-since-last-GC sizes.
+    static void resetHeapCounters();
 
     static Visitor* s_markingVisitor;
     static CallbackStack* s_markingStack;
@@ -968,8 +1086,44 @@ private:
     static size_t s_allocatedSpace;
     static size_t s_allocatedObjectSize;
     static size_t s_markedObjectSize;
+    static size_t s_externallyAllocatedBytes;
+    static size_t s_externallyAllocatedBytesAlive;
+    static unsigned s_requestedUrgentGC;
+    static double s_markingTimeInLastGC;
+
     friend class ThreadState;
 };
+
+// We use sized heaps for normal pages to improve memory locality.
+// It seems that the same type of objects are likely to be accessed together,
+// which means that we want to group objects by type. That's why we provide
+// dedicated heaps for popular types (e.g., Node, CSSValue), but it's not
+// practical to prepare dedicated heaps for all types. Thus we group objects
+// by their sizes, hoping that it will approximately group objects
+// by their types.
+template<typename T>
+struct HeapIndexTrait {
+    static int index(size_t size)
+    {
+        if (size < 64) {
+            if (size < 32)
+                return NormalPage1HeapIndex;
+            return NormalPage2HeapIndex;
+        }
+        if (size < 128)
+            return NormalPage3HeapIndex;
+        return NormalPage4HeapIndex;
+    };
+};
+
+// FIXME: The forward declaration is layering violation.
+#define DEFINE_TYPED_HEAP_TRAIT(Type)                   \
+    class Type;                                         \
+    template <> struct HeapIndexTrait<class Type> {     \
+        static int index(size_t) { return Type##HeapIndex; }; \
+    };
+FOR_EACH_TYPED_HEAP(DEFINE_TYPED_HEAP_TRAIT)
+#undef DEFINE_TYPED_HEAP_TRAIT
 
 // Base class for objects allocated in the Blink garbage-collected heap.
 //
@@ -1190,42 +1344,30 @@ private:
 #define GC_PLUGIN_IGNORE(bug)
 #endif
 
-// Mask an address down to the enclosing oilpan heap base page.  All oilpan heap
-// pages are aligned at blinkPageBase plus an OS page size.
-// FIXME: Remove PLATFORM_EXPORT once we get a proper public interface to our
-// typed heaps.  This is only exported to enable tests in HeapTest.cpp.
-PLATFORM_EXPORT inline BaseHeapPage* pageFromObject(const void* object)
-{
-    Address address = reinterpret_cast<Address>(const_cast<void*>(object));
-    BaseHeapPage* page = reinterpret_cast<BaseHeapPage*>(blinkPageAddress(address) + WTF::kSystemPageSize);
-    ASSERT(page->contains(address));
-    return page;
-}
-
 NO_SANITIZE_ADDRESS inline
 size_t HeapObjectHeader::size() const
 {
     size_t result = m_encoded & headerSizeMask;
     // Large objects should not refer to header->size().
     // The actual size of a large object is stored in
-    // LargeObject::m_payloadSize.
+    // LargeObjectPage::m_payloadSize.
     ASSERT(result != largeObjectSizeInHeader);
-    ASSERT(!pageFromObject(this)->isLargeObject());
+    ASSERT(!pageFromObject(this)->isLargeObjectPage());
     return result;
 }
 
-NO_SANITIZE_ADDRESS
+NO_SANITIZE_ADDRESS inline
 void HeapObjectHeader::checkHeader() const
 {
     ASSERT(pageFromObject(this)->orphaned() || m_magic == magic);
 }
 
-Address HeapObjectHeader::payload()
+inline Address HeapObjectHeader::payload()
 {
     return reinterpret_cast<Address>(this) + sizeof(HeapObjectHeader);
 }
 
-Address HeapObjectHeader::payloadEnd()
+inline Address HeapObjectHeader::payloadEnd()
 {
     return reinterpret_cast<Address>(this) + size();
 }
@@ -1235,10 +1377,10 @@ size_t HeapObjectHeader::payloadSize()
 {
     size_t size = m_encoded & headerSizeMask;
     if (UNLIKELY(size == largeObjectSizeInHeader)) {
-        ASSERT(pageFromObject(this)->isLargeObject());
-        return static_cast<LargeObject*>(pageFromObject(this))->payloadSize();
+        ASSERT(pageFromObject(this)->isLargeObjectPage());
+        return static_cast<LargeObjectPage*>(pageFromObject(this))->payloadSize();
     }
-    ASSERT(!pageFromObject(this)->isLargeObject());
+    ASSERT(!pageFromObject(this)->isLargeObjectPage());
     return size - sizeof(HeapObjectHeader);
 }
 
@@ -1280,23 +1422,17 @@ void HeapObjectHeader::markDead()
     m_encoded |= headerDeadBitMask;
 }
 
-size_t ThreadHeap::allocationSizeFromSize(size_t size)
+inline Address NormalPageHeap::allocateObject(size_t allocationSize, size_t gcInfoIndex)
 {
-    // Check the size before computing the actual allocation size.  The
-    // allocation size calculation can overflow for large sizes and the check
-    // therefore has to happen before any calculation on the size.
-    RELEASE_ASSERT(size < maxHeapObjectSize);
+#if ENABLE(GC_PROFILING)
+    m_cumulativeAllocationSize += allocationSize;
+    ++m_allocationCount;
+#endif
 
-    // Add space for header.
-    size_t allocationSize = size + sizeof(HeapObjectHeader);
-    // Align size with allocation granularity.
-    allocationSize = (allocationSize + allocationMask) & ~allocationMask;
-    return allocationSize;
-}
-
-Address ThreadHeap::allocateObject(size_t allocationSize, size_t gcInfoIndex)
-{
     if (LIKELY(allocationSize <= m_remainingAllocationSize)) {
+#if ENABLE(GC_PROFILING)
+        ++m_inlineAllocationCount;
+#endif
         Address headerAddress = m_currentAllocationPoint;
         m_currentAllocationPoint += allocationSize;
         m_remainingAllocationSize -= allocationSize;
@@ -1314,54 +1450,19 @@ Address ThreadHeap::allocateObject(size_t allocationSize, size_t gcInfoIndex)
     return outOfLineAllocate(allocationSize, gcInfoIndex);
 }
 
-Address ThreadHeap::allocate(size_t size, size_t gcInfoIndex)
+inline Address Heap::allocateOnHeapIndex(ThreadState* state, size_t size, int heapIndex, size_t gcInfoIndex)
 {
-    return allocateObject(allocationSizeFromSize(size), gcInfoIndex);
-}
-
-// We use four heaps for general type objects depending on their object sizes.
-// Objects whose size is 1 - 3 words go to the first general type heap.
-// Objects whose size is 4 - 7 words go to the second general type heap.
-// Objects whose size is 8 - 15 words go to the third general type heap.
-// Objects whose size is more than 15 words go to the fourth general type heap.
-template<typename T>
-struct HeapIndexTrait {
-    static int index(size_t size)
-    {
-        static const int wordSize = sizeof(void*);
-        if (size < 8 * wordSize) {
-            if (size < 4 * wordSize)
-                return General1Heap;
-            return General2Heap;
-        }
-        if (size < 16 * wordSize)
-            return General3Heap;
-        return General4Heap;
-    };
-};
-
-// FIXME: The forward declaration is layering violation.
-#define DEFINE_TYPED_HEAP_TRAIT(Type)                \
-    class Type;                                      \
-    template<>                                       \
-    struct HeapIndexTrait<class Type> {              \
-    static int index(size_t) { return Type##Heap; }; \
-    };
-FOR_EACH_TYPED_HEAP(DEFINE_TYPED_HEAP_TRAIT)
-#undef DEFINE_TYPED_HEAP_TRAIT
-
-template<typename T>
-Address Heap::allocateOnHeapIndex(size_t size, int heapIndex, size_t gcInfoIndex)
-{
-    ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
     ASSERT(state->isAllocationAllowed());
-    return state->heap(heapIndex)->allocate(size, gcInfoIndex);
+    ASSERT(heapIndex != LargeObjectHeapIndex);
+    NormalPageHeap* heap = static_cast<NormalPageHeap*>(state->heap(heapIndex));
+    return heap->allocateObject(allocationSizeFromSize(size), gcInfoIndex);
 }
 
 template<typename T>
 Address Heap::allocate(size_t size)
 {
-    return allocateOnHeapIndex<T>(size, HeapIndexTrait<T>::index(size), GCInfoTrait<T>::index());
+    ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
+    return Heap::allocateOnHeapIndex(state, size, HeapIndexTrait<T>::index(size), GCInfoTrait<T>::index());
 }
 
 template<typename T>
@@ -1372,7 +1473,8 @@ Address Heap::reallocate(void* previous, size_t size)
         // malloc(0).  In both cases we do nothing and return nullptr.
         return nullptr;
     }
-    Address address = Heap::allocateOnHeapIndex<T>(size, HeapIndexTrait<T>::index(size), GCInfoTrait<T>::index());
+    ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
+    Address address = Heap::allocateOnHeapIndex(state, size, HeapIndexTrait<T>::index(size), GCInfoTrait<T>::index());
     if (!previous) {
         // This is equivalent to malloc(size).
         return address;
@@ -1388,13 +1490,35 @@ Address Heap::reallocate(void* previous, size_t size)
     return address;
 }
 
+inline void Heap::increaseExternallyAllocatedBytes(size_t delta)
+{
+    // Flag GC urgency on a 50% increase in external allocation
+    // since the last GC, but not for less than 100M.
+    //
+    // FIXME: consider other, 'better' policies (e.g., have the count of
+    // heap objects with external allocations be taken into
+    // account, ...) The overall goal here is to trigger a
+    // GC such that it considerably lessens memory pressure
+    // for a renderer process, when absolutely needed.
+    size_t externalBytesAllocatedSinceLastGC = atomicAdd(&s_externallyAllocatedBytes, static_cast<long>(delta));
+    if (LIKELY(externalBytesAllocatedSinceLastGC < 100 * 1024 * 1024))
+        return;
+
+    if (UNLIKELY(isUrgentGCRequested()))
+        return;
+
+    size_t externalBytesAliveAtLastGC = externallyAllocatedBytesAlive();
+    if (UNLIKELY(externalBytesAllocatedSinceLastGC > externalBytesAliveAtLastGC / 2))
+        Heap::requestUrgentGC();
+}
+
 class HeapAllocatorQuantizer {
 public:
     template<typename T>
     static size_t quantizedSize(size_t count)
     {
         RELEASE_ASSERT(count <= kMaxUnquantizedAllocation / sizeof(T));
-        return ThreadHeap::roundedAllocationSize(count * sizeof(T));
+        return Heap::roundedAllocationSize(count * sizeof(T));
     }
     static const size_t kMaxUnquantizedAllocation = maxHeapObjectSize;
 };
@@ -1410,36 +1534,50 @@ public:
     template <typename T>
     static T* allocateVectorBacking(size_t size)
     {
+        ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
+        ASSERT(state->isAllocationAllowed());
         size_t gcInfoIndex = GCInfoTrait<HeapVectorBacking<T, VectorTraits<T>>>::index();
-        return reinterpret_cast<T*>(Heap::allocateOnHeapIndex<T>(size, VectorBackingHeap, gcInfoIndex));
+        NormalPageHeap* heap = static_cast<NormalPageHeap*>(state->vectorBackingHeap(gcInfoIndex));
+        return reinterpret_cast<T*>(heap->allocateObject(Heap::allocationSizeFromSize(size), gcInfoIndex));
     }
-    PLATFORM_EXPORT static void freeVectorBacking(void* address);
+    template <typename T>
+    static T* allocateExpandedVectorBacking(size_t size)
+    {
+        ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
+        ASSERT(state->isAllocationAllowed());
+        size_t gcInfoIndex = GCInfoTrait<HeapVectorBacking<T, VectorTraits<T>>>::index();
+        NormalPageHeap* heap = static_cast<NormalPageHeap*>(state->vectorBackingHeap(gcInfoIndex));
+        return reinterpret_cast<T*>(heap->allocateObject(Heap::allocationSizeFromSize(size), gcInfoIndex));
+    }
+    PLATFORM_EXPORT static void freeVectorBacking(void*);
     PLATFORM_EXPORT static bool expandVectorBacking(void*, size_t);
     static inline bool shrinkVectorBacking(void* address, size_t quantizedCurrentSize, size_t quantizedShrunkSize)
     {
-        shrinkVectorBackingInternal(address, quantizedCurrentSize, quantizedShrunkSize);
+        // Returns always true, so the inlining in turn enables call site simplifications.
+        backingShrink(address, quantizedCurrentSize, quantizedShrunkSize);
         return true;
     }
     template <typename T>
     static T* allocateInlineVectorBacking(size_t size)
     {
         size_t gcInfoIndex = GCInfoTrait<HeapVectorBacking<T, VectorTraits<T>>>::index();
-        return reinterpret_cast<T*>(Heap::allocateOnHeapIndex<T>(size, InlineVectorBackingHeap, gcInfoIndex));
+        ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
+        return reinterpret_cast<T*>(Heap::allocateOnHeapIndex(state, size, InlineVectorHeapIndex, gcInfoIndex));
     }
-    PLATFORM_EXPORT static void freeInlineVectorBacking(void* address);
+    PLATFORM_EXPORT static void freeInlineVectorBacking(void*);
     PLATFORM_EXPORT static bool expandInlineVectorBacking(void*, size_t);
-    static inline bool shrinkInlineVectorBacking(void* address, size_t quantizedCurrentSize, size_t quantizedShrinkedSize)
+    static inline bool shrinkInlineVectorBacking(void* address, size_t quantizedCurrentSize, size_t quantizedShrunkSize)
     {
-        shrinkInlineVectorBackingInternal(address, quantizedCurrentSize, quantizedShrinkedSize);
+        backingShrink(address, quantizedCurrentSize, quantizedShrunkSize);
         return true;
     }
-
 
     template <typename T, typename HashTable>
     static T* allocateHashTableBacking(size_t size)
     {
         size_t gcInfoIndex = GCInfoTrait<HeapHashTableBacking<HashTable>>::index();
-        return reinterpret_cast<T*>(Heap::allocateOnHeapIndex<T>(size, HashTableBackingHeap, gcInfoIndex));
+        ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
+        return reinterpret_cast<T*>(Heap::allocateOnHeapIndex(state, size, HashTableHeapIndex, gcInfoIndex));
     }
     template <typename T, typename HashTable>
     static T* allocateZeroedHashTableBacking(size_t size)
@@ -1500,7 +1638,8 @@ public:
     }
 
 #if ENABLE(ASSERT)
-    static bool weakTableRegistered(Visitor* visitor, const void* closure)
+    template<typename VisitorDispatcher>
+    static bool weakTableRegistered(VisitorDispatcher visitor, const void* closure)
     {
         return visitor->weakTableRegistered(closure);
     }
@@ -1537,19 +1676,17 @@ public:
     }
 
 private:
-    static void backingFree(void*, int heapIndex);
-    static bool backingExpand(void*, size_t, int heapIndex);
-    static void backingShrink(void*, size_t quantizedCurrentSize, size_t quantizedShrunkSize, int heapIndex);
-    PLATFORM_EXPORT static void shrinkVectorBackingInternal(void*, size_t quantizedCurrentSize, size_t quantizedShrunkSize);
-    PLATFORM_EXPORT static void shrinkInlineVectorBackingInternal(void*, size_t quantizedCurrentSize, size_t quantizedShrunkSize);
+    static void backingFree(void*);
+    static bool backingExpand(void*, size_t);
+    PLATFORM_EXPORT static void backingShrink(void*, size_t quantizedCurrentSize, size_t quantizedShrunkSize);
 
     template<typename T, size_t u, typename V> friend class WTF::Vector;
     template<typename T, typename U, typename V, typename W> friend class WTF::HashSet;
     template<typename T, typename U, typename V, typename W, typename X, typename Y> friend class WTF::HashMap;
 };
 
-template<typename Value>
-static void traceListHashSetValue(Visitor* visitor, Value& value)
+template<typename VisitorDispatcher, typename Value>
+static void traceListHashSetValue(VisitorDispatcher visitor, Value& value)
 {
     // We use the default hash traits for the value in the node, because
     // ListHashSet does not let you specify any specific ones.
@@ -1579,6 +1716,7 @@ public:
 
         // No allocator object is needed.
         void createAllocatorIfNeeded() { }
+        void releaseAllocator() { }
 
         // There is no allocator object in the HeapListHashSet (unlike in the
         // regular ListHashSet) so there is nothing to swap.
@@ -1598,7 +1736,8 @@ public:
         return malloc<void*, Node>(sizeof(Node));
     }
 
-    static void traceValue(Visitor* visitor, Node* node)
+    template<typename VisitorDispatcher>
+    static void traceValue(VisitorDispatcher visitor, Node* node)
     {
         traceListHashSetValue(visitor, node->m_value);
     }
@@ -1616,31 +1755,31 @@ template<
     typename MappedArg,
     typename HashArg = typename DefaultHash<KeyArg>::Hash,
     typename KeyTraitsArg = HashTraits<KeyArg>,
-    typename MappedTraitsArg = HashTraits<MappedArg> >
+    typename MappedTraitsArg = HashTraits<MappedArg>>
 class HeapHashMap : public HashMap<KeyArg, MappedArg, HashArg, KeyTraitsArg, MappedTraitsArg, HeapAllocator> { };
 
 template<
     typename ValueArg,
     typename HashArg = typename DefaultHash<ValueArg>::Hash,
-    typename TraitsArg = HashTraits<ValueArg> >
+    typename TraitsArg = HashTraits<ValueArg>>
 class HeapHashSet : public HashSet<ValueArg, HashArg, TraitsArg, HeapAllocator> { };
 
 template<
     typename ValueArg,
     typename HashArg = typename DefaultHash<ValueArg>::Hash,
-    typename TraitsArg = HashTraits<ValueArg> >
+    typename TraitsArg = HashTraits<ValueArg>>
 class HeapLinkedHashSet : public LinkedHashSet<ValueArg, HashArg, TraitsArg, HeapAllocator> { };
 
 template<
     typename ValueArg,
     size_t inlineCapacity = 0, // The inlineCapacity is just a dummy to match ListHashSet (off-heap).
     typename HashArg = typename DefaultHash<ValueArg>::Hash>
-class HeapListHashSet : public ListHashSet<ValueArg, inlineCapacity, HashArg, HeapListHashSetAllocator<ValueArg, inlineCapacity> > { };
+class HeapListHashSet : public ListHashSet<ValueArg, inlineCapacity, HashArg, HeapListHashSetAllocator<ValueArg, inlineCapacity>> { };
 
 template<
     typename Value,
     typename HashFunctions = typename DefaultHash<Value>::Hash,
-    typename Traits = HashTraits<Value> >
+    typename Traits = HashTraits<Value>>
 class HeapHashCountedSet : public HashCountedSet<Value, HashFunctions, Traits, HeapAllocator> { };
 
 template<typename T, size_t inlineCapacity = 0>
@@ -1660,6 +1799,12 @@ public:
     HeapVector(const HeapVector<T, otherCapacity>& other)
         : Vector<T, inlineCapacity, HeapAllocator>(other)
     {
+    }
+
+    template<typename U>
+    void append(const U* data, size_t dataSize)
+    {
+        Vector<T, inlineCapacity, HeapAllocator>::append(data, dataSize);
     }
 
     template<typename U>
@@ -1698,7 +1843,7 @@ public:
     }
 
     // FIXME: Doesn't work if there is an inline buffer, due to crbug.com/360572
-    inline void swap(HeapDeque& other)
+    void swap(HeapDeque& other)
     {
         Deque<T, inlineCapacity, HeapAllocator>::swap(other);
     }
@@ -1890,7 +2035,7 @@ struct GCInfoTrait<WTF::ListHashSetNode<T, Allocator>> {
         static const GCInfo gcInfo = {
             TraceTrait<TargetType>::trace,
             TargetType::finalize,
-            WTF::HashTraits<T>::needsDestruction, // The node needs destruction if its data does.
+            !WTF::IsTriviallyDestructible<T>::value, // The node needs destruction if its data does.
             false, // no vtable.
 #if ENABLE(GC_PROFILING)
             TypenameStringTrait<TargetType>::get()
@@ -2026,7 +2171,7 @@ struct GCInfoTrait<HeapHashTableBacking<Table>> {
         static const GCInfo gcInfo = {
             TraceTrait<TargetType>::trace,
             HeapHashTableBacking<Table>::finalize,
-            Table::ValueTraits::needsDestruction,
+            !WTF::IsTriviallyDestructible<typename Table::ValueType>::value,
             WTF::IsPolymorphic<TargetType>::value,
 #if ENABLE(GC_PROFILING)
             TypenameStringTrait<TargetType>::get()
@@ -2094,6 +2239,12 @@ struct TraceInCollectionTrait<NoWeakHandlingInCollections, strongify, blink::Hea
         // Use the payload size as recorded by the heap to determine how many
         // elements to mark.
         size_t length = header->payloadSize() / sizeof(T);
+#ifdef ANNOTATE_CONTIGUOUS_CONTAINER
+        // Have no option but to mark the whole container as accessible, but
+        // this trace() is only used for backing stores that are identified
+        // as roots independent from a vector.
+        ANNOTATE_CHANGE_SIZE(array, length, 0, length);
+#endif
         for (size_t i = 0; i < length; ++i)
             blink::CollectionBackingTraceTrait<ShouldBeTraced<Traits>::value, Traits::weakHandlingFlag, WeakPointersActStrong, T, Traits>::trace(visitor, array[i]);
         return false;
@@ -2373,7 +2524,7 @@ template<typename Table>
 void HeapHashTableBacking<Table>::finalize(void* pointer)
 {
     using Value = typename Table::ValueType;
-    ASSERT(Table::ValueTraits::needsDestruction);
+    ASSERT(!WTF::IsTriviallyDestructible<Value>::value);
     HeapObjectHeader* header = HeapObjectHeader::fromPayload(pointer);
     // Use the payload size as recorded by the heap to determine how many
     // elements to finalize.
@@ -2392,7 +2543,7 @@ struct GCInfoTrait<HeapHashSet<T, U, V>> : public GCInfoTrait<HashSet<T, U, V, H
 template<typename T, typename U, typename V>
 struct GCInfoTrait<HeapLinkedHashSet<T, U, V>> : public GCInfoTrait<LinkedHashSet<T, U, V, HeapAllocator>> { };
 template<typename T, size_t inlineCapacity, typename U>
-struct GCInfoTrait<HeapListHashSet<T, inlineCapacity, U>> : public GCInfoTrait<ListHashSet<T, inlineCapacity, U, HeapListHashSetAllocator<T, inlineCapacity>> > { };
+struct GCInfoTrait<HeapListHashSet<T, inlineCapacity, U>> : public GCInfoTrait<ListHashSet<T, inlineCapacity, U, HeapListHashSetAllocator<T, inlineCapacity>>> { };
 template<typename T, size_t inlineCapacity>
 struct GCInfoTrait<HeapVector<T, inlineCapacity>> : public GCInfoTrait<Vector<T, inlineCapacity, HeapAllocator>> { };
 template<typename T, size_t inlineCapacity>

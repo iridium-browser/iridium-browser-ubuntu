@@ -390,9 +390,6 @@ typedef struct SPEED_FEATURES {
   // enabled in real time mode.
   int encode_breakout_thresh;
 
-  // In real time encoding, increase the threshold for NEWMV.
-  int elevate_newmv_thresh;
-
   // default interp filter choice
   INTERP_FILTER default_interp_filter;
 
@@ -424,4 +421,3 @@ void vp9_set_speed_features_framesize_dependent(struct VP9_COMP *cpi);
 #endif
 
 #endif  // VP9_ENCODER_VP9_SPEED_FEATURES_H_
-

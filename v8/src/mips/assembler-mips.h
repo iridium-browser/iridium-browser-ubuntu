@@ -38,9 +38,11 @@
 
 #include <stdio.h>
 
+#include <set>
+
 #include "src/assembler.h"
+#include "src/compiler.h"
 #include "src/mips/constants-mips.h"
-#include "src/serialize.h"
 
 namespace v8 {
 namespace internal {
@@ -544,6 +546,11 @@ class Assembler : public AssemblerBase {
         target);
   }
 
+  // This sets the internal reference at the pc.
+  inline static void deserialization_set_target_internal_reference_at(
+      Address pc, Address target,
+      RelocInfo::Mode mode = RelocInfo::INTERNAL_REFERENCE);
+
   // Size of an instruction.
   static const int kInstrSize = sizeof(Instr);
 
@@ -588,6 +595,8 @@ class Assembler : public AssemblerBase {
   // Number of instructions used for the JS return sequence. The constant is
   // used by the debugger to patch the JS return sequence.
   static const int kJSReturnSequenceInstructions = 7;
+  static const int kJSReturnSequenceLength =
+      kJSReturnSequenceInstructions * kInstrSize;
   static const int kDebugBreakSlotInstructions = 4;
   static const int kDebugBreakSlotLength =
       kDebugBreakSlotInstructions * kInstrSize;
@@ -1016,12 +1025,19 @@ class Assembler : public AssemblerBase {
   // Use --code-comments to enable.
   void RecordComment(const char* msg);
 
-  static int RelocateInternalReference(byte* pc, intptr_t pc_delta);
+  // Record a deoptimization reason that can be used by a log or cpu profiler.
+  // Use --trace-deopt to enable.
+  void RecordDeoptReason(const int reason, const SourcePosition position);
+
+
+  static int RelocateInternalReference(RelocInfo::Mode rmode, byte* pc,
+                                       intptr_t pc_delta);
 
   // Writes a single byte or word of data in the code stream.  Used for
   // inline tables, e.g., jump-tables.
   void db(uint8_t data);
   void dd(uint32_t data);
+  void dd(Label* label);
 
   // Emits the address of the code stub's first instruction.
   void emit_code_stub_address(Code* stub);
@@ -1120,10 +1136,10 @@ class Assembler : public AssemblerBase {
   int32_t buffer_space() const { return reloc_info_writer.pos() - pc_; }
 
   // Decode branch instruction at pos and return branch target pos.
-  int target_at(int32_t pos);
+  int target_at(int pos, bool is_internal);
 
   // Patch branch instruction at pos to branch to given branch target pos.
-  void target_at_put(int32_t pos, int32_t target_pos);
+  void target_at_put(int pos, int target_pos, bool is_internal);
 
   // Say if we need to relocate with this mode.
   bool MustUseReg(RelocInfo::Mode rmode);
@@ -1175,6 +1191,9 @@ class Assembler : public AssemblerBase {
   }
 
  private:
+  inline static void set_target_internal_reference_encoded_at(Address pc,
+                                                              Address target);
+
   // Buffer size and constant pool distance are checked together at regular
   // intervals of kBufferCheckInterval emitted bytes.
   static const int kBufferCheckInterval = 1*KB/2;
@@ -1292,7 +1311,7 @@ class Assembler : public AssemblerBase {
   // Labels.
   void print(Label* L);
   void bind_to(Label* L, int pos);
-  void next(Label* L);
+  void next(Label* L, bool is_internal);
 
   // One trampoline consists of:
   // - space for trampoline slots,
@@ -1356,6 +1375,10 @@ class Assembler : public AssemblerBase {
   static const int kTrampolineSlotsSize = 4 * kInstrSize;
   static const int kMaxBranchOffset = (1 << (18 - 1)) - 1;
   static const int kInvalidSlotPos = -1;
+
+  // Internal reference positions, required for unbounded internal reference
+  // labels.
+  std::set<int> internal_reference_positions_;
 
   Trampoline trampoline_;
   bool internal_trampoline_exception_;

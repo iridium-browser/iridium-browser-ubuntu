@@ -12,9 +12,12 @@
 
 #if SK_SUPPORT_GPU
 
+#include "GrBatchTarget.h"
+#include "GrBufferAllocPool.h"
 #include "GrContext.h"
 #include "GrPathUtils.h"
 #include "GrTest.h"
+#include "GrTestBatch.h"
 #include "SkColorPriv.h"
 #include "SkDevice.h"
 #include "SkGeometry.h"
@@ -26,6 +29,91 @@ static inline SkScalar eval_line(const SkPoint& p, const SkScalar lineEq[3], SkS
 }
 
 namespace skiagm {
+
+class BezierCubicOrConicTestBatch : public GrTestBatch {
+public:
+    struct Geometry : public GrTestBatch::Geometry {
+        SkRect fBounds;
+    };
+
+    const char* name() const override { return "BezierCubicOrConicTestBatch"; }
+
+    static GrBatch* Create(const GrGeometryProcessor* gp, const Geometry& geo,
+                           const SkScalar klmEqs[9], SkScalar sign) {
+        return SkNEW_ARGS(BezierCubicOrConicTestBatch, (gp, geo, klmEqs, sign));
+    }
+
+private:
+    BezierCubicOrConicTestBatch(const GrGeometryProcessor* gp, const Geometry& geo,
+                                const SkScalar klmEqs[9], SkScalar sign)
+        : INHERITED(gp) {
+        for (int i = 0; i < 9; i++) {
+            fKlmEqs[i] = klmEqs[i];
+        }
+
+        fGeometry = geo;
+        fSign = sign;
+    }
+
+    struct Vertex {
+        SkPoint fPosition;
+        float   fKLM[4]; // The last value is ignored. The effect expects a vec4f.
+    };
+
+    Geometry* geoData(int index) override {
+        SkASSERT(0 == index);
+        return &fGeometry;
+    }
+
+    void onGenerateGeometry(GrBatchTarget* batchTarget, const GrPipeline* pipeline) override {
+        size_t vertexStride = this->geometryProcessor()->getVertexStride();
+
+        const GrVertexBuffer* vertexBuffer;
+        int firstVertex;
+
+        void* vertices = batchTarget->vertexPool()->makeSpace(vertexStride,
+                                                              kVertsPerCubic,
+                                                              &vertexBuffer,
+                                                              &firstVertex);
+
+        if (!vertices || !batchTarget->quadIndexBuffer()) {
+            SkDebugf("Could not allocate buffers\n");
+            return;
+        }
+
+        SkASSERT(vertexStride == sizeof(Vertex));
+        Vertex* verts = reinterpret_cast<Vertex*>(vertices);
+
+        verts[0].fPosition.setRectFan(fGeometry.fBounds.fLeft, fGeometry.fBounds.fTop,
+                                      fGeometry.fBounds.fRight, fGeometry.fBounds.fBottom,
+                                      sizeof(Vertex));
+        for (int v = 0; v < 4; ++v) {
+            verts[v].fKLM[0] = eval_line(verts[v].fPosition, fKlmEqs + 0, fSign);
+            verts[v].fKLM[1] = eval_line(verts[v].fPosition, fKlmEqs + 3, fSign);
+            verts[v].fKLM[2] = eval_line(verts[v].fPosition, fKlmEqs + 6, 1.f);
+        }
+
+        GrDrawTarget::DrawInfo drawInfo;
+        drawInfo.setPrimitiveType(kTriangleFan_GrPrimitiveType);
+        drawInfo.setVertexBuffer(vertexBuffer);
+        drawInfo.setStartVertex(firstVertex);
+        drawInfo.setVertexCount(kVertsPerCubic);
+        drawInfo.setStartIndex(0);
+        drawInfo.setIndexCount(kIndicesPerCubic);
+        drawInfo.setIndexBuffer(batchTarget->quadIndexBuffer());
+        batchTarget->draw(drawInfo);
+    }
+
+    Geometry fGeometry;
+    SkScalar fKlmEqs[9];
+    SkScalar fSign;
+
+    static const int kVertsPerCubic = 4;
+    static const int kIndicesPerCubic = 6;
+
+    typedef GrTestBatch INHERITED;
+};
+
 /**
  * This GM directly exercises effects that draw Bezier curves in the GPU backend.
  */
@@ -36,23 +124,18 @@ public:
     }
 
 protected:
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("bezier_cubic_effects");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(800, 800);
     }
 
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        // This is a GPU-specific GM.
-        return kGPUOnly_Flag;
-    }
-
-
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         GrRenderTarget* rt = canvas->internal_private_accessTopLayerRenderTarget();
         if (NULL == rt) {
+            this->drawGpuOnlyMessage(canvas);
             return;
         }
         GrContext* context = rt->getContext();
@@ -150,25 +233,17 @@ protected:
                     context->getTestTarget(&tt);
                     SkASSERT(tt.target());
 
-                    GrDrawState ds;
+                    GrPipelineBuilder pipelineBuilder;
+                    pipelineBuilder.setRenderTarget(rt);
 
-                    GrDrawTarget::AutoReleaseGeometry geo(tt.target(), 4, gp->getVertexStride(), 0);
-                    SkASSERT(gp->getVertexStride() == sizeof(Vertex));
-                    Vertex* verts = reinterpret_cast<Vertex*>(geo.vertices());
+                    BezierCubicOrConicTestBatch::Geometry geometry;
+                    geometry.fColor = gp->color();
+                    geometry.fBounds = bounds;
 
-                    verts[0].fPosition.setRectFan(bounds.fLeft, bounds.fTop,
-                                                  bounds.fRight, bounds.fBottom,
-                                                  sizeof(Vertex));
-                    for (int v = 0; v < 4; ++v) {
-                        verts[v].fKLM[0] = eval_line(verts[v].fPosition, klmEqs + 0, klmSigns[c]);
-                        verts[v].fKLM[1] = eval_line(verts[v].fPosition, klmEqs + 3, klmSigns[c]);
-                        verts[v].fKLM[2] = eval_line(verts[v].fPosition, klmEqs + 6, 1.f);
-                    }
+                    SkAutoTUnref<GrBatch> batch(
+                            BezierCubicOrConicTestBatch::Create(gp, geometry, klmEqs, klmSigns[c]));
 
-                    ds.setRenderTarget(rt);
-
-                    tt.target()->setIndexSourceToBuffer(context->getQuadIndexBuffer());
-                    tt.target()->drawIndexed(&ds, gp, kTriangleFan_GrPrimitiveType, 0, 0,4,6);
+                    tt.target()->drawBatch(&pipelineBuilder, batch, NULL);
                 }
                 ++col;
                 if (numCols == col) {
@@ -195,23 +270,19 @@ public:
     }
 
 protected:
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("bezier_conic_effects");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(800, 800);
     }
 
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        // This is a GPU-specific GM.
-        return kGPUOnly_Flag;
-    }
 
-
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         GrRenderTarget* rt = canvas->internal_private_accessTopLayerRenderTarget();
         if (NULL == rt) {
+            this->drawGpuOnlyMessage(canvas);
             return;
         }
         GrContext* context = rt->getContext();
@@ -306,25 +377,17 @@ protected:
                     context->getTestTarget(&tt);
                     SkASSERT(tt.target());
 
-                    GrDrawState ds;
+                    GrPipelineBuilder pipelineBuilder;
+                    pipelineBuilder.setRenderTarget(rt);
 
-                    GrDrawTarget::AutoReleaseGeometry geo(tt.target(), 4, gp->getVertexStride(), 0);
-                    SkASSERT(gp->getVertexStride() == sizeof(Vertex));
-                    Vertex* verts = reinterpret_cast<Vertex*>(geo.vertices());
+                    BezierCubicOrConicTestBatch::Geometry geometry;
+                    geometry.fColor = gp->color();
+                    geometry.fBounds = bounds;
 
-                    verts[0].fPosition.setRectFan(bounds.fLeft, bounds.fTop,
-                                                  bounds.fRight, bounds.fBottom,
-                                                  sizeof(Vertex));
-                    for (int v = 0; v < 4; ++v) {
-                        verts[v].fKLM[0] = eval_line(verts[v].fPosition, klmEqs + 0, 1.f);
-                        verts[v].fKLM[1] = eval_line(verts[v].fPosition, klmEqs + 3, 1.f);
-                        verts[v].fKLM[2] = eval_line(verts[v].fPosition, klmEqs + 6, 1.f);
-                    }
+                    SkAutoTUnref<GrBatch> batch(
+                            BezierCubicOrConicTestBatch::Create(gp, geometry, klmEqs, 1.f));
 
-                    ds.setRenderTarget(rt);
-
-                    tt.target()->setIndexSourceToBuffer(context->getQuadIndexBuffer());
-                    tt.target()->drawIndexed(&ds, gp, kTriangleFan_GrPrimitiveType, 0, 0,4,6);
+                    tt.target()->drawBatch(&pipelineBuilder, batch, NULL);
                 }
                 ++col;
                 if (numCols == col) {
@@ -377,6 +440,84 @@ private:
 };
 
 //////////////////////////////////////////////////////////////////////////////
+
+class BezierQuadTestBatch : public GrTestBatch {
+public:
+    struct Geometry : public GrTestBatch::Geometry {
+        SkRect fBounds;
+    };
+
+    const char* name() const override { return "BezierQuadTestBatch"; }
+
+    static GrBatch* Create(const GrGeometryProcessor* gp, const Geometry& geo,
+                           const GrPathUtils::QuadUVMatrix& devToUV) {
+        return SkNEW_ARGS(BezierQuadTestBatch, (gp, geo, devToUV));
+    }
+
+private:
+    BezierQuadTestBatch(const GrGeometryProcessor* gp, const Geometry& geo,
+                        const GrPathUtils::QuadUVMatrix& devToUV)
+        : INHERITED(gp)
+        , fGeometry(geo)
+        , fDevToUV(devToUV) {
+    }
+
+    struct Vertex {
+        SkPoint fPosition;
+        float   fKLM[4]; // The last value is ignored. The effect expects a vec4f.
+    };
+
+    Geometry* geoData(int index) override {
+        SkASSERT(0 == index);
+        return &fGeometry;
+    }
+
+    void onGenerateGeometry(GrBatchTarget* batchTarget, const GrPipeline* pipeline) override {
+        size_t vertexStride = this->geometryProcessor()->getVertexStride();
+
+        const GrVertexBuffer* vertexBuffer;
+        int firstVertex;
+
+        void* vertices = batchTarget->vertexPool()->makeSpace(vertexStride,
+                                                              kVertsPerCubic,
+                                                              &vertexBuffer,
+                                                              &firstVertex);
+
+        if (!vertices || !batchTarget->quadIndexBuffer()) {
+            SkDebugf("Could not allocate buffers\n");
+            return;
+        }
+
+        SkASSERT(vertexStride == sizeof(Vertex));
+        Vertex* verts = reinterpret_cast<Vertex*>(vertices);
+
+        verts[0].fPosition.setRectFan(fGeometry.fBounds.fLeft, fGeometry.fBounds.fTop,
+                                      fGeometry.fBounds.fRight, fGeometry.fBounds.fBottom,
+                                      sizeof(Vertex));
+
+        fDevToUV.apply<4, sizeof(Vertex), sizeof(SkPoint)>(verts);
+
+
+        GrDrawTarget::DrawInfo drawInfo;
+        drawInfo.setPrimitiveType(kTriangles_GrPrimitiveType);
+        drawInfo.setVertexBuffer(vertexBuffer);
+        drawInfo.setStartVertex(firstVertex);
+        drawInfo.setVertexCount(kVertsPerCubic);
+        drawInfo.setStartIndex(0);
+        drawInfo.setIndexCount(kIndicesPerCubic);
+        drawInfo.setIndexBuffer(batchTarget->quadIndexBuffer());
+        batchTarget->draw(drawInfo);
+    }
+
+    Geometry fGeometry;
+    GrPathUtils::QuadUVMatrix fDevToUV;
+
+    static const int kVertsPerCubic = 4;
+    static const int kIndicesPerCubic = 6;
+
+    typedef GrTestBatch INHERITED;
+};
+
 /**
  * This GM directly exercises effects that draw Bezier quad curves in the GPU backend.
  */
@@ -387,23 +528,19 @@ public:
     }
 
 protected:
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("bezier_quad_effects");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(800, 800);
     }
 
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        // This is a GPU-specific GM.
-        return kGPUOnly_Flag;
-    }
 
-
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         GrRenderTarget* rt = canvas->internal_private_accessTopLayerRenderTarget();
         if (NULL == rt) {
+            this->drawGpuOnlyMessage(canvas);
             return;
         }
         GrContext* context = rt->getContext();
@@ -493,23 +630,18 @@ protected:
                     context->getTestTarget(&tt);
                     SkASSERT(tt.target());
 
-                    GrDrawState ds;
-
-                    GrDrawTarget::AutoReleaseGeometry geo(tt.target(), 4, gp->getVertexStride(), 0);
-                    SkASSERT(gp->getVertexStride() == sizeof(Vertex));
-                    Vertex* verts = reinterpret_cast<Vertex*>(geo.vertices());
-
-                    verts[0].fPosition.setRectFan(bounds.fLeft, bounds.fTop,
-                                                  bounds.fRight, bounds.fBottom,
-                                                  sizeof(Vertex));
+                    GrPipelineBuilder pipelineBuilder;
+                    pipelineBuilder.setRenderTarget(rt);
 
                     GrPathUtils::QuadUVMatrix DevToUV(pts);
-                    DevToUV.apply<4, sizeof(Vertex), sizeof(SkPoint)>(verts);
 
-                    ds.setRenderTarget(rt);
+                    BezierQuadTestBatch::Geometry geometry;
+                    geometry.fColor = gp->color();
+                    geometry.fBounds = bounds;
 
-                    tt.target()->setIndexSourceToBuffer(context->getQuadIndexBuffer());
-                    tt.target()->drawIndexed(&ds, gp, kTriangles_GrPrimitiveType, 0, 0, 4, 6);
+                    SkAutoTUnref<GrBatch> batch(BezierQuadTestBatch::Create(gp, geometry, DevToUV));
+
+                    tt.target()->drawBatch(&pipelineBuilder, batch, NULL);
                 }
                 ++col;
                 if (numCols == col) {

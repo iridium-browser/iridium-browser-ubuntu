@@ -25,7 +25,6 @@
 #include "core/svg/SVGSVGElement.h"
 #include "core/svg/SVGZoomAndPan.h"
 #include "platform/heap/Handle.h"
-#include "wtf/WeakPtr.h"
 
 namespace blink {
 
@@ -46,6 +45,7 @@ public:
     bool parseViewSpec(const String&);
     void reset();
     void detachContextElement();
+    template<typename T> void inheritViewAttributesFromElement(T*);
 
     // JS API
     SVGTransformList* transform() { return m_transform ? m_transform->baseValue() : 0; }
@@ -59,7 +59,7 @@ public:
     void setZoomAndPan(unsigned short value) { } // read only
     void setZoomAndPan(unsigned short value, ExceptionState&);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     SVGSVGElement* contextElement() { return m_contextElement.get(); }
 
@@ -73,6 +73,21 @@ private:
     RefPtrWillBeMember<SVGAnimatedTransformList> m_transform;
     String m_viewTargetString;
 };
+
+template <typename T>
+void SVGViewSpec::inheritViewAttributesFromElement(T* inheritFromElement)
+{
+    if (inheritFromElement->hasAttribute(SVGNames::viewBoxAttr))
+        viewBox()->baseValue()->setValue(inheritFromElement->viewBox()->currentValue()->value());
+
+    if (inheritFromElement->hasAttribute(SVGNames::preserveAspectRatioAttr)) {
+        preserveAspectRatio()->baseValue()->setAlign(inheritFromElement->preserveAspectRatio()->currentValue()->align());
+        preserveAspectRatio()->baseValue()->setMeetOrSlice(inheritFromElement->preserveAspectRatio()->currentValue()->meetOrSlice());
+    }
+
+    if (inheritFromElement->hasAttribute(SVGNames::zoomAndPanAttr))
+        setZoomAndPan(inheritFromElement->zoomAndPan());
+}
 
 } // namespace blink
 

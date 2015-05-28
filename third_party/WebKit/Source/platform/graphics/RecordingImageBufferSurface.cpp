@@ -6,6 +6,7 @@
 
 #include "platform/graphics/RecordingImageBufferSurface.h"
 
+#include "platform/graphics/ExpensiveCanvasHeuristicParameters.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/ImageBuffer.h"
 #include "public/platform/Platform.h"
@@ -19,7 +20,12 @@ namespace blink {
 RecordingImageBufferSurface::RecordingImageBufferSurface(const IntSize& size, PassOwnPtr<RecordingImageBufferFallbackSurfaceFactory> fallbackFactory, OpacityMode opacityMode)
     : ImageBufferSurface(size, opacityMode)
     , m_imageBuffer(0)
+    , m_currentFramePixelCount(0)
+    , m_previousFramePixelCount(0)
     , m_frameWasCleared(true)
+    , m_didRecordDrawCommandsInCurrentFrame(false)
+    , m_currentFrameHasExpensiveOp(false)
+    , m_previousFrameHasExpensiveOp(false)
     , m_fallbackFactory(fallbackFactory)
 {
     initializeCurrentFrame();
@@ -35,9 +41,10 @@ bool RecordingImageBufferSurface::initializeCurrentFrame()
     m_currentFrame->beginRecording(size().width(), size().height(), &rTreeFactory);
     if (m_imageBuffer) {
         m_imageBuffer->resetCanvas(m_currentFrame->getRecordingCanvas());
-        m_imageBuffer->context()->setRegionTrackingMode(GraphicsContext::RegionTrackingOverwrite);
     }
-
+    m_didRecordDrawCommandsInCurrentFrame = false;
+    m_currentFrameHasExpensiveOp = false;
+    m_currentFramePixelCount = 0;
     return true;
 }
 
@@ -45,12 +52,10 @@ void RecordingImageBufferSurface::setImageBuffer(ImageBuffer* imageBuffer)
 {
     m_imageBuffer = imageBuffer;
     if (m_currentFrame && m_imageBuffer) {
-        m_imageBuffer->context()->setRegionTrackingMode(GraphicsContext::RegionTrackingOverwrite);
         m_imageBuffer->resetCanvas(m_currentFrame->getRecordingCanvas());
     }
     if (m_fallbackSurface) {
         m_fallbackSurface->setImageBuffer(imageBuffer);
-        m_imageBuffer->context()->setRegionTrackingMode(GraphicsContext::RegionTrackingDisabled);
     }
 }
 
@@ -84,7 +89,6 @@ void RecordingImageBufferSurface::fallBackToRasterCanvas()
     }
 
     if (m_imageBuffer) {
-        m_imageBuffer->context()->setRegionTrackingMode(GraphicsContext::RegionTrackingDisabled);
         m_imageBuffer->resetCanvas(m_fallbackSurface->canvas());
         m_imageBuffer->context()->setAccelerated(m_fallbackSurface->isAccelerated());
     }
@@ -135,21 +139,34 @@ void RecordingImageBufferSurface::finalizeFrame(const FloatRect &dirtyRect)
         fallBackToRasterCanvas();
 }
 
-void RecordingImageBufferSurface::didClearCanvas()
+void RecordingImageBufferSurface::willOverwriteCanvas()
 {
-    if (m_fallbackSurface) {
-        m_fallbackSurface->didClearCanvas();
-        return;
-    }
     m_frameWasCleared = true;
+    m_previousFrame.clear();
+    m_previousFrameHasExpensiveOp = false;
+    m_previousFramePixelCount = 0;
+    if (m_didRecordDrawCommandsInCurrentFrame) {
+        // Discard previous draw commands
+        adoptRef(m_currentFrame->endRecording());
+        initializeCurrentFrame();
+    }
+}
+
+void RecordingImageBufferSurface::didDraw(const FloatRect& rect)
+{
+    m_didRecordDrawCommandsInCurrentFrame = true;
+    IntRect pixelBounds = enclosingIntRect(rect);
+    m_currentFramePixelCount += pixelBounds.width() * pixelBounds.height();
 }
 
 bool RecordingImageBufferSurface::finalizeFrameInternal()
 {
     ASSERT(!m_fallbackSurface);
+    ASSERT(m_currentFrame);
+    ASSERT(m_currentFrame->getRecordingCanvas());
 
     if (!m_imageBuffer->isDirty()) {
-        if (m_currentFrame && !m_previousFrame) {
+        if (!m_previousFrame) {
             // Create an initial blank frame
             m_previousFrame = adoptRef(m_currentFrame->endRecording());
             initializeCurrentFrame();
@@ -157,15 +174,15 @@ bool RecordingImageBufferSurface::finalizeFrameInternal()
         return m_currentFrame;
     }
 
-    IntRect canvasRect(IntPoint(0, 0), size());
-    if (!m_frameWasCleared && !m_imageBuffer->context()->opaqueRegion().asRect().contains(canvasRect)) {
+    if (!m_frameWasCleared || m_currentFrame->getRecordingCanvas()->getSaveCount() > ExpensiveCanvasHeuristicParameters::ExpensiveRecordingStackDepth) {
         return false;
     }
 
     m_previousFrame = adoptRef(m_currentFrame->endRecording());
+    m_previousFrameHasExpensiveOp = m_currentFrameHasExpensiveOp;
+    m_previousFramePixelCount = m_currentFramePixelCount;
     if (!initializeCurrentFrame())
         return false;
-
 
     m_frameWasCleared = false;
     return true;
@@ -178,19 +195,46 @@ void RecordingImageBufferSurface::willDrawVideo()
         fallBackToRasterCanvas();
 }
 
-void RecordingImageBufferSurface::draw(GraphicsContext* context, const FloatRect& destRect, const FloatRect& srcRect, CompositeOperator op, WebBlendMode blendMode, bool needsCopy)
+void RecordingImageBufferSurface::draw(GraphicsContext* context, const FloatRect& destRect, const FloatRect& srcRect, SkXfermode::Mode op, bool needsCopy)
 {
     if (m_fallbackSurface) {
-        m_fallbackSurface->draw(context, destRect, srcRect, op, blendMode, needsCopy);
+        m_fallbackSurface->draw(context, destRect, srcRect, op, needsCopy);
         return;
     }
 
     RefPtr<SkPicture> picture = getPicture();
     if (picture) {
-        context->compositePicture(picture.get(), destRect, srcRect, op, blendMode);
+        context->compositePicture(picture.get(), destRect, srcRect, op);
     } else {
-        ImageBufferSurface::draw(context, destRect, srcRect, op, blendMode, needsCopy);
+        ImageBufferSurface::draw(context, destRect, srcRect, op, needsCopy);
     }
+}
+
+bool RecordingImageBufferSurface::isExpensiveToPaint()
+{
+    if (m_fallbackSurface)
+        return m_fallbackSurface->isExpensiveToPaint();
+
+    if (m_didRecordDrawCommandsInCurrentFrame) {
+        if (m_currentFrameHasExpensiveOp)
+            return true;
+
+        if (m_currentFramePixelCount >= (size().width() * size().height() * ExpensiveCanvasHeuristicParameters::ExpensiveOverdrawThreshold))
+            return true;
+
+        if (m_frameWasCleared)
+            return false; // early exit because previous frame is overdrawn
+    }
+
+    if (m_previousFrame) {
+        if (m_previousFrameHasExpensiveOp)
+            return true;
+
+        if (m_previousFramePixelCount >= (size().width() * size().height() * ExpensiveCanvasHeuristicParameters::ExpensiveOverdrawThreshold))
+            return true;
+    }
+
+    return false;
 }
 
 // Fallback passthroughs

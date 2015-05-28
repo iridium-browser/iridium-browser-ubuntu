@@ -75,7 +75,7 @@ public:
 
     virtual ~ImageBitmapFactories() { }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 protected:
     static const char* supplementName();
@@ -91,7 +91,7 @@ private:
         void loadBlobAsync(ExecutionContext*, Blob*);
         ScriptPromise promise() { return m_resolver->promise(); }
 
-        void trace(Visitor*);
+        DECLARE_TRACE();
 
         virtual ~ImageBitmapLoader() { }
 
@@ -120,7 +120,7 @@ private:
     void addLoader(ImageBitmapLoader*);
     void didFinishLoading(ImageBitmapLoader*);
 
-    PersistentHeapHashSetWillBeHeapHashSet<Member<ImageBitmapLoader> > m_pendingLoaders;
+    PersistentHeapHashSetWillBeHeapHashSet<Member<ImageBitmapLoader>> m_pendingLoaders;
 };
 
 } // namespace blink

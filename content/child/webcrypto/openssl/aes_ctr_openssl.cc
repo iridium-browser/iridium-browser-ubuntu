@@ -50,7 +50,7 @@ Status AesCtrEncrypt128BitCounter(const EVP_CIPHER* cipher,
   DCHECK_EQ(16u, counter.byte_length());
 
   crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
-  crypto::ScopedOpenSSL<EVP_CIPHER_CTX, EVP_CIPHER_CTX_free>::Type context(
+  crypto::ScopedOpenSSL<EVP_CIPHER_CTX, EVP_CIPHER_CTX_free> context(
       EVP_CIPHER_CTX_new());
 
   if (!context.get())
@@ -108,7 +108,7 @@ crypto::ScopedBIGNUM GetCounter(const CryptoData& counter_block,
   counter[0] &= ~(0xFF << counter_length_remainder_bits);
 
   return crypto::ScopedBIGNUM(
-      BN_bin2bn(&counter.front(), counter.size(), NULL));
+      BN_bin2bn(vector_as_array(&counter), counter.size(), NULL));
 }
 
 // Returns a counter block with the counter bits all set all zero.

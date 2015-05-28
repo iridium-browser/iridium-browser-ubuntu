@@ -40,9 +40,9 @@
 #if defined(USE_OZONE)
 #if defined(OS_CHROMEOS)
 #include "ui/display/chromeos/display_configurator.h"
+#include "ui/display/types/native_display_delegate.h"
 #endif  // defined(OS_CHROMEOS)
 #include "ui/ozone/public/ozone_platform.h"
-#include "ui/ozone/public/ui_thread_gpu.h"
 #include "ui/platform_window/platform_window.h"
 #include "ui/platform_window/platform_window_delegate.h"
 #endif  // defined(USE_OZONE)
@@ -86,6 +86,7 @@ class DisplayConfiguratorObserver : public ui::DisplayConfigurator::Observer {
     loop_ = nullptr;
   }
   void OnDisplayModeChangeFailed(
+      const ui::DisplayConfigurator::DisplayStateList& outputs,
       ui::MultipleDisplayState failed_new_state) override {
     LOG(FATAL) << "Could not configure display";
   }
@@ -98,11 +99,10 @@ class DisplayConfiguratorObserver : public ui::DisplayConfigurator::Observer {
 class RenderingHelper::StubOzoneDelegate : public ui::PlatformWindowDelegate {
  public:
   StubOzoneDelegate() : accelerated_widget_(gfx::kNullAcceleratedWidget) {
-    ui_thread_gpu_.Initialize();
     platform_window_ = ui::OzonePlatform::GetInstance()->CreatePlatformWindow(
         this, gfx::Rect());
   }
-  virtual ~StubOzoneDelegate() {}
+  ~StubOzoneDelegate() override {}
 
   void OnBoundsChanged(const gfx::Rect& new_bounds) override {}
 
@@ -132,7 +132,6 @@ class RenderingHelper::StubOzoneDelegate : public ui::PlatformWindowDelegate {
   ui::PlatformWindow* platform_window() const { return platform_window_.get(); }
 
  private:
-  ui::UiThreadGpu ui_thread_gpu_;
   scoped_ptr<ui::PlatformWindow> platform_window_;
   gfx::AcceleratedWidget accelerated_widget_;
 
@@ -182,7 +181,7 @@ void RenderingHelper::InitializeOneOff(base::WaitableEvent* done) {
   done->Signal();
 }
 
-RenderingHelper::RenderingHelper() {
+RenderingHelper::RenderingHelper() : ignore_vsync_(false) {
   window_ = gfx::kNullAcceleratedWidget;
   Clear();
 }
@@ -241,6 +240,10 @@ void RenderingHelper::Setup() {
 
   platform_window_delegate_.reset(new RenderingHelper::StubOzoneDelegate());
   window_ = platform_window_delegate_->accelerated_widget();
+  gfx::Size window_size(800, 600);
+  // Ignore the vsync provider by default. On ChromeOS this will be set
+  // accordingly based on the display configuration.
+  ignore_vsync_ = true;
 #if defined(OS_CHROMEOS)
   // We hold onto the main loop here to wait for the DisplayController
   // to give us the size of the display so we can create a window of
@@ -248,6 +251,7 @@ void RenderingHelper::Setup() {
   base::RunLoop wait_display_setup;
   DisplayConfiguratorObserver display_setup_observer(&wait_display_setup);
   display_configurator_.reset(new ui::DisplayConfigurator());
+  display_configurator_->SetDelegateForTesting(0);
   display_configurator_->AddObserver(&display_setup_observer);
   display_configurator_->Init(true);
   display_configurator_->ForceInitialConfigure(0);
@@ -255,11 +259,17 @@ void RenderingHelper::Setup() {
   wait_display_setup.Run();
   display_configurator_->RemoveObserver(&display_setup_observer);
 
-  platform_window_delegate_->platform_window()->SetBounds(
-      gfx::Rect(display_configurator_->framebuffer_size()));
-#else
-  platform_window_delegate_->platform_window()->SetBounds(gfx::Rect(800, 600));
+  gfx::Size framebuffer_size = display_configurator_->framebuffer_size();
+  if (!framebuffer_size.IsEmpty()) {
+    window_size = framebuffer_size;
+    ignore_vsync_ = false;
+  }
 #endif
+  if (ignore_vsync_)
+    DVLOG(1) << "Ignoring vsync provider";
+
+  platform_window_delegate_->platform_window()->SetBounds(
+      gfx::Rect(window_size));
 
   // On Ozone/DRI, platform windows are associated with the physical
   // outputs. Association is achieved by matching the bounds of the
@@ -316,6 +326,9 @@ void RenderingHelper::Initialize(const RenderingHelperParams& params,
   message_loop_ = base::MessageLoop::current();
 
   gl_surface_ = gfx::GLSurface::CreateViewGLSurface(window_);
+#if defined(USE_OZONE)
+  gl_surface_->Resize(platform_window_delegate_->GetSize());
+#endif  // defined(USE_OZONE)
   screen_size_ = gl_surface_->GetSize();
 
   gl_context_ = gfx::GLContext::CreateGLContext(
@@ -366,7 +379,8 @@ void RenderingHelper::Initialize(const RenderingHelperParams& params,
     CHECK(fb_status == GL_FRAMEBUFFER_COMPLETE) << fb_status;
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    glBindFramebufferEXT(GL_FRAMEBUFFER, 0);
+    glBindFramebufferEXT(GL_FRAMEBUFFER,
+                         gl_surface_->GetBackingFrameBufferObject());
   }
 
   // These vertices and texture coords. map (0,0) in the texture to the
@@ -465,7 +479,11 @@ void RenderingHelper::Initialize(const RenderingHelperParams& params,
   // in VideoDecodeAcceleratorTest.TearDown(), while the |rendering_helper_| is
   // a member of that class. (See video_decode_accelerator_unittest.cc.)
   gfx::VSyncProvider* vsync_provider = gl_surface_->GetVSyncProvider();
-  if (vsync_provider && frame_duration_ != base::TimeDelta())
+
+  // VSync providers rely on the underlying CRTC to get the timing. In headless
+  // mode the surface isn't associated with a CRTC so the vsync provider can not
+  // get the timing, meaning it will not call UpdateVsyncParameters() ever.
+  if (!ignore_vsync_ && vsync_provider && frame_duration_ != base::TimeDelta())
     vsync_provider->GetVSyncParameters(base::Bind(
         &RenderingHelper::UpdateVSyncParameters, base::Unretained(this), done));
   else
@@ -506,6 +524,7 @@ void RenderingHelper::UnInitialize(base::WaitableEvent* done) {
     glDeleteFramebuffersEXT(1, &thumbnails_fbo_id_);
   }
 
+  gl_surface_->Destroy();
   gl_context_->ReleaseCurrent(gl_surface_.get());
   gl_context_ = NULL;
   gl_surface_ = NULL;
@@ -572,7 +591,8 @@ void RenderingHelper::RenderThumbnail(uint32 texture_target,
   glBindFramebufferEXT(GL_FRAMEBUFFER, thumbnails_fbo_id_);
   GLSetViewPort(area);
   RenderTexture(texture_target, texture_id);
-  glBindFramebufferEXT(GL_FRAMEBUFFER, 0);
+  glBindFramebufferEXT(GL_FRAMEBUFFER,
+                       gl_surface_->GetBackingFrameBufferObject());
 
   // Need to flush the GL commands before we return the tnumbnail texture to
   // the decoder.
@@ -663,7 +683,8 @@ void RenderingHelper::GetThumbnailsAsRGB(std::vector<unsigned char>* rgb,
                GL_RGBA,
                GL_UNSIGNED_BYTE,
                &rgba[0]);
-  glBindFramebufferEXT(GL_FRAMEBUFFER, 0);
+  glBindFramebufferEXT(GL_FRAMEBUFFER,
+                       gl_surface_->GetBackingFrameBufferObject());
   rgb->resize(num_pixels * 3);
   // Drop the alpha channel, but check as we go that it is all 0xff.
   bool solid = true;
@@ -694,13 +715,19 @@ void RenderingHelper::RenderContent() {
   // in VideoDecodeAcceleratorTest.TearDown(), while the |rendering_helper_| is
   // a member of that class. (See video_decode_accelerator_unittest.cc.)
   gfx::VSyncProvider* vsync_provider = gl_surface_->GetVSyncProvider();
-  if (vsync_provider) {
+  if (vsync_provider && !ignore_vsync_) {
     vsync_provider->GetVSyncParameters(base::Bind(
         &RenderingHelper::UpdateVSyncParameters, base::Unretained(this),
         static_cast<base::WaitableEvent*>(NULL)));
   }
 
-  glUniform1i(glGetUniformLocation(program_, "tex_flip"), 1);
+  int tex_flip = 1;
+#if defined(USE_OZONE)
+  // Ozone surfaceless renders flipped from normal GL, so there's no need to
+  // do an extra flip.
+  tex_flip = 0;
+#endif  // defined(USE_OZONE)
+  glUniform1i(glGetUniformLocation(program_, "tex_flip"), tex_flip);
 
   // Frames that will be returned to the client (via the no_longer_needed_cb)
   // after this vector falls out of scope at the end of this method. We need

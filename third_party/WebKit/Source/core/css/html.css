@@ -27,6 +27,10 @@ html {
     display: block
 }
 
+:root {
+    scroll-blocks-on: start-touch wheel-event
+}
+
 /* children of the <head> element all have display:none */
 head {
     display: none
@@ -397,6 +401,7 @@ input, textarea, keygen, select, button, meter, progress {
 input, textarea, keygen, select, button {
     margin: 0__qem;
     font: -webkit-small-control;
+    text-rendering: auto; /* FIXME: Remove when tabs work with optimizeLegibility. */
     color: initial;
     letter-spacing: normal;
     word-spacing: normal;
@@ -445,7 +450,7 @@ input::-webkit-clear-button {
     -webkit-user-modify: read-only !important;
     -webkit-margin-start: 2px;
     opacity: 0;
-    pionter-events: none;
+    pointer-events: none;
 }
 
 input:enabled:read-write:-webkit-any(:focus,:hover)::-webkit-clear-button {
@@ -607,7 +612,6 @@ input[type="range" i]::-webkit-slider-container, input[type="range" i]::-webkit-
     box-sizing: border-box;
     -webkit-user-modify: read-only !important;
     display: flex;
-    -webkit-align-contents: center;
 }
 
 input[type="range" i]::-webkit-slider-runnable-track {
@@ -651,7 +655,8 @@ datalist {
 }
 
 area {
-    display: inline
+    display: inline;
+    cursor: pointer;
 }
 
 param {

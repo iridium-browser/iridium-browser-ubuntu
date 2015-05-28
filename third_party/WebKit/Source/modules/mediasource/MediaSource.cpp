@@ -276,14 +276,14 @@ void MediaSource::clearWeakMembers(Visitor* visitor)
 #endif
 }
 
-void MediaSource::trace(Visitor* visitor)
+DEFINE_TRACE(MediaSource)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_asyncEventQueue);
 #endif
     visitor->trace(m_sourceBuffers);
     visitor->trace(m_activeSourceBuffers);
-    visitor->registerWeakMembers<MediaSource, &MediaSource::clearWeakMembers>(this);
+    visitor->template registerWeakMembers<MediaSource, &MediaSource::clearWeakMembers>(this);
     RefCountedGarbageCollectedEventTargetWithInlineData<MediaSource>::trace(visitor);
     ActiveDOMObject::trace(visitor);
 }
@@ -319,7 +319,7 @@ PassRefPtrWillBeRawPtr<TimeRanges> MediaSource::buffered() const
 {
     // Implements MediaSource algorithm for HTMLMediaElement.buffered.
     // https://dvcs.w3.org/hg/html-media/raw-file/default/media-source/media-source.html#htmlmediaelement-extensions
-    WillBeHeapVector<RefPtrWillBeMember<TimeRanges> > ranges(m_activeSourceBuffers->length());
+    WillBeHeapVector<RefPtrWillBeMember<TimeRanges>> ranges(m_activeSourceBuffers->length());
     for (size_t i = 0; i < m_activeSourceBuffers->length(); ++i)
         ranges[i] = m_activeSourceBuffers->item(i)->buffered(ASSERT_NO_EXCEPTION);
 

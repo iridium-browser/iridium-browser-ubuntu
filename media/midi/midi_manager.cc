@@ -5,9 +5,9 @@
 #include "media/midi/midi_manager.h"
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
+#include "base/trace_event/trace_event.h"
 
 namespace media {
 
@@ -128,6 +128,22 @@ void MidiManager::AddOutputPort(const MidiPortInfo& info) {
   output_ports_.push_back(info);
   for (auto client : clients_)
     client->AddOutputPort(info);
+}
+
+void MidiManager::SetInputPortState(uint32 port_index, MidiPortState state) {
+  base::AutoLock auto_lock(lock_);
+  DCHECK_LT(port_index, input_ports_.size());
+  input_ports_[port_index].state = state;
+  for (auto client : clients_)
+    client->SetInputPortState(port_index, state);
+}
+
+void MidiManager::SetOutputPortState(uint32 port_index, MidiPortState state) {
+  base::AutoLock auto_lock(lock_);
+  DCHECK_LT(port_index, output_ports_.size());
+  output_ports_[port_index].state = state;
+  for (auto client : clients_)
+    client->SetOutputPortState(port_index, state);
 }
 
 void MidiManager::ReceiveMidiData(

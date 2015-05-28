@@ -14,25 +14,21 @@
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/jumplist_updater_win.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/profiles/avatar_menu.h"
-#include "chrome/browser/profiles/avatar_menu_observer.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_observer.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/history/core/browser/top_sites_observer.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 namespace chrome {
 struct FaviconImageResult;
 }
 
-namespace content {
-class NotificationRegistrar;
-}
-
-class PageUsageData;
 class PrefChangeRegistrar;
 class Profile;
 
@@ -41,7 +37,6 @@ class Profile;
 // JumpList:
 // * Retrieving "Most Visited" pages from HistoryService;
 // * Retrieving strings from the application resource;
-// * Creating COM objects used by JumpList from PageUsageData objects;
 // * Adding COM objects to JumpList, etc.
 //
 // This class observes the tabs and policies of the given Profile and updates
@@ -55,9 +50,10 @@ class Profile;
 // always delete JumpList on UI thread (the same thread it got constructed on).
 class JumpList : public TabRestoreServiceObserver,
                  public content::NotificationObserver,
-                 public AvatarMenuObserver,
+                 public history::TopSitesObserver,
                  public base::RefCountedThreadSafe<
-                     JumpList, content::BrowserThread::DeleteOnUIThread> {
+                     JumpList,
+                     content::BrowserThread::DeleteOnUIThread> {
  public:
   explicit JumpList(Profile* profile);
 
@@ -73,9 +69,6 @@ class JumpList : public TabRestoreServiceObserver,
   // Observer callback to notice when our associated TabRestoreService
   // is destroyed.
   void TabRestoreServiceDestroyed(TabRestoreService* service) override;
-
-  // Overridden from AvatarMenuObserver:
-  void OnAvatarMenuChanged(AvatarMenu* avatar_menu) override;
 
   // Cancel a pending jumplist update.
   void CancelPendingUpdate();
@@ -141,9 +134,9 @@ class JumpList : public TabRestoreServiceObserver,
   // loaded icons.
   void CreateIconFiles(const ShellLinkItemList& item_list);
 
-  // Called when the list of Profiles has changed. This function updates the
-  // |profile_switcher_| ShellLinkItemList.
-  void UpdateProfileSwitcher();
+  // history::TopSitesObserver implementation.
+  void TopSitesLoaded(history::TopSites* top_sites) override;
+  void TopSitesChanged(history::TopSites* top_sites) override;
 
   // Tracks FaviconService tasks.
   base::CancelableTaskTracker cancelable_task_tracker_;
@@ -169,10 +162,6 @@ class JumpList : public TabRestoreServiceObserver,
   // protected by the list_lock_.
   ShellLinkItemList recently_closed_pages_;
 
-  // Items in the "People" category of the application JumpList, protected
-  // by the list_lock_.
-  ShellLinkItemList profile_switcher_;
-
   // A list of URLs we need to retrieve their favicons,
   // protected by the list_lock_.
   typedef std::pair<std::string, scoped_refptr<ShellLinkItem> > URLPair;
@@ -188,13 +177,6 @@ class JumpList : public TabRestoreServiceObserver,
 
   // For callbacks may be run after destruction.
   base::WeakPtrFactory<JumpList> weak_ptr_factory_;
-
-  // Contains data about existing Profiles.
-  scoped_ptr<AvatarMenu> avatar_menu_;
-
-  // Whether the experiment that is replacing "Most Visited" category with a
-  // "People" category is enabled.
-  bool use_profiles_category_;
 
   DISALLOW_COPY_AND_ASSIGN(JumpList);
 };

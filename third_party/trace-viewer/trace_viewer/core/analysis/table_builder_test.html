@@ -5,6 +5,7 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
+<link rel="import" href="/base/deep_utils.html">
 <link rel="import" href="/core/analysis/table_builder.html">
 
 <script>
@@ -73,11 +74,11 @@ tv.b.unittest.testSuite(function() {
             subRows: [
               {
                 firstData: 'SubSub1 A1',
-                secondData: 'SubSub1 A2',
+                secondData: 'SubSub1 A2'
               },
               {
                 firstData: 'SubSub2 A1',
-                secondData: 'SubSub2 A2',
+                secondData: 'SubSub2 A2'
               }
             ]
           },
@@ -107,7 +108,7 @@ tv.b.unittest.testSuite(function() {
       {
         title: 'First Column',
         value: function(row) { return row.firstData; },
-        width: '50%',
+        width: '50%'
       },
       {
         title: 'Second Column',
@@ -136,11 +137,11 @@ tv.b.unittest.testSuite(function() {
             subRows: [
               {
                 firstData: 'SubSub1 A1',
-                secondData: 'SubSub1 A2',
+                secondData: 'SubSub1 A2'
               },
               {
                 firstData: 'SubSub2 A1',
-                secondData: 'SubSub2 A2',
+                secondData: 'SubSub2 A2'
               }
             ]
           },
@@ -171,11 +172,11 @@ tv.b.unittest.testSuite(function() {
             subRows: [
               {
                 firstData: 'SubSub1F1',
-                secondData: 'SubSub1F2',
+                secondData: 'SubSub1F2'
               },
               {
                 firstData: 'SubSub2F1',
-                secondData: 'SubSub2F2',
+                secondData: 'SubSub2F2'
               }
             ]
           },
@@ -205,5 +206,90 @@ tv.b.unittest.testSuite(function() {
     });
     this.addHTMLOutput(button);
   });
+
+
+  test('instantiateNestedTableAlreadyExpanded', function() {
+    var columns = [
+      {
+        title: 'a',
+        value: function(row) { return row.a; },
+        width: '50%'
+      },
+      {
+        title: 'a',
+        value: function(row) { return row.b; },
+        width: '50%'
+      }
+    ];
+
+    var rows = [
+      {
+        a: 'aToplevel',
+        b: 'bToplevel',
+        isExpanded: true,
+        subRows: [
+          {
+            a: 'a1',
+            b: 'b1'
+          }
+        ]
+      }
+    ];
+
+    var table = new TracingAnalysisNestedTable();
+    table.tableColumns = columns;
+    table.tableRows = rows;
+    table.rebuild();
+    this.addHTMLOutput(table);
+
+    var a1El = tv.b.findDeepElementMatchingPredicate(table, function(element) {
+      return element.textContent == 'a1';
+    });
+    assertNotUndefined(a1El);
+
+    var bToplevelEl = tv.b.findDeepElementMatchingPredicate(
+        table,
+        function(element) {
+          return element.textContent == 'bToplevel';
+        });
+    assertNotUndefined(bToplevelEl);
+    var expandButton = bToplevelEl.parentElement.querySelector('expand-button');
+    assertTrue(expandButton.classList.contains('button-expanded'));
+  });
+
+
+  test('instantiateTableWithHiddenHeader', function() {
+    var columns = [
+      {
+        title: 'a',
+        value: function(row) { return row.a; },
+        width: '50%'
+      },
+      {
+        title: 'a',
+        value: function(row) { return row.b; },
+        width: '50%'
+      }
+    ];
+
+    var rows = [
+      {
+        a: 'aToplevel',
+        b: 'bToplevel'
+      }
+    ];
+
+    var table = new TracingAnalysisNestedTable();
+    table.showHeader = false;
+    table.tableColumns = columns;
+    table.tableRows = rows;
+    table.rebuild();
+    this.addHTMLOutput(table);
+
+    var tHead = table.$.head;
+    assertEquals(0, tHead.getBoundingClientRect().height);
+  });
+
+
 });
 </script>

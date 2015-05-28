@@ -25,7 +25,6 @@ from chromite.lib import git
 from chromite.lib import osutils
 from chromite.lib import parallel
 from chromite.lib import portage_util
-from chromite.scripts import cros_generate_breakpad_symbols
 
 
 _FULL_BINHOST = 'FULL_BINHOST'
@@ -440,24 +439,9 @@ class DebugSymbolsStage(generic_stages.BoardSpecificBuilderStage,
 
   def UploadDebugTarball(self):
     """Generate and upload the debug tarball."""
-    try:
-      filename = commands.GenerateDebugTarball(
-          self._build_root, self._current_board, self.archive_path,
-          self._run.config.archive_build_debug)
-    except cros_build_lib.RunCommandError:
-      # TODO(yjhong): Remove this after crbug.com/339934 is fixed.
-      debug_root = cros_build_lib.FromChrootPath(
-          cros_generate_breakpad_symbols.FindDebugDir(self._current_board))
-      logging.warning('Failed to generate the debug tarball. Listing the '
-                      'files in %s:', debug_root)
-      for subpath in [os.path.join('bin'),
-                      os.path.join('usr', 'bin'),
-                      os.path.join('usr', 'sbin')]:
-        logging.warning(osutils.StatFilesInDirectory(
-            os.path.join(debug_root, subpath),
-            recursive=True, to_string=True))
-      raise
-
+    filename = commands.GenerateDebugTarball(
+        self._build_root, self._current_board, self.archive_path,
+        self._run.config.archive_build_debug)
     self.UploadArtifact(filename, archive=False)
     cros_build_lib.Info('Announcing availability of debug tarball now.')
     self.board_runattrs.SetParallel('debug_tarball_generated', True)
@@ -591,7 +575,8 @@ class UploadPrebuiltsStage(generic_stages.BoardSpecificBuilderStage):
   option_name = 'prebuilts'
   config_name = 'prebuilts'
 
-  def __init__(self, builder_run, board, **kwargs):
+  def __init__(self, builder_run, board, version=None, **kwargs):
+    self.prebuilts_version = version
     super(UploadPrebuiltsStage, self).__init__(builder_run, board, **kwargs)
 
   def GenerateCommonArgs(self):
@@ -607,6 +592,9 @@ class UploadPrebuiltsStage(generic_stages.BoardSpecificBuilderStage):
     # Generate the version if we are a manifest_version build.
     if self._run.config.manifest_version:
       version = self._run.GetVersion()
+    else:
+      version = self.prebuilts_version
+    if version is not None:
       generated_args.extend(['--set-version', version])
 
     if self._run.config.git_sync:
@@ -687,21 +675,28 @@ class UploadPrebuiltsStage(generic_stages.BoardSpecificBuilderStage):
             private_builders.append(c['name'])
             private_args.extend(self._AddOptionsForSlave(c, board))
 
+    common_kwargs = {
+        'buildroot': self._build_root,
+        'category': prebuilt_type,
+        'chrome_rev': self._chrome_rev,
+        'version': self.prebuilts_version,
+    }
+
     # Upload the public prebuilts, if any.
     if public_builders or public:
       public_board = board if public else None
       prebuilts.UploadPrebuilts(
-          category=prebuilt_type, chrome_rev=self._chrome_rev,
-          private_bucket=False, buildroot=self._build_root,
-          board=public_board, extra_args=generated_args + public_args)
+          private_bucket=False, board=public_board,
+          extra_args=generated_args + public_args,
+          **common_kwargs)
 
     # Upload the private prebuilts, if any.
     if private_builders or not public:
       private_board = board if not public else None
       prebuilts.UploadPrebuilts(
-          category=prebuilt_type, chrome_rev=self._chrome_rev,
-          private_bucket=True, buildroot=self._build_root, board=private_board,
-          extra_args=generated_args + private_args)
+          private_bucket=True, board=private_board,
+          extra_args=generated_args + private_args,
+          **common_kwargs)
 
 
 class DevInstallerPrebuiltsStage(UploadPrebuiltsStage):
@@ -746,6 +741,11 @@ class UploadTestArtifactsStage(generic_stages.BoardSpecificBuilderStage,
         test_suites_tarball = commands.BuildAutotestTestSuitesTarball(
             self._build_root, cwd, tempdir)
         queue.put([test_suites_tarball])
+
+        # Build the server side package.
+        server_tarball = commands.BuildAutotestServerPackageTarball(
+            self._build_root, cwd, tempdir)
+        queue.put([server_tarball])
 
   def _GeneratePayloads(self, image_name, **kwargs):
     """Generate and upload payloads for |image_name|.

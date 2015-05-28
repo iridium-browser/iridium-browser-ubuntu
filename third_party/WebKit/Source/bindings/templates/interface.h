@@ -42,26 +42,27 @@ public:
     };
 
     {% endif %}
-    static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
+    {{exported}}static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
     {% if is_array_buffer_or_view %}
-    static {{cpp_class}}* toImpl(v8::Local<v8::Object> object);
+    {{exported}}static {{cpp_class}}* toImpl(v8::Local<v8::Object> object);
     {% else %}
     static v8::Local<v8::Object> findInstanceInPrototypeChain(v8::Local<v8::Value>, v8::Isolate*);
-    static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*);
+    {{exported}}static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*);
     static {{cpp_class}}* toImpl(v8::Local<v8::Object> object)
     {
         return blink::toScriptWrappable(object)->toImpl<{{cpp_class}}>();
     }
     {% endif %}
-    static {{cpp_class}}* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
+    {{exported}}static {{cpp_class}}* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
     {% if has_partial_interface %}
-    static WrapperTypeInfo wrapperTypeInfo;
+    {{exported}}static WrapperTypeInfo wrapperTypeInfo;
     {% else %}
-    static const WrapperTypeInfo wrapperTypeInfo;
+    {{exported}}static const WrapperTypeInfo wrapperTypeInfo;
     {% endif %}
     static void refObject(ScriptWrappable*);
     static void derefObject(ScriptWrappable*);
-    static void trace(Visitor* visitor, ScriptWrappable* scriptWrappable)
+    template<typename VisitorDispatcher>
+    static void trace(VisitorDispatcher visitor, ScriptWrappable* scriptWrappable)
     {
         {% if gc_type == 'GarbageCollectedObject' %}
         visitor->trace(scriptWrappable->toImpl<{{cpp_class}}>());
@@ -84,6 +85,11 @@ public:
     {% if method.is_custom %}
     {% filter conditional(method.conditional_string) %}
     static void {{method.name}}MethodCustom(const v8::FunctionCallbackInfo<v8::Value>&);
+    {% endfilter %}
+    {% endif %}
+    {% if method.is_custom_call_epilogue %}
+    {% filter conditional(method.conditional_string) %}
+    static void {{method.name}}MethodEpilogueCustom(const v8::FunctionCallbackInfo<v8::Value>&, {{cpp_class}}*);
     {% endfilter %}
     {% endif %}
     {% endfor %}
@@ -161,10 +167,10 @@ public:
     {% else %} { }
     {% endif %}
     {% if has_partial_interface %}
-    static void updateWrapperTypeInfo(InstallTemplateFunction, InstallConditionallyEnabledMethodsFunction);
-    static void install{{v8_class}}Template(v8::Local<v8::FunctionTemplate>, v8::Isolate*);
+    {{exported}}static void updateWrapperTypeInfo(InstallTemplateFunction, InstallConditionallyEnabledMethodsFunction);
+    {{exported}}static void install{{v8_class}}Template(v8::Local<v8::FunctionTemplate>, v8::Isolate*);
     {% for method in methods if method.overloads and method.overloads.has_partial_overloads %}
-    static void register{{method.name | blink_capitalize}}MethodForPartialInterface(void (*)(const v8::FunctionCallbackInfo<v8::Value>&));
+    {{exported}}static void register{{method.name | blink_capitalize}}MethodForPartialInterface(void (*)(const v8::FunctionCallbackInfo<v8::Value>&));
     {% endfor %}
     {% endif %}
     {% if has_partial_interface %}
@@ -195,9 +201,14 @@ inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo, {{cpp_class}}
 
 {% endif %}{# has_custom_to_v8 #}
 {% if has_event_constructor %}
-bool initialize{{cpp_class}}({{cpp_class}}Init&, const Dictionary&, ExceptionState&, const v8::FunctionCallbackInfo<v8::Value>& info);
+{{exported}}bool initialize{{cpp_class}}({{cpp_class}}Init&, const Dictionary&, ExceptionState&, const v8::FunctionCallbackInfo<v8::Value>& info);
 
 {% endif %}
+template <>
+struct V8TypeOf<{{cpp_class}}> {
+    typedef {{v8_class}} Type;
+};
+
 } // namespace blink
 {% endfilter %}
 

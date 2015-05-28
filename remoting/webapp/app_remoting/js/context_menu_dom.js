@@ -31,60 +31,35 @@ var remoting = remoting || {};
  * @param {HTMLElement} root The root of the context menu DOM.
  */
 remoting.ContextMenuDom = function(root) {
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+  /** @private {HTMLElement} */
   this.root_ = root;
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+  /** @private {HTMLElement} */
   this.stub_ = /** @type {HTMLElement} */
-      this.root_.querySelector('.context-menu-stub');
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+      (this.root_.querySelector('.context-menu-stub'));
+  /** @private {HTMLElement} */
   this.icon_ = /** @type {HTMLElement} */
-      this.root_.querySelector('.context-menu-icon');
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+      (this.root_.querySelector('.context-menu-icon'));
+  /** @private {HTMLElement} */
   this.screen_ = /** @type {HTMLElement} */
-      this.root_.querySelector('.context-menu-screen');
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
-  this.menu_ = /** @type {HTMLElement} */ this.root_.querySelector('ul');
-  /**
-   * @type {number}
-   * @private
-   */
+      (this.root_.querySelector('.context-menu-screen'));
+  /** @private {HTMLElement} */
+  this.menu_ = /** @type {HTMLElement} */ (this.root_.querySelector('ul'));
+  /** @private {number} */
   this.bottom_ = 8;
-  /**
-   * @type {base.EventSource}
-   * @private
-   */
-  this.eventSource_ = new base.EventSource();
-  /**
-   * @type {string}
-   * @private
-   */
+  /** @private {base.EventSourceImpl} */
+  this.eventSource_ = new base.EventSourceImpl();
+  /** @private {string} */
   this.eventName_ = '_click';
   /**
    * Since the same element is used to lock the icon open and to drag it, we
    * must keep track of drag events so that the corresponding click event can
    * be ignored.
    *
-   * @type {boolean}
-   * @private
+   * @private {boolean}
    */
   this.stubDragged_ = false;
 
-  /*
+  /**
    * @private
    */
   this.dragAndDrop_ = new remoting.DragAndDrop(
@@ -103,7 +78,7 @@ remoting.ContextMenuDom = function(root) {
 };
 
 /**
- * @param {Array.<{left: number, top: number, width: number, height: number}>}
+ * @param {Array<{left: number, top: number, width: number, height: number}>}
  *     rects List of rectangles.
  */
 remoting.ContextMenuDom.prototype.addToRegion = function(rects) {
@@ -194,7 +169,7 @@ remoting.ContextMenuDom.prototype.remove = function(id) {
 };
 
 /**
- * @param {function(OnClickData):void} listener
+ * @param {function(OnClickData=):void} listener
  */
 remoting.ContextMenuDom.prototype.addListener = function(listener) {
   this.eventSource_.addEventListener(this.eventName_, listener);

@@ -164,7 +164,7 @@ PassOwnPtr<CrossThreadResourceResponseData> ResourceResponse::copyData() const
     data->m_wasFetchedViaServiceWorker = m_wasFetchedViaServiceWorker;
     data->m_wasFallbackRequiredByServiceWorker = m_wasFallbackRequiredByServiceWorker;
     data->m_serviceWorkerResponseType = m_serviceWorkerResponseType;
-    data->m_originalURLViaServiceWorker = m_originalURLViaServiceWorker;
+    data->m_originalURLViaServiceWorker = m_originalURLViaServiceWorker.copy();
     data->m_responseTime = m_responseTime;
     data->m_remoteIPAddress = m_remoteIPAddress.string().isolatedCopy();
     data->m_remotePort = m_remotePort;
@@ -367,6 +367,13 @@ double ResourceResponse::cacheControlMaxAge()
     if (!m_cacheControlHeader.parsed)
         m_cacheControlHeader = parseCacheControlDirectives(m_httpHeaderFields.get(cacheControlHeaderString()), m_httpHeaderFields.get(pragmaHeaderString()));
     return m_cacheControlHeader.maxAge;
+}
+
+double ResourceResponse::cacheControlStaleWhileRevalidate()
+{
+    if (!m_cacheControlHeader.parsed)
+        m_cacheControlHeader = parseCacheControlDirectives(m_httpHeaderFields.get(cacheControlHeaderString()), m_httpHeaderFields.get(pragmaHeaderString()));
+    return m_cacheControlHeader.staleWhileRevalidate;
 }
 
 static double parseDateValueInHeader(const HTTPHeaderMap& headers, const AtomicString& headerName)

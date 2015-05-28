@@ -5,60 +5,35 @@
 #ifndef CC_RESOURCES_RASTER_TILE_PRIORITY_QUEUE_H_
 #define CC_RESOURCES_RASTER_TILE_PRIORITY_QUEUE_H_
 
-#include <set>
-#include <utility>
 #include <vector>
 
 #include "cc/base/cc_export.h"
 #include "cc/layers/picture_layer_impl.h"
 #include "cc/resources/tile_priority.h"
-#include "cc/resources/tiling_set_raster_queue.h"
 
 namespace cc {
+class Tile;
 
 class CC_EXPORT RasterTilePriorityQueue {
  public:
-  struct PairedTilingSetQueue {
-    PairedTilingSetQueue();
-    PairedTilingSetQueue(const PictureLayerImpl::Pair& layer_pair,
-                         TreePriority tree_priority);
-    ~PairedTilingSetQueue();
+  enum class Type { ALL, REQUIRED_FOR_ACTIVATION, REQUIRED_FOR_DRAW };
 
-    bool IsEmpty() const;
-    Tile* Top(TreePriority tree_priority);
-    void Pop(TreePriority tree_priority);
+  // TODO(vmpstr): Make this work with PictureLayerTilingSet pairs instead.
+  static scoped_ptr<RasterTilePriorityQueue> Create(
+      const std::vector<PictureLayerImpl::Pair>& paired_layers,
+      TreePriority tree_priority,
+      Type type);
 
-    WhichTree NextTileIteratorTree(TreePriority tree_priority) const;
-    void SkipTilesReturnedByTwin(TreePriority tree_priority);
+  virtual ~RasterTilePriorityQueue() {}
 
-    scoped_refptr<base::debug::ConvertableToTraceFormat> StateAsValue() const;
+  virtual bool IsEmpty() const = 0;
+  virtual Tile* Top() = 0;
+  virtual void Pop() = 0;
 
-    scoped_ptr<TilingSetRasterQueue> active_queue;
-    scoped_ptr<TilingSetRasterQueue> pending_queue;
-    bool has_both_layers;
-
-    // Set of returned tiles (excluding the current one) for DCHECKing.
-    std::set<const Tile*> returned_tiles_for_debug;
-  };
-
-  RasterTilePriorityQueue();
-  ~RasterTilePriorityQueue();
-
-  void Build(const std::vector<PictureLayerImpl::Pair>& paired_layers,
-             TreePriority tree_priority);
-  void Reset();
-
-  bool IsEmpty() const;
-  Tile* Top();
-  void Pop();
+ protected:
+  RasterTilePriorityQueue() {}
 
  private:
-  // TODO(vmpstr): This is potentially unnecessary if it becomes the case that
-  // PairedTilingSetQueue is fast enough to copy. In that case, we can use
-  // objects directly (ie std::vector<PairedTilingSetQueue>.
-  ScopedPtrVector<PairedTilingSetQueue> paired_queues_;
-  TreePriority tree_priority_;
-
   DISALLOW_COPY_AND_ASSIGN(RasterTilePriorityQueue);
 };
 

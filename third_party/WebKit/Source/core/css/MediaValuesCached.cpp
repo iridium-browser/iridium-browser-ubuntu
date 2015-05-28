@@ -8,7 +8,7 @@
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
-#include "core/rendering/RenderObject.h"
+#include "core/layout/LayoutObject.h"
 
 namespace blink {
 
@@ -33,7 +33,7 @@ PassRefPtr<MediaValues> MediaValuesCached::create(LocalFrame* frame)
     ASSERT(!frame || frame->view());
     if (!frame || !frame->view())
         return adoptRef(new MediaValuesCached());
-    ASSERT(frame->document() && frame->document()->renderView());
+    ASSERT(frame->document() && frame->document()->layoutView());
     return adoptRef(new MediaValuesCached(frame));
 }
 
@@ -61,6 +61,7 @@ MediaValuesCached::MediaValuesCached(LocalFrame* frame)
     m_data.defaultFontSize = calculateDefaultFontSize(frame);
     m_data.threeDEnabled = calculateThreeDEnabled(frame);
     m_data.strictMode = calculateStrictMode(frame);
+    m_data.displayMode = calculateDisplayMode(frame);
     const String mediaType = calculateMediaType(frame);
     if (!mediaType.isEmpty())
         m_data.mediaType = mediaType.isolatedCopy();
@@ -155,9 +156,15 @@ bool MediaValuesCached::strictMode() const
 {
     return m_data.strictMode;
 }
+
 const String MediaValuesCached::mediaType() const
 {
     return m_data.mediaType;
+}
+
+WebDisplayMode MediaValuesCached::displayMode() const
+{
+    return m_data.displayMode;
 }
 
 Document* MediaValuesCached::document() const

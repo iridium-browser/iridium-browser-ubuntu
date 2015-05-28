@@ -8,7 +8,8 @@
 #include "core/dom/Element.h"
 #include "core/dom/Node.h"
 #include "core/html/HTMLElement.h"
-#include "core/testing/URLTestHelpers.h"
+#include "platform/testing/URLTestHelpers.h"
+#include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebUnitTestSupport.h"
 #include "public/web/WebDocument.h"
@@ -18,8 +19,8 @@
 #include <gtest/gtest.h>
 
 using namespace blink;
-using blink::FrameTestHelpers::runPendingTasks;
 using blink::FrameTestHelpers::loadFrame;
+using blink::testing::runPendingTasks;
 using URLTestHelpers::registerMockedURLFromBaseURL;
 
 namespace {
@@ -52,7 +53,7 @@ private:
     int m_imeRequestCount;
 };
 
-class ImeOnFocusTest : public testing::Test {
+class ImeOnFocusTest : public ::testing::Test {
 public:
     ImeOnFocusTest()
         : m_baseURL("http://www.test.com/")
@@ -87,7 +88,7 @@ void ImeOnFocusTest::sendGestureTap(WebView* webView, IntPoint clientPoint)
     webGestureEvent.data.tap.height = 10;
 
     webView->handleInputEvent(webGestureEvent);
-    FrameTestHelpers::runPendingTasks();
+    runPendingTasks();
 }
 
 void ImeOnFocusTest::focus(const WTF::AtomicString& element)
@@ -100,7 +101,6 @@ void ImeOnFocusTest::runImeOnFocusTest(std::string fileName, int expectedImeRequ
     ImeRequestTrackingWebViewClient client;
     registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL), WebString::fromUTF8(fileName));
     WebViewImpl* webView = m_webViewHelper.initialize(true, 0, &client);
-    m_webViewHelper.webView()->setPageScaleFactorLimits(1, 1);
     webView->resize(WebSize(800, 1200));
     loadFrame(webView->mainFrame(), m_baseURL + fileName);
     m_document = m_webViewHelper.webViewImpl()->mainFrameImpl()->document().unwrap<Document>();

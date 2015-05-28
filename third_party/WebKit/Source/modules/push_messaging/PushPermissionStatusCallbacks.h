@@ -6,8 +6,8 @@
 #define PushPermissionStatusCallbacks_h
 
 #include "platform/heap/Handle.h"
-#include "public/platform/WebPushPermissionStatus.h"
-#include "public/platform/WebPushProvider.h"
+#include "public/platform/modules/push_messaging/WebPushPermissionStatus.h"
+#include "public/platform/modules/push_messaging/WebPushProvider.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
@@ -34,7 +34,7 @@ public:
     void onError() override;
 
 private:
-    static const WTF::String& permissionString(WebPushPermissionStatus);
+    static WTF::String permissionString(WebPushPermissionStatus);
     RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
 };
 

@@ -15,6 +15,12 @@ const char kDisableCreditCardScan[]         = "disable-credit-card-scan";
 // selection, rather than autofilling on page load.
 const char kDisableFillOnAccountSelect[]    = "disable-fill-on-account-select";
 
+// Force hiding the local save checkbox in the autofill dialog box for getting
+// the full credit card number for a wallet card. The card will never be stored
+// locally.
+const char kDisableOfferStoreUnmaskedWalletCards[] =
+    "disable-offer-store-unmasked-wallet-cards";
+
 // Disables password generation when we detect that the user is going through
 // account creation.
 const char kDisablePasswordGeneration[]     = "disable-password-generation";
@@ -36,6 +42,11 @@ const char kEnableFillOnAccountSelect[]     = "enable-fill-on-account-select";
 const char kEnableFillOnAccountSelectNoHighlighting[] =
     "enable-fill-on-account-select-no-highlighting";
 
+// Force showing the local save checkbox in the autofill dialog box for getting
+// the full credit card number for a wallet card.
+const char kEnableOfferStoreUnmaskedWalletCards[] =
+    "enable-offer-store-unmasked-wallet-cards";
+
 // Enables password generation when we detect that the user is going through
 // account creation.
 const char kEnablePasswordGeneration[]      = "enable-password-generation";
@@ -46,9 +57,6 @@ const char kEnablePasswordSaveOnInPageNavigation[] =
 
 // Enables/disables suggestions without typing anything (on first click).
 const char kEnableSingleClickAutofill[]     = "enable-single-click-autofill";
-
-// Enables the feature that imports Wallet cards for Chrome Autofill.
-const char kEnableWalletCardImport[] = "enable-wallet-card-import";
 
 // Ignores autocomplete="off" for Autofill data (profiles + credit cards).
 const char kIgnoreAutocompleteOffForAutofill[] =

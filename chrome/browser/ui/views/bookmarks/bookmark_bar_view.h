@@ -31,11 +31,14 @@
 class BookmarkBarViewObserver;
 class BookmarkBarViewTestHelper;
 class BookmarkContextMenu;
-class BookmarkModel;
 class Browser;
 class BrowserView;
 class ChromeBookmarkClient;
 class Profile;
+
+namespace bookmarks {
+class BookmarkModel;
+}
 
 namespace content {
 class PageNavigator;
@@ -110,11 +113,12 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // showing and |loc| is over the overflow button, the bookmark bar node is
   // returned and |model_start_index| is set to the index of the first node
   // contained in the overflow menu.
-  const BookmarkNode* GetNodeForButtonAtModelIndex(const gfx::Point& loc,
-                                                   int* model_start_index);
+  const bookmarks::BookmarkNode* GetNodeForButtonAtModelIndex(
+      const gfx::Point& loc,
+      int* model_start_index);
 
   // Returns the MenuButton for node.
-  views::MenuButton* GetMenuButtonForNode(const BookmarkNode* node);
+  views::MenuButton* GetMenuButtonForNode(const bookmarks::BookmarkNode* node);
 
   // Returns the position to anchor the menu for |button| at.
   void GetAnchorPositionForButton(views::MenuButton* button,
@@ -171,8 +175,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
   void Layout() override;
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override;
-  void PaintChildren(gfx::Canvas* canvas,
-                     const views::CullSet& cull_set) override;
+  void PaintChildren(const ui::PaintContext& context) override;
   bool GetDropFormats(
       int* formats,
       std::set<ui::OSExchangeData::CustomFormat>* custom_formats) override;
@@ -205,29 +208,31 @@ class BookmarkBarView : public views::AccessiblePaneView,
   void OnBookmarkBubbleHidden() override;
 
   // bookmarks::BookmarkModelObserver:
-  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
-  void BookmarkModelBeingDeleted(BookmarkModel* model) override;
-  void BookmarkNodeMoved(BookmarkModel* model,
-                         const BookmarkNode* old_parent,
+  void BookmarkModelLoaded(bookmarks::BookmarkModel* model,
+                           bool ids_reassigned) override;
+  void BookmarkModelBeingDeleted(bookmarks::BookmarkModel* model) override;
+  void BookmarkNodeMoved(bookmarks::BookmarkModel* model,
+                         const bookmarks::BookmarkNode* old_parent,
                          int old_index,
-                         const BookmarkNode* new_parent,
+                         const bookmarks::BookmarkNode* new_parent,
                          int new_index) override;
-  void BookmarkNodeAdded(BookmarkModel* model,
-                         const BookmarkNode* parent,
+  void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
+                         const bookmarks::BookmarkNode* parent,
                          int index) override;
-  void BookmarkNodeRemoved(BookmarkModel* model,
-                           const BookmarkNode* parent,
+  void BookmarkNodeRemoved(bookmarks::BookmarkModel* model,
+                           const bookmarks::BookmarkNode* parent,
                            int old_index,
-                           const BookmarkNode* node,
+                           const bookmarks::BookmarkNode* node,
                            const std::set<GURL>& removed_urls) override;
-  void BookmarkAllUserNodesRemoved(BookmarkModel* model,
+  void BookmarkAllUserNodesRemoved(bookmarks::BookmarkModel* model,
                                    const std::set<GURL>& removed_urls) override;
-  void BookmarkNodeChanged(BookmarkModel* model,
-                           const BookmarkNode* node) override;
-  void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                     const BookmarkNode* node) override;
-  void BookmarkNodeFaviconChanged(BookmarkModel* model,
-                                  const BookmarkNode* node) override;
+  void BookmarkNodeChanged(bookmarks::BookmarkModel* model,
+                           const bookmarks::BookmarkNode* node) override;
+  void BookmarkNodeChildrenReordered(
+      bookmarks::BookmarkModel* model,
+      const bookmarks::BookmarkNode* node) override;
+  void BookmarkNodeFaviconChanged(bookmarks::BookmarkModel* model,
+                                  const bookmarks::BookmarkNode* node) override;
 
   // views::DragController:
   void WriteDragDataForView(views::View* sender,
@@ -300,43 +305,48 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // Creates the button showing the "Managed Bookmarks" folder.
   views::MenuButton* CreateManagedBookmarksButton();
 
+  // Creates the button showing the supervised bookmarks items.
+  views::MenuButton* CreateSupervisedBookmarksButton();
+
   // Creates the button used when not all bookmark buttons fit.
   views::MenuButton* CreateOverflowButton();
 
   // Creates the button for rendering the specified bookmark node.
-  views::View* CreateBookmarkButton(const BookmarkNode* node);
+  views::View* CreateBookmarkButton(const bookmarks::BookmarkNode* node);
 
   // Creates the button for rendering the apps page shortcut.
   views::LabelButton* CreateAppsPageShortcutButton();
 
   // Configures the button from the specified node. This sets the text,
   // and icon.
-  void ConfigureButton(const BookmarkNode* node, views::LabelButton* button);
+  void ConfigureButton(const bookmarks::BookmarkNode* node,
+                       views::LabelButton* button);
 
   // Implementation for BookmarkNodeAddedImpl. Returns true if LayoutAndPaint()
   // is required.
-  bool BookmarkNodeAddedImpl(BookmarkModel* model,
-                             const BookmarkNode* parent,
+  bool BookmarkNodeAddedImpl(bookmarks::BookmarkModel* model,
+                             const bookmarks::BookmarkNode* parent,
                              int index);
 
   // Implementation for BookmarkNodeRemoved. Returns true if LayoutAndPaint() is
   // required.
-  bool BookmarkNodeRemovedImpl(BookmarkModel* model,
-                               const BookmarkNode* parent,
+  bool BookmarkNodeRemovedImpl(bookmarks::BookmarkModel* model,
+                               const bookmarks::BookmarkNode* parent,
                                int index);
 
   // If the node is a child of the root node, the button is updated
   // appropriately.
-  void BookmarkNodeChangedImpl(BookmarkModel* model, const BookmarkNode* node);
+  void BookmarkNodeChangedImpl(bookmarks::BookmarkModel* model,
+                               const bookmarks::BookmarkNode* node);
 
   // Shows the menu used during drag and drop for the specified node.
-  void ShowDropFolderForNode(const BookmarkNode* node);
+  void ShowDropFolderForNode(const bookmarks::BookmarkNode* node);
 
   // Cancels the timer used to show a drop menu.
   void StopShowFolderDropMenuTimer();
 
   // Stars the timer used to show a drop menu for node.
-  void StartShowFolderDropMenuTimer(const BookmarkNode* node);
+  void StartShowFolderDropMenuTimer(const bookmarks::BookmarkNode* node);
 
   // Calculates the location for the drop in |location|.
   void CalculateDropLocation(const ui::DropTargetEvent& event,
@@ -344,27 +354,28 @@ class BookmarkBarView : public views::AccessiblePaneView,
                              DropLocation* location);
 
   // Writes a BookmarkNodeData for node to data.
-  void WriteBookmarkDragData(const BookmarkNode* node,
+  void WriteBookmarkDragData(const bookmarks::BookmarkNode* node,
                              ui::OSExchangeData* data);
 
   // This determines which view should throb and starts it
   // throbbing (e.g when the bookmark bubble is showing).
   // If |overflow_only| is true, start throbbing only if |node| is hidden in
   // the overflow menu.
-  void StartThrobbing(const BookmarkNode* node, bool overflow_only);
+  void StartThrobbing(const bookmarks::BookmarkNode* node, bool overflow_only);
 
   // Returns the view to throb when a node is removed. |parent| is the parent of
   // the node that was removed, and |old_index| the index of the node that was
   // removed.
   views::CustomButton* DetermineViewToThrobFromRemove(
-      const BookmarkNode* parent,
+      const bookmarks::BookmarkNode* parent,
       int old_index);
 
   // Updates the colors for all the child objects in the bookmarks bar.
   void UpdateColors();
 
-  // Updates the visibility of |other_bookmarks_button_| and
-  // |managed_bookmarks_button_|. Also shows or hides the separator if required.
+  // Updates the visibility of |other_bookmarks_button_|,
+  // |managed_bookmarks_button_|, and |supervised_bookmarks_button_|. Also
+  // shows or hides the separator if required.
   // Returns true if something changed and a LayoutAndPaint() is needed.
   bool UpdateOtherAndManagedButtonsVisibility();
 
@@ -389,7 +400,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
 
   // BookmarkModel that owns the entries and folders that are shown in this
   // view. This is owned by the Profile.
-  BookmarkModel* model_;
+  bookmarks::BookmarkModel* model_;
 
   // ChromeBookmarkClient. This is owned by the Profile.
   ChromeBookmarkClient* client_;
@@ -412,6 +423,9 @@ class BookmarkBarView : public views::AccessiblePaneView,
 
   // Shows the managed bookmarks entries.
   views::MenuButton* managed_bookmarks_button_;
+
+  // Shows the supervised bookmarks entries.
+  views::MenuButton* supervised_bookmarks_button_;
 
   // Shows the Apps page shortcut.
   views::LabelButton* apps_page_shortcut_;

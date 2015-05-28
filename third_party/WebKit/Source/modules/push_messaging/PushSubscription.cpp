@@ -7,11 +7,12 @@
 
 #include "bindings/core/v8/CallbackPromiseAdapter.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "bindings/core/v8/V8ObjectBuilder.h"
 #include "modules/push_messaging/PushError.h"
 #include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebPushProvider.h"
-#include "public/platform/WebPushSubscription.h"
+#include "public/platform/modules/push_messaging/WebPushProvider.h"
+#include "public/platform/modules/push_messaging/WebPushSubscription.h"
 #include "wtf/OwnPtr.h"
 
 namespace blink {
@@ -51,7 +52,16 @@ ScriptPromise PushSubscription::unsubscribe(ScriptState* scriptState)
     return promise;
 }
 
-void PushSubscription::trace(Visitor* visitor)
+ScriptValue PushSubscription::toJSONForBinding(ScriptState* scriptState)
+{
+    V8ObjectBuilder result(scriptState);
+    result.addString("endpoint", m_endpoint);
+    result.addString("subscriptionId", m_subscriptionId);
+
+    return result.scriptValue();
+}
+
+DEFINE_TRACE(PushSubscription)
 {
     visitor->trace(m_serviceWorkerRegistration);
 }

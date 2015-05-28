@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2013 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+<link rel="import" href="/base/base.html">
+<link rel="import" href="/core/auditor.html">
+<link rel="import" href="/extras/audits/android_model_helper.html">
+<link rel="import" href="/extras/audits/utils.html">
+
+<script>
+'use strict';
+
+/**
+ * @fileoverview Class for Android-specific Auditing
+ */
+tv.exportTo('tv.e.audits', function() {
+  // TODO: extract from VSYNC, since not all devices have vsync near 60fps
+  var EXPECTED_FRAME_TIME = 16.67;
+
+  var Auditor = tv.c.Auditor;
+  var AndroidModelHelper = tv.e.audits.AndroidModelHelper;
+
+  /**
+   * Auditor for Android-specific traces.
+   * @constructor
+   */
+  function AndroidAuditor(model) {
+    this.model = model;
+    this.helper = new AndroidModelHelper(model);
+  };
+
+  AndroidAuditor.prototype = {
+    __proto__: Auditor.prototype,
+
+    runAudit: function() {
+      this.helper.apps.forEach(function(app) {
+        // per frame alerts
+        app.getFrames().forEach(this.getFrameTimingAlerts, this);
+
+        // general alerts
+        this.addSaveLayerAlerts(app.renderThread);
+      }, this);
+    },
+
+    getFrameTimingAlerts: function(frame) {
+      /*
+      * Currently, we create alerts for these, but really we should
+      * highlight frame-production-performance isolated per app,
+      * without alerts.
+      *
+      * Consider highlighting process background green when frames
+      * take < 16.6ms, yellow when double buffered but not dropping
+      * frames, red when actively janking.
+      */
+      if (frame.totalDuration > EXPECTED_FRAME_TIME) {
+        var title = 'Frame took too long!';
+        var colorId = tv.b.ui.getColorIdForGeneralPurposeString(title);
+        var alert = new tv.c.trace_model.Alert(
+            title, colorId,
+            tv.c.trace_model.ALERT_SEVERITY.WARNING,
+            frame.start, { 'totalDuration' : frame.totalDuration });
+        this.model.alerts.push(alert);
+      }
+    },
+
+    addSaveLayerAlerts: function(renderThread) {
+      if (!renderThread)
+        return;
+      var saveLayerRegEx = /caused (unclipped )?saveLayer (\d+)x(\d+)/;
+      renderThread.sliceGroup.slices.forEach(function(slice) {
+        var match = saveLayerRegEx.exec(slice.title);
+        if (match) {
+          var args = { 'width' : parseInt(match[2]),
+                       'height' : parseInt(match[3]) };
+          var title = 'SaveLayer of size observed!';
+          var colorId = tv.b.ui.getColorIdForGeneralPurposeString(title);
+          var alert = new tv.c.trace_model.Alert(
+              title, colorId,
+              tv.c.trace_model.ALERT_SEVERITY.WARNING,
+              slice.start, args);
+          this.model.alerts.push(alert);
+        }
+        // TODO: also do something reasonable with standalone saveLayer commands
+      }, this);
+    }
+  };
+
+  Auditor.register(AndroidAuditor);
+
+  return {
+    AndroidAuditor: AndroidAuditor
+  };
+});
+</script>

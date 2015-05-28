@@ -23,7 +23,7 @@
 
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
-#include "core/rendering/RenderView.h"
+#include "core/layout/LayoutView.h"
 #include "platform/graphics/GraphicsContext.h"
 
 namespace blink {
@@ -59,7 +59,7 @@ void PrintContext::computePageRects(const FloatRect& printRect, float headerHeig
     m_pageRects.clear();
     outPageHeight = 0;
 
-    if (!m_frame->document() || !m_frame->view() || !m_frame->document()->renderView())
+    if (!m_frame->document() || !m_frame->view() || !m_frame->document()->layoutView())
         return;
 
     if (userScaleFactor <= 0) {
@@ -67,7 +67,7 @@ void PrintContext::computePageRects(const FloatRect& printRect, float headerHeig
         return;
     }
 
-    RenderView* view = m_frame->document()->renderView();
+    LayoutView* view = m_frame->document()->layoutView();
     const IntRect& documentRect = view->documentRect();
     FloatSize pageSize = m_frame->resizePageRectsKeepingRatio(FloatSize(printRect.width(), printRect.height()), FloatSize(documentRect.width(), documentRect.height()));
     float pageWidth = pageSize.width();
@@ -92,10 +92,10 @@ void PrintContext::computePageRectsWithPageSize(const FloatSize& pageSizeInPixel
 
 void PrintContext::computePageRectsWithPageSizeInternal(const FloatSize& pageSizeInPixels, bool allowInlineDirectionTiling)
 {
-    if (!m_frame->document() || !m_frame->view() || !m_frame->document()->renderView())
+    if (!m_frame->document() || !m_frame->view() || !m_frame->document()->layoutView())
         return;
 
-    RenderView* view = m_frame->document()->renderView();
+    LayoutView* view = m_frame->document()->layoutView();
 
     IntRect docRect = view->documentRect();
 
@@ -181,14 +181,14 @@ void PrintContext::end()
     m_linkAndLinkedDestinationsValid = false;
 }
 
-static RenderBoxModelObject* enclosingBoxModelObject(RenderObject* object)
+static LayoutBoxModelObject* enclosingBoxModelObject(LayoutObject* object)
 {
 
     while (object && !object->isBoxModelObject())
         object = object->parent();
     if (!object)
         return nullptr;
-    return toRenderBoxModelObject(object);
+    return toLayoutBoxModelObject(object);
 }
 
 int PrintContext::pageNumberForElement(Element* element, const FloatSize& pageSizeInPixels)
@@ -197,7 +197,7 @@ int PrintContext::pageNumberForElement(Element* element, const FloatSize& pageSi
     RefPtrWillBeRawPtr<Element> protect(element);
     element->document().updateLayout();
 
-    RenderBoxModelObject* box = enclosingBoxModelObject(element->renderer());
+    LayoutBoxModelObject* box = enclosingBoxModelObject(element->layoutObject());
     if (!box)
         return -1;
 
@@ -236,36 +236,45 @@ void PrintContext::collectLinkAndLinkedDestinations(Node* node)
 
     bool linkIsValid = true;
     if (url.hasFragmentIdentifier() && equalIgnoringFragmentIdentifier(url, node->document().baseURL())) {
-        String name = url.fragmentIdentifier();
-        Element* element = node->document().findAnchor(name);
-        if (element)
-            m_linkedDestinations.set(name, element);
-        else
+        // Only output anchors and links to anchors in the top-level frame because our PrintContext
+        // supports only one namespace for the anchors.
+        if (node->document().frame() == m_frame.get()) {
+            String name = url.fragmentIdentifier();
+            if (Element* element = node->document().findAnchor(name))
+                m_linkedDestinations.set(name, element);
+            else
+                linkIsValid = false;
+        } else {
             linkIsValid = false;
+        }
     }
 
     if (linkIsValid)
         m_linkDestinations.set(toElement(node), url);
 }
 
-void PrintContext::outputLinkAndLinkedDestinations(GraphicsContext& graphicsContext, Node* node, const IntRect& pageRect)
+void PrintContext::outputLinkAndLinkedDestinations(GraphicsContext& graphicsContext, const IntRect& pageRect)
 {
     if (!m_linkAndLinkedDestinationsValid) {
-        collectLinkAndLinkedDestinations(node);
+        for (Frame* currentFrame = frame(); currentFrame; currentFrame = currentFrame->tree().traverseNext(frame())) {
+            if (currentFrame->isLocalFrame())
+                collectLinkAndLinkedDestinations(toLocalFrame(currentFrame)->document());
+        }
         m_linkAndLinkedDestinationsValid = true;
     }
 
     for (const auto& entry : m_linkDestinations) {
-        RenderObject* renderer = entry.key->renderer();
-        if (!renderer)
+        LayoutObject* layoutObject = entry.key->layoutObject();
+        if (!layoutObject || !layoutObject->frameView())
             continue;
         KURL url = entry.value;
-        IntRect boundingBox = renderer->absoluteBoundingBoxRect();
+        IntRect boundingBox = layoutObject->absoluteFocusRingBoundingBoxRect();
+        boundingBox = layoutObject->frameView()->convertToContainingWindow(boundingBox);
         if (!pageRect.intersects(boundingBox))
             continue;
-        if (url.hasFragmentIdentifier() && equalIgnoringFragmentIdentifier(url, renderer->document().baseURL())) {
+        if (url.hasFragmentIdentifier() && equalIgnoringFragmentIdentifier(url, layoutObject->document().baseURL())) {
             String name = url.fragmentIdentifier();
-            ASSERT(renderer->document().findAnchor(name));
+            ASSERT(layoutObject->document().findAnchor(name));
             graphicsContext.setURLFragmentForRect(name, boundingBox);
         } else {
             graphicsContext.setURLForRect(url, boundingBox);
@@ -273,10 +282,11 @@ void PrintContext::outputLinkAndLinkedDestinations(GraphicsContext& graphicsCont
     }
 
     for (const auto& entry : m_linkedDestinations) {
-        RenderObject* renderer = entry.value->renderer();
-        if (!renderer)
+        LayoutObject* layoutObject = entry.value->layoutObject();
+        if (!layoutObject || !layoutObject->frameView())
             continue;
-        IntRect boundingBox = renderer->absoluteBoundingBoxRect();
+        IntRect boundingBox = layoutObject->absoluteBoundingBoxRect();
+        boundingBox = layoutObject->frameView()->convertToContainingWindow(boundingBox);
         if (!pageRect.intersects(boundingBox))
             continue;
         IntPoint point = boundingBox.minXMinYCorner();
@@ -291,7 +301,7 @@ String PrintContext::pageProperty(LocalFrame* frame, const char* propertyName, i
     PrintContext printContext(frame);
     printContext.begin(800); // Any width is OK here.
     document->updateLayout();
-    RefPtr<RenderStyle> style = document->styleForPage(pageNumber);
+    RefPtr<ComputedStyle> style = document->styleForPage(pageNumber);
 
     // Implement formatters for properties we care about.
     if (!strcmp(propertyName, "margin-left")) {
@@ -339,7 +349,7 @@ int PrintContext::numberOfPages(LocalFrame* frame, const FloatSize& pageSizeInPi
     return printContext.pageCount();
 }
 
-void PrintContext::trace(Visitor* visitor)
+DEFINE_TRACE(PrintContext)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_frame);

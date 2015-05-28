@@ -40,10 +40,9 @@ BufferQueue::~BufferQueue() {
     gl->DeleteFramebuffers(1, &fbo_);
 }
 
-bool BufferQueue::Initialize() {
+void BufferQueue::Initialize() {
   gpu::gles2::GLES2Interface* gl = context_provider_->ContextGL();
   gl->GenFramebuffers(1, &fbo_);
-  return fbo_ != 0;
 }
 
 void BufferQueue::BindFramebuffer() {
@@ -78,8 +77,10 @@ void BufferQueue::CopyBufferDamage(int texture,
 }
 
 void BufferQueue::UpdateBufferDamage(const gfx::Rect& damage) {
+  displayed_surface_.damage.Union(damage);
   for (size_t i = 0; i < available_surfaces_.size(); i++)
     available_surfaces_[i].damage.Union(damage);
+
   for (std::deque<AllocatedSurface>::iterator it =
            in_flight_surfaces_.begin();
        it != in_flight_surfaces_.end();
@@ -90,10 +91,12 @@ void BufferQueue::UpdateBufferDamage(const gfx::Rect& damage) {
 void BufferQueue::SwapBuffers(const gfx::Rect& damage) {
   if (damage != gfx::Rect(size_)) {
     // We must have a frame available to copy from.
-    DCHECK(!in_flight_surfaces_.empty());
-    CopyBufferDamage(current_surface_.texture,
-                     in_flight_surfaces_.back().texture,
-                     damage,
+    DCHECK(!in_flight_surfaces_.empty() || displayed_surface_.texture);
+    unsigned int texture_id = !in_flight_surfaces_.empty()
+                                  ? in_flight_surfaces_.back().texture
+                                  : displayed_surface_.texture;
+
+    CopyBufferDamage(current_surface_.texture, texture_id, damage,
                      current_surface_.damage);
   }
   UpdateBufferDamage(damage);
@@ -122,20 +125,26 @@ void BufferQueue::Reshape(const gfx::Size& size, float scale_factor) {
 }
 
 void BufferQueue::PageFlipComplete() {
-  if (in_flight_surfaces_.size() > 1) {
-    available_surfaces_.push_back(in_flight_surfaces_.front());
-    in_flight_surfaces_.pop_front();
-  }
+  DCHECK(!in_flight_surfaces_.empty());
+
+  if (displayed_surface_.texture)
+    available_surfaces_.push_back(displayed_surface_);
+
+  displayed_surface_ = in_flight_surfaces_.front();
+  in_flight_surfaces_.pop_front();
 }
 
 void BufferQueue::FreeAllSurfaces() {
+  FreeSurface(&displayed_surface_);
   FreeSurface(&current_surface_);
-  while (!in_flight_surfaces_.empty()) {
-    FreeSurface(&in_flight_surfaces_.front());
-    in_flight_surfaces_.pop_front();
-  }
+  // This is intentionally not emptied since the swap buffers acks are still
+  // expected to arrive.
+  for (auto& surface : in_flight_surfaces_)
+    FreeSurface(&surface);
+
   for (size_t i = 0; i < available_surfaces_.size(); i++)
     FreeSurface(&available_surfaces_[i]);
+
   available_surfaces_.clear();
 }
 
@@ -173,6 +182,11 @@ BufferQueue::AllocatedSurface BufferQueue::GetNextSurface() {
           size_, gpu::ImageFactory::ImageFormatToGpuMemoryBufferFormat(
                      internalformat_),
           surface_id_));
+  if (!buffer) {
+    gl->DeleteTextures(1, &texture);
+    DLOG(ERROR) << "Failed to allocate GPU memory buffer";
+    return AllocatedSurface();
+  }
 
   unsigned int id = gl->CreateImageCHROMIUM(
       buffer->AsClientBuffer(), size_.width(), size_.height(), internalformat_);

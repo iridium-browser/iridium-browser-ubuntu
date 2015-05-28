@@ -192,6 +192,10 @@ typedef struct macroblockd {
   int mi_stride;
 
   MODE_INFO *mi;
+  MODE_INFO *left_mi;
+  MODE_INFO *above_mi;
+  MB_MODE_INFO *left_mbmi;
+  MB_MODE_INFO *above_mbmi;
 
   int up_available;
   int left_available;
@@ -208,6 +212,12 @@ typedef struct macroblockd {
   /* pointer to current frame */
   const YV12_BUFFER_CONFIG *cur_buf;
 
+  ENTROPY_CONTEXT *above_context[MAX_MB_PLANE];
+  ENTROPY_CONTEXT left_context[MAX_MB_PLANE][16];
+
+  PARTITION_CONTEXT *above_seg_context;
+  PARTITION_CONTEXT left_seg_context[8];
+
   /* mc buffer */
   DECLARE_ALIGNED(16, uint8_t, mc_buf[80 * 2 * 80 * 2]);
 
@@ -217,17 +227,13 @@ typedef struct macroblockd {
   DECLARE_ALIGNED(16, uint16_t, mc_buf_high[80 * 2 * 80 * 2]);
 #endif
 
-  int lossless;
+  /* dqcoeff are shared by all the planes. So planes must be decoded serially */
+  DECLARE_ALIGNED(16, tran_low_t, dqcoeff[64 * 64]);
 
+  int lossless;
   int corrupted;
 
-  DECLARE_ALIGNED(16, tran_low_t, dqcoeff[MAX_MB_PLANE][64 * 64]);
-
-  ENTROPY_CONTEXT *above_context[MAX_MB_PLANE];
-  ENTROPY_CONTEXT left_context[MAX_MB_PLANE][16];
-
-  PARTITION_CONTEXT *above_seg_context;
-  PARTITION_CONTEXT left_seg_context[8];
+  struct vpx_internal_error_info *error_info;
 } MACROBLOCKD;
 
 static INLINE BLOCK_SIZE get_subsize(BLOCK_SIZE bsize,

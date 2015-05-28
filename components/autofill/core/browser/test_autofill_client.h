@@ -10,6 +10,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
 #include "components/autofill/core/browser/autofill_client.h"
+#include "components/rappor/test_rappor_service.h"
+#include "google_apis/gaia/fake_identity_provider.h"
+#include "google_apis/gaia/fake_oauth2_token_service.h"
 
 namespace autofill {
 
@@ -23,11 +26,13 @@ class TestAutofillClient : public AutofillClient {
   PersonalDataManager* GetPersonalDataManager() override;
   scoped_refptr<AutofillWebDataService> GetDatabase() override;
   PrefService* GetPrefs() override;
+  IdentityProvider* GetIdentityProvider() override;
+  rappor::RapporService* GetRapporService() override;
   void HideRequestAutocompleteDialog() override;
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(const CreditCard& card,
                         base::WeakPtr<CardUnmaskDelegate> delegate) override;
-  void OnUnmaskVerificationResult(bool success) override;
+  void OnUnmaskVerificationResult(GetRealPanResult result) override;
   void ConfirmSaveCreditCard(const base::Closure& save_card_callback) override;
   bool HasCreditCardScanFeature() override;
   void ScanCreditCard(const CreditCardScanCallback& callback) override;
@@ -44,18 +49,26 @@ class TestAutofillClient : public AutofillClient {
       const std::vector<base::string16>& labels) override;
   void HideAutofillPopup() override;
   bool IsAutocompleteEnabled() override;
-  void DetectAccountCreationForms(
+  void PropagateAutofillPredictions(
       content::RenderFrameHost* rfh,
       const std::vector<autofill::FormStructure*>& forms) override;
   void DidFillOrPreviewField(const base::string16& autofilled_value,
                              const base::string16& profile_full_name) override;
   void OnFirstUserGestureObserved() override;
+  void LinkClicked(const GURL& url, WindowOpenDisposition disposition) override;
 
   void SetPrefs(scoped_ptr<PrefService> prefs) { prefs_ = prefs.Pass(); }
+
+  rappor::TestRapporService* test_rappor_service() {
+    return rappor_service_.get();
+  }
 
  private:
   // NULL by default.
   scoped_ptr<PrefService> prefs_;
+  scoped_ptr<FakeOAuth2TokenService> token_service_;
+  scoped_ptr<FakeIdentityProvider> identity_provider_;
+  scoped_ptr<rappor::TestRapporService> rappor_service_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillClient);
 };

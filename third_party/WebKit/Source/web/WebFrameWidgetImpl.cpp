@@ -38,15 +38,16 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/Settings.h"
+#include "core/layout/LayoutView.h"
+#include "core/layout/compositing/DeprecatedPaintLayerCompositor.h"
 #include "core/page/EventHandler.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
-#include "core/rendering/RenderView.h"
-#include "core/rendering/compositing/RenderLayerCompositor.h"
 #include "platform/KeyboardCodes.h"
 #include "platform/NotImplemented.h"
 #include "public/web/WebBeginFrameArgs.h"
 #include "public/web/WebWidgetClient.h"
+#include "web/WebDevToolsAgentImpl.h"
 #include "web/WebInputEventConversion.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebPluginContainerImpl.h"
@@ -69,6 +70,13 @@ WebFrameWidgetImpl* WebFrameWidgetImpl::create(WebWidgetClient* client, WebLocal
     return adoptRef(new WebFrameWidgetImpl(client, localRoot)).leakRef();
 }
 
+// static
+HashSet<WebFrameWidgetImpl*>& WebFrameWidgetImpl::allInstances()
+{
+    DEFINE_STATIC_LOCAL(HashSet<WebFrameWidgetImpl*>, allInstances, ());
+    return allInstances;
+}
+
 WebFrameWidgetImpl::WebFrameWidgetImpl(WebWidgetClient* client, WebLocalFrame* localRoot)
     : m_client(client)
     , m_localRoot(toWebLocalFrameImpl(localRoot))
@@ -85,6 +93,7 @@ WebFrameWidgetImpl::WebFrameWidgetImpl(WebWidgetClient* client, WebLocalFrame* l
     ASSERT(m_localRoot->frame()->isLocalRoot());
     initializeLayerTreeView();
     m_localRoot->setFrameWidget(this);
+    allInstances().add(this);
 }
 
 WebFrameWidgetImpl::~WebFrameWidgetImpl()
@@ -95,6 +104,10 @@ WebFrameWidgetImpl::~WebFrameWidgetImpl()
 
 void WebFrameWidgetImpl::close()
 {
+    WebDevToolsAgentImpl::webFrameWidgetImplClosed(this);
+    ASSERT(allInstances().contains(this));
+    allInstances().remove(this);
+
     // Reset the delegate to prevent notifications being sent as we're being
     // deleted.
     m_client = nullptr;
@@ -180,6 +193,12 @@ void WebFrameWidgetImpl::updateMainFrameLayoutSize()
     WebSize layoutSize = m_size;
 
     view->setLayoutSize(layoutSize);
+}
+
+void WebFrameWidgetImpl::setIgnoreInputEvents(bool newValue)
+{
+    ASSERT(m_ignoreInputEvents != newValue);
+    m_ignoreInputEvents = newValue;
 }
 
 void WebFrameWidgetImpl::willEndLiveResize()
@@ -348,9 +367,15 @@ bool WebFrameWidgetImpl::handleInputEvent(const WebInputEvent& inputEvent)
 
     TRACE_EVENT1("input", "WebFrameWidgetImpl::handleInputEvent", "type", inputTypeToName(inputEvent.type).ascii());
 
+    WebDevToolsAgentImpl* devTools = m_localRoot ? m_localRoot->devToolsAgentImpl() : nullptr;
+    if (devTools && devTools->handleInputEvent(inputEvent))
+        return true;
+
     // Report the event to be NOT processed by WebKit, so that the browser can handle it appropriately.
     if (m_ignoreInputEvents)
         return false;
+
+    // FIXME: pass event to m_localRoot's WebDevToolsAgentImpl once available.
 
     TemporaryChange<const WebInputEvent*> currentEventChange(m_currentInputEvent, &inputEvent);
 
@@ -417,16 +442,11 @@ void WebFrameWidgetImpl::scheduleAnimation()
 }
 
 void WebFrameWidgetImpl::applyViewportDeltas(
-    const WebSize& pinchViewportDelta,
-    const WebSize& mainFrameDelta,
+    const WebFloatSize& pinchViewportDelta,
+    const WebFloatSize& mainFrameDelta,
     const WebFloatSize& elasticOverscrollDelta,
     float pageScaleDelta,
     float topControlsDelta)
-{
-    // FIXME: To be implemented.
-}
-
-void WebFrameWidgetImpl::applyViewportDeltas(const WebSize& scrollDelta, float pageScaleDelta, float topControlsDelta)
 {
     // FIXME: To be implemented.
 }
@@ -549,8 +569,9 @@ bool WebFrameWidgetImpl::selectionBounds(WebRect& anchor, WebRect& focus) const
         focus = localFrame->editor().firstRectForRange(range.get());
     }
 
-    IntRect scaledAnchor(localFrame->view()->contentsToWindow(anchor));
-    IntRect scaledFocus(localFrame->view()->contentsToWindow(focus));
+    // FIXME: This doesn't apply page scale. This should probably be contents to viewport. crbug.com/459293.
+    IntRect scaledAnchor(localFrame->view()->contentsToRootFrame(anchor));
+    IntRect scaledFocus(localFrame->view()->contentsToRootFrame(focus));
 
     anchor = scaledAnchor;
     focus = scaledFocus;
@@ -668,12 +689,12 @@ void WebFrameWidgetImpl::handleMouseDown(LocalFrame& mainFrame, const WebMouseEv
     // capture because it will interfere with the scrollbar receiving events.
     IntPoint point(event.x, event.y);
     if (event.button == WebMouseEvent::ButtonLeft) {
-        point = m_localRoot->frameView()->windowToContents(point);
+        point = m_localRoot->frameView()->rootFrameToContents(point);
         HitTestResult result(m_localRoot->frame()->eventHandler().hitTestResultAtPoint(point));
-        result.setToShadowHostIfInUserAgentShadowRoot();
+        result.setToShadowHostIfInClosedShadowRoot();
         Node* hitNode = result.innerNonSharedNode();
 
-        if (!result.scrollbar() && hitNode && hitNode->renderer() && hitNode->renderer()->isEmbeddedObject()) {
+        if (!result.scrollbar() && hitNode && hitNode->layoutObject() && hitNode->layoutObject()->isEmbeddedObject()) {
             m_mouseCaptureNode = hitNode;
             TRACE_EVENT_ASYNC_BEGIN0("input", "capturing mouse", this);
         }
@@ -735,10 +756,10 @@ bool WebFrameWidgetImpl::handleKeyEvent(const WebKeyboardEvent& event)
 
     if (frame->eventHandler().keyEvent(evt)) {
         if (WebInputEvent::RawKeyDown == event.type) {
-            // Suppress the next keypress event unless the focused node is a plug-in node.
+            // Suppress the next keypress event unless the focused node is a plugin node.
             // (Flash needs these keypress events to handle non-US keyboards.)
             Element* element = focusedElement();
-            if (!element || !element->renderer() || !element->renderer()->isEmbeddedObject())
+            if (!element || !element->layoutObject() || !element->layoutObject()->isEmbeddedObject())
                 m_suppressNextKeypressEvent = true;
         }
         return true;
@@ -962,13 +983,13 @@ void WebFrameWidgetImpl::setIsAcceleratedCompositingActive(bool active)
         m_localRoot->frameView()->setClipsRepaints(!m_isAcceleratedCompositingActive);
 }
 
-RenderLayerCompositor* WebFrameWidgetImpl::compositor() const
+DeprecatedPaintLayerCompositor* WebFrameWidgetImpl::compositor() const
 {
     LocalFrame* frame = toLocalFrame(toCoreFrame(m_localRoot));
-    if (!frame || !frame->document() || !frame->document()->renderView())
+    if (!frame || !frame->document() || !frame->document()->layoutView())
         return nullptr;
 
-    return frame->document()->renderView()->compositor();
+    return frame->document()->layoutView()->compositor();
 }
 
 void WebFrameWidgetImpl::suppressInvalidations(bool enable)
@@ -1002,6 +1023,34 @@ void WebFrameWidgetImpl::setRootGraphicsLayer(GraphicsLayer* layer)
     }
 
     suppressInvalidations(false);
+}
+
+void WebFrameWidgetImpl::attachCompositorAnimationTimeline(WebCompositorAnimationTimeline* compositorTimeline)
+{
+    if (m_layerTreeView)
+        m_layerTreeView->attachCompositorAnimationTimeline(compositorTimeline);
+
+}
+
+void WebFrameWidgetImpl::detachCompositorAnimationTimeline(WebCompositorAnimationTimeline* compositorTimeline)
+{
+    if (m_layerTreeView)
+        m_layerTreeView->detachCompositorAnimationTimeline(compositorTimeline);
+}
+
+void WebFrameWidgetImpl::setVisibilityState(WebPageVisibilityState visibilityState, bool isInitialState)
+{
+    if (!m_page)
+        return;
+
+    // FIXME: This is not correct, since Show and Hide messages for a frame's Widget do not necessarily
+    // correspond to Page visibility, but is necessary until we properly sort out OOPIF visibility.
+    m_page->setVisibilityState(static_cast<PageVisibilityState>(visibilityState), isInitialState);
+
+    if (m_layerTreeView) {
+        bool visible = visibilityState == WebPageVisibilityStateVisible;
+        m_layerTreeView->setVisible(visible);
+    }
 }
 
 } // namespace blink

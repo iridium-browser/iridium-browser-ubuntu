@@ -41,7 +41,25 @@ google.patch contains the following modifications. Apply with
    - https://bugzilla.mozilla.org/show_bug.cgi?id=701348
  - Add qcms_profile_match api
    - https://code.google.com/p/chromium/issues/detail?id=401971
- - Add qcms_profile_get_decription api
+ - Add qcms_profile_get_description api
    - https://code.google.com/p/chromium/issues/detail?id=401971
+ - Convert MLUC profile description embedded nulls to '.'
+   - https://code.google.com/p/chromium/issues/detail?id=401971
+ - [APPLE port] Use en-localized profile description names
+   - https://code.google.com/p/chromium/issues/detail?id=401971
+ - [APPLE port] Use mmod data for profile descriptions
+   - https://code.google.com/p/chromium/issues/detail?id=401971
+ - Minor variable name change: description -> description_offset
+   - https://code.google.com/p/chromium/issues/detail?id=401971
+ - Avoid divisions creating sample points in the float cube LUT builder
+   - https://code.google.com/p/chromium/issues/detail?id=443863
+ - Add bgra (z,y,x) sampled transform lookup table api
+   - https://code.google.com/p/chromium/issues/detail?id=443863
+ - Apply upstream fix reject invalid sizes from
+   - https://bugzilla.mozilla.org/show_bug.cgi?id=1132468
+ - lut_inverse_interp16: remove odd whitespace formatting
+   - https://code.google.com/p/chromium/issues/detail?id=458024
+ - lut_inverse_interp16: better handle degenerate TRC curves
+   - https://code.google.com/p/chromium/issues/detail?id=458024
 To regenerate google.patch:
   git diff b8456f38 src > google.patch

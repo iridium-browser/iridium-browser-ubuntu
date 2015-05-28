@@ -52,8 +52,8 @@
   <message name="IDS_ASH_STATUS_TRAY_OTHER_WIFI" desc="The label used for the item to display other Wi-Fi networks.">
     Join other...
   </message>
-  <message name="IDS_ASH_STATUS_TRAY_OTHER_VPN" desc="The label used for the item to configure other private networks.">
-    Join other...
+  <message name="IDS_ASH_STATUS_TRAY_EXTENSION_CONTROLLED_WIFI" desc="The accessible text for the badge in the detailed network list indicating that the respective network's configuration may be controlled by an extension.">
+    The extension "<ph name="EXTENSION_NAME">$1<ex>Nexus S</ex></ph>" can help connect to this network.
   </message>
   <message name="IDS_ASH_STATUS_TRAY_TURN_ON_WIFI" desc="The label used for the item to turn on Wi-Fi networks.">
     Turn Wi-Fi on...
@@ -96,6 +96,9 @@
   </message>
   <message name="IDS_ASH_STATUS_TRAY_BLUETOOTH_PAIRED" desc="Notification shown when a new device is paired with the computer.">
     Bluetooth device "<ph name="DEVICE_NAME">$1<ex>Nexus S</ex></ph>" has been paired and is now available to all users. You may remove this pairing using Settings.
+  </message>
+  <message name="IDS_ASH_STATUS_TRAY_VPN_DISCONNECT" desc="Message on button that disconnects from the current VPN.">
+    Disconnect
   </message>
 
   <!-- Ash multi-user warning dialog -->
@@ -161,7 +164,7 @@
   </message>
 
   <message name="IDS_ASH_STATUS_TRAY_AUDIO_HDMI_DEVICE" desc="label used for hdmi audio device">
-    <ph name="device_name">$1<ex>Speaker</ex></ph> (HDMI)
+    <ph name="device_name">$1<ex>Speaker</ex></ph> (HDMI/DP)
   </message>
 
   <message name="IDS_AURA_SET_DESKTOP_WALLPAPER" desc="The label used for change wallpaper in context menu">
@@ -345,6 +348,12 @@ Press Shift + Alt to switch.
   </message>
   <message name="IDS_ASH_STATUS_TRAY_KEYBOARD_ENABLED" desc="The text shown in the tray menu when the virtual keyboard is enabled.">
     On-screen keyboard enabled
+  </message>
+  <message name="IDS_ASH_STATUS_TRAY_ENABLE_KEYBOARD" desc="A button label in the tray menu to enable the keyboard.">
+    Enable on-screen keyboard
+  </message>
+  <message name="IDS_ASH_STATUS_TRAY_DISABLE_KEYBOARD" desc="A button label in the tray menu to disable the keyboard.">
+    Disable on-screen keyboard
   </message>
   <message name="IDS_ASH_VIRTUAL_KEYBOARD_TRAY_ACCESSIBLE_NAME" desc="The accessible text for virtual keyboard icon in status tray.">
     Show on-screen keyboard

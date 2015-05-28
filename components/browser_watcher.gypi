@@ -12,10 +12,14 @@
             'target_name': 'browser_watcher',
             'type': 'static_library',
             'sources': [
+              'browser_watcher/endsession_watcher_window_win.cc',
+              'browser_watcher/endsession_watcher_window_win.h',
               'browser_watcher/exit_code_watcher_win.cc',
               'browser_watcher/exit_code_watcher_win.h',
               'browser_watcher/exit_funnel_win.cc',
               'browser_watcher/exit_funnel_win.h',
+              'browser_watcher/window_hang_monitor_win.cc',
+              'browser_watcher/window_hang_monitor_win.h',
             ],
             'dependencies': [
               '../base/base.gyp:base',
@@ -26,15 +30,14 @@
             'target_name': 'browser_watcher_client',
             'type': 'static_library',
             'sources': [
+              'browser_watcher/crash_reporting_metrics_win.cc',
+              'browser_watcher/crash_reporting_metrics_win.h',
               'browser_watcher/watcher_client_win.cc',
               'browser_watcher/watcher_client_win.h',
-              'browser_watcher/watcher_main_api_win.cc',
-              'browser_watcher/watcher_main_api_win.h',
               'browser_watcher/watcher_metrics_provider_win.cc',
               'browser_watcher/watcher_metrics_provider_win.h',
             ],
             'dependencies': [
-              'browser_watcher',
               '../base/base.gyp:base',
             ],
           },

@@ -43,14 +43,7 @@
 
 #if OS(WIN)
 #include "SkFontMgr.h"
-#include <windows.h>
-#include <objidl.h>
-#include <mlang.h>
 struct IDWriteFactory;
-#endif
-
-#if OS(ANDROID)
-#include <unicode/uscript.h>
 #endif
 
 class SkTypeface;
@@ -70,7 +63,7 @@ enum PurgeSeverity { PurgeIfNeeded, ForcePurge };
 class PLATFORM_EXPORT FontCache {
     friend class FontCachePurgePreventer;
 
-    WTF_MAKE_NONCOPYABLE(FontCache); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(FontCache); WTF_MAKE_FAST_ALLOCATED(FontCache);
 public:
     static FontCache* fontCache();
 
@@ -95,10 +88,6 @@ public:
 
     unsigned short generation();
     void invalidate();
-
-#if OS(WIN)
-    PassRefPtr<SimpleFontData> fontDataFromDescriptionAndLogFont(const FontDescription&, ShouldRetain, const LOGFONT&, wchar_t* outFontFamilyName);
-#endif
 
 #if OS(WIN)
     bool useSubpixelPositioning() const { return s_useSubpixelPositioning; }
@@ -174,7 +163,7 @@ private:
     static IDWriteFactory* s_directWriteFactory;
     static float s_deviceScaleFactor;
     static bool s_useSubpixelPositioning;
-    static HashMap<String, RefPtr<SkTypeface> >* s_sideloadedFonts;
+    static HashMap<String, RefPtr<SkTypeface>>* s_sideloadedFonts;
     // The system font metrics cache.
     static AtomicString* s_menuFontFamilyName;
     static int32_t s_menuFontHeight;
@@ -184,9 +173,6 @@ private:
     static int32_t s_statusFontHeight;
 #endif
 
-#if OS(MACOSX) || OS(ANDROID)
-    friend class ComplexTextController;
-#endif
     friend class SimpleFontData; // For fontDataFromFontPlatformData
     friend class FontFallbackList;
 };

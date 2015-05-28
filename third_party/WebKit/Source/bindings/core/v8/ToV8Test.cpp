@@ -6,6 +6,7 @@
 #include "bindings/core/v8/ToV8.h"
 
 #include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForTesting.h"
 #include "core/testing/GarbageCollectedScriptWrappable.h"
 #include "core/testing/RefCountedScriptWrappable.h"
 #include "platform/heap/Heap.h"
@@ -46,7 +47,7 @@ public:
     GarbageCollectedHolder(GarbageCollectedScriptWrappable* scriptWrappable)
         : m_scriptWrappable(scriptWrappable) { }
 
-    void trace(Visitor* visitor) { visitor->trace(m_scriptWrappable); }
+    DEFINE_INLINE_TRACE() { visitor->trace(m_scriptWrappable); }
 
     // This should be public in order to access a Member<X> object.
     Member<GarbageCollectedScriptWrappable> m_scriptWrappable;
@@ -148,7 +149,7 @@ TEST_F(ToV8Test, boolean)
 TEST_F(ToV8Test, v8Value)
 {
     v8::Local<v8::Value> localValue(v8::Number::New(m_scope.isolate(), 1234));
-    v8::Handle<v8::Value> handleValue(v8::Number::New(m_scope.isolate(), 5678));
+    v8::Local<v8::Value> handleValue(v8::Number::New(m_scope.isolate(), 5678));
 
     TEST_TOV8("1234", localValue);
     TEST_TOV8("5678", handleValue);
@@ -168,7 +169,7 @@ TEST_F(ToV8Test, scriptValue)
 
 TEST_F(ToV8Test, vector)
 {
-    Vector<RefPtr<RefCountedScriptWrappable> > v;
+    Vector<RefPtr<RefCountedScriptWrappable>> v;
     v.append(RefCountedScriptWrappable::create("foo"));
     v.append(RefCountedScriptWrappable::create("bar"));
 
@@ -227,9 +228,22 @@ TEST_F(ToV8Test, basicTypeVectors)
     TEST_TOV8("true,true,false", boolVector);
 }
 
+TEST_F(ToV8Test, dictionaryVector)
+{
+    Vector<std::pair<String, int>> dictionary;
+    dictionary.append(std::make_pair("one", 1));
+    dictionary.append(std::make_pair("two", 2));
+    TEST_TOV8("[object Object]", dictionary);
+    v8::Local<v8::Object> result = toV8(dictionary, m_scope.scriptState()->context()->Global(), m_scope.isolate())->ToObject();
+    v8::Local<v8::Value> one = result->Get(m_scope.context(), v8String(m_scope.isolate(), "one")).ToLocalChecked();
+    EXPECT_EQ(1, one->NumberValue(m_scope.context()).FromJust());
+    v8::Local<v8::Value> two = result->Get(m_scope.context(), v8String(m_scope.isolate(), "two")).ToLocalChecked();
+    EXPECT_EQ(2, two->NumberValue(m_scope.context()).FromJust());
+}
+
 TEST_F(ToV8Test, heapVector)
 {
-    HeapVector<Member<GarbageCollectedScriptWrappable> > v;
+    HeapVector<Member<GarbageCollectedScriptWrappable>> v;
     v.append(new GarbageCollectedScriptWrappable("hoge"));
     v.append(new GarbageCollectedScriptWrappable("fuga"));
     v.append(nullptr);

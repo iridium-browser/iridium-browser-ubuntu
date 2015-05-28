@@ -27,6 +27,111 @@ cr.define('hotword', function() {
                                     hotword.constants.SessionSource.TRAINING);
   }
 
+  /**
+   * Handles a success event on mounting the file system event and deletes
+   * the user data files.
+   * @param {FileSystem} fs The FileSystem object.
+   * @private
+   */
+  TrainingManager.deleteFiles_ = function(fs) {
+    fs.root.getFile(hotword.constants.SPEAKER_MODEL_FILE_NAME, {create: false},
+        TrainingManager.deleteFile_, TrainingManager.fileErrorHandler_);
+
+    for (var i = 0; i < hotword.constants.NUM_TRAINING_UTTERANCES; ++i) {
+      fs.root.getFile(hotword.constants.UTTERANCE_FILE_PREFIX + i +
+          hotword.constants.UTTERANCE_FILE_EXTENSION,
+          {create: false},
+          TrainingManager.deleteFile_, TrainingManager.fileErrorHandler_);
+    }
+  };
+
+  /**
+   * Deletes a file.
+   * @param {FileEntry} fileEntry The FileEntry object.
+   * @private
+   */
+  TrainingManager.deleteFile_ = function(fileEntry) {
+    if (fileEntry.isFile) {
+      hotword.debug('File found: ' + fileEntry.fullPath);
+      if (hotword.DEBUG || window.localStorage['hotword.DEBUG']) {
+        fileEntry.getMetadata(function(md) {
+          hotword.debug('File size: ' + md.size);
+        });
+      }
+      fileEntry.remove(function() {
+          hotword.debug('File removed: ' + fileEntry.fullPath);
+      }, TrainingManager.fileErrorHandler_);
+    }
+  };
+
+  /**
+   * Handles a failure event on mounting the file system event.
+   * @param {FileError} e The FileError object.
+   * @private
+   */
+  TrainingManager.fileErrorHandler_ = function(e) {
+      hotword.debug('File error: ' + e.code);
+  };
+
+  /**
+   * Handles a failure event on checking for the existence of the speaker model.
+   * @param {FileError} e The FileError object.
+   * @private
+   */
+  TrainingManager.sendNoSpeakerModelResponse_ = function(e) {
+    chrome.hotwordPrivate.speakerModelExistsResult(false);
+  };
+
+  /**
+   * Handles a success event on mounting the file system and checks for the
+   * existence of the speaker model.
+   * @param {FileSystem} fs The FileSystem object.
+   * @private
+   */
+  TrainingManager.speakerModelExists_ = function(fs) {
+    fs.root.getFile(hotword.constants.SPEAKER_MODEL_FILE_NAME, {create: false},
+        TrainingManager.sendSpeakerModelExistsResponse_,
+        TrainingManager.sendNoSpeakerModelResponse_);
+  };
+
+  /**
+   * Sends a response through the HotwordPrivateApi indicating whether
+   * the speaker model exists.
+   * @param {FileEntry} fileEntry The FileEntry object.
+   * @private
+   */
+  TrainingManager.sendSpeakerModelExistsResponse_ = function(fileEntry) {
+    if (fileEntry.isFile) {
+      hotword.debug('File found: ' + fileEntry.fullPath);
+      if (hotword.DEBUG || window.localStorage['hotword.DEBUG']) {
+        fileEntry.getMetadata(function(md) {
+          hotword.debug('File size: ' + md.size);
+        });
+      }
+    }
+    chrome.hotwordPrivate.speakerModelExistsResult(fileEntry.isFile);
+  };
+
+  /**
+   * Handles a request to delete the speaker model.
+   */
+  TrainingManager.handleDeleteSpeakerModel = function() {
+    window.webkitRequestFileSystem(PERSISTENT,
+        hotword.constants.FILE_SYSTEM_SIZE_BYTES,
+        TrainingManager.deleteFiles_,
+        TrainingManager.fileErrorHandler_);
+  };
+
+  /**
+   * Handles a request for the speaker model existence.
+   */
+  TrainingManager.handleSpeakerModelExists = function() {
+    window.webkitRequestFileSystem(PERSISTENT,
+        hotword.constants.FILE_SYSTEM_SIZE_BYTES,
+        TrainingManager.speakerModelExists_,
+        TrainingManager.fileErrorHandler_);
+  };
+
   TrainingManager.prototype = {
     __proto__: hotword.BaseSessionManager.prototype,
 

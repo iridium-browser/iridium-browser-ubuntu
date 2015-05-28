@@ -9,6 +9,7 @@
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/geometry_test_utils.h"
 #include "cc/test/test_shared_bitmap_manager.h"
+#include "cc/test/test_task_graph_runner.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -20,13 +21,24 @@ class ScrollbarAnimationControllerThinningTest
       public ScrollbarAnimationControllerClient {
  public:
   ScrollbarAnimationControllerThinningTest()
-      : host_impl_(&proxy_, &shared_bitmap_manager_) {}
+      : host_impl_(&proxy_, &shared_bitmap_manager_, &task_graph_runner_) {}
 
-  void PostDelayedScrollbarFade(const base::Closure& start_fade,
-                                base::TimeDelta delay) override {
-    start_fade_ = start_fade;
+  void StartAnimatingScrollbarAnimationController(
+      ScrollbarAnimationController* controller) override {
+    is_animating_ = true;
   }
-  void SetNeedsScrollbarAnimationFrame() override {}
+  void StopAnimatingScrollbarAnimationController(
+      ScrollbarAnimationController* controller) override {
+    is_animating_ = false;
+  }
+  void PostDelayedScrollbarAnimationTask(const base::Closure& start_fade,
+                                         base::TimeDelta delay) override {
+    start_fade_ = start_fade;
+    delay_ = delay;
+  }
+  void SetNeedsRedrawForScrollbarAnimation() override {
+    did_request_redraw_ = true;
+  }
 
  protected:
   void SetUp() override {
@@ -57,21 +69,22 @@ class ScrollbarAnimationControllerThinningTest
     scroll_layer_ptr->SetBounds(gfx::Size(200, 200));
 
     scrollbar_controller_ = ScrollbarAnimationControllerThinning::Create(
-        scroll_layer_ptr,
-        this,
-        base::TimeDelta::FromSeconds(2),
-        base::TimeDelta::FromSeconds(5),
-        base::TimeDelta::FromSeconds(3));
+        scroll_layer_ptr, this, base::TimeDelta::FromSeconds(2),
+        base::TimeDelta::FromSeconds(5), base::TimeDelta::FromSeconds(3));
   }
 
   FakeImplProxy proxy_;
   TestSharedBitmapManager shared_bitmap_manager_;
+  TestTaskGraphRunner task_graph_runner_;
   FakeLayerTreeHostImpl host_impl_;
   scoped_ptr<ScrollbarAnimationControllerThinning> scrollbar_controller_;
   scoped_ptr<LayerImpl> clip_layer_;
   scoped_ptr<SolidColorScrollbarLayerImpl> scrollbar_layer_;
 
   base::Closure start_fade_;
+  base::TimeDelta delay_;
+  bool is_animating_;
+  bool did_request_redraw_;
 };
 
 // Check initialization of scrollbar.

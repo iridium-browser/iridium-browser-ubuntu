@@ -33,6 +33,7 @@
 #include "core/css/parser/CSSParser.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
+#include "core/dom/ExceptionCode.h"
 #include "core/dom/Node.h"
 #include "core/dom/StaticNodeList.h"
 #include "core/dom/shadow/ElementShadow.h"
@@ -51,7 +52,7 @@ struct SingleElementSelectorQueryTrait {
 };
 
 struct AllElementsSelectorQueryTrait {
-    typedef WillBeHeapVector<RefPtrWillBeMember<Element> > OutputType;
+    typedef WillBeHeapVector<RefPtrWillBeMember<Element>> OutputType;
     static const bool shouldOnlyMatchFirstElement = false;
     ALWAYS_INLINE static void appendElement(OutputType& output, Element& element)
     {
@@ -150,7 +151,7 @@ Element* SelectorDataList::closest(Element& targetElement) const
 
 PassRefPtrWillBeRawPtr<StaticElementList> SelectorDataList::queryAll(ContainerNode& rootNode) const
 {
-    WillBeHeapVector<RefPtrWillBeMember<Element> > result;
+    WillBeHeapVector<RefPtrWillBeMember<Element>> result;
     execute<AllElementsSelectorQueryTrait>(rootNode, result);
     return StaticElementList::adopt(result);
 }
@@ -353,7 +354,7 @@ static ShadowRoot* authorShadowRootOf(const ContainerNode& node)
     ElementShadow* shadow = toElement(node).shadow();
     ASSERT(shadow);
     for (ShadowRoot* shadowRoot = shadow->oldestShadowRoot(); shadowRoot; shadowRoot = shadowRoot->youngerShadowRoot()) {
-        if (shadowRoot->type() == ShadowRoot::AuthorShadowRoot)
+        if (shadowRoot->type() == ShadowRoot::OpenShadowRoot)
             return shadowRoot;
     }
     return 0;
@@ -384,7 +385,7 @@ static ContainerNode* nextTraversingShadowTree(const ContainerNode& node, const 
             return 0;
         if (ShadowRoot* youngerShadowRoot = shadowRoot->youngerShadowRoot()) {
             // Should not obtain any elements in user-agent shadow root.
-            ASSERT(youngerShadowRoot->type() == ShadowRoot::AuthorShadowRoot);
+            ASSERT(youngerShadowRoot->type() == ShadowRoot::OpenShadowRoot);
             return youngerShadowRoot;
         }
 
@@ -421,7 +422,7 @@ void SelectorDataList::execute(ContainerNode& rootNode, typename SelectorQueryTr
 {
     if (!canUseFastQuery(rootNode)) {
         if (m_crossesTreeBoundary) {
-            rootNode.document().updateDistributionForNodeIfNeeded(&rootNode);
+            rootNode.updateDistribution();
             executeSlowTraversingShadowTree<SelectorQueryTrait>(rootNode, output);
         } else {
             executeSlow<SelectorQueryTrait>(rootNode, output);
@@ -438,7 +439,7 @@ void SelectorDataList::execute(ContainerNode& rootNode, typename SelectorQueryTr
     if (const CSSSelector* idSelector = selectorForIdLookup(firstSelector)) {
         const AtomicString& idToMatch = idSelector->value();
         if (rootNode.treeScope().containsMultipleElementsWithId(idToMatch)) {
-            const WillBeHeapVector<RawPtrWillBeMember<Element> >& elements = rootNode.treeScope().getAllElementsById(idToMatch);
+            const WillBeHeapVector<RawPtrWillBeMember<Element>>& elements = rootNode.treeScope().getAllElementsById(idToMatch);
             size_t count = elements.size();
             for (size_t i = 0; i < count; ++i) {
                 Element& element = *elements[i];
@@ -510,13 +511,12 @@ PassRefPtrWillBeRawPtr<Element> SelectorQuery::queryFirst(ContainerNode& rootNod
 
 SelectorQuery* SelectorQueryCache::add(const AtomicString& selectors, const Document& document, ExceptionState& exceptionState)
 {
-    HashMap<AtomicString, OwnPtr<SelectorQuery> >::iterator it = m_entries.find(selectors);
+    HashMap<AtomicString, OwnPtr<SelectorQuery>>::iterator it = m_entries.find(selectors);
     if (it != m_entries.end())
         return it->value.get();
 
-    CSSParser parser(CSSParserContext(document, 0));
     CSSSelectorList selectorList;
-    parser.parseSelector(selectors, selectorList);
+    CSSParser::parseSelector(CSSParserContext(document, 0), selectors, selectorList);
 
     if (!selectorList.first()) {
         exceptionState.throwDOMException(SyntaxError, "'" + selectors + "' is not a valid selector.");

@@ -145,8 +145,13 @@ EXTRA_ENV = {
   'TRANSLATE_FLAGS' : '-O${#OPT_LEVEL ? ${OPT_LEVEL} : 0}',
 
   'STDLIBS'   : '${DEFAULTLIBS ? '
-                '${LIBSTDCPP} ${LIBPTHREAD} ${LIBNACL} ${LIBC} ${LIBPNACLMM}}',
+                '${LIBSTDCPP} ${LIBPTHREAD} ${LIBNACL} ${LIBC} '
+                '${LIBGCC_BC} ${LIBPNACLMM}}',
   'LIBSTDCPP' : '${IS_CXX ? -l${STDLIB_TRUNC} -lm }',
+  # The few functions in the bitcode version of compiler-rt unfortunately
+  # depend on libm. TODO(jvoung): try rewriting the compiler-rt functions
+  # to be standalone.
+  'LIBGCC_BC' : '-lgcc -lm',
   'LIBC'      : '-lc',
   'LIBNACL'   : '-lnacl',
   'LIBPNACLMM': '-lpnaclmm',
@@ -157,7 +162,7 @@ EXTRA_ENV = {
   'CC' : '${IS_CXX ? ${CLANGXX} : ${CLANG}}',
   'RUN_CC': '${CC} ${emit_llvm_flag} ${mode} ${CC_FLAGS} ' +
             '${@AddPrefix:-isystem :ISYSTEM} ' +
-            '-x${typespec} "${infile}" -o ${output}',
+            '-x${typespec} ${infile} -o ${output}',
 }
 
 def AddLLVMPassDisableFlag(*args):
@@ -456,12 +461,9 @@ def DriverOutputTypes(driver_flag, compiling_to_native):
 
 def ReadDriverRevision():
   rev_file = env.getone('DRIVER_REV_FILE')
-  # Might be an SVN version or a GIT hash (depending on the NaCl src client)
   nacl_ver = DriverOpen(rev_file, 'rb').readlines()[0]
-  m = re.search(r'\[SVN\].*/native_client:\s*(\d+)', nacl_ver)
-  if m:
-    return m.group(1)
-  m = re.search(r'\[GIT\].*/native_client.git:\s*(\w+)', nacl_ver)
+  m = re.search(r'\[GIT\].*/native_client(?:\.git)?:\s*([0-9a-f]{40})',
+                nacl_ver)
   if m:
     return m.group(1)
   # fail-fast: if the REV file exists but regex search failed,

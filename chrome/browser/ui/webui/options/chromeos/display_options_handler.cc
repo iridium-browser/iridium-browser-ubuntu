@@ -10,6 +10,7 @@
 #include "ash/display/display_controller.h"
 #include "ash/display/display_manager.h"
 #include "ash/display/resolution_notification_controller.h"
+#include "ash/rotator/screen_rotation_animator.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/logging.h"
@@ -204,9 +205,7 @@ void DisplayOptionsHandler::GetLocalizedValues(
 
 void DisplayOptionsHandler::InitializePage() {
   DCHECK(web_ui());
-  web_ui()->CallJavascriptFunction(
-      "options.BrowserOptions.enableDisplayButton",
-      base::FundamentalValue(true));
+  UpdateDisplaySettingsEnabled();
 }
 
 void DisplayOptionsHandler::RegisterMessages() {
@@ -244,6 +243,7 @@ void DisplayOptionsHandler::OnDisplayConfigurationChanging() {
 }
 
 void DisplayOptionsHandler::OnDisplayConfigurationChanged() {
+  UpdateDisplaySettingsEnabled();
   SendAllDisplayInfo();
 }
 
@@ -279,7 +279,7 @@ void DisplayOptionsHandler::SendDisplayInfo(
     js_display->SetBoolean("isPrimary", display.id() == primary_id);
     js_display->SetBoolean("isInternal", display.IsInternal());
     js_display->SetInteger("orientation",
-                           static_cast<int>(display_info.rotation()));
+                           static_cast<int>(display_info.GetActiveRotation()));
 
     base::ListValue* js_resolutions = new base::ListValue();
     for (const ash::DisplayMode& display_mode : display_info.display_modes()) {
@@ -315,6 +315,13 @@ void DisplayOptionsHandler::SendDisplayInfo(
   web_ui()->CallJavascriptFunction(
       "options.DisplayOptions.setDisplayInfo",
       mirroring, js_displays, *layout_value.get(), *offset_value.get());
+}
+
+void DisplayOptionsHandler::UpdateDisplaySettingsEnabled() {
+  bool enabled = GetDisplayManager()->num_connected_displays() <= 2;
+  web_ui()->CallJavascriptFunction(
+      "options.BrowserOptions.enableDisplaySettings",
+      base::FundamentalValue(enabled));
 }
 
 void DisplayOptionsHandler::OnFadeOutForMirroringFinished(bool is_mirroring) {
@@ -431,7 +438,8 @@ void DisplayOptionsHandler::HandleSetOrientation(const base::ListValue* args) {
 
   content::RecordAction(
       base::UserMetricsAction("Options_DisplaySetOrientation"));
-  GetDisplayManager()->SetDisplayRotation(display_id, new_rotation);
+  ash::ScreenRotationAnimator(display_id)
+      .Rotate(new_rotation, gfx::Display::ROTATION_SOURCE_USER);
 }
 
 void DisplayOptionsHandler::HandleSetColorProfile(const base::ListValue* args) {

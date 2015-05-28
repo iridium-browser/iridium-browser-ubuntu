@@ -6,6 +6,7 @@
 #include "base/macros.h"
 #include "base/sys_info.h"
 #include "chromecast/app/cast_main_delegate.h"
+#include "chromecast/common/chromecast_switches.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/content_test_suite_base.h"
 #include "content/public/test/test_launcher.h"
@@ -16,6 +17,10 @@ namespace shell {
 
 namespace {
 
+// Duplicate switch to avoid dependency on chromecast/internal.
+const char kSwitchesAVSettingsUnixSocketPath[] = "av-settings-unix-socket-path";
+
+const char kAvSettingsUnixSocketPath[] = "/tmp/avsettings";
 const char kTestTypeBrowser[] = "browser";
 
 class BrowserTestSuite : public content::ContentTestSuiteBase {
@@ -43,7 +48,10 @@ class ChromecastTestLauncherDelegate : public content::TestLauncherDelegate {
       base::CommandLine* command_line,
       const base::FilePath& temp_data_dir) override {
     // TODO(gunsch): handle temp_data_dir
+    command_line->AppendSwitch(switches::kNoWifi);
     command_line->AppendSwitchASCII(switches::kTestType, kTestTypeBrowser);
+    command_line->AppendSwitchASCII(kSwitchesAVSettingsUnixSocketPath,
+                                    kAvSettingsUnixSocketPath);
     return true;
   }
 

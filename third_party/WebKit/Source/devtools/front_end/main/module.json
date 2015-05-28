@@ -1,6 +1,17 @@
 {
     "extensions": [
         {
+            "type": "@WebInspector.AppProvider",
+            "condition": "can_dock",
+            "className": "WebInspector.AdvancedAppProvider",
+            "order": 0
+        },
+        {
+            "type": "@WebInspector.AppProvider",
+            "className": "WebInspector.SimpleAppProvider",
+            "order": 10
+        },
+        {
             "type": "@WebInspector.ContextMenu.Provider",
             "contextTypes": ["WebInspector.UISourceCode", "WebInspector.Resource", "WebInspector.NetworkRequest", "Node"],
             "className": "WebInspector.HandlerRegistry.ContextMenuProvider"
@@ -134,6 +145,7 @@
             "type": "@WebInspector.ActionDelegate",
             "actionId": "main.toggle-device-mode",
             "className": "WebInspector.AdvancedApp.ToggleDeviceModeActionDelegate",
+            "condition": "can_dock",
             "bindings": [
                 {
                     "platform": "windows,linux",
@@ -174,14 +186,9 @@
         {
             "type": "@WebInspector.StatusBarItem.Provider",
             "className": "WebInspector.AdvancedApp.EmulationButtonProvider",
+            "condition": "can_dock",
             "order": 1,
             "location": "toolbar-left"
-        },
-        {
-            "type": "@WebInspector.StatusBarItem.Provider",
-            "className": "WebInspector.AdvancedApp.DeviceCounter",
-            "order": 0,
-            "location": "toolbar-right"
         },
         {
             "type": "@WebInspector.StatusBarItem.Provider",
@@ -202,15 +209,15 @@
             "location": "toolbar-right"
         },
         {
-            "type": "@WebInspector.StatusBarItem.Provider",
-            "className": "WebInspector.ScreencastApp.StatusBarButtonProvider",
-            "order": 5,
-            "location": "toolbar-right"
-        },
-        {
             "type": "ui-setting",
             "title": "Disable cache (while DevTools is open)",
             "settingName": "cacheDisabled",
+            "settingType": "checkbox"
+        },
+        {
+            "type": "ui-setting",
+            "title": "Disable JavaScript",
+            "settingName": "javaScriptDisabled",
             "settingType": "checkbox"
         },
         {
@@ -251,20 +258,18 @@
         "extensions",
         "host",
         "platform",
-        "screencast",
         "sdk",
         "toolbox"
     ],
     "scripts": [
         "HelpScreenUntilReload.js",
-        "App.js",
         "AdvancedApp.js",
         "OverridesView.js",
         "RenderingOptions.js",
-        "ScreencastApp.js",
         "SimpleApp.js",
         "TestController.js",
         "Tests.js",
+        "OverlayController.js",
         "Main.js"
     ],
     "skip_compilation": [

@@ -21,20 +21,20 @@
 #ifndef AXProgressIndicator_h
 #define AXProgressIndicator_h
 
-#include "modules/accessibility/AXRenderObject.h"
+#include "modules/accessibility/AXLayoutObject.h"
 
 namespace blink {
 
 class AXObjectCacheImpl;
 class HTMLProgressElement;
-class RenderProgress;
+class LayoutProgress;
 
-class AXProgressIndicator final : public AXRenderObject {
+class AXProgressIndicator final : public AXLayoutObject {
 public:
-    static PassRefPtr<AXProgressIndicator> create(RenderProgress*, AXObjectCacheImpl*);
+    static PassRefPtr<AXProgressIndicator> create(LayoutProgress*, AXObjectCacheImpl*);
 
 private:
-    virtual AccessibilityRole roleValue() const override { return ProgressIndicatorRole; }
+    virtual AccessibilityRole roleValue() const override;
 
     virtual bool isProgressIndicator() const override { return true; }
 
@@ -42,7 +42,7 @@ private:
     virtual float maxValueForRange() const override;
     virtual float minValueForRange() const override;
 
-    AXProgressIndicator(RenderProgress*, AXObjectCacheImpl*);
+    AXProgressIndicator(LayoutProgress*, AXObjectCacheImpl*);
 
     HTMLProgressElement* element() const;
     virtual bool computeAccessibilityIsIgnored() const override;

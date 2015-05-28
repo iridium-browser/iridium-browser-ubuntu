@@ -5,11 +5,8 @@
 {
   'conditions': [
     ['disable_nacl==0 and disable_nacl_untrusted==0', {
-      'variables': {
-        'monacl_codegen_dir': '<(SHARED_INTERMEDIATE_DIR)/<!(python <(DEPTH)/build/inverse_depth.py <(DEPTH))/monacl',
-      },
       'includes': [
-        '../components/nacl/nacl_defines.gypi',
+        '../mojo/mojo_nacl.gypi',
       ],
       'targets': [
         {
@@ -22,12 +19,16 @@
                 'nacl/generator/generate_nacl_bindings.py',
                 'nacl/generator/interface.py',
                 'nacl/generator/interface_dsl.py',
-                'nacl/generator/mojo_syscall.cc.tmpl',
                 'nacl/generator/libmojo.cc.tmpl',
+                'nacl/generator/mojo_irt.c.tmpl',
+                'nacl/generator/mojo_irt.h.tmpl',
+                'nacl/generator/mojo_syscall.cc.tmpl',
               ],
               'outputs': [
-                '<(monacl_codegen_dir)/mojo_syscall.cc',
                 '<(monacl_codegen_dir)/libmojo.cc',
+                '<(monacl_codegen_dir)/mojo_irt.c',
+                '<(monacl_codegen_dir)/mojo_irt.h',
+                '<(monacl_codegen_dir)/mojo_syscall.cc',
               ],
               'action': [
                 'python',
@@ -36,31 +37,30 @@
               ],
             },
           ],
+          'direct_dependent_settings': {
+            'include_dirs': [ '../third_party/mojo/src/' ],
+          },
         },
         {
           'target_name': 'monacl_syscall',
           'type': 'static_library',
-          'defines': [
-            '<@(nacl_defines)',
-          ],
           'include_dirs': [
             '..',
+            '../third_party/mojo/src/',
           ],
           'sources': [
             '<(monacl_codegen_dir)/mojo_syscall.cc',
           ],
           'dependencies': [
-            'mojo_public.gyp:mojo_system_placeholder',
+            '../third_party/mojo/mojo_public.gyp:mojo_system_placeholder',
           ],
         },
         {
           'target_name': 'monacl_sel',
           'type': 'static_library',
-          'defines': [
-            '<@(nacl_defines)',
-          ],
           'include_dirs': [
             '..',
+            '../third_party/mojo/src/',
           ],
           'sources': [
             'nacl/monacl_sel_main.cc',
@@ -76,7 +76,7 @@
           'type': 'executable',
           'dependencies': [
             '../base/base.gyp:base',
-            'mojo_edk.gyp:mojo_system_impl',
+            '../third_party/mojo/mojo_edk.gyp:mojo_system_impl',
             'monacl_sel',
           ],
           'sources': [
@@ -90,9 +90,6 @@
             {
               'target_name': 'monacl_syscall_win64',
               'type': 'static_library',
-              'defines': [
-                '<@(nacl_defines)',
-              ],
               'include_dirs': [
                 '..',
               ],
@@ -100,7 +97,7 @@
                 '<(monacl_codegen_dir)/mojo_syscall.cc',
               ],
               'dependencies': [
-                'mojo_public.gyp:mojo_system_placeholder',
+                '../third_party/mojo/mojo_public.gyp:mojo_system_placeholder',
               ],
               'configurations': {
                 'Common_Base': {

@@ -85,7 +85,7 @@ static inline GLenum GetTexInternalFormat(GLenum internal_format,
   }
 
   if (type == GL_FLOAT && gfx::g_version_info->is_angle &&
-      gfx::g_version_info->is_es2) {
+      gfx::g_version_info->is_es && gfx::g_version_info->major_version == 2) {
     // It's possible that the texture is using a sized internal format, and
     // ANGLE exposing GLES2 API doesn't support those.
     // TODO(oetuaho@nvidia.com): Remove these conversions once ANGLE has the
@@ -331,8 +331,10 @@ const GLVersionInfo* GetGLVersionInfo() {
 void InitializeDynamicGLBindingsGL(GLContext* context) {
   g_driver_gl.InitializeCustomDynamicBindings(context);
   DCHECK(context && context->IsCurrent(NULL) && !g_version_info);
-  g_version_info = new GLVersionInfo(context->GetGLVersion().c_str(),
-      context->GetGLRenderer().c_str());
+  g_version_info = new GLVersionInfo(
+      context->GetGLVersion().c_str(),
+      context->GetGLRenderer().c_str(),
+      context->GetExtensions().c_str());
 }
 
 void InitializeDebugGLBindingsGL() {
@@ -395,11 +397,6 @@ void GLApiBase::InitializeBase(DriverGL* driver) {
   driver_ = driver;
 }
 
-void GLApiBase::SignalFlush() {
-  DCHECK(GLContext::GetCurrent());
-  GLContext::GetCurrent()->OnFlush();
-}
-
 RealGLApi::RealGLApi() {
 }
 
@@ -412,12 +409,10 @@ void RealGLApi::Initialize(DriverGL* driver) {
 
 void RealGLApi::glFlushFn() {
   GLApiBase::glFlushFn();
-  GLApiBase::SignalFlush();
 }
 
 void RealGLApi::glFinishFn() {
   GLApiBase::glFinishFn();
-  GLApiBase::SignalFlush();
 }
 
 TraceGLApi::~TraceGLApi() {
@@ -442,8 +437,7 @@ void VirtualGLApi::Initialize(DriverGL* driver, GLContext* real_context) {
   real_context_ = real_context;
 
   DCHECK(real_context->IsCurrent(NULL));
-  std::string ext_string(
-      reinterpret_cast<const char*>(driver_->fn.glGetStringFn(GL_EXTENSIONS)));
+  std::string ext_string = real_context->GetExtensions();
   std::vector<std::string> ext;
   Tokenize(ext_string, " ", &ext);
 
@@ -473,11 +467,15 @@ bool VirtualGLApi::MakeCurrent(GLContext* virtual_context, GLSurface* surface) {
     }
   }
 
+  bool state_dirtied_externally = real_context_->GetStateWasDirtiedExternally();
+  real_context_->SetStateWasDirtiedExternally(false);
+
   DCHECK_EQ(real_context_, GLContext::GetRealCurrent());
   DCHECK(real_context_->IsCurrent(NULL));
   DCHECK(virtual_context->IsCurrent(surface));
 
-  if (switched_contexts || virtual_context != current_context_) {
+  if (state_dirtied_externally || switched_contexts ||
+      virtual_context != current_context_) {
 #if DCHECK_IS_ON()
     GLenum error = glGetErrorFn();
     // Accepting a context loss error here enables using debug mode to work on
@@ -492,7 +490,7 @@ bool VirtualGLApi::MakeCurrent(GLContext* virtual_context, GLSurface* surface) {
     SetGLToRealGLApi();
     if (virtual_context->GetGLStateRestorer()->IsInitialized()) {
       virtual_context->GetGLStateRestorer()->RestoreState(
-          (current_context_ && !switched_contexts)
+          (current_context_ && !state_dirtied_externally && !switched_contexts)
               ? current_context_->GetGLStateRestorer()
               : NULL);
     }
@@ -525,12 +523,10 @@ const GLubyte* VirtualGLApi::glGetStringFn(GLenum name) {
 
 void VirtualGLApi::glFlushFn() {
   GLApiBase::glFlushFn();
-  GLApiBase::SignalFlush();
 }
 
 void VirtualGLApi::glFinishFn() {
   GLApiBase::glFinishFn();
-  GLApiBase::SignalFlush();
 }
 
 ScopedSetGLToRealGLApi::ScopedSetGLToRealGLApi()

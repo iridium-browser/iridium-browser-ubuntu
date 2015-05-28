@@ -5,26 +5,30 @@
 /**
  * Overrided metadata worker's path.
  * @type {string}
- * @const
  */
-ContentProvider.WORKER_SCRIPT = '/js/metadata_worker.js';
+ContentMetadataProvider.WORKER_SCRIPT = '/js/metadata_worker.js';
 
 /**
- * @param {HTMLElement} container Container element.
+ * @param {Element} container Container element.
  * @constructor
  */
 function AudioPlayer(container) {
   this.container_ = container;
   this.volumeManager_ = new VolumeManagerWrapper(
-      VolumeManagerWrapper.DriveEnabledStatus.DRIVE_ENABLED);
-  this.metadataCache_ = MetadataCache.createFull(this.volumeManager_);
+      VolumeManagerWrapper.NonNativeVolumeStatus.ENABLED);
+  this.metadataModel_ = MetadataModel.create(this.volumeManager_);
   this.selectedEntry_ = null;
+  this.invalidTracks_ = {};
 
   this.model_ = new AudioPlayerModel();
-  var observer = new PathObserver(this.model_, 'expanded');
-  observer.open(function(newValue, oldValue) {
-    // Inverse arguments intentionally to match the Polymer way.
-    this.onModelExpandedChanged(oldValue, newValue);
+  Object.observe(this.model_, function(changes) {
+    for (var i = 0; i < changes.length; i++) {
+      var change = changes[i];
+      if (change.name == 'expanded' && change.type == 'update') {
+        this.onModelExpandedChanged(change.oldValue, change.object.expanded);
+        break;
+      }
+    }
   }.bind(this));
 
   this.entries_ = [];
@@ -41,38 +45,41 @@ function AudioPlayer(container) {
    */
   this.isExpanded_ = null;  // Initial value is null. It'll be set in load().
 
-  this.player_ = document.querySelector('audio-player');
+  this.player_ =
+    /** @type {AudioPlayerElement} */ (document.querySelector('audio-player'));
   // TODO(yoshiki): Move tracks into the model.
   this.player_.tracks = [];
   this.player_.model = this.model_;
-  Platform.performMicrotaskCheckpoint();
 
-  this.errorString_ = '';
-  this.offlineString_ = '';
-  chrome.fileManagerPrivate.getStrings(function(strings) {
-    container.ownerDocument.title = strings['AUDIO_PLAYER_TITLE'];
-    this.errorString_ = strings['AUDIO_ERROR'];
-    this.offlineString_ = strings['AUDIO_OFFLINE'];
-    AudioPlayer.TrackInfo.DEFAULT_ARTIST =
-        strings['AUDIO_PLAYER_DEFAULT_ARTIST'];
-  }.bind(this));
+  // Run asynchronously after an event of model change is delivered.
+  setTimeout(function() {
+    this.errorString_ = '';
+    this.offlineString_ = '';
+    chrome.fileManagerPrivate.getStrings(function(strings) {
+      container.ownerDocument.title = strings['AUDIO_PLAYER_TITLE'];
+      this.errorString_ = strings['AUDIO_ERROR'];
+      this.offlineString_ = strings['AUDIO_OFFLINE'];
+      AudioPlayer.TrackInfo.DEFAULT_ARTIST =
+          strings['AUDIO_PLAYER_DEFAULT_ARTIST'];
+    }.bind(this));
 
-  this.volumeManager_.addEventListener('externally-unmounted',
-      this.onExternallyUnmounted_.bind(this));
+    this.volumeManager_.addEventListener('externally-unmounted',
+        this.onExternallyUnmounted_.bind(this));
 
-  window.addEventListener('resize', this.onResize_.bind(this));
+    window.addEventListener('resize', this.onResize_.bind(this));
 
-  // Show the window after DOM is processed.
-  var currentWindow = chrome.app.window.current();
-  if (currentWindow)
-    setTimeout(currentWindow.show.bind(currentWindow), 0);
+    // Show the window after DOM is processed.
+    var currentWindow = chrome.app.window.current();
+    if (currentWindow)
+      setTimeout(currentWindow.show.bind(currentWindow), 0);
+  }.bind(this), 0);
 }
 
 /**
  * Initial load method (static).
  */
 AudioPlayer.load = function() {
-  document.ondragstart = function(e) { e.preventDefault() };
+  document.ondragstart = function(e) { e.preventDefault(); };
 
   AudioPlayer.instance =
       new AudioPlayer(document.querySelector('.audio-player'));
@@ -134,22 +141,21 @@ AudioPlayer.prototype.load = function(playlist) {
           unchanged = false;
       }
 
-      if (!unchanged) {
+      if (!unchanged)
         this.player_.tracks = newTracks;
 
-        // Makes it sure that the handler of the track list is called, before
-        // the handler of the track index.
-        Platform.performMicrotaskCheckpoint();
-      }
+      // Run asynchronously, to makes it sure that the handler of the track list
+      // is called, before the handler of the track index.
+      setTimeout(function() {
+        this.select_(position, !!time);
 
-      this.select_(position, !!time);
-
-      // Load the selected track metadata first, then load the rest.
-      this.loadMetadata_(position);
-      for (i = 0; i != this.entries_.length; i++) {
-        if (i != position)
-          this.loadMetadata_(i);
-      }
+        // Load the selected track metadata first, then load the rest.
+        this.loadMetadata_(position);
+        for (i = 0; i != this.entries_.length; i++) {
+          if (i != position)
+            this.loadMetadata_(i);
+        }
+      }.bind(this), 0);
     }.bind(this));
   }.bind(this));
 };
@@ -212,36 +218,39 @@ AudioPlayer.prototype.select_ = function(newTrack, time) {
   this.currentTrackIndex_ = newTrack;
   this.player_.currentTrackIndex = this.currentTrackIndex_;
   this.player_.audioController.time = time;
-  Platform.performMicrotaskCheckpoint();
 
-  if (!window.appReopen)
-    this.player_.audioElement.play();
+  // Run asynchronously after an event of current track change is delivered.
+  setTimeout(function() {
+    if (!window.appReopen)
+      this.player_.audioElement.play();
 
-  window.appState.position = this.currentTrackIndex_;
-  window.appState.time = 0;
-  util.saveAppState();
+    window.appState.position = this.currentTrackIndex_;
+    window.appState.time = 0;
+    util.saveAppState();
 
-  var entry = this.entries_[this.currentTrackIndex_];
+    var entry = this.entries_[this.currentTrackIndex_];
 
-  this.fetchMetadata_(entry, function(metadata) {
-    if (this.currentTrackIndex_ != newTrack)
-      return;
+    this.fetchMetadata_(entry, function(metadata) {
+      if (this.currentTrackIndex_ != newTrack)
+        return;
 
-    this.selectedEntry_ = entry;
-  }.bind(this));
+      this.selectedEntry_ = entry;
+    }.bind(this));
+  }.bind(this), 0);
 };
 
 /**
  * @param {FileEntry} entry Track file entry.
- * @param {function(object)} callback Callback.
+ * @param {function(Object)} callback Callback.
  * @private
  */
 AudioPlayer.prototype.fetchMetadata_ = function(entry, callback) {
-  this.metadataCache_.getOne(entry, 'thumbnail|media|external',
+  this.metadataModel_.get(
+      [entry], ['mediaTitle', 'mediaArtist', 'present']).then(
       function(generation, metadata) {
         // Do nothing if another load happened since the metadata request.
         if (this.playlistGeneration_ == generation)
-          callback(metadata);
+          callback(metadata[0]);
       }.bind(this, this.playlistGeneration_));
 };
 
@@ -257,7 +266,7 @@ AudioPlayer.prototype.onError_ = function() {
   this.fetchMetadata_(
       this.entries_[track],
       function(metadata) {
-        var error = (!navigator.onLine && !metadata.external.present) ?
+        var error = (!navigator.onLine && !metadata.present) ?
             this.offlineString_ : this.errorString_;
         this.displayMetadata_(track, metadata, error);
         this.scheduleAutoAdvance_();
@@ -372,8 +381,8 @@ AudioPlayer.prototype.syncHeight_ = function() {
 /**
  * Create a TrackInfo object encapsulating the information about one track.
  *
- * @param {fileEntry} entry FileEntry to be retrieved the track info from.
- * @param {function} onClick Click handler.
+ * @param {FileEntry} entry FileEntry to be retrieved the track info from.
+ * @param {function(MouseEvent)} onClick Click handler.
  * @constructor
  */
 AudioPlayer.TrackInfo = function(entry, onClick) {
@@ -385,11 +394,6 @@ AudioPlayer.TrackInfo = function(entry, onClick) {
   this.artwork = null;
   this.active = false;
 };
-
-/**
- * @return {HTMLDivElement} The wrapper element for the track.
- */
-AudioPlayer.TrackInfo.prototype.getBox = function() { return this.box_ };
 
 /**
  * @return {string} Default track title (file name extracted from the url).
@@ -422,10 +426,8 @@ AudioPlayer.TrackInfo.prototype.setMetadata = function(
     metadata, error) {
   // TODO(yoshiki): Handle error in better way.
   // TODO(yoshiki): implement artwork (metadata.thumbnail)
-  this.title = (metadata.media && metadata.media.title) ||
-      this.getDefaultTitle();
-  this.artist = error ||
-      (metadata.media && metadata.media.artist) || this.getDefaultArtist();
+  this.title = metadata.mediaTitle || this.getDefaultTitle();
+  this.artist = error || metadata.mediaArtist || this.getDefaultArtist();
 };
 
 // Starts loading the audio player.

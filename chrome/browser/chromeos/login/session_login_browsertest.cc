@@ -4,6 +4,7 @@
 
 #include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
+#include "base/command_line.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -28,9 +29,9 @@ const char kTestUser[] = "test-user@gmail.com";
 class BrowserLoginTest : public chromeos::LoginManagerTest {
  public:
   BrowserLoginTest() : LoginManagerTest(true) {}
-  virtual ~BrowserLoginTest() {}
+  ~BrowserLoginTest() override {}
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     LoginManagerTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(::switches::kCreateBrowserOnStartupForTests);
   }

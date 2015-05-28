@@ -36,9 +36,7 @@ class TestDirectoryLoaderObserver : public ChangeListLoaderObserver {
     loader_->AddObserver(this);
   }
 
-  virtual ~TestDirectoryLoaderObserver() {
-    loader_->RemoveObserver(this);
-  }
+  ~TestDirectoryLoaderObserver() override { loader_->RemoveObserver(this); }
 
   const std::set<base::FilePath>& changed_directories() const {
     return changed_directories_;
@@ -46,8 +44,7 @@ class TestDirectoryLoaderObserver : public ChangeListLoaderObserver {
   void clear_changed_directories() { changed_directories_.clear(); }
 
   // ChageListObserver overrides:
-  virtual void OnDirectoryReloaded(
-      const base::FilePath& directory_path) override {
+  void OnDirectoryReloaded(const base::FilePath& directory_path) override {
     changed_directories_.insert(directory_path);
   }
 
@@ -68,7 +65,7 @@ void AccumulateReadDirectoryResult(ResourceEntryVector* out_entries,
 
 class DirectoryLoaderTest : public testing::Test {
  protected:
-  virtual void SetUp() override {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     pref_service_.reset(new TestingPrefServiceSimple);
     test_util::RegisterDrivePrefs(pref_service_->registry());
@@ -110,7 +107,7 @@ class DirectoryLoaderTest : public testing::Test {
 
   // Adds a new file to the root directory of the service.
   scoped_ptr<google_apis::FileResource> AddNewFile(const std::string& title) {
-    google_apis::GDataErrorCode error = google_apis::GDATA_FILE_ERROR;
+    google_apis::DriveApiErrorCode error = google_apis::DRIVE_FILE_ERROR;
     scoped_ptr<google_apis::FileResource> entry;
     drive_service_->AddNewFile(
         "text/plain",

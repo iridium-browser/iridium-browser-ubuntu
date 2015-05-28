@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/debug/trace_event.h"
 #include "base/process/process.h"
+#include "base/trace_event/trace_event.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/media/media_internals.h"
@@ -55,7 +55,8 @@ MidiHost::MidiHost(int renderer_process_id, media::MidiManager* midi_manager)
       is_session_requested_(false),
       midi_manager_(midi_manager),
       sent_bytes_in_flight_(0),
-      bytes_sent_since_last_acknowledgement_(0) {
+      bytes_sent_since_last_acknowledgement_(0),
+      output_port_count_(0) {
   CHECK(midi_manager_);
 }
 
@@ -90,6 +91,15 @@ void MidiHost::OnStartSession() {
 void MidiHost::OnSendData(uint32 port,
                           const std::vector<uint8>& data,
                           double timestamp) {
+  {
+    base::AutoLock auto_lock(output_port_count_lock_);
+    if (output_port_count_ <= port) {
+      RecordAction(base::UserMetricsAction("BadMessageTerminate_MIDIPort"));
+      BadMessageReceived();
+      return;
+    }
+  }
+
   if (data.empty())
     return;
 
@@ -142,7 +152,17 @@ void MidiHost::AddInputPort(const media::MidiPortInfo& info) {
 }
 
 void MidiHost::AddOutputPort(const media::MidiPortInfo& info) {
+  base::AutoLock auto_lock(output_port_count_lock_);
+  output_port_count_++;
   Send(new MidiMsg_AddOutputPort(info));
+}
+
+void MidiHost::SetInputPortState(uint32 port, media::MidiPortState state) {
+  Send(new MidiMsg_SetInputPortState(port, state));
+}
+
+void MidiHost::SetOutputPortState(uint32 port, media::MidiPortState state) {
+  Send(new MidiMsg_SetOutputPortState(port, state));
 }
 
 void MidiHost::ReceiveMidiData(

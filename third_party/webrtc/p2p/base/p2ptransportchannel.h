@@ -79,6 +79,7 @@ class P2PTransportChannel : public TransportChannelImpl,
   virtual int SendPacket(const char *data, size_t len,
                          const rtc::PacketOptions& options, int flags);
   virtual int SetOption(rtc::Socket::Option opt, int value);
+  virtual bool GetOption(rtc::Socket::Option opt, int* value);
   virtual int GetError() { return error_; }
   virtual bool GetStats(std::vector<ConnectionInfo>* stats);
 
@@ -108,8 +109,13 @@ class P2PTransportChannel : public TransportChannelImpl,
     return false;
   }
 
-  // Find out which DTLS-SRTP cipher was negotiated
+  // Find out which DTLS-SRTP cipher was negotiated.
   virtual bool GetSrtpCipher(std::string* cipher) {
+    return false;
+  }
+
+  // Find out which DTLS cipher was negotiated.
+  virtual bool GetSslCipher(std::string* cipher) {
     return false;
   }
 
@@ -148,6 +154,9 @@ class P2PTransportChannel : public TransportChannelImpl,
   // Helper method used only in unittest.
   rtc::DiffServCodePoint DefaultDscpValue() const;
 
+  // Public for unit tests.
+  Connection* FindNextPingableConnection();
+
  private:
   rtc::Thread* thread() { return worker_thread_; }
   PortAllocatorSession* allocator_session() {
@@ -176,7 +185,6 @@ class P2PTransportChannel : public TransportChannelImpl,
   void RememberRemoteCandidate(const Candidate& remote_candidate,
                                PortInterface* origin_port);
   bool IsPingable(Connection* conn);
-  Connection* FindNextPingableConnection();
   void PingConnection(Connection* conn);
   void AddAllocatorSession(PortAllocatorSession* session);
   void AddConnection(Connection* connection);

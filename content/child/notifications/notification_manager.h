@@ -7,24 +7,22 @@
 
 #include <map>
 #include <set>
+#include <vector>
 
 #include "base/id_map.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "content/child/notifications/notification_dispatcher.h"
-#include "content/child/notifications/notification_image_loader.h"
+#include "content/child/notifications/pending_notifications_tracker.h"
 #include "content/child/worker_task_runner.h"
-#include "third_party/WebKit/public/platform/WebNotificationManager.h"
+#include "content/common/platform_notification_messages.h"
+#include "third_party/WebKit/public/platform/modules/notifications/WebNotificationManager.h"
 
 class SkBitmap;
 
-namespace blink {
-class WebURL;
-}
-
 namespace content {
 
+struct PlatformNotificationData;
 class ThreadSafeSender;
 
 class NotificationManager : public blink::WebNotificationManager,
@@ -51,8 +49,13 @@ class NotificationManager : public blink::WebNotificationManager,
       const blink::WebNotificationData& notification_data,
       blink::WebServiceWorkerRegistration* service_worker_registration,
       blink::WebNotificationShowCallbacks* callbacks);
+  virtual void getNotifications(
+      const blink::WebString& filter_tag,
+      blink::WebServiceWorkerRegistration* service_worker_registration,
+      blink::WebNotificationGetCallbacks* callbacks);
   virtual void close(blink::WebNotificationDelegate* delegate);
   virtual void closePersistent(
+      const blink::WebSerializedOrigin& origin,
       const blink::WebString& persistent_notification_id);
   virtual void notifyDelegateDestroyed(
       blink::WebNotificationDelegate* delegate);
@@ -70,59 +73,51 @@ class NotificationManager : public blink::WebNotificationManager,
 
   // IPC message handlers.
   void OnDidShow(int notification_id);
+  void OnDidShowPersistent(int request_id, bool success);
   void OnDidClose(int notification_id);
   void OnDidClick(int notification_id);
+  void OnDidGetNotifications(
+      int request_id,
+      const std::vector<PersistentNotificationInfo>& notification_infos);
 
-  // Asynchronously starts loading |image_url| on the main thread and returns a
-  // reference to the notification image loaded responsible for this. |callback|
-  // will be invoked on the calling thread when the load is complete.
-  scoped_refptr<NotificationImageLoader> CreateImageLoader(
-      const blink::WebURL& image_url,
-      const NotificationImageLoadedCallback& callback) const;
+  // To be called when a page notification is ready to be displayed. Will
+  // inform the browser process about all available data. The |delegate|,
+  // owned by Blink, will be used to feed back events associated with the
+  // notification to the JavaScript object.
+  void DisplayPageNotification(
+      const blink::WebSerializedOrigin& origin,
+      const blink::WebNotificationData& notification_data,
+      blink::WebNotificationDelegate* delegate,
+      const SkBitmap& icon);
 
-  // Sends an IPC to the browser process to display the notification,
-  // accompanied by the downloaded icon.
-  void DisplayNotification(const blink::WebSerializedOrigin& origin,
-                           const blink::WebNotificationData& notification_data,
-                           blink::WebNotificationDelegate* delegate,
-                           scoped_refptr<NotificationImageLoader> image_loader);
-
-  // Sends an IPC to the browser process to display the persistent notification,
-  // accompanied by the downloaded icon.
+  // To be called when a persistent notification is ready to be displayed. Will
+  // inform the browser process about all available data. The |callbacks| will
+  // be used to inform the Promise pending in Blink that the notification has
+  // been send to the browser process to be displayed.
   void DisplayPersistentNotification(
       const blink::WebSerializedOrigin& origin,
       const blink::WebNotificationData& notification_data,
       int64 service_worker_registration_id,
-      int request_id,
-      scoped_refptr<NotificationImageLoader> image_loader);
-
-  // Removes the notification identified by |delegate| from the set of
-  // pending notifications, and returns whether it could be found.
-  bool RemovePendingPageNotification(blink::WebNotificationDelegate* delegate);
+      scoped_ptr<blink::WebNotificationShowCallbacks> callbacks,
+      const SkBitmap& icon);
 
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
-  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
   scoped_refptr<NotificationDispatcher> notification_dispatcher_;
 
-  // Tracking display requests for persistent notifications.
+  // Tracker which stores all pending Notifications, both page and persistent
+  // ones, until all their associated resources have been fetched.
+  PendingNotificationsTracker pending_notifications_;
+
+  // Tracks pending requests for getting a list of notifications.
+  IDMap<blink::WebNotificationGetCallbacks, IDMapOwnPointer>
+      pending_get_notification_requests_;
+
+  // Tracks pending requests for displaying persistent notifications.
   IDMap<blink::WebNotificationShowCallbacks, IDMapOwnPointer>
-      persistent_notification_requests_;
-
-  // A map tracking Page-bound notifications whose icon is still being
-  // downloaded. These downloads can be cancelled by the developer.
-  std::map<blink::WebNotificationDelegate*,
-           scoped_refptr<NotificationImageLoader>>
-      pending_page_notifications_;
-
-  // A set tracking Persistent notifications whose icon is still being
-  // downloaded. These downloads cannot be cancelled by the developer.
-  std::set<scoped_refptr<NotificationImageLoader>>
-      pending_persistent_notifications_;
+      pending_show_notification_requests_;
 
   // Map to store the delegate associated with a notification request Id.
-  std::map<int, blink::WebNotificationDelegate*> active_notifications_;
-
-  base::WeakPtrFactory<NotificationManager> weak_factory_;
+  std::map<int, blink::WebNotificationDelegate*> active_page_notifications_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationManager);
 };

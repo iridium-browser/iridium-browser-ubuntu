@@ -474,6 +474,7 @@ void CreateUrlApplicationShortcutView::FetchIcon() {
       unprocessed_icons_.back().url,
       true,  // is a favicon
       0,  // no maximum size
+      false,  // normal cache policy
       base::Bind(&CreateUrlApplicationShortcutView::DidDownloadFavicon,
                  weak_ptr_factory_.GetWeakPtr(),
                  preferred_size));
@@ -498,6 +499,9 @@ void CreateUrlApplicationShortcutView::DidDownloadFavicon(
       requested_size,
       NULL);
   if (!image_skia.isNull()) {
+    // As |shortcut_info_| will be passed to the FILE thread upon accepting the
+    // dialog, this image must be made read-only and thread-safe.
+    image_skia.MakeThreadSafe();
     shortcut_info_.favicon.Add(image_skia);
     static_cast<AppInfoView*>(app_info_)->UpdateIcon(shortcut_info_.favicon);
   } else {

@@ -37,7 +37,6 @@ def SetEnvironmentAndGetRuntimeDllDirs():
 
     toolchain = toolchain_data['path']
     version = toolchain_data['version']
-    version_is_pro = version[-1] != 'e'
     win8sdk = toolchain_data['win8sdk']
     wdk = toolchain_data['wdk']
     # TODO(scottmg): The order unfortunately matters in these. They should be
@@ -130,11 +129,11 @@ def CopyVsRuntimeDlls(output_dir, runtime_dirs):
                        source_x64)
 
 
-def CopyDlls(target_dir, configuration, cpu_arch):
+def CopyDlls(target_dir, configuration, target_cpu):
   """Copy the VS runtime DLLs into the requested directory as needed.
 
   configuration is one of 'Debug' or 'Release'.
-  cpu_arch is one of 'x86' or 'x64'.
+  target_cpu is one of 'x86' or 'x64'.
 
   The debug configuration gets both the debug and release DLLs; the
   release config only the latter.
@@ -144,7 +143,7 @@ def CopyDlls(target_dir, configuration, cpu_arch):
     return
 
   x64_runtime, x86_runtime = vs2013_runtime_dll_dirs
-  runtime_dir = x64_runtime if cpu_arch == 'x64' else x86_runtime
+  runtime_dir = x64_runtime if target_cpu == 'x64' else x86_runtime
   _CopyRuntime(target_dir, runtime_dir, 'msvc%s120.dll')
   if configuration == 'Debug':
     _CopyRuntime(target_dir, runtime_dir, 'msvc%s120d.dll')
@@ -168,7 +167,6 @@ def Update():
   if sys.platform in ('win32', 'cygwin') and depot_tools_win_toolchain:
     import find_depot_tools
     depot_tools_path = find_depot_tools.add_depot_tools_to_path()
-    json_data_file = os.path.join(script_dir, 'win_toolchain.json')
     get_toolchain_args = [
         sys.executable,
         os.path.join(depot_tools_path,

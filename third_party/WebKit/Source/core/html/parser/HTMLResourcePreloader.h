@@ -33,6 +33,8 @@
 
 namespace blink {
 
+class Document;
+
 class PreloadRequest {
 public:
     static PassOwnPtr<PreloadRequest> create(const String& initiatorName, const TextPosition& initiatorPosition, const String& resourceURL, const KURL& baseURL, Resource::Type resourceType)
@@ -87,10 +89,10 @@ private:
 typedef Vector<OwnPtr<PreloadRequest>> PreloadRequestStream;
 
 class HTMLResourcePreloader final : public NoBaseWillBeGarbageCollected<HTMLResourcePreloader> {
-    WTF_MAKE_NONCOPYABLE(HTMLResourcePreloader); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_NONCOPYABLE(HTMLResourcePreloader); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(HTMLResourcePreloader);
 public:
     static PassOwnPtrWillBeRawPtr<HTMLResourcePreloader> create(Document&);
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     void takeAndPreload(PreloadRequestStream&);
 

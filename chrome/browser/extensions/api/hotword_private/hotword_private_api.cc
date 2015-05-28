@@ -6,9 +6,9 @@
 
 #include <string>
 
-#include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/hotword_audio_history_handler.h"
 #include "chrome/browser/search/hotword_client.h"
@@ -21,6 +21,7 @@
 #include "content/public/browser/speech_recognition_session_preamble.h"
 #include "extensions/browser/event_router.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/webui/web_ui_util.h"
 
 namespace extensions {
 
@@ -97,6 +98,14 @@ void HotwordPrivateEventService::OnHotwordTriggered() {
   SignalEvent(api::hotword_private::OnHotwordTriggered::kEventName);
 }
 
+void HotwordPrivateEventService::OnDeleteSpeakerModel() {
+  SignalEvent(api::hotword_private::OnDeleteSpeakerModel::kEventName);
+}
+
+void HotwordPrivateEventService::OnSpeakerModelExists() {
+  SignalEvent(api::hotword_private::OnSpeakerModelExists::kEventName);
+}
+
 void HotwordPrivateEventService::SignalEvent(const std::string& event_name) {
   EventRouter* router = EventRouter::Get(profile_);
   if (!router || !router->HasEventListener(event_name))
@@ -140,29 +149,41 @@ bool HotwordPrivateSetHotwordAlwaysOnSearchEnabledFunction::RunSync() {
 }
 
 bool HotwordPrivateGetStatusFunction::RunSync() {
+  scoped_ptr<api::hotword_private::GetStatus::Params> params(
+      api::hotword_private::GetStatus::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
   api::hotword_private::StatusDetails result;
 
   HotwordService* hotword_service =
       HotwordServiceFactory::GetForProfile(GetProfile());
   if (!hotword_service) {
     result.available = false;
+    result.always_on_available = false;
     result.enabled = false;
     result.audio_logging_enabled = false;
     result.always_on_enabled = false;
     result.user_is_active = false;
+    result.hotword_hardware_available = false;
   } else {
-    result.available = hotword_service->IsServiceAvailable();
+    result.available = false;
+    result.always_on_available = false;
+    if (params->get_optional_fields && *params->get_optional_fields) {
+      result.available = hotword_service->IsServiceAvailable();
+      result.always_on_available =
+          HotwordServiceFactory::IsAlwaysOnAvailable();
+    }
     result.enabled = hotword_service->IsSometimesOnEnabled();
     result.audio_logging_enabled = hotword_service->IsOptedIntoAudioLogging();
     result.training_enabled = hotword_service->IsTraining();
     result.always_on_enabled = hotword_service->IsAlwaysOnEnabled();
     result.user_is_active = hotword_service->UserIsActive();
+    result.hotword_hardware_available =
+        HotwordService::IsHotwordHardwareAvailable();
   }
 
   PrefService* prefs = GetProfile()->GetPrefs();
   result.enabled_set = prefs->HasPrefPath(prefs::kHotwordSearchEnabled);
-  result.experimental_hotword_enabled =
-      HotwordService::IsExperimentalHotwordingEnabled();
 
   SetResult(result.ToValue().release());
   return true;
@@ -205,8 +226,7 @@ bool HotwordPrivateNotifyHotwordRecognitionFunction::RunSync() {
       hotword_service->NotifyHotwordTriggered();
     } else if (hotword_service->client()) {
       hotword_service->client()->OnHotwordRecognized(preamble);
-    } else if (HotwordService::IsExperimentalHotwordingEnabled() &&
-               hotword_service->IsAlwaysOnEnabled()) {
+    } else if (hotword_service->IsAlwaysOnEnabled()) {
       Browser* browser = GetCurrentBrowser();
       // If a Browser does not exist, fall back to the universally available,
       // but not recommended, way.
@@ -385,8 +405,8 @@ bool HotwordPrivateGetLocalizedStringsFunction::RunSync() {
       "finishedWait",
       l10n_util::GetStringUTF16(IDS_HOTWORD_OPT_IN_FINISHED_WAIT));
 
-  localized_strings->SetString("textdirection",
-      base::i18n::IsRTL() ? "rtl" : "ltr");
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
+  webui::SetLoadTimeDataDefaults(app_locale, localized_strings);
 
   SetResult(localized_strings);
   return true;
@@ -443,6 +463,20 @@ void HotwordPrivateGetAudioHistoryEnabledFunction::SetResultAndSendResponse(
   result.enabled = new_enabled_value;
   SetResult(result.ToValue().release());
   SendResponse(true);
+}
+
+bool HotwordPrivateSpeakerModelExistsResultFunction::RunSync() {
+  scoped_ptr<api::hotword_private::SpeakerModelExistsResult::Params> params(
+      api::hotword_private::SpeakerModelExistsResult::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  HotwordService* hotword_service =
+      HotwordServiceFactory::GetForProfile(GetProfile());
+  if (!hotword_service)
+    return false;
+
+  hotword_service->SpeakerModelExistsComplete(params->exists);
+  return true;
 }
 
 }  // namespace extensions

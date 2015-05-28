@@ -19,14 +19,17 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
+import org.chromium.base.CommandLine;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.PasswordUIView;
 import org.chromium.chrome.browser.PasswordUIView.PasswordListObserver;
+import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreference;
 import org.chromium.chrome.browser.preferences.ChromeBasePreference;
 import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.Preferences;
+import org.chromium.content.common.ContentSwitches;
 import org.chromium.ui.text.SpanApplier;
 
 /**
@@ -48,15 +51,17 @@ public class ManageSavedPasswordsPreferences extends PreferenceFragment
     public static final String PASSWORD_LIST_DELETED_ID = "deleted_id";
 
     public static final String PREF_SAVE_PASSWORDS_SWITCH = "save_passwords_switch";
+    public static final String PREF_AUTOSIGNIN_SWITCH = "autosignin_switch";
 
     private static final String PREF_CATEGORY_SAVED_PASSWORDS = "saved_passwords";
     private static final String PREF_CATEGORY_EXCEPTIONS = "exceptions";
     private static final String PREF_MANAGE_ACCOUNT_LINK = "manage_account_link";
 
     private static final int ORDER_SWITCH = 0;
-    private static final int ORDER_MANAGE_ACCOUNT_LINK = 1;
-    private static final int ORDER_SAVED_PASSWORDS = 2;
-    private static final int ORDER_EXCEPTIONS = 3;
+    private static final int ORDER_AUTO_SIGNIN_CHECKBOX = 1;
+    private static final int ORDER_MANAGE_ACCOUNT_LINK = 2;
+    private static final int ORDER_SAVED_PASSWORDS = 3;
+    private static final int ORDER_EXCEPTIONS = 4;
 
     public static final int RESULT_DELETE_PASSWORD = 1;
 
@@ -65,6 +70,8 @@ public class ManageSavedPasswordsPreferences extends PreferenceFragment
     private boolean mNoPasswords;
     private boolean mNoPasswordExceptions;
     private Preference mLinkPref;
+    private ChromeSwitchPreference mSavePasswordsSwitch;
+    private ChromeBaseCheckBoxPreference mAutoSignInSwitch;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -105,7 +112,8 @@ public class ManageSavedPasswordsPreferences extends PreferenceFragment
         mNoPasswordExceptions = false;
         getPreferenceScreen().removeAll();
         mEmptyView.setVisibility(View.GONE);
-        createSavePasswordsSwitch(PrefServiceBridge.getInstance().isRememberPasswordsEnabled());
+        createSavePasswordsSwitch();
+        createAutoSignInCheckbox();
         mPasswordManagerHandler.updatePasswordLists();
     }
 
@@ -242,39 +250,67 @@ public class ManageSavedPasswordsPreferences extends PreferenceFragment
         }
     }
 
-    private void createSavePasswordsSwitch(boolean isEnabled) {
-        ChromeSwitchPreference savePasswordsSwitch =
-                new ChromeSwitchPreference(getActivity(), null);
-        savePasswordsSwitch.setKey(PREF_SAVE_PASSWORDS_SWITCH);
-        savePasswordsSwitch.setOrder(ORDER_SWITCH);
-        savePasswordsSwitch.setSummaryOn(R.string.text_on);
-        savePasswordsSwitch.setSummaryOff(R.string.text_off);
-        savePasswordsSwitch.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
+    private void createSavePasswordsSwitch() {
+        mSavePasswordsSwitch = new ChromeSwitchPreference(getActivity(), null);
+        mSavePasswordsSwitch.setKey(PREF_SAVE_PASSWORDS_SWITCH);
+        mSavePasswordsSwitch.setTitle(R.string.prefs_saved_passwords);
+        mSavePasswordsSwitch.setOrder(ORDER_SWITCH);
+        mSavePasswordsSwitch.setSummaryOn(R.string.text_on);
+        mSavePasswordsSwitch.setSummaryOff(R.string.text_off);
+        mSavePasswordsSwitch.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
             @Override
             public boolean onPreferenceChange(Preference preference, Object newValue) {
                 PrefServiceBridge.getInstance().setRememberPasswordsEnabled((boolean) newValue);
                 return true;
             }
         });
-
-        savePasswordsSwitch.setManagedPreferenceDelegate(new ManagedPreferenceDelegate() {
+        mSavePasswordsSwitch.setManagedPreferenceDelegate(new ManagedPreferenceDelegate() {
             @Override
             public boolean isPreferenceControlledByPolicy(Preference preference) {
                 return PrefServiceBridge.getInstance().isRememberPasswordsManaged();
             }
         });
-
-        getPreferenceScreen().addPreference(savePasswordsSwitch);
+        getPreferenceScreen().addPreference(mSavePasswordsSwitch);
 
         // Note: setting the switch state before the preference is added to the screen results in
         // some odd behavior where the switch state doesn't always match the internal enabled state
         // (e.g. the switch will say "On" when save passwords is really turned off), so
         // .setChecked() should be called after .addPreference()
-        savePasswordsSwitch.setChecked(isEnabled);
+        mSavePasswordsSwitch.setChecked(
+                PrefServiceBridge.getInstance().isRememberPasswordsEnabled());
+    }
+
+    private void createAutoSignInCheckbox() {
+        if (!CommandLine.getInstance().hasSwitch(ContentSwitches.ENABLE_CREDENTIAL_MANAGER_API)) {
+            return;
+        }
+        mAutoSignInSwitch = new ChromeBaseCheckBoxPreference(getActivity(), null);
+        mAutoSignInSwitch.setKey(PREF_AUTOSIGNIN_SWITCH);
+        mAutoSignInSwitch.setTitle(R.string.passwords_auto_signin_title);
+        mAutoSignInSwitch.setOrder(ORDER_AUTO_SIGNIN_CHECKBOX);
+        mAutoSignInSwitch.setSummary(R.string.passwords_auto_signin_description);
+        mAutoSignInSwitch.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
+            @Override
+            public boolean onPreferenceChange(Preference preference, Object newValue) {
+                PrefServiceBridge.getInstance().setPasswordManagerAutoSigninEnabled(
+                        (boolean) newValue);
+                return true;
+            }
+        });
+        mAutoSignInSwitch.setManagedPreferenceDelegate(new ManagedPreferenceDelegate() {
+            @Override
+            public boolean isPreferenceControlledByPolicy(Preference preference) {
+                return PrefServiceBridge.getInstance().isPasswordManagerAutoSigninManaged();
+            }
+        });
+        getPreferenceScreen().addPreference(mAutoSignInSwitch);
+        mAutoSignInSwitch.setChecked(
+                PrefServiceBridge.getInstance().isPasswordManagerAutoSigninEnabled());
     }
 
     private void displayManageAccountLink() {
-        if (PasswordUIView.shouldDisplayManageAccountLink()
+        boolean shouldDisplayLink = PasswordUIView.shouldDisplayManageAccountLink();
+        if (shouldDisplayLink
                 && getPreferenceScreen().findPreference(PREF_MANAGE_ACCOUNT_LINK) == null) {
             if (mLinkPref == null) {
                 ForegroundColorSpan colorSpan = new ForegroundColorSpan(
@@ -290,5 +326,8 @@ public class ManageSavedPasswordsPreferences extends PreferenceFragment
             }
             getPreferenceScreen().addPreference(mLinkPref);
         }
+        // Draw a divider only if the preference after mSavePasswordsSwitch is not selectable,
+        // in which case the ListView itself doesn't draw a divider.
+        mSavePasswordsSwitch.setDrawDivider(!shouldDisplayLink && mAutoSignInSwitch == null);
     }
 }

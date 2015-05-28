@@ -70,7 +70,6 @@ class MockInputRouter : public InputRouter {
   ~MockInputRouter() override {}
 
   // InputRouter
-  void Flush() override { flush_called_ = true; }
   bool SendInput(scoped_ptr<IPC::Message> message) override {
     send_event_called_ = true;
     return true;
@@ -100,8 +99,8 @@ class MockInputRouter : public InputRouter {
     NOTREACHED();
     return NULL;
   }
-  bool ShouldForwardTouchEvent() const override { return true; }
   void OnViewUpdated(int view_flags) override {}
+  void RequestNotificationWhenFlushed() override {}
   bool HasPendingEvents() const override { return false; }
 
   // IPC::Listener
@@ -110,7 +109,6 @@ class MockInputRouter : public InputRouter {
     return false;
   }
 
-  bool flush_called_;
   bool send_event_called_;
   bool sent_mouse_event_;
   bool sent_wheel_event_;
@@ -159,10 +157,6 @@ class MockRenderWidgetHost : public RenderWidgetHostImpl {
     return unresponsive_timer_fired_;
   }
 
-  void set_hung_renderer_delay_ms(int64 delay_ms) {
-    hung_renderer_delay_ms_ = delay_ms;
-  }
-
   void DisableGestureDebounce() {
     input_router_.reset(new InputRouterImpl(
         process_, this, this, routing_id_, InputRouterImpl::Config()));
@@ -198,35 +192,15 @@ namespace  {
 class RenderWidgetHostProcess : public MockRenderProcessHost {
  public:
   explicit RenderWidgetHostProcess(BrowserContext* browser_context)
-      : MockRenderProcessHost(browser_context),
-        update_msg_reply_flags_(0) {
+      : MockRenderProcessHost(browser_context) {
   }
   ~RenderWidgetHostProcess() override {}
-
-  void set_update_msg_reply_flags(int flags) {
-    update_msg_reply_flags_ = flags;
-  }
-
-  // Fills the given update parameters with resonable default values.
-  void InitUpdateRectParams(ViewHostMsg_UpdateRect_Params* params);
 
   bool HasConnection() const override { return true; }
 
  protected:
-  // Indicates the flags that should be sent with a repaint request. This
-  // only has an effect when update_msg_should_reply_ is true.
-  int update_msg_reply_flags_;
-
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostProcess);
 };
-
-void RenderWidgetHostProcess::InitUpdateRectParams(
-    ViewHostMsg_UpdateRect_Params* params) {
-  const int w = 100, h = 100;
-
-  params->view_size = gfx::Size(w, h);
-  params->flags = update_msg_reply_flags_;
-}
 
 // TestView --------------------------------------------------------------------
 
@@ -458,6 +432,7 @@ class RenderWidgetHostTest : public testing::Test {
 
 #if defined(USE_AURA)
     aura::Env::DeleteInstance();
+    gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, nullptr);
     screen_.reset();
 #endif
 #if defined(USE_AURA) || (defined(OS_MACOSX) && !defined(OS_IOS))
@@ -636,7 +611,13 @@ TEST_F(RenderWidgetHostTest, Resize) {
   EXPECT_FALSE(host_->resize_ack_pending_);
   EXPECT_FALSE(process_->sink().GetUniqueMessageMatching(ViewMsg_Resize::ID));
 
-  // Setting the bounds to a "real" rect should send out the notification.
+  // No resize ack if the physical backing gets set, but the view bounds are
+  // zero.
+  view_->SetMockPhysicalBackingSize(gfx::Size(200, 200));
+  host_->WasResized();
+  EXPECT_FALSE(host_->resize_ack_pending_);
+
+  // Setting the view bounds to nonzero should send out the notification.
   // but should not expect ack for empty physical backing size.
   gfx::Rect original_size(0, 0, 100, 100);
   process_->sink().ClearMessages();
@@ -647,14 +628,19 @@ TEST_F(RenderWidgetHostTest, Resize) {
   EXPECT_EQ(original_size.size(), host_->old_resize_params_->new_size);
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(ViewMsg_Resize::ID));
 
-  // Setting the bounds to a "real" rect should send out the notification.
-  // but should not expect ack for only physical backing size change.
+  // Setting the bounds and physical backing size to nonzero should send out
+  // the notification and expect an ack.
   process_->sink().ClearMessages();
   view_->ClearMockPhysicalBackingSize();
   host_->WasResized();
-  EXPECT_FALSE(host_->resize_ack_pending_);
+  EXPECT_TRUE(host_->resize_ack_pending_);
   EXPECT_EQ(original_size.size(), host_->old_resize_params_->new_size);
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(ViewMsg_Resize::ID));
+  ViewHostMsg_UpdateRect_Params params;
+  params.flags = ViewHostMsg_UpdateRect_Flags::IS_RESIZE_ACK;
+  params.view_size = original_size.size();
+  host_->OnUpdateRect(params);
+  EXPECT_FALSE(host_->resize_ack_pending_);
 
   // Send out a update that's not a resize ack after setting resize ack pending
   // flag. This should not clean the resize ack pending flag.
@@ -664,8 +650,8 @@ TEST_F(RenderWidgetHostTest, Resize) {
   view_->set_bounds(second_size);
   host_->WasResized();
   EXPECT_TRUE(host_->resize_ack_pending_);
-  ViewHostMsg_UpdateRect_Params params;
-  process_->InitUpdateRectParams(&params);
+  params.flags = 0;
+  params.view_size = gfx::Size(100, 100);
   host_->OnUpdateRect(params);
   EXPECT_TRUE(host_->resize_ack_pending_);
   EXPECT_EQ(second_size.size(), host_->old_resize_params_->new_size);
@@ -689,15 +675,16 @@ TEST_F(RenderWidgetHostTest, Resize) {
   host_->OnUpdateRect(params);
   EXPECT_TRUE(host_->resize_ack_pending_);
   EXPECT_EQ(third_size.size(), host_->old_resize_params_->new_size);
-  ASSERT_TRUE(process_->sink().GetUniqueMessageMatching(ViewMsg_Resize::ID));
+  EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(ViewMsg_Resize::ID));
 
   // Send the resize ack for the latest size.
   process_->sink().ClearMessages();
+  params.flags = ViewHostMsg_UpdateRect_Flags::IS_RESIZE_ACK;
   params.view_size = third_size.size();
   host_->OnUpdateRect(params);
   EXPECT_FALSE(host_->resize_ack_pending_);
   EXPECT_EQ(third_size.size(), host_->old_resize_params_->new_size);
-  ASSERT_FALSE(process_->sink().GetFirstMessageMatching(ViewMsg_Resize::ID));
+  EXPECT_FALSE(process_->sink().GetFirstMessageMatching(ViewMsg_Resize::ID));
 
   // Now clearing the bounds should send out a notification but we shouldn't
   // expect a resize ack (since the renderer won't ack empty sizes). The message
@@ -805,7 +792,7 @@ TEST_F(RenderWidgetHostTest, HiddenPaint) {
   // Send it an update as from the renderer.
   process_->sink().ClearMessages();
   ViewHostMsg_UpdateRect_Params params;
-  process_->InitUpdateRectParams(&params);
+  params.view_size = gfx::Size(100, 100);
   host_->OnUpdateRect(params);
 
   // Now unhide.
@@ -991,13 +978,51 @@ TEST_F(RenderWidgetHostTest, ShorterDelayHangMonitorTimeout) {
   EXPECT_TRUE(host_->unresponsive_timer_fired());
 }
 
+// Test that the hang monitor timer is effectively disabled when the widget is
+// hidden.
+TEST_F(RenderWidgetHostTest, HangMonitorTimeoutDisabledForInputWhenHidden) {
+  host_->set_hung_renderer_delay(base::TimeDelta::FromMicroseconds(1));
+  SimulateMouseEvent(WebInputEvent::MouseMove, 10, 10, 0, false);
+
+  // Hiding the widget should deactivate the timeout.
+  host_->WasHidden();
+
+  // The timeout should not fire.
+  EXPECT_FALSE(host_->unresponsive_timer_fired());
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::MessageLoop::QuitClosure(),
+      TimeDelta::FromMicroseconds(2));
+  base::MessageLoop::current()->Run();
+  EXPECT_FALSE(host_->unresponsive_timer_fired());
+
+  // The timeout should never reactivate while hidden.
+  SimulateMouseEvent(WebInputEvent::MouseMove, 10, 10, 0, false);
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::MessageLoop::QuitClosure(),
+      TimeDelta::FromMicroseconds(2));
+  base::MessageLoop::current()->Run();
+  EXPECT_FALSE(host_->unresponsive_timer_fired());
+
+  // Showing the widget should restore the timeout, as the events have
+  // not yet been ack'ed.
+  host_->WasShown(ui::LatencyInfo());
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::MessageLoop::QuitClosure(),
+      TimeDelta::FromMicroseconds(2));
+  base::MessageLoop::current()->Run();
+  EXPECT_TRUE(host_->unresponsive_timer_fired());
+}
+
 // Test that the hang monitor catches two input events but only one ack.
 // This can happen if the second input event causes the renderer to hang.
 // This test will catch a regression of crbug.com/111185.
 TEST_F(RenderWidgetHostTest, MultipleInputEvents) {
   // Configure the host to wait 10ms before considering
   // the renderer hung.
-  host_->set_hung_renderer_delay_ms(10);
+  host_->set_hung_renderer_delay(base::TimeDelta::FromMicroseconds(10));
 
   // Send two events but only one ack.
   SimulateKeyboardEvent(WebInputEvent::RawKeyDown);
@@ -1009,7 +1034,7 @@ TEST_F(RenderWidgetHostTest, MultipleInputEvents) {
   base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::MessageLoop::QuitClosure(),
-      TimeDelta::FromMilliseconds(40));
+      TimeDelta::FromMicroseconds(20));
   base::MessageLoop::current()->Run();
   EXPECT_TRUE(host_->unresponsive_timer_fired());
 }
@@ -1034,7 +1059,8 @@ TEST_F(RenderWidgetHostTest, TouchEmulator) {
   simulated_event_time_delta_seconds_ = 0.1;
   // Immediately ack all touches instead of sending them to the renderer.
   host_->OnMessageReceived(ViewHostMsg_HasTouchEventHandlers(0, false));
-  host_->SetTouchEventEmulationEnabled(true);
+  host_->SetTouchEventEmulationEnabled(
+      true, ui::GestureProviderConfigType::GENERIC_MOBILE);
   process_->sink().ClearMessages();
   view_->set_bounds(gfx::Rect(0, 0, 400, 200));
   view_->Show();
@@ -1133,7 +1159,8 @@ TEST_F(RenderWidgetHostTest, TouchEmulator) {
   EXPECT_EQ(0U, process_->sink().message_count());
 
   // Turn off emulation during a pinch.
-  host_->SetTouchEventEmulationEnabled(false);
+  host_->SetTouchEventEmulationEnabled(
+      false, ui::GestureProviderConfigType::GENERIC_MOBILE);
   EXPECT_EQ(WebInputEvent::TouchCancel, host_->acked_touch_event_type());
   EXPECT_EQ("GesturePinchEnd GestureScrollEnd",
             GetInputMessageTypes(process_));
@@ -1148,7 +1175,8 @@ TEST_F(RenderWidgetHostTest, TouchEmulator) {
   EXPECT_EQ(0U, process_->sink().message_count());
 
   // Turn on emulation.
-  host_->SetTouchEventEmulationEnabled(true);
+  host_->SetTouchEventEmulationEnabled(
+      true, ui::GestureProviderConfigType::GENERIC_MOBILE);
   EXPECT_EQ(0U, process_->sink().message_count());
 
   // Another touch.
@@ -1167,7 +1195,8 @@ TEST_F(RenderWidgetHostTest, TouchEmulator) {
                     INPUT_EVENT_ACK_STATE_CONSUMED);
 
   // Turn off emulation during a scroll.
-  host_->SetTouchEventEmulationEnabled(false);
+  host_->SetTouchEventEmulationEnabled(
+      false, ui::GestureProviderConfigType::GENERIC_MOBILE);
   EXPECT_EQ(WebInputEvent::TouchCancel, host_->acked_touch_event_type());
 
   EXPECT_EQ("GestureScrollEnd", GetInputMessageTypes(process_));

@@ -6,11 +6,11 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/renderer/media/cast_session.h"
 #include "chrome/renderer/media/cast_udp_transport.h"
@@ -70,8 +70,6 @@ CastRtpPayloadParams DefaultVp8Payload() {
   payload.min_bitrate = 50;
   payload.channels = 1;
   payload.max_frame_rate = media::cast::kDefaultMaxFrameRate;
-  payload.width = 1280;
-  payload.height = 720;
   payload.codec_name = kCodecNameVp8;
   return payload;
 }
@@ -89,8 +87,6 @@ CastRtpPayloadParams DefaultH264Payload() {
   payload.min_bitrate = 50;
   payload.channels = 1;
   payload.max_frame_rate = media::cast::kDefaultMaxFrameRate;
-  payload.width = 1280;
-  payload.height = 720;
   payload.codec_name = kCodecNameH264;
   return payload;
 }
@@ -214,10 +210,6 @@ bool ToVideoSenderConfig(const CastRtpParams& params,
   if (config->min_playout_delay > config->max_playout_delay)
     return false;
   config->rtp_payload_type = params.payload.payload_type;
-  config->width = params.payload.width;
-  config->height = params.payload.height;
-  if (config->width < 2 || config->height < 2)
-    return false;
   config->min_bitrate = config->start_bitrate =
       params.payload.min_bitrate * kBitrateMultiplier;
   config->max_bitrate = params.payload.max_bitrate * kBitrateMultiplier;
@@ -257,14 +249,11 @@ class CastVideoSink : public base::SupportsWeakPtr<CastVideoSink>,
                       public content::MediaStreamVideoSink {
  public:
   // |track| provides data for this sink.
-  // |expected_natural_size| is the expected dimension of the video frame.
   // |error_callback| is called if video formats don't match.
   CastVideoSink(const blink::WebMediaStreamTrack& track,
-                const gfx::Size& expected_natural_size,
                 const CastRtpStream::ErrorCallback& error_callback)
       : track_(track),
         sink_added_(false),
-        expected_natural_size_(expected_natural_size),
         error_callback_(error_callback) {}
 
   ~CastVideoSink() override {
@@ -275,24 +264,11 @@ class CastVideoSink : public base::SupportsWeakPtr<CastVideoSink>,
   // This static method is used to forward video frames to |frame_input|.
   static void OnVideoFrame(
       // These parameters are already bound when callback is created.
-      const gfx::Size& expected_natural_size,
       const CastRtpStream::ErrorCallback& error_callback,
       const scoped_refptr<media::cast::VideoFrameInput> frame_input,
       // These parameters are passed for each frame.
       const scoped_refptr<media::VideoFrame>& frame,
-      const media::VideoCaptureFormat& format,
       const base::TimeTicks& estimated_capture_time) {
-    if (frame->natural_size() != expected_natural_size) {
-      error_callback.Run(
-          base::StringPrintf("Video frame resolution does not match config."
-                             " Expected %dx%d. Got %dx%d.",
-                             expected_natural_size.width(),
-                             expected_natural_size.height(),
-                             frame->natural_size().width(),
-                             frame->natural_size().height()));
-      return;
-    }
-
     base::TimeTicks timestamp;
     if (estimated_capture_time.is_null())
       timestamp = base::TimeTicks::Now();
@@ -318,7 +294,6 @@ class CastVideoSink : public base::SupportsWeakPtr<CastVideoSink>,
         this,
         base::Bind(
             &CastVideoSink::OnVideoFrame,
-            expected_natural_size_,
             error_callback_,
             frame_input),
         track_);
@@ -327,7 +302,6 @@ class CastVideoSink : public base::SupportsWeakPtr<CastVideoSink>,
  private:
   blink::WebMediaStreamTrack track_;
   bool sink_added_;
-  gfx::Size expected_natural_size_;
   CastRtpStream::ErrorCallback error_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CastVideoSink);
@@ -482,9 +456,8 @@ CastRtpPayloadParams::CastRtpPayloadParams()
       max_bitrate(0),
       min_bitrate(0),
       channels(0),
-      max_frame_rate(0.0),
-      width(0),
-      height(0) {}
+      max_frame_rate(0.0) {
+}
 
 CastRtpPayloadParams::~CastRtpPayloadParams() {}
 
@@ -543,7 +516,6 @@ void CastRtpStream::Start(const CastRtpParams& params,
     // See the code for audio above for explanation of callbacks.
     video_sink_.reset(new CastVideoSink(
         track_,
-        gfx::Size(config.width, config.height),
         media::BindToCurrentLoop(base::Bind(&CastRtpStream::DidEncounterError,
                                             weak_factory_.GetWeakPtr()))));
     cast_session_->StartVideo(

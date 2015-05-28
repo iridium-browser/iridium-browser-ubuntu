@@ -13,10 +13,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/install_verification/win/module_info.h"
 #include "chrome/browser/install_verification/win/module_verification_common.h"
-#include "chrome/browser/safe_browsing/binary_feature_extractor.h"
-#include "chrome/browser/safe_browsing/incident_reporting/add_incident_callback.h"
+#include "chrome/browser/safe_browsing/incident_reporting/blacklist_load_incident.h"
+#include "chrome/browser/safe_browsing/incident_reporting/incident_receiver.h"
 #include "chrome/browser/safe_browsing/path_sanitizer.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/common/safe_browsing/binary_feature_extractor.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome_elf/blacklist/blacklist.h"
 
@@ -43,7 +44,7 @@ bool GetLoadedBlacklistedModules(std::vector<base::string16>* module_names) {
   return true;
 }
 
-void VerifyBlacklistLoadState(const AddIncidentCallback& callback) {
+void VerifyBlacklistLoadState(scoped_ptr<IncidentReceiver> incident_receiver) {
   std::vector<base::string16> module_names;
   if (GetLoadedBlacklistedModules(&module_names)) {
     PathSanitizer path_sanitizer;
@@ -51,10 +52,9 @@ void VerifyBlacklistLoadState(const AddIncidentCallback& callback) {
     const bool blacklist_intialized = blacklist::IsBlacklistInitialized();
 
     for (const auto& module_name : module_names) {
-      scoped_ptr<ClientIncidentReport_IncidentData> incident_data(
-          new ClientIncidentReport_IncidentData());
-      ClientIncidentReport_IncidentData_BlacklistLoadIncident* blacklist_load =
-          incident_data->mutable_blacklist_load();
+      scoped_ptr<ClientIncidentReport_IncidentData_BlacklistLoadIncident>
+          blacklist_load(
+              new ClientIncidentReport_IncidentData_BlacklistLoadIncident());
 
       const base::FilePath module_path(module_name);
 
@@ -92,11 +92,17 @@ void VerifyBlacklistLoadState(const AddIncidentCallback& callback) {
                           base::TimeTicks::Now() - start_time);
 
       // Image headers.
-      binary_feature_extractor->ExtractImageHeaders(
-          module_path, blacklist_load->mutable_image_headers());
+      if (!binary_feature_extractor->ExtractImageFeatures(
+              module_path,
+              BinaryFeatureExtractor::kDefaultOptions,
+              blacklist_load->mutable_image_headers(),
+              nullptr /* signed_data */)) {
+        blacklist_load->clear_image_headers();
+      }
 
       // Send the report.
-      callback.Run(incident_data.Pass());
+      incident_receiver->AddIncidentForProcess(
+          make_scoped_ptr(new BlacklistLoadIncident(blacklist_load.Pass())));
     }
   }
 }

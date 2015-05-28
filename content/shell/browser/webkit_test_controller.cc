@@ -205,7 +205,8 @@ WebKitTestController::WebKitTestController()
       is_leak_detection_enabled_(
           base::CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kEnableLeakDetection)),
-      crash_when_leak_found_(false) {
+      crash_when_leak_found_(false),
+      devtools_frontend_(NULL) {
   CHECK(!instance_);
   instance_ = this;
 
@@ -252,8 +253,7 @@ bool WebKitTestController::PrepareForLayoutTest(
       ShellContentBrowserClient::Get()->browser_context();
   if (test_url.spec().find("compositing/") != std::string::npos)
     is_compositing_test_ = true;
-  initial_size_ = gfx::Size(
-      Shell::kDefaultTestWindowWidthDip, Shell::kDefaultTestWindowHeightDip);
+  initial_size_ = Shell::GetShellDefaultSize();
   // The W3C SVG layout tests use a different size than the other layout tests.
   if (test_url.spec().find("W3C-SVG-1.1") != std::string::npos)
     initial_size_ = gfx::Size(kTestSVGWindowWidthDip, kTestSVGWindowHeightDip);
@@ -433,7 +433,9 @@ void WebKitTestController::RenderProcessGone(base::TerminationStatus status) {
 void WebKitTestController::DevToolsProcessCrashed() {
   DCHECK(CalledOnValidThread());
   printer_->AddErrorMessage("#CRASHED - devtools");
-  DiscardMainWindow();
+  if (devtools_frontend_)
+      devtools_frontend_->Close();
+  devtools_frontend_ = NULL;
 }
 
 void WebKitTestController::WebContentsDestroyed() {
@@ -513,6 +515,7 @@ void WebKitTestController::OnTestFinished() {
     printer_->PrintImageFooter();
   RenderViewHost* render_view_host =
       main_window_->web_contents()->GetRenderViewHost();
+  main_window_->web_contents()->ExitFullscreen();
   base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(base::IgnoreResult(&WebKitTestController::Send),
@@ -586,11 +589,19 @@ void WebKitTestController::OnClearDevToolsLocalStorage() {
 
 void WebKitTestController::OnShowDevTools(const std::string& settings,
                                           const std::string& frontend_url) {
-  main_window_->ShowDevToolsForTest(settings, frontend_url);
+  if (!devtools_frontend_) {
+    devtools_frontend_ = LayoutTestDevToolsFrontend::Show(
+        main_window_->web_contents(), settings, frontend_url);
+  } else {
+    devtools_frontend_->ReuseFrontend(settings, frontend_url);
+  }
+  devtools_frontend_->Activate();
+  devtools_frontend_->Focus();
 }
 
 void WebKitTestController::OnCloseDevTools() {
-  main_window_->CloseDevTools();
+  if (devtools_frontend_)
+    devtools_frontend_->DisconnectFromTarget();
 }
 
 void WebKitTestController::OnGoToOffset(int offset) {
@@ -653,8 +664,10 @@ void WebKitTestController::OnCaptureSessionHistory() {
 void WebKitTestController::OnCloseRemainingWindows() {
   DevToolsAgentHost::DetachAllClients();
   std::vector<Shell*> open_windows(Shell::windows());
+  Shell* devtools_shell = devtools_frontend_ ?
+      devtools_frontend_->frontend_shell() : NULL;
   for (size_t i = 0; i < open_windows.size(); ++i) {
-    if (open_windows[i] != main_window_)
+    if (open_windows[i] != main_window_ && open_windows[i] != devtools_shell)
       open_windows[i]->Close();
   }
   base::MessageLoop::current()->RunUntilIdle();

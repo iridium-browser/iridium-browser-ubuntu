@@ -8,7 +8,6 @@
     "compiler_options": {
       "implemented_in": "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
     },
-    "platforms": ["chromeos"],
     "description": "none",
     "types": [
       {
@@ -256,6 +255,13 @@
             ]
           }
         ]
+      }
+    ],
+    "events": [
+      {
+        "name": "onWallpaperChangedBy3rdParty",
+        "type": "function",
+        "description": "This event is sent when the current wallpaper was set by a third party application."
       }
     ]
   }

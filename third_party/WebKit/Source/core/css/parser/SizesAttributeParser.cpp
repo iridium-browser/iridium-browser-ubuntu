@@ -17,8 +17,7 @@ SizesAttributeParser::SizesAttributeParser(PassRefPtr<MediaValues> mediaValues, 
     , m_length(0)
     , m_lengthWasSet(false)
 {
-    CSSTokenizer::tokenize(attribute, m_tokens);
-    m_isValid = parse(m_tokens);
+    m_isValid = parse(CSSTokenizer::Scope(attribute).tokenRange());
 }
 
 float SizesAttributeParser::length()
@@ -61,9 +60,8 @@ bool SizesAttributeParser::mediaConditionMatches(PassRefPtrWillBeRawPtr<MediaQue
     return mediaQueryEvaluator.eval(mediaCondition.get());
 }
 
-bool SizesAttributeParser::parse(Vector<CSSParserToken>& tokens)
+bool SizesAttributeParser::parse(CSSParserTokenRange range)
 {
-    CSSParserTokenRange range(tokens);
     // Split on a comma token and parse the result tokens as (media-condition, length) pairs
     while (!range.atEnd()) {
         const CSSParserToken* mediaConditionStart = &range.peek();
@@ -74,7 +72,7 @@ bool SizesAttributeParser::parse(Vector<CSSParserToken>& tokens)
             lengthTokenStart = &range.peek();
             range.consumeComponentValue();
             lengthTokenEnd = &range.peek();
-            range.consumeWhitespaceAndComments();
+            range.consumeWhitespace();
         }
         range.consume();
 

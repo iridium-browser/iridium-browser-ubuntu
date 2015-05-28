@@ -10,11 +10,13 @@
 #include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/crypto/quic_crypto_server_config.h"
 #include "net/quic/crypto/quic_random.h"
+#include "net/quic/quic_connection_helper.h"
 #include "net/quic/quic_crypto_stream.h"
 #include "net/quic/quic_flags.h"
 #include "net/quic/quic_utils.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/tools/epoll_server/epoll_server.h"
+#include "net/tools/quic/quic_epoll_connection_helper.h"
 #include "net/tools/quic/quic_packet_writer_wrapper.h"
 #include "net/tools/quic/quic_time_wait_list_manager.h"
 #include "net/tools/quic/test_tools/quic_dispatcher_peer.h"
@@ -25,10 +27,9 @@
 using base::StringPiece;
 using net::EpollServer;
 using net::test::ConstructEncryptedPacket;
+using net::test::MockConnection;
 using net::test::MockSession;
 using net::test::ValueRestore;
-using net::tools::test::MockConnection;
-using std::make_pair;
 using std::string;
 using testing::DoAll;
 using testing::InSequence;
@@ -41,22 +42,36 @@ namespace tools {
 namespace test {
 namespace {
 
+class TestServerSession : public QuicServerSession {
+ public:
+  TestServerSession(const QuicConfig& config, QuicConnection* connection)
+      : QuicServerSession(config, connection, nullptr) {}
+  ~TestServerSession() override{};
+
+  MOCK_METHOD2(OnConnectionClosed, void(QuicErrorCode error, bool from_peer));
+  MOCK_METHOD1(CreateIncomingDataStream, QuicDataStream*(QuicStreamId id));
+  MOCK_METHOD0(CreateOutgoingDataStream, QuicDataStream*());
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestServerSession);
+};
+
 class TestDispatcher : public QuicDispatcher {
  public:
   explicit TestDispatcher(const QuicConfig& config,
-                          const QuicCryptoServerConfig& crypto_config,
+                          const QuicCryptoServerConfig* crypto_config,
                           EpollServer* eps)
       : QuicDispatcher(config,
                        crypto_config,
                        QuicSupportedVersions(),
                        new QuicDispatcher::DefaultPacketWriterFactory(),
-                       eps) {
+                       new QuicEpollConnectionHelper(eps)) {
   }
 
-  MOCK_METHOD3(CreateQuicSession, QuicSession*(
-      QuicConnectionId connection_id,
-      const IPEndPoint& server_address,
-      const IPEndPoint& client_address));
+  MOCK_METHOD3(CreateQuicSession,
+               QuicServerSession*(QuicConnectionId connection_id,
+                                  const IPEndPoint& server_address,
+                                  const IPEndPoint& client_address));
 
   using QuicDispatcher::current_server_address;
   using QuicDispatcher::current_client_address;
@@ -70,24 +85,27 @@ class MockServerConnection : public MockConnection {
  public:
   MockServerConnection(QuicConnectionId connection_id,
                        QuicDispatcher* dispatcher)
-      : MockConnection(connection_id, true),
+      : MockConnection(connection_id, Perspective::IS_SERVER),
         dispatcher_(dispatcher) {}
 
   void UnregisterOnConnectionClosed() {
     LOG(ERROR) << "Unregistering " << connection_id();
     dispatcher_->OnConnectionClosed(connection_id(), QUIC_NO_ERROR);
   }
+
  private:
   QuicDispatcher* dispatcher_;
 };
 
-QuicSession* CreateSession(QuicDispatcher* dispatcher,
-                           QuicConnectionId connection_id,
-                           const IPEndPoint& client_address,
-                           MockSession** session) {
+QuicServerSession* CreateSession(QuicDispatcher* dispatcher,
+                                 const QuicConfig& config,
+                                 QuicConnectionId connection_id,
+                                 const IPEndPoint& client_address,
+                                 TestServerSession** session) {
   MockServerConnection* connection =
       new MockServerConnection(connection_id, dispatcher);
-  *session = new MockSession(connection);
+  *session = new TestServerSession(config, connection);
+  connection->set_visitor(*session);
   ON_CALL(*connection, SendConnectionClose(_)).WillByDefault(
       WithoutArgs(Invoke(
           connection, &MockServerConnection::UnregisterOnConnectionClosed)));
@@ -100,12 +118,14 @@ QuicSession* CreateSession(QuicDispatcher* dispatcher,
 class QuicDispatcherTest : public ::testing::Test {
  public:
   QuicDispatcherTest()
-      : crypto_config_(QuicCryptoServerConfig::TESTING,
+      : helper_(&eps_),
+        crypto_config_(QuicCryptoServerConfig::TESTING,
                        QuicRandom::GetInstance()),
-        dispatcher_(config_, crypto_config_, &eps_),
+        dispatcher_(config_, &crypto_config_, &eps_),
+        time_wait_list_manager_(nullptr),
         session1_(nullptr),
         session2_(nullptr) {
-    dispatcher_.Initialize(1);
+    dispatcher_.InitializeWithWriter(new QuicDefaultPacketWriter(1));
   }
 
   ~QuicDispatcherTest() override {}
@@ -122,8 +142,19 @@ class QuicDispatcherTest : public ::testing::Test {
                      QuicConnectionId connection_id,
                      bool has_version_flag,
                      const string& data) {
+    ProcessPacket(client_address, connection_id, has_version_flag, data,
+                  PACKET_8BYTE_CONNECTION_ID, PACKET_6BYTE_SEQUENCE_NUMBER);
+  }
+
+  void ProcessPacket(IPEndPoint client_address,
+                     QuicConnectionId connection_id,
+                     bool has_version_flag,
+                     const string& data,
+                     QuicConnectionIdLength connection_id_length,
+                     QuicSequenceNumberLength sequence_number_length) {
     scoped_ptr<QuicEncryptedPacket> packet(ConstructEncryptedPacket(
-        connection_id, has_version_flag, false, 1, data));
+        connection_id, has_version_flag, false, 1, data, connection_id_length,
+        sequence_number_length));
     data_ = string(packet->data(), packet->length());
     dispatcher_.ProcessPacket(server_address_, client_address, *packet);
   }
@@ -133,13 +164,23 @@ class QuicDispatcherTest : public ::testing::Test {
     EXPECT_EQ(data_, packet.AsStringPiece());
   }
 
+  void CreateTimeWaitListManager() {
+    time_wait_list_manager_ = new MockTimeWaitListManager(
+        QuicDispatcherPeer::GetWriter(&dispatcher_), &dispatcher_, &helper_);
+    // dispatcher_ takes the ownership of time_wait_list_manager_.
+    QuicDispatcherPeer::SetTimeWaitListManager(&dispatcher_,
+                                               time_wait_list_manager_);
+  }
+
   EpollServer eps_;
+  QuicEpollConnectionHelper helper_;
   QuicConfig config_;
   QuicCryptoServerConfig crypto_config_;
   IPEndPoint server_address_;
   TestDispatcher dispatcher_;
-  MockSession* session1_;
-  MockSession* session2_;
+  MockTimeWaitListManager* time_wait_list_manager_;
+  TestServerSession* session1_;
+  TestServerSession* session2_;
   string data_;
 };
 
@@ -150,16 +191,15 @@ TEST_F(QuicDispatcherTest, ProcessPackets) {
   server_address_ = IPEndPoint(any4, 5);
 
   EXPECT_CALL(dispatcher_, CreateQuicSession(1, _, client_address))
-      .WillOnce(testing::Return(CreateSession(
-          &dispatcher_, 1, client_address, &session1_)));
+      .WillOnce(testing::Return(
+          CreateSession(&dispatcher_, config_, 1, client_address, &session1_)));
   ProcessPacket(client_address, 1, true, "foo");
   EXPECT_EQ(client_address, dispatcher_.current_client_address());
   EXPECT_EQ(server_address_, dispatcher_.current_server_address());
 
-
   EXPECT_CALL(dispatcher_, CreateQuicSession(2, _, client_address))
-      .WillOnce(testing::Return(CreateSession(
-                    &dispatcher_, 2, client_address, &session2_)));
+      .WillOnce(testing::Return(
+          CreateSession(&dispatcher_, config_, 2, client_address, &session2_)));
   ProcessPacket(client_address, 2, true, "bar");
 
   EXPECT_CALL(*reinterpret_cast<MockConnection*>(session1_->connection()),
@@ -173,8 +213,8 @@ TEST_F(QuicDispatcherTest, Shutdown) {
   IPEndPoint client_address(net::test::Loopback4(), 1);
 
   EXPECT_CALL(dispatcher_, CreateQuicSession(_, _, client_address))
-      .WillOnce(testing::Return(CreateSession(
-                    &dispatcher_, 1, client_address, &session1_)));
+      .WillOnce(testing::Return(
+          CreateSession(&dispatcher_, config_, 1, client_address, &session1_)));
 
   ProcessPacket(client_address, 1, true, "foo");
 
@@ -184,34 +224,15 @@ TEST_F(QuicDispatcherTest, Shutdown) {
   dispatcher_.Shutdown();
 }
 
-class MockTimeWaitListManager : public QuicTimeWaitListManager {
- public:
-  MockTimeWaitListManager(QuicPacketWriter* writer,
-                          QuicServerSessionVisitor* visitor,
-                          EpollServer* eps)
-      : QuicTimeWaitListManager(writer, visitor, eps, QuicSupportedVersions()) {
-  }
-
-  MOCK_METHOD5(ProcessPacket, void(const IPEndPoint& server_address,
-                                   const IPEndPoint& client_address,
-                                   QuicConnectionId connection_id,
-                                   QuicPacketSequenceNumber sequence_number,
-                                   const QuicEncryptedPacket& packet));
-};
-
 TEST_F(QuicDispatcherTest, TimeWaitListManager) {
-  MockTimeWaitListManager* time_wait_list_manager =
-      new MockTimeWaitListManager(
-          QuicDispatcherPeer::GetWriter(&dispatcher_), &dispatcher_, &eps_);
-  // dispatcher takes the ownership of time_wait_list_manager.
-  QuicDispatcherPeer::SetTimeWaitListManager(&dispatcher_,
-                                             time_wait_list_manager);
+  CreateTimeWaitListManager();
+
   // Create a new session.
   IPEndPoint client_address(net::test::Loopback4(), 1);
   QuicConnectionId connection_id = 1;
   EXPECT_CALL(dispatcher_, CreateQuicSession(connection_id, _, client_address))
       .WillOnce(testing::Return(CreateSession(
-                    &dispatcher_, connection_id, client_address, &session1_)));
+          &dispatcher_, config_, connection_id, client_address, &session1_)));
   ProcessPacket(client_address, connection_id, true, "foo");
 
   // Close the connection by sending public reset packet.
@@ -233,32 +254,48 @@ TEST_F(QuicDispatcherTest, TimeWaitListManager) {
           reinterpret_cast<MockConnection*>(session1_->connection()),
           &MockConnection::ReallyProcessUdpPacket));
   dispatcher_.ProcessPacket(IPEndPoint(), client_address, *encrypted);
-  EXPECT_TRUE(time_wait_list_manager->IsConnectionIdInTimeWait(connection_id));
+  EXPECT_TRUE(time_wait_list_manager_->IsConnectionIdInTimeWait(connection_id));
 
   // Dispatcher forwards subsequent packets for this connection_id to the time
   // wait list manager.
-  EXPECT_CALL(*time_wait_list_manager,
+  EXPECT_CALL(*time_wait_list_manager_,
               ProcessPacket(_, _, connection_id, _, _)).Times(1);
+  EXPECT_CALL(*time_wait_list_manager_, AddConnectionIdToTimeWait(_, _, _))
+      .Times(0);
   ProcessPacket(client_address, connection_id, true, "foo");
 }
 
 TEST_F(QuicDispatcherTest, StrayPacketToTimeWaitListManager) {
-  MockTimeWaitListManager* time_wait_list_manager =
-      new MockTimeWaitListManager(
-          QuicDispatcherPeer::GetWriter(&dispatcher_), &dispatcher_, &eps_);
-  // dispatcher takes the ownership of time_wait_list_manager.
-  QuicDispatcherPeer::SetTimeWaitListManager(&dispatcher_,
-                                             time_wait_list_manager);
+  CreateTimeWaitListManager();
 
   IPEndPoint client_address(net::test::Loopback4(), 1);
   QuicConnectionId connection_id = 1;
   // Dispatcher forwards all packets for this connection_id to the time wait
   // list manager.
   EXPECT_CALL(dispatcher_, CreateQuicSession(_, _, _)).Times(0);
-  EXPECT_CALL(*time_wait_list_manager,
+  EXPECT_CALL(*time_wait_list_manager_,
               ProcessPacket(_, _, connection_id, _, _)).Times(1);
-  string data = "foo";
-  ProcessPacket(client_address, connection_id, false, "foo");
+  EXPECT_CALL(*time_wait_list_manager_, AddConnectionIdToTimeWait(_, _, _))
+      .Times(1);
+  ProcessPacket(client_address, connection_id, false, "data");
+}
+
+TEST_F(QuicDispatcherTest, ProcessPacketWithBogusPort) {
+  CreateTimeWaitListManager();
+
+  IPEndPoint client_address(net::test::Loopback4(), 0);
+  IPAddressNumber any4;
+  CHECK(net::ParseIPLiteralToNumber("0.0.0.0", &any4));
+  server_address_ = IPEndPoint(any4, 5);
+
+  // dispatcher_ should drop this packet.
+  EXPECT_CALL(dispatcher_, CreateQuicSession(1, _, client_address)).Times(0);
+  EXPECT_CALL(*time_wait_list_manager_, ProcessPacket(_, _, _, _, _)).Times(0);
+  EXPECT_CALL(*time_wait_list_manager_, AddConnectionIdToTimeWait(_, _, _))
+      .Times(0);
+  ProcessPacket(client_address, 1, true, "foo");
+  EXPECT_EQ(client_address, dispatcher_.current_client_address());
+  EXPECT_EQ(server_address_, dispatcher_.current_server_address());
 }
 
 class BlockingWriter : public QuicPacketWriterWrapper {
@@ -293,13 +330,13 @@ class QuicDispatcherWriteBlockedListTest : public QuicDispatcherTest {
     IPEndPoint client_address(net::test::Loopback4(), 1);
 
     EXPECT_CALL(dispatcher_, CreateQuicSession(_, _, client_address))
-        .WillOnce(testing::Return(CreateSession(
-                      &dispatcher_, 1, client_address, &session1_)));
+        .WillOnce(testing::Return(CreateSession(&dispatcher_, config_, 1,
+                                                client_address, &session1_)));
     ProcessPacket(client_address, 1, true, "foo");
 
     EXPECT_CALL(dispatcher_, CreateQuicSession(_, _, client_address))
-        .WillOnce(testing::Return(CreateSession(
-                      &dispatcher_, 2, client_address, &session2_)));
+        .WillOnce(testing::Return(CreateSession(&dispatcher_, config_, 2,
+                                                client_address, &session2_)));
     ProcessPacket(client_address, 2, true, "bar");
 
     blocked_list_ = QuicDispatcherPeer::GetWriteBlockedList(&dispatcher_);

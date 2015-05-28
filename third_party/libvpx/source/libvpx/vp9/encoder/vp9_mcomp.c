@@ -90,13 +90,10 @@ static int mv_err_cost(const MV *mv, const MV *ref,
 
 static int mvsad_err_cost(const MACROBLOCK *x, const MV *mv, const MV *ref,
                           int error_per_bit) {
-  if (x->nmvsadcost) {
-    const MV diff = { mv->row - ref->row,
-                      mv->col - ref->col };
-    return ROUND_POWER_OF_TWO(mv_cost(&diff, x->nmvjointsadcost,
-                                      x->nmvsadcost) * error_per_bit, 8);
-  }
-  return 0;
+  const MV diff = { mv->row - ref->row,
+                    mv->col - ref->col };
+  return ROUND_POWER_OF_TWO(mv_cost(&diff, x->nmvjointsadcost,
+                                    x->nmvsadcost) * error_per_bit, 8);
 }
 
 void vp9_init_dsmotion_compensation(search_site_config *cfg, int stride) {
@@ -1717,6 +1714,184 @@ int vp9_diamond_search_sad_c(const MACROBLOCK *x,
   return bestsad;
 }
 
+static int vector_match(int16_t *ref, int16_t *src, int bwl) {
+  int best_sad = INT_MAX;
+  int this_sad;
+  int d;
+  int center, offset = 0;
+  int bw = 4 << bwl;  // redundant variable, to be changed in the experiments.
+  for (d = 0; d <= bw; d += 16) {
+    this_sad = vp9_vector_var(&ref[d], src, bwl);
+    if (this_sad < best_sad) {
+      best_sad = this_sad;
+      offset = d;
+    }
+  }
+  center = offset;
+
+  for (d = -8; d <= 8; d += 16) {
+    int this_pos = offset + d;
+    // check limit
+    if (this_pos < 0 || this_pos > bw)
+      continue;
+    this_sad = vp9_vector_var(&ref[this_pos], src, bwl);
+    if (this_sad < best_sad) {
+      best_sad = this_sad;
+      center = this_pos;
+    }
+  }
+  offset = center;
+
+  for (d = -4; d <= 4; d += 8) {
+    int this_pos = offset + d;
+    // check limit
+    if (this_pos < 0 || this_pos > bw)
+      continue;
+    this_sad = vp9_vector_var(&ref[this_pos], src, bwl);
+    if (this_sad < best_sad) {
+      best_sad = this_sad;
+      center = this_pos;
+    }
+  }
+  offset = center;
+
+  for (d = -2; d <= 2; d += 4) {
+    int this_pos = offset + d;
+    // check limit
+    if (this_pos < 0 || this_pos > bw)
+      continue;
+    this_sad = vp9_vector_var(&ref[this_pos], src, bwl);
+    if (this_sad < best_sad) {
+      best_sad = this_sad;
+      center = this_pos;
+    }
+  }
+  offset = center;
+
+  for (d = -1; d <= 1; d += 2) {
+    int this_pos = offset + d;
+    // check limit
+    if (this_pos < 0 || this_pos > bw)
+      continue;
+    this_sad = vp9_vector_var(&ref[this_pos], src, bwl);
+    if (this_sad < best_sad) {
+      best_sad = this_sad;
+      center = this_pos;
+    }
+  }
+
+  return (center - (bw >> 1));
+}
+
+static const MV search_pos[4] = {
+    {-1, 0}, {0, -1}, {0, 1}, {1, 0},
+};
+
+unsigned int vp9_int_pro_motion_estimation(const VP9_COMP *cpi, MACROBLOCK *x,
+                                           BLOCK_SIZE bsize) {
+  MACROBLOCKD *xd = &x->e_mbd;
+  DECLARE_ALIGNED(16, int16_t, hbuf[128]);
+  DECLARE_ALIGNED(16, int16_t, vbuf[128]);
+  DECLARE_ALIGNED(16, int16_t, src_hbuf[64]);
+  DECLARE_ALIGNED(16, int16_t, src_vbuf[64]);
+  int idx;
+  const int bw = 4 << b_width_log2_lookup[bsize];
+  const int bh = 4 << b_height_log2_lookup[bsize];
+  const int search_width = bw << 1;
+  const int search_height = bh << 1;
+  const int src_stride = x->plane[0].src.stride;
+  const int ref_stride = xd->plane[0].pre[0].stride;
+  uint8_t const *ref_buf, *src_buf;
+  MV *tmp_mv = &xd->mi[0].src_mi->mbmi.mv[0].as_mv;
+  unsigned int best_sad, tmp_sad, this_sad[4];
+  MV this_mv;
+  const int norm_factor = 3 + (bw >> 5);
+
+#if CONFIG_VP9_HIGHBITDEPTH
+  tmp_mv->row = 0;
+  tmp_mv->col = 0;
+  return cpi->fn_ptr[bsize].sdf(x->plane[0].src.buf, src_stride,
+                                xd->plane[0].pre[0].buf, ref_stride);
+#endif
+
+  // Set up prediction 1-D reference set
+  ref_buf = xd->plane[0].pre[0].buf - (bw >> 1);
+  for (idx = 0; idx < search_width; idx += 16) {
+    vp9_int_pro_row(&hbuf[idx], ref_buf, ref_stride, bh);
+    ref_buf += 16;
+  }
+
+  ref_buf = xd->plane[0].pre[0].buf - (bh >> 1) * ref_stride;
+  for (idx = 0; idx < search_height; ++idx) {
+    vbuf[idx] = vp9_int_pro_col(ref_buf, bw) >> norm_factor;
+    ref_buf += ref_stride;
+  }
+
+  // Set up src 1-D reference set
+  for (idx = 0; idx < bw; idx += 16) {
+    src_buf = x->plane[0].src.buf + idx;
+    vp9_int_pro_row(&src_hbuf[idx], src_buf, src_stride, bh);
+  }
+
+  src_buf = x->plane[0].src.buf;
+  for (idx = 0; idx < bh; ++idx) {
+    src_vbuf[idx] = vp9_int_pro_col(src_buf, bw) >> norm_factor;
+    src_buf += src_stride;
+  }
+
+  // Find the best match per 1-D search
+  tmp_mv->col = vector_match(hbuf, src_hbuf, b_width_log2_lookup[bsize]);
+  tmp_mv->row = vector_match(vbuf, src_vbuf, b_height_log2_lookup[bsize]);
+
+  this_mv = *tmp_mv;
+  src_buf = x->plane[0].src.buf;
+  ref_buf = xd->plane[0].pre[0].buf + this_mv.row * ref_stride + this_mv.col;
+  best_sad = cpi->fn_ptr[bsize].sdf(src_buf, src_stride, ref_buf, ref_stride);
+
+  {
+    const uint8_t * const pos[4] = {
+        ref_buf - ref_stride,
+        ref_buf - 1,
+        ref_buf + 1,
+        ref_buf + ref_stride,
+    };
+
+    cpi->fn_ptr[bsize].sdx4df(src_buf, src_stride, pos, ref_stride, this_sad);
+  }
+
+  for (idx = 0; idx < 4; ++idx) {
+    if (this_sad[idx] < best_sad) {
+      best_sad = this_sad[idx];
+      tmp_mv->row = search_pos[idx].row + this_mv.row;
+      tmp_mv->col = search_pos[idx].col + this_mv.col;
+    }
+  }
+
+  if (this_sad[0] < this_sad[3])
+    this_mv.row -= 1;
+  else
+    this_mv.row += 1;
+
+  if (this_sad[1] < this_sad[2])
+    this_mv.col -= 1;
+  else
+    this_mv.col += 1;
+
+  ref_buf = xd->plane[0].pre[0].buf + this_mv.row * ref_stride + this_mv.col;
+
+  tmp_sad = cpi->fn_ptr[bsize].sdf(src_buf, src_stride,
+                                   ref_buf, ref_stride);
+  if (best_sad > tmp_sad) {
+    *tmp_mv = this_mv;
+    best_sad = tmp_sad;
+  }
+
+  tmp_mv->row *= 8;
+  tmp_mv->col *= 8;
+
+  return best_sad;
+}
+
 /* do_refine: If last step (1-away) of n-step search doesn't pick the center
               point as the best match, we will do a final 1-away diamond
               refining search  */
@@ -2142,7 +2317,7 @@ int vp9_full_pixel_search(VP9_COMP *cpi, MACROBLOCK *x,
                                    1, cost_list, fn_ptr, ref_mv, tmp_mv);
       break;
     default:
-      assert(!"Invalid search method.");
+      assert(0 && "Invalid search method.");
   }
 
   if (method != NSTEP && rd && var < var_max)

@@ -11,8 +11,8 @@
 #include <windows.h>
 
 #include "base/memory/ref_counted.h"
+#include "media/base/video_capture_types.h"
 #include "media/video/capture/video_capture_device.h"
-#include "media/video/capture/video_capture_types.h"
 #include "media/video/capture/win/filter_base_win.h"
 #include "media/video/capture/win/sink_filter_observer_win.h"
 
@@ -37,7 +37,9 @@ class __declspec(uuid("88cdbbdc-a73b-4afa-acbf-15d5e2ce12c3"))
   explicit SinkFilter(SinkFilterObserver* observer);
   virtual ~SinkFilter();
 
-  void SetRequestedMediaFormat(const VideoCaptureFormat& format);
+  void SetRequestedMediaFormat(VideoPixelFormat pixel_format,
+                               float frame_rate,
+                               const BITMAPINFOHEADER& info_header);
   // Returns the format that is negotiated when this
   // filter is connected to a media filter.
   const VideoCaptureFormat& ResultingFormat();

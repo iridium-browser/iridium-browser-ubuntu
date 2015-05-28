@@ -56,8 +56,7 @@ public:
     // DOM methods
     void importStylesheet(PassRefPtrWillBeRawPtr<Node> style)
     {
-        if (style)
-            m_stylesheetRootNode = style;
+        m_stylesheetRootNode = style;
     }
     PassRefPtrWillBeRawPtr<DocumentFragment> transformToFragment(Node* source, Document* ouputDoc);
     PassRefPtrWillBeRawPtr<Document> transformToDocument(Node* source);
@@ -77,7 +76,7 @@ public:
 
     typedef HashMap<String, String> ParameterMap;
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     XSLTProcessor(Document& document)

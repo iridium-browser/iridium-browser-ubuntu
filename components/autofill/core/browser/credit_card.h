@@ -7,6 +7,7 @@
 
 #include <iosfwd>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/compiler_specific.h"
@@ -31,6 +32,12 @@ class CreditCard : public AutofillDataModel {
     // A card from the Wallet server with full information. This card is not
     // locally editable.
     FULL_SERVER_CARD,
+  };
+
+  // The status of this credit card. Only used for server cards.
+  enum ServerStatus {
+    EXPIRED,
+    OK,
   };
 
   CreditCard(const std::string& guid, const std::string& origin);
@@ -72,6 +79,10 @@ class CreditCard : public AutofillDataModel {
   // Type strings are defined at the bottom of this file, e.g. kVisaCard.
   void SetTypeForMaskedCard(const char* type);
 
+  // Sets/gets the status of a server card.
+  void SetServerStatus(ServerStatus status);
+  ServerStatus GetServerStatus() const;
+
   // FormGroup:
   void GetMatchingTypes(const base::string16& text,
                         const std::string& app_locale,
@@ -84,9 +95,10 @@ class CreditCard : public AutofillDataModel {
                const base::string16& value,
                const std::string& app_locale) override;
 
-  // Credit card preview summary, for example: Visa - 1234, Exp: 01/2020
-  // Used for settings and the requestAutocomplete dialog, but not
-  // the autofill dropdown.
+  // Credit card preview summary, for example: "Visa - 1234", ", 01/2020".
+  const std::pair<base::string16, base::string16> LabelPieces() const;
+
+  // Like LabelPieces, but appends the two pieces together.
   const base::string16 Label() const;
 
   // Special method to set value for HTML5 month input type.
@@ -104,6 +116,12 @@ class CreditCard : public AutofillDataModel {
 
   int expiration_month() const { return expiration_month_; }
   int expiration_year() const { return expiration_year_; }
+
+  // These setters verify that the month and year are within appropriate
+  // ranges, or 0. They take integers as an alternative to setting the inputs
+  // from strings via SetInfo().
+  void SetExpirationMonth(int expiration_month);
+  void SetExpirationYear(int expiration_year);
 
   const std::string& server_id() const { return server_id_; }
 
@@ -128,7 +146,8 @@ class CreditCard : public AutofillDataModel {
   // Determines if |this| is a local version of the server card |other|.
   bool IsLocalDuplicateOfServerCard(const CreditCard& other) const;
 
-  // Used by tests.
+  // Equality operators compare GUIDs, origins, and the contents.
+  // Usage metadata (use count, use date, modification date) are NOT compared.
   bool operator==(const CreditCard& credit_card) const;
   bool operator!=(const CreditCard& credit_card) const;
 
@@ -174,11 +193,6 @@ class CreditCard : public AutofillDataModel {
   // Sets |expiration_year_| to the integer conversion of |text|.
   void SetExpirationYearFromString(const base::string16& text);
 
-  // These setters verify that the month and year are within appropriate
-  // ranges.
-  void SetExpirationMonth(int expiration_month);
-  void SetExpirationYear(int expiration_year);
-
   // See enum definition above.
   RecordType record_type_;
 
@@ -199,6 +213,10 @@ class CreditCard : public AutofillDataModel {
   // For server cards (both MASKED and UNMASKED) this is the ID assigned by the
   // server to uniquely identify this card.
   std::string server_id_;
+
+  // The status of the card, as reported by the server. Not valid for local
+  // cards.
+  ServerStatus server_status_;
 };
 
 // So we can compare CreditCards with EXPECT_EQ().

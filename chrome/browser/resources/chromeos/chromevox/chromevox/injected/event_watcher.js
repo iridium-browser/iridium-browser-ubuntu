@@ -162,7 +162,7 @@ cvox.ChromeVoxEventWatcher.init = function(doc) {
 
   /**
    * Array of events that need to be processed.
-   * @type {Array.<Event>}
+   * @type {Array<Event>}
    * @private
    */
   cvox.ChromeVoxEventWatcher.events_ = new Array();
@@ -189,7 +189,7 @@ cvox.ChromeVoxEventWatcher.init = function(doc) {
   /**
    * A list of callbacks to be called when the EventWatcher has
    * completed processing all events in its queue.
-   * @type {Array.<function()>}
+   * @type {Array<function()>}
    * @private
    */
   cvox.ChromeVoxEventWatcher.readyCallbacks_ = new Array();
@@ -252,15 +252,11 @@ cvox.ChromeVoxEventWatcher.readFrom = function(store) {
  * event was received.
  *
  * @param {Event} evt The event to be added to the events queue.
- * @param {boolean=} opt_ignoreVisibility Whether to ignore visibility
- * checking on the document. By default, this is set to false (so an
- * invisible document would result in this event not being added).
  */
-cvox.ChromeVoxEventWatcher.addEvent = function(evt, opt_ignoreVisibility) {
+cvox.ChromeVoxEventWatcher.addEvent = function(evt) {
   // Don't add any events to the events queue if ChromeVox is inactive or the
-  // page is hidden unless specified to not do so.
-  if (!cvox.ChromeVox.isActive ||
-      (document.webkitHidden && !opt_ignoreVisibility)) {
+  // page is hidden.
+  if (!cvox.ChromeVox.isActive || document.webkitHidden) {
     return;
   }
   cvox.ChromeVoxEventWatcher.events_.push(evt);
@@ -470,7 +466,7 @@ cvox.ChromeVoxEventWatcher.setLastFocusedNode_ = function(element) {
 /**
  * Called when there's any mutation of the document. We use this to
  * handle live region updates.
- * @param {Array.<MutationRecord>} mutations The mutations.
+ * @param {Array<MutationRecord>} mutations The mutations.
  * @return {boolean} True if the default action should be performed.
  */
 cvox.ChromeVoxEventWatcher.mutationHandler = function(mutations) {
@@ -486,7 +482,7 @@ cvox.ChromeVoxEventWatcher.mutationHandler = function(mutations) {
         var evt = new window.Event('LiveRegion');
         evt.navDescriptions = navDescriptions;
         evt.assertive = assertive;
-        cvox.ChromeVoxEventWatcher.addEvent(evt, true);
+        cvox.ChromeVoxEventWatcher.addEvent(evt);
         return true;
       });
 };
@@ -872,6 +868,16 @@ cvox.ChromeVoxEventWatcher.changeEventWatcher = function(evt) {
  * @return {boolean} True if the default action should be performed.
  */
 cvox.ChromeVoxEventWatcher.clipboardEventWatcher = function(evt) {
+  // Don't announce anything unless this document has focus and the
+  // editable element that's the target of the clipboard event is visible.
+  var targetNode = /** @type {Node} */(evt.target);
+  if (!document.hasFocus() ||
+      !targetNode ||
+      !cvox.DomUtil.isVisible(targetNode) ||
+      cvox.AriaUtil.isHidden(targetNode)) {
+    return true;
+  }
+
   cvox.ChromeVox.tts.speak(cvox.ChromeVox.msgs.getMsg(evt.type).toLowerCase(),
                            cvox.QueueMode.QUEUE);
   var text = '';
@@ -938,7 +944,7 @@ cvox.ChromeVoxEventWatcher.getInitialVisibility = function() {
 /**
  * Speaks the text of one live region.
  * @param {boolean} assertive True if it's an assertive live region.
- * @param {Array.<cvox.NavDescription>} messages An array of navDescriptions
+ * @param {Array<cvox.NavDescription>} messages An array of navDescriptions
  *    representing the description of the live region changes.
  * @private
  */
@@ -1117,19 +1123,18 @@ cvox.ChromeVoxEventWatcher.handleControlChanged = function(control) {
     announceChange = true;
   }
 
+  var activeDescendant = cvox.AriaUtil.getActiveDescendant(control);
   if ((parentControl &&
       parentControl != control &&
       document.activeElement == control)) {
-    // If focus has been set on a child of the parent control, we need to
-    // sync to that node so that ChromeVox navigation will be in sync with
-    // focus navigation.
+    // Sync ChromeVox to the newly selected control.
     cvox.ApiImplementation.syncToNode(
-        control, true,
+        activeDescendant || control, true,
         cvox.ChromeVoxEventWatcher.queueMode_());
     announceChange = false;
-  } else if (cvox.AriaUtil.getActiveDescendant(control)) {
+  } else if (activeDescendant) {
     cvox.ChromeVox.navigationManager.updateSelToArbitraryNode(
-        cvox.AriaUtil.getActiveDescendant(control),
+        activeDescendant,
         true);
 
     announceChange = true;

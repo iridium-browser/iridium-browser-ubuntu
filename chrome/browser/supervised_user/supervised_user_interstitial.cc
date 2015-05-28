@@ -11,6 +11,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
@@ -97,6 +98,10 @@ class TabCloser : public content::WebContentsUserData<TabCloser> {
 }  // namespace
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(TabCloser);
+
+content::InterstitialPageDelegate::TypeID
+    SupervisedUserInterstitial::kTypeForTesting =
+        &SupervisedUserInterstitial::kTypeForTesting;
 
 // static
 void SupervisedUserInterstitial::Show(
@@ -226,7 +231,7 @@ std::string SupervisedUserInterstitial::GetHTMLContents() {
   strings.SetString("blockPageMessage", block_message);
   strings.SetString("blockReasonMessage", is_child_account
       ? l10n_util::GetStringUTF16(
-          SupervisedUserURLFilter::GetBlockMessageID(reason_))
+            SupervisedUserURLFilter::GetBlockMessageID(reason_))
       : base::string16());
 
   bool show_feedback = false;
@@ -267,10 +272,14 @@ std::string SupervisedUserInterstitial::GetHTMLContents() {
   strings.SetString("requestSentMessage", request_sent_message);
   strings.SetString("requestFailedMessage", request_failed_message);
 
-  webui::SetFontAndTextDirection(&strings);
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
+  webui::SetLoadTimeDataDefaults(app_locale, &strings);
 
-  base::StringPiece html(ResourceBundle::GetSharedInstance().GetRawDataResource(
-      IDR_SUPERVISED_USER_BLOCK_INTERSTITIAL_HTML));
+  std::string html =
+      ResourceBundle::GetSharedInstance()
+          .GetRawDataResource(IDR_SUPERVISED_USER_BLOCK_INTERSTITIAL_HTML)
+          .as_string();
+  webui::AppendWebUiCssTextDefaults(&html);
 
   return webui::GetI18nTemplateHtml(html, &strings);
 }
@@ -306,15 +315,19 @@ void SupervisedUserInterstitial::CommandReceived(const std::string& command) {
 
     SupervisedUserService* supervised_user_service =
         SupervisedUserServiceFactory::GetForProfile(profile_);
-    supervised_user_service->AddAccessRequest(
+    supervised_user_service->AddURLAccessRequest(
         url_, base::Bind(&SupervisedUserInterstitial::OnAccessRequestAdded,
                          weak_ptr_factory_.GetWeakPtr()));
     return;
   }
 
   if (command == "\"feedback\"") {
+    base::string16 reason = l10n_util::GetStringUTF16(
+        SupervisedUserURLFilter::GetBlockMessageID(reason_));
+    std::string message = l10n_util::GetStringFUTF8(
+        IDS_BLOCK_INTERSTITIAL_DEFAULT_FEEDBACK_TEXT, reason);
 #if defined(OS_ANDROID)
-    ReportChildAccountFeedback(web_contents_, url_);
+    ReportChildAccountFeedback(web_contents_, message, url_);
 #else
     std::string bucket;
 #if defined(OS_CHROMEOS)
@@ -324,7 +337,7 @@ void SupervisedUserInterstitial::CommandReceived(const std::string& command) {
 #endif
     chrome::ShowFeedbackPage(
         chrome::FindBrowserWithWebContents(web_contents_),
-        l10n_util::GetStringUTF8(IDS_BLOCK_INTERSTITIAL_DEFAULT_FEEDBACK_TEXT),
+        message,
         bucket);
 #endif
     return;
@@ -339,6 +352,11 @@ void SupervisedUserInterstitial::OnProceed() {
 
 void SupervisedUserInterstitial::OnDontProceed() {
   DispatchContinueRequest(false);
+}
+
+content::InterstitialPageDelegate::TypeID
+SupervisedUserInterstitial::GetTypeForTesting() const {
+  return SupervisedUserInterstitial::kTypeForTesting;
 }
 
 void SupervisedUserInterstitial::OnURLFilterChanged() {
@@ -361,8 +379,13 @@ bool SupervisedUserInterstitial::ShouldProceed() {
   SupervisedUserURLFilter* url_filter =
       supervised_user_service->GetURLFilterForUIThread();
   SupervisedUserURLFilter::FilteringBehavior behavior;
-  return (url_filter->GetManualFilteringBehaviorForURL(url_, &behavior) &&
-          behavior != SupervisedUserURLFilter::BLOCK);
+  if (url_filter->HasAsyncURLChecker()) {
+    if (!url_filter->GetManualFilteringBehaviorForURL(url_, &behavior))
+      return false;
+  } else {
+    behavior = url_filter->GetFilteringBehaviorForURL(url_);
+  }
+  return behavior != SupervisedUserURLFilter::BLOCK;
 }
 
 void SupervisedUserInterstitial::DispatchContinueRequest(

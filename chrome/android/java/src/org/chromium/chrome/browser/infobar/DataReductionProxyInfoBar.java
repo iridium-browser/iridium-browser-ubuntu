@@ -31,21 +31,8 @@ public class DataReductionProxyInfoBar extends ConfirmInfoBar {
         DataReductionProxyInfoBarDelegate.launch(webContents, linkUrl);
     }
 
-    /**
-     * Use the method above instead. TODO(newt): delete this once all callers are updated.
-     */
-    public static void launch(WebContents webContents,
-            String unused1,
-            String unused2,
-            String title,
-            String linkText,
-            String linkUrl) {
-        launch(webContents, title, linkText, linkUrl);
-    }
-
     DataReductionProxyInfoBar(long nativeInfoBar, int iconDrawableId) {
-        super(nativeInfoBar, null, iconDrawableId, sTitle,
-                sLinkText, null, null);
+        super(nativeInfoBar, null, iconDrawableId, null, sTitle, sLinkText, null, null);
     }
 
     @Override

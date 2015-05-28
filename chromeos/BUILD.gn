@@ -4,6 +4,7 @@
 
 import("//build/config/allocator.gni")
 import("//build/config/ui.gni")
+import("//testing/test.gni")
 import("//third_party/protobuf/proto_library.gni")
 
 assert(is_chromeos, "Non-ChromeOS builds must not depend on //chromeos")
@@ -20,18 +21,20 @@ component("chromeos") {
   ]
   deps = [
     "//base",
+    "//base:i18n",
     "//base:prefs",
     "//base/third_party/dynamic_annotations",
     "//chromeos/ime:gencode",
+    "//components/device_event_log",
     "//components/policy/proto",
     "//components/onc",
     "//crypto",
+    "//crypto:platform",
     "//google_apis",
     "//net/third_party/nss/ssl:libssl",
     "//third_party/icu",
     "//third_party/libxml",
     "//third_party/protobuf:protobuf_lite",
-    "//ui/accelerometer",
     "//url",
     ":cryptohome_proto",
     ":power_manager_proto",
@@ -81,8 +84,6 @@ static_library("test_support") {
     "login/auth/mock_auth_attempt_state_resolver.h",
     "login/auth/mock_auth_status_consumer.cc",
     "login/auth/mock_auth_status_consumer.h",
-    "login/auth/mock_authenticator.cc",
-    "login/auth/mock_authenticator.h",
     "login/auth/mock_url_fetchers.cc",
     "login/auth/mock_url_fetchers.h",
     "network/fake_network_device_handler.cc",

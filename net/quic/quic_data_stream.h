@@ -33,13 +33,12 @@ class ReliableQuicStreamPeer;
 
 class IPEndPoint;
 class QuicSession;
-class SSLInfo;
 
 // All this does right now is send data to subclasses via the sequencer.
 class NET_EXPORT_PRIVATE QuicDataStream : public ReliableQuicStream {
  public:
   // Visitor receives callbacks from the stream.
-  class Visitor {
+  class NET_EXPORT_PRIVATE Visitor {
    public:
     Visitor() {}
 
@@ -107,9 +106,6 @@ class NET_EXPORT_PRIVATE QuicDataStream : public ReliableQuicStream {
 
   const IPEndPoint& GetPeerAddress();
 
-  // Gets the SSL connection information.
-  bool GetSSLInfo(SSLInfo* ssl_info);
-
  protected:
   // Sets priority_ to priority.  This should only be called before bytes are
   // written to the server.
@@ -135,10 +131,6 @@ class NET_EXPORT_PRIVATE QuicDataStream : public ReliableQuicStream {
   // Contains a copy of the decompressed headers until they are consumed
   // via ProcessData or Readv.
   std::string decompressed_headers_;
-  // True if an error was encountered during decompression.
-  bool decompression_failed_;
-  // True if the priority has been read, false otherwise.
-  bool priority_parsed_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicDataStream);
 };

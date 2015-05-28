@@ -25,8 +25,10 @@ class TestRenderFrameHostFactory : public RenderFrameHostFactory {
  protected:
   // RenderFrameHostFactory implementation.
   scoped_ptr<RenderFrameHostImpl> CreateRenderFrameHost(
+      SiteInstance* site_instance,
       RenderViewHostImpl* render_view_host,
       RenderFrameHostDelegate* delegate,
+      RenderWidgetHostDelegate* rwh_delegate,
       FrameTree* frame_tree,
       FrameTreeNode* frame_tree_node,
       int routing_id,

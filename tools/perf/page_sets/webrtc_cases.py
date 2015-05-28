@@ -7,10 +7,14 @@ from telemetry.page import page as page_module
 from telemetry.page import page_set as page_set_module
 
 
+WEBRTC_GITHUB_SAMPLES_URL = 'http://webrtc.github.io/samples/src/content/'
+
+
 class WebrtcCasesPage(page_module.Page):
 
-  def __init__(self, url, page_set):
-    super(WebrtcCasesPage, self).__init__(url=url, page_set=page_set)
+  def __init__(self, url, page_set, name):
+    super(WebrtcCasesPage, self).__init__(
+        url=url, page_set=page_set, name=name)
 
     with open(os.path.join(os.path.dirname(__file__),
                            'webrtc_track_peerconnections.js')) as javascript:
@@ -23,9 +27,9 @@ class Page1(WebrtcCasesPage):
 
   def __init__(self, page_set):
     super(Page1, self).__init__(
-        url=('http://googlechrome.github.io/webrtc/samples/web/content/'
-             'getusermedia/gum/'),
-      page_set=page_set)
+        url=WEBRTC_GITHUB_SAMPLES_URL + 'getusermedia/gum/',
+        name='vga_local_stream_10s',
+        page_set=page_set)
 
   def RunPageInteractions(self, action_runner):
     action_runner.Wait(10)
@@ -37,8 +41,8 @@ class Page2(WebrtcCasesPage):
 
   def __init__(self, page_set):
     super(Page2, self).__init__(
-      url=('http://googlechrome.github.io/webrtc/samples/web/content/'
-           'peerconnection/pc1/'),
+      url=WEBRTC_GITHUB_SAMPLES_URL + 'peerconnection/pc1/',
+      name='vga_call_10s',
       page_set=page_set)
 
   def RunPageInteractions(self, action_runner):
@@ -55,8 +59,8 @@ class Page3(WebrtcCasesPage):
 
   def __init__(self, page_set):
     super(Page3, self).__init__(
-      url=('http://googlechrome.github.io/webrtc/samples/web/content/'
-           'getusermedia/resolution/'),
+      url=WEBRTC_GITHUB_SAMPLES_URL + 'getusermedia/resolution/',
+      name='hd_local_stream_10s',
       page_set=page_set)
 
   def RunPageInteractions(self, action_runner):
@@ -70,8 +74,8 @@ class Page4(WebrtcCasesPage):
 
   def __init__(self, page_set):
     super(Page4, self).__init__(
-      url=('http://googlechrome.github.io/webrtc/samples/web/content/'
-           'peerconnection/audio/?codec=OPUS'),
+      url=WEBRTC_GITHUB_SAMPLES_URL + 'peerconnection/audio/?codec=OPUS',
+      name='audio_call_opus_10s',
       page_set=page_set)
 
   def RunPageInteractions(self, action_runner):
@@ -86,8 +90,8 @@ class Page5(WebrtcCasesPage):
 
   def __init__(self, page_set):
     super(Page5, self).__init__(
-      url=('http://googlechrome.github.io/webrtc/samples/web/content/'
-           'peerconnection/audio/?codec=G722'),
+      url=WEBRTC_GITHUB_SAMPLES_URL + 'peerconnection/audio/?codec=G722',
+      name='audio_call_g722_10s',
       page_set=page_set)
 
   def RunPageInteractions(self, action_runner):
@@ -102,8 +106,8 @@ class Page6(WebrtcCasesPage):
 
   def __init__(self, page_set):
     super(Page6, self).__init__(
-      url=('http://googlechrome.github.io/webrtc/samples/web/content/'
-           'peerconnection/audio/?codec=PCMU'),
+      url=WEBRTC_GITHUB_SAMPLES_URL + 'peerconnection/audio/?codec=PCMU',
+      name='audio_call_pcmu_10s',
       page_set=page_set)
 
   def RunPageInteractions(self, action_runner):
@@ -118,8 +122,8 @@ class Page7(WebrtcCasesPage):
 
   def __init__(self, page_set):
     super(Page7, self).__init__(
-      url=('http://googlechrome.github.io/webrtc/samples/web/content/'
-           'peerconnection/audio/?codec=ISAC_16K'),
+      url=WEBRTC_GITHUB_SAMPLES_URL + 'peerconnection/audio/?codec=ISAC_16K',
+      name='audio_call_isac16k_10s',
       page_set=page_set)
 
   def RunPageInteractions(self, action_runner):
@@ -127,6 +131,26 @@ class Page7(WebrtcCasesPage):
     action_runner.ClickElement('button[id="callButton"]')
     action_runner.Wait(10)
 
+
+class Page8(WebrtcCasesPage):
+
+  """ Why: Sets up a WebRTC 720p call for 45 seconds. """
+
+  def __init__(self, page_set):
+    super(Page8, self).__init__(
+        url=WEBRTC_GITHUB_SAMPLES_URL + 'peerconnection/constraints/',
+        name='720p_call_45s',
+        page_set=page_set)
+
+  def RunPageInteractions(self, action_runner):
+    action_runner.ExecuteJavaScript('minWidthInput.value = 1280')
+    action_runner.ExecuteJavaScript('maxWidthInput.value = 1280')
+    action_runner.ExecuteJavaScript('minHeightInput.value = 720')
+    action_runner.ExecuteJavaScript('maxHeightInput.value = 720')
+    action_runner.ClickElement('button[id="getMedia"]')
+    action_runner.Wait(2)
+    action_runner.ClickElement('button[id="connect"]')
+    action_runner.Wait(45)
 
 class WebrtcCasesPageSet(page_set_module.PageSet):
 
@@ -140,10 +164,6 @@ class WebrtcCasesPageSet(page_set_module.PageSet):
     self.AddUserStory(Page1(self))
     self.AddUserStory(Page2(self))
     self.AddUserStory(Page3(self))
-    self.AddUserStory(Page1(self))
-    self.AddUserStory(Page2(self))
-    self.AddUserStory(Page3(self))
-    self.AddUserStory(Page4(self))
-    self.AddUserStory(Page5(self))
-    self.AddUserStory(Page6(self))
-    self.AddUserStory(Page7(self))
+    # Disable page 4-7 until we can implement http://crbug.com/468732. We can
+    # get data out from the tests, but it's not very useful yet.
+    self.AddUserStory(Page8(self))

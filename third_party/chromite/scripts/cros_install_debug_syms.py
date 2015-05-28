@@ -29,7 +29,9 @@ from chromite.lib import cros_build_lib
 from chromite.lib import osutils
 from chromite.lib import parallel
 from chromite.lib import gs
-from portage import create_trees
+
+if cros_build_lib.IsInsideChroot():
+  from portage import create_trees
 
 
 DEBUG_SYMS_EXT = '.debug.tbz2'
@@ -201,7 +203,14 @@ def GetPackageIndex(binhost, binhost_cache=None):
       temp_file.file.close()
       binhost_cache.Lookup(key).Assign(temp_file.name)
   elif pkgindex is None:
-    binhost = urlparse.urlsplit(binhost).path
+    urlparts = urlparse.urlsplit(binhost)
+    if urlparts.scheme not in ('file', ''):
+      # Don't fail the build on network errors. Print a warning message and
+      # continue.
+      cros_build_lib.Warning('Could not get package index %s' % binhost)
+      return None
+
+    binhost = urlparts.path
     if not os.path.isdir(binhost):
       raise ValueError('unrecognized binhost format for %s.')
     pkgindex = binpkg.GrabLocalPackageIndex(binhost)
@@ -227,6 +236,9 @@ def ListBinhost(binhost, binhost_cache=None):
 
   symbols = {}
   pkgindex = GetPackageIndex(binhost, binhost_cache)
+  if pkgindex is None:
+    return symbols
+
   for p in pkgindex.packages:
     if p.get('DEBUG_SYMBOLS') == 'yes':
       path = p.get('PATH', p['CPV'] + '.tbz2')
@@ -259,9 +271,12 @@ def GetMatchingCPV(package, vardb):
 def main(argv):
   options = ParseArgs(argv)
 
-  cros_build_lib.AssertInsideChroot()
+  if not cros_build_lib.IsInsideChroot():
+    raise commandline.ChrootRequiredError()
+
   if os.geteuid() != 0:
-    cros_build_lib.Die('This script must be ran as root.')
+    cros_build_lib.SudoRunCommand(sys.argv)
+    return
 
   # sysroot must have a trailing / as the tree dictionary produced by
   # create_trees in indexed with a trailing /.

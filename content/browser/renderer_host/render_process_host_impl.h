@@ -20,7 +20,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_platform_file.h"
-#include "mojo/public/cpp/bindings/interface_ptr.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_ptr.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gl/gpu_switching_observer.h"
 
@@ -46,6 +46,7 @@ class AudioRendererHost;
 class BrowserCdmManager;
 class BrowserDemuxerAndroid;
 class GpuMessageFilter;
+class InProcessChildThreadParams;
 class MessagePortMessageFilter;
 class MojoApplicationHost;
 class NotificationMessageFilter;
@@ -63,7 +64,7 @@ class StoragePartition;
 class StoragePartitionImpl;
 
 typedef base::Thread* (*RendererMainThreadFactoryFunction)(
-    const std::string& id);
+    const InProcessChildThreadParams& params);
 
 // Implements a concrete RenderProcessHost for the browser process for talking
 // to actual renderer processes (as opposed to mocks).
@@ -102,7 +103,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void RemoveRoute(int32 routing_id) override;
   void AddObserver(RenderProcessHostObserver* observer) override;
   void RemoveObserver(RenderProcessHostObserver* observer) override;
-  void ReceivedBadMessage() override;
+  void ShutdownForBadMessage() override;
   void WidgetRestored() override;
   void WidgetHidden() override;
   int VisibleWidgetCount() const override;
@@ -149,6 +150,10 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void OnRemoveSubscription(unsigned int target) override;
   void SendUpdateValueState(
       unsigned int target, const gpu::ValueState& state) override;
+#if defined(ENABLE_BROWSER_CDMS)
+  media::BrowserCdm* GetBrowserCdm(int render_frame_id,
+                                   int cdm_id) const override;
+#endif
 
   // IPC::Sender via RenderProcessHost.
   bool Send(IPC::Message* msg) override;
@@ -161,6 +166,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   // ChildProcessLauncher::Client implementation.
   void OnProcessLaunched() override;
+  void OnProcessLaunchFailed() override;
 
   scoped_refptr<AudioRendererHost> audio_renderer_host() const;
 
@@ -169,10 +175,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void mark_child_process_activity_time() {
     child_process_activity_time_ = base::TimeTicks::Now();
   }
-
-  // Returns the current number of active views in this process.  Excludes
-  // any RenderViewHosts that are swapped out.
-  int GetActiveViewCount();
 
   // Start and end frame subscription for a specific renderer.
   // This API only supports subscription to accelerated composited frames.
@@ -270,6 +272,9 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // immediately after receiving response headers.
   void ResumeResponseDeferredAtStart(const GlobalRequestID& request_id);
 
+  void GetAudioOutputControllers(
+      const GetAudioOutputControllersCallback& callback) const override;
+
  protected:
   // A proxy for our IPC::Channel that lives on the IO thread (see
   // browser_process.h)
@@ -297,8 +302,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
  private:
   friend class VisitRelayingRenderProcessHost;
+  friend class ChildProcessLauncherBrowserTest_ChildSpawnFail_Test;
 
-  bool ShouldUseMojoChannel() const;
   scoped_ptr<IPC::ChannelProxy> CreateChannelProxy(
       const std::string& channel_id);
 
@@ -331,7 +336,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void SetBackgrounded(bool backgrounded);
 
   // Handle termination of our process.
-  void ProcessDied(bool already_dead);
+  void ProcessDied(bool already_dead, RendererClosedDetails* known_details);
 
   // GpuSwitchingObserver implementation.
   void OnGpuSwitched() override;
@@ -475,6 +480,10 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   // Records the time when the process starts surviving for workers for UMA.
   base::TimeTicks survive_for_worker_start_time_;
+
+  // Records the maximum # of workers simultaneously hosted in this process
+  // for UMA.
+  int max_worker_count_;
 
   // Context shared for each PermissionService instance created for this RPH.
   scoped_ptr<PermissionServiceContext> permission_service_context_;

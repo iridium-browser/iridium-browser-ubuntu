@@ -9,8 +9,8 @@
 #include "core/dom/DOMTypedArray.h"
 #include "core/events/EventTarget.h"
 #include "platform/Supplementable.h"
-#include "platform/graphics/media/MediaPlayer.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebEncryptedMediaTypes.h"
 #include "public/platform/WebMediaPlayerClient.h"
 
 namespace blink {
@@ -45,14 +45,15 @@ public:
     static void keyAdded(HTMLMediaElement&, const String& keySystem, const String& sessionId);
     static void keyError(HTMLMediaElement&, const String& keySystem, const String& sessionId, WebMediaPlayerClient::MediaKeyErrorCode, unsigned short systemCode);
     static void keyMessage(HTMLMediaElement&, const String& keySystem, const String& sessionId, const unsigned char* message, unsigned messageLength, const WebURL& defaultURL);
-    static void encrypted(HTMLMediaElement&, const String& initDataType, const unsigned char* initData, unsigned initDataLength);
-    static void playerDestroyed(HTMLMediaElement&);
+    static void encrypted(HTMLMediaElement&, WebEncryptedMediaInitDataType, const unsigned char* initData, unsigned initDataLength);
+    static void didBlockPlaybackWaitingForKey(HTMLMediaElement&);
+    static void didResumePlaybackBlockedForKey(HTMLMediaElement&);
     static WebContentDecryptionModule* contentDecryptionModule(HTMLMediaElement&);
 
     static HTMLMediaElementEncryptedMedia& from(HTMLMediaElement&);
     static const char* supplementName();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     friend class SetMediaKeysHandler;
@@ -79,6 +80,8 @@ private:
     WebContentDecryptionModule* contentDecryptionModule();
 
     EmeMode m_emeMode;
+
+    bool m_isWaitingForKey;
 
     PersistentWillBeMember<MediaKeys> m_mediaKeys;
 };

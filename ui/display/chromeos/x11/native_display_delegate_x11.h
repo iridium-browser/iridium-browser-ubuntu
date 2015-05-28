@@ -20,23 +20,25 @@
 #include "ui/display/types/native_display_delegate.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gfx/x/x11_types.h"
 
 // Forward declarations for Xlib and Xrandr.
 // This is so unused X definitions don't pollute the namespace.
-typedef unsigned long XID;
 typedef XID RROutput;
 typedef XID RRCrtc;
 typedef XID RRMode;
 typedef XID Window;
 
-struct _XDisplay;
-typedef struct _XDisplay Display;
 struct _XRROutputInfo;
 typedef _XRROutputInfo XRROutputInfo;
 struct _XRRScreenResources;
 typedef _XRRScreenResources XRRScreenResources;
 struct _XRRCrtcGamma;
 typedef _XRRCrtcGamma XRRCrtcGamma;
+
+extern "C" {
+void XRRFreeScreenResources(XRRScreenResources* resources);
+}
 
 namespace ui {
 
@@ -66,37 +68,32 @@ class DISPLAY_EXPORT NativeDisplayDelegateX11 : public NativeDisplayDelegate {
   };
 
   NativeDisplayDelegateX11();
-  virtual ~NativeDisplayDelegateX11();
+  ~NativeDisplayDelegateX11() override;
 
   // NativeDisplayDelegate overrides:
-  virtual void Initialize() override;
-  virtual void GrabServer() override;
-  virtual void UngrabServer() override;
-  virtual bool TakeDisplayControl() override;
-  virtual bool RelinquishDisplayControl() override;
-  virtual void SyncWithServer() override;
-  virtual void SetBackgroundColor(uint32_t color_argb) override;
-  virtual void ForceDPMSOn() override;
-  virtual void GetDisplays(const GetDisplaysCallback& callback) override;
-  virtual void AddMode(const DisplaySnapshot& output,
-                       const DisplayMode* mode) override;
-  virtual void Configure(const DisplaySnapshot& output,
-                         const DisplayMode* mode,
-                         const gfx::Point& origin,
-                         const ConfigureCallback& callback) override;
-  virtual void CreateFrameBuffer(const gfx::Size& size) override;
-  virtual bool GetHDCPState(const DisplaySnapshot& output,
-                            HDCPState* state) override;
-  virtual bool SetHDCPState(const DisplaySnapshot& output,
-                            HDCPState state) override;
-  virtual std::vector<ColorCalibrationProfile>
-      GetAvailableColorCalibrationProfiles(
-          const DisplaySnapshot& output) override;
-  virtual bool SetColorCalibrationProfile(
-      const DisplaySnapshot& output,
-      ColorCalibrationProfile new_profile) override;
-  virtual void AddObserver(NativeDisplayObserver* observer) override;
-  virtual void RemoveObserver(NativeDisplayObserver* observer) override;
+  void Initialize() override;
+  void GrabServer() override;
+  void UngrabServer() override;
+  bool TakeDisplayControl() override;
+  bool RelinquishDisplayControl() override;
+  void SyncWithServer() override;
+  void SetBackgroundColor(uint32_t color_argb) override;
+  void ForceDPMSOn() override;
+  void GetDisplays(const GetDisplaysCallback& callback) override;
+  void AddMode(const DisplaySnapshot& output, const DisplayMode* mode) override;
+  void Configure(const DisplaySnapshot& output,
+                 const DisplayMode* mode,
+                 const gfx::Point& origin,
+                 const ConfigureCallback& callback) override;
+  void CreateFrameBuffer(const gfx::Size& size) override;
+  bool GetHDCPState(const DisplaySnapshot& output, HDCPState* state) override;
+  bool SetHDCPState(const DisplaySnapshot& output, HDCPState state) override;
+  std::vector<ColorCalibrationProfile> GetAvailableColorCalibrationProfiles(
+      const DisplaySnapshot& output) override;
+  bool SetColorCalibrationProfile(const DisplaySnapshot& output,
+                                  ColorCalibrationProfile new_profile) override;
+  void AddObserver(NativeDisplayObserver* observer) override;
+  void RemoveObserver(NativeDisplayObserver* observer) override;
 
  private:
   class HelperDelegateX11;
@@ -133,11 +130,14 @@ class DISPLAY_EXPORT NativeDisplayDelegateX11 : public NativeDisplayDelegate {
 
   void DrawBackground();
 
-  Display* display_;
+  XDisplay* display_;
   Window window_;
 
   // Initialized when the server is grabbed and freed when it's ungrabbed.
-  XRRScreenResources* screen_;
+  gfx::XScopedPtr<
+      XRRScreenResources,
+      gfx::XObjectDeleter<XRRScreenResources, void, XRRFreeScreenResources>>
+      screen_;
 
   std::map<RRMode, DisplayModeX11*> modes_;
 

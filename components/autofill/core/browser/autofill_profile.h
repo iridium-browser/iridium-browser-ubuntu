@@ -34,6 +34,9 @@ class AutofillProfile : public AutofillDataModel {
 
     // A profile synced down from the server. These are read-only locally.
     SERVER_PROFILE,
+
+    // An auxiliary profile, such as a Mac address book entry.
+    AUXILIARY_PROFILE,
   };
 
   AutofillProfile(const std::string& guid, const std::string& origin);
@@ -69,6 +72,7 @@ class AutofillProfile : public AutofillDataModel {
 
   // How this card is stored.
   RecordType record_type() const { return record_type_; }
+  void set_record_type(RecordType type) { record_type_ = type; }
 
   // Multi-value equivalents to |GetInfo| and |SetInfo|.
   void SetRawMultiInfo(ServerFieldType type,
@@ -102,11 +106,13 @@ class AutofillProfile : public AutofillDataModel {
   // Same as operator==, but ignores differences in origin.
   bool EqualsSansOrigin(const AutofillProfile& profile) const;
 
-  // Same as operator==, but ignores differences in GUID.
-  bool EqualsSansGuid(const AutofillProfile& profile) const;
+  // Same as operator==, but ignores differences in guid and cares about
+  // differences in usage stats.
+  bool EqualsForSyncPurposes(const AutofillProfile& profile) const;
 
   // Equality operators compare GUIDs, origins, language code, and the contents
-  // in the comparison.
+  // in the comparison. Usage metadata (use count, use date, modification date)
+  // are NOT compared.
   bool operator==(const AutofillProfile& profile) const;
   virtual bool operator!=(const AutofillProfile& profile) const;
 
@@ -119,6 +125,11 @@ class AutofillProfile : public AutofillDataModel {
   // |profile|.
   bool IsSubsetOf(const AutofillProfile& profile,
                   const std::string& app_locale) const;
+
+  // Like IsSubsetOf, but only considers the types present in |types|.
+  bool IsSubsetOfForFieldSet(const AutofillProfile& profile,
+                             const std::string& app_locale,
+                             const ServerFieldTypeSet& types) const;
 
   // Overwrites the single-valued field data in |profile| with this
   // Profile.  Or, for multi-valued fields append the new values.
@@ -230,6 +241,9 @@ class AutofillProfile : public AutofillDataModel {
   // is not reconstructible via a heuristic parse of the full name string).
   void OverwriteOrAppendNames(const std::vector<NameInfo>& names,
                               const std::string& app_locale);
+
+  // Same as operator==, but ignores differences in GUID.
+  bool EqualsSansGuid(const AutofillProfile& profile) const;
 
   RecordType record_type_;
 

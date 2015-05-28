@@ -19,6 +19,7 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/process/process_info.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -38,7 +39,6 @@
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
@@ -55,12 +55,13 @@
 #include "chrome/browser/extensions/api/tabs/tabs_windows_api.h"
 #include "chrome/browser/extensions/browser_extension_window_controller.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_ui_util.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/first_run/first_run.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -91,7 +92,6 @@
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
-#include "chrome/browser/ui/browser_content_translate_driver_observer.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
@@ -107,6 +107,7 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
+#include "chrome/browser/ui/exclusive_access/mouse_lock_controller.h"
 #include "chrome/browser/ui/fast_unload_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
@@ -154,10 +155,12 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/infobars/core/simple_alert_infobar_delegate.h"
 #include "components/search/search.h"
 #include "components/sessions/session_types.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
+#include "components/translate/core/browser/language_state.h"
 #include "components/ui/zoom/zoom_controller.h"
 #include "components/web_modal/popup_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
@@ -360,8 +363,6 @@ Browser::Browser(const CreateParams& params)
       bookmark_bar_state_(BookmarkBar::HIDDEN),
       command_controller_(new chrome::BrowserCommandController(this)),
       window_has_shown_(false),
-      translate_driver_observer_(
-          new BrowserContentTranslateDriverObserver(this)),
       chrome_updater_factory_(this),
       weak_factory_(this) {
   // If this causes a crash then a window is being opened using a profile type
@@ -447,7 +448,8 @@ Browser::Browser(const CreateParams& params)
 #endif  // defined(OS_WIN)
   }
 
-  fullscreen_controller_.reset(new FullscreenController(this));
+  exclusive_access_manager_.reset(
+      new ExclusiveAccessManager(window_->GetExclusiveAccessContext()));
 
   // Must be initialized after window_.
   // Also: surprise! a modal dialog host is not necessary to host modal dialogs
@@ -802,7 +804,8 @@ Browser::DownloadClosePreventionType Browser::OkToCloseWithInProgressDownloads(
 // Browser, Tab adding/showing functions:
 
 void Browser::WindowFullscreenStateChanged() {
-  fullscreen_controller_->WindowFullscreenStateChanged();
+  exclusive_access_manager_->fullscreen_controller()
+      ->WindowFullscreenStateChanged();
   command_controller_->FullscreenStateChanged();
   UpdateBookmarkBarState(BOOKMARK_BAR_STATE_CHANGE_TOGGLE_FULLSCREEN);
 }
@@ -811,8 +814,8 @@ void Browser::WindowFullscreenStateChanged() {
 // Browser, Assorted browser commands:
 
 void Browser::ToggleFullscreenModeWithExtension(const GURL& extension_url) {
-  fullscreen_controller_->
-      ToggleBrowserFullscreenModeWithExtension(extension_url);
+  exclusive_access_manager_->fullscreen_controller()
+      ->ToggleBrowserFullscreenModeWithExtension(extension_url);
 }
 
 bool Browser::SupportsWindowFeature(WindowFeature feature) const {
@@ -962,7 +965,7 @@ void Browser::TabInsertedAt(WebContents* contents,
 void Browser::TabClosingAt(TabStripModel* tab_strip_model,
                            WebContents* contents,
                            int index) {
-  fullscreen_controller_->OnTabClosing(contents);
+  exclusive_access_manager_->OnTabClosing(contents);
   SessionService* session_service =
       SessionServiceFactory::GetForProfile(profile_);
   if (session_service)
@@ -998,7 +1001,7 @@ void Browser::TabDetachedAt(WebContents* contents, int index) {
 }
 
 void Browser::TabDeactivated(WebContents* contents) {
-  fullscreen_controller_->OnTabDeactivated(contents);
+  exclusive_access_manager_->OnTabDeactivated(contents);
   search_delegate_->OnTabDeactivated(contents);
   SearchTabHelper::FromWebContents(contents)->OnTabDeactivated();
 
@@ -1026,7 +1029,7 @@ void Browser::ActiveTabChanged(WebContents* old_contents,
   // is updated.
   window_->OnActiveTabChanged(old_contents, new_contents, index, reason);
 
-  fullscreen_controller_->OnTabDetachedFromView(old_contents);
+  exclusive_access_manager_->OnTabDetachedFromView(old_contents);
 
   // Discarded tabs always get reloaded.
   if (tab_strip_model_->IsTabDiscarded(index)) {
@@ -1098,7 +1101,7 @@ void Browser::TabReplacedAt(TabStripModel* tab_strip_model,
                             WebContents* new_contents,
                             int index) {
   TabDetachedAtImpl(old_contents, index, DETACH_TYPE_REPLACE);
-  fullscreen_controller_->OnTabClosing(old_contents);
+  exclusive_access_manager_->OnTabClosing(old_contents);
   SessionService* session_service =
       SessionServiceFactory::GetForProfile(profile_);
   if (session_service)
@@ -1198,10 +1201,10 @@ bool Browser::ShouldPreserveAbortedURLs(WebContents* source) {
 bool Browser::PreHandleKeyboardEvent(content::WebContents* source,
                                      const NativeWebKeyboardEvent& event,
                                      bool* is_keyboard_shortcut) {
-  // Escape exits tabbed fullscreen mode.
+  // Escape exits tabbed fullscreen mode and mouse lock, and possibly others.
   // TODO(koz): Write a test for this http://crbug.com/100441.
   if (event.windowsKeyCode == 27 &&
-      fullscreen_controller_->HandleUserPressedEscape()) {
+      exclusive_access_manager_->HandleUserPressedEscape()) {
     return true;
   }
   return window()->PreHandleKeyboardEvent(event, is_keyboard_shortcut);
@@ -1229,15 +1232,9 @@ void Browser::ShowValidationMessage(content::WebContents* web_contents,
                                     const gfx::Rect& anchor_in_root_view,
                                     const base::string16& main_text,
                                     const base::string16& sub_text) {
-  RenderWidgetHostView* rwhv = web_contents->GetRenderWidgetHostView();
-  if (rwhv) {
-    validation_message_bubble_ =
-        chrome::ValidationMessageBubble::CreateAndShow(
-            rwhv->GetRenderWidgetHost(),
-            anchor_in_root_view,
-            main_text,
-            sub_text);
-  }
+  validation_message_bubble_ =
+      TabDialogs::FromWebContents(web_contents)
+          ->ShowValidationMessage(anchor_in_root_view, main_text, sub_text);
 }
 
 void Browser::HideValidationMessage(content::WebContents* web_contents) {
@@ -1279,7 +1276,7 @@ bool Browser::CanDragEnter(content::WebContents* source,
 }
 
 bool Browser::IsMouseLocked() const {
-  return fullscreen_controller_->IsMouseLocked();
+  return exclusive_access_manager_->mouse_lock_controller()->IsMouseLocked();
 }
 
 void Browser::OnWindowDidShow() {
@@ -1345,8 +1342,7 @@ void Browser::ShowDownload(content::DownloadItem* download) {
     return;
 
   // GetDownloadShelf creates the download shelf if it was not yet created.
-  DownloadShelf* shelf = window()->GetDownloadShelf();
-  shelf->AddDownload(download);
+  window()->GetDownloadShelf()->AddDownload(download);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1354,6 +1350,12 @@ void Browser::ShowDownload(content::DownloadItem* download) {
 
 WebContents* Browser::OpenURLFromTab(WebContents* source,
                                      const OpenURLParams& params) {
+  if (is_devtools()) {
+    DevToolsWindow* window = DevToolsWindow::AsDevToolsWindow(source);
+    DCHECK(window);
+    return window->OpenURLFromTab(source, params);
+  }
+
   chrome::NavigateParams nav_params(this, params.url, params.transition);
   FillNavigateParamsFromOpenURLParams(&nav_params, params);
   nav_params.source_contents = source;
@@ -1388,10 +1390,20 @@ WebContents* Browser::OpenURLFromTab(WebContents* source,
 
 void Browser::NavigationStateChanged(WebContents* source,
                                      content::InvalidateTypes changed_flags) {
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466285
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466285 Browser::NavigationStateChanged::ScheduleUIUpdate"));
   // Only update the UI when something visible has changed.
   if (changed_flags)
     ScheduleUIUpdate(source, changed_flags);
 
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466285
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466285 Browser::NavigationStateChanged::TabStateChanged"));
   // We can synchronously update commands since they will only change once per
   // navigation, so we don't have to worry about flickering. We do, however,
   // need to update the command state early on load to always present usable
@@ -1412,10 +1424,10 @@ void Browser::VisibleSSLStateChanged(const WebContents* source) {
 void Browser::AddNewContents(WebContents* source,
                              WebContents* new_contents,
                              WindowOpenDisposition disposition,
-                             const gfx::Rect& initial_pos,
+                             const gfx::Rect& initial_rect,
                              bool user_gesture,
                              bool* was_blocked) {
-  chrome::AddWebContents(this, source, new_contents, disposition, initial_pos,
+  chrome::AddWebContents(this, source, new_contents, disposition, initial_rect,
                          user_gesture, was_blocked);
 }
 
@@ -1555,10 +1567,6 @@ void Browser::SetFocusToLocationBar(bool select_all) {
   window_->SetFocusToLocationBar(select_all);
 }
 
-int Browser::GetExtraRenderViewHeight() const {
-  return window_->GetExtraRenderViewHeight();
-}
-
 void Browser::ViewSourceForTab(WebContents* source, const GURL& page_url) {
   DCHECK(source);
   chrome::ViewSource(this, source);
@@ -1649,11 +1657,6 @@ void Browser::DidNavigateMainFramePostCommit(WebContents* web_contents) {
     UpdateBookmarkBarState(BOOKMARK_BAR_STATE_CHANGE_TAB_STATE);
 }
 
-void Browser::DidNavigateToPendingEntry(WebContents* web_contents) {
-  if (web_contents == tab_strip_model_->GetActiveWebContents())
-    UpdateBookmarkBarState(BOOKMARK_BAR_STATE_CHANGE_TAB_STATE);
-}
-
 content::JavaScriptDialogManager* Browser::GetJavaScriptDialogManager(
     WebContents* source) {
   return app_modal::JavaScriptDialogManager::GetInstance();
@@ -1681,15 +1684,21 @@ bool Browser::EmbedsFullscreenWidget() const {
   return true;
 }
 
-void Browser::ToggleFullscreenModeForTab(WebContents* web_contents,
-                                         bool enter_fullscreen) {
-  fullscreen_controller_->ToggleFullscreenModeForTab(web_contents,
-                                                     enter_fullscreen);
+void Browser::EnterFullscreenModeForTab(WebContents* web_contents,
+                                        const GURL& origin) {
+  exclusive_access_manager_->fullscreen_controller()->EnterFullscreenModeForTab(
+      web_contents, origin);
+}
+
+void Browser::ExitFullscreenModeForTab(WebContents* web_contents) {
+  exclusive_access_manager_->fullscreen_controller()->ExitFullscreenModeForTab(
+      web_contents);
 }
 
 bool Browser::IsFullscreenForTabOrPending(
     const WebContents* web_contents) const {
-  return fullscreen_controller_->IsFullscreenForTabOrPending(web_contents);
+  return exclusive_access_manager_->fullscreen_controller()
+      ->IsFullscreenForTabOrPending(web_contents);
 }
 
 void Browser::RegisterProtocolHandler(WebContents* web_contents,
@@ -1785,13 +1794,12 @@ void Browser::FindReply(WebContents* web_contents,
 void Browser::RequestToLockMouse(WebContents* web_contents,
                                  bool user_gesture,
                                  bool last_unlocked_by_target) {
-  fullscreen_controller_->RequestToLockMouse(web_contents,
-                                             user_gesture,
-                                             last_unlocked_by_target);
+  exclusive_access_manager_->mouse_lock_controller()->RequestToLockMouse(
+      web_contents, user_gesture, last_unlocked_by_target);
 }
 
 void Browser::LostMouseLock() {
-  fullscreen_controller_->LostMouseLock();
+  exclusive_access_manager_->mouse_lock_controller()->LostMouseLock();
 }
 
 void Browser::RequestMediaAccessPermission(
@@ -1899,7 +1907,8 @@ OmniboxView* Browser::GetOmniboxView() {
 }
 
 std::set<std::string> Browser::GetOpenUrls() {
-  history::TopSites* top_sites = profile_->GetTopSites();
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile_);
   if (!top_sites)  // NULL for Incognito profiles.
     return std::set<std::string>();
 
@@ -1943,9 +1952,7 @@ void Browser::URLStarredChanged(content::WebContents* web_contents,
 void Browser::OnZoomChanged(
     const ui_zoom::ZoomController::ZoomChangedEventData& data) {
   if (data.web_contents == tab_strip_model_->GetActiveWebContents()) {
-    // Only show the zoom bubble for zoom changes in the active window.
-    window_->ZoomChangedForActiveTab(data.can_show_bubble &&
-                                     window_->IsActive());
+    window_->ZoomChangedForActiveTab(data.can_show_bubble);
     // Change the zoom commands state based on the zoom state
     command_controller_->ZoomStateChanged();
   }
@@ -2069,6 +2076,24 @@ void Browser::OnExtensionUnloaded(
 #endif  // defined(ENABLE_EXTENSIONS)
 
 ///////////////////////////////////////////////////////////////////////////////
+// Browser, translate::ContentTranslateDriver::Observer implementation:
+
+void Browser::OnIsPageTranslatedChanged(content::WebContents* source) {
+  DCHECK(source);
+  if (tab_strip_model_->GetActiveWebContents() == source) {
+    window_->SetTranslateIconToggled(
+        ChromeTranslateClient::FromWebContents(
+            source)->GetLanguageState().IsPageTranslated());
+  }
+}
+
+void Browser::OnTranslateEnabledChanged(content::WebContents* source) {
+  DCHECK(source);
+  if (tab_strip_model_->GetActiveWebContents() == source)
+    UpdateToolbar(false);
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Browser, Command and state updating (private):
 
 void Browser::OnDevToolsDisabledChanged() {
@@ -2090,6 +2115,11 @@ void Browser::ScheduleUIUpdate(WebContents* source,
   int index = tab_strip_model_->GetIndexOfWebContents(source);
   DCHECK_NE(TabStripModel::kNoTab, index);
 
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466285
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466285 Browser::ScheduleUIUpdate::Toolbar"));
   // Do some synchronous updates.
   if (changed_flags & content::INVALIDATE_TYPE_URL) {
     if (source == tab_strip_model_->GetActiveWebContents()) {
@@ -2105,6 +2135,12 @@ void Browser::ScheduleUIUpdate(WebContents* source,
     }
     changed_flags &= ~content::INVALIDATE_TYPE_URL;
   }
+
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466285
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466285 Browser::ScheduleUIUpdate::TabStripModel"));
   if (changed_flags & content::INVALIDATE_TYPE_LOAD) {
     // Update the loading state synchronously. This is so the throbber will
     // immediately start/stop, which gives a more snappy feel. We want to do
@@ -2164,6 +2200,12 @@ void Browser::ProcessPendingUIUpdates() {
 
   chrome_updater_factory_.InvalidateWeakPtrs();
 
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/467185
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "467185 Browser::ProcessPendingUIUpdates1"));
+
   for (UpdateMap::const_iterator i = scheduled_updates_.begin();
        i != scheduled_updates_.end(); ++i) {
     // Do not dereference |contents|, it may be out-of-date!
@@ -2171,6 +2213,12 @@ void Browser::ProcessPendingUIUpdates() {
     unsigned flags = i->second;
 
     if (contents == tab_strip_model_->GetActiveWebContents()) {
+      // TODO(robliao): Remove ScopedTracker below once https://crbug.com/467185
+      // is fixed.
+      tracked_objects::ScopedTracker tracking_profile2(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "467185 Browser::ProcessPendingUIUpdates2"));
+
       // Updates that only matter when the tab is selected go here.
 
       // Updating the URL happens synchronously in ScheduleUIUpdate.
@@ -2188,6 +2236,11 @@ void Browser::ProcessPendingUIUpdates() {
     // Updates that don't depend upon the selected state go here.
     if (flags &
         (content::INVALIDATE_TYPE_TAB | content::INVALIDATE_TYPE_TITLE)) {
+      // TODO(robliao): Remove ScopedTracker below once https://crbug.com/467185
+      // is fixed.
+      tracked_objects::ScopedTracker tracking_profile3(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "467185 Browser::ProcessPendingUIUpdates3"));
       tab_strip_model_->UpdateWebContentsStateAt(
           tab_strip_model_->GetIndexOfWebContents(contents),
           TabStripModelObserver::ALL);
@@ -2195,8 +2248,14 @@ void Browser::ProcessPendingUIUpdates() {
 
     // Update the bookmark bar. It may happen that the tab is crashed, and if
     // so, the bookmark bar should be hidden.
-    if (flags & content::INVALIDATE_TYPE_TAB)
+    if (flags & content::INVALIDATE_TYPE_TAB) {
+      // TODO(robliao): Remove ScopedTracker below once https://crbug.com/467185
+      // is fixed.
+      tracked_objects::ScopedTracker tracking_profile4(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "467185 Browser::ProcessPendingUIUpdates4"));
       UpdateBookmarkBarState(BOOKMARK_BAR_STATE_CHANGE_TAB_STATE);
+    }
 
     // We don't need to process INVALIDATE_STATE, since that's not visible.
   }
@@ -2296,11 +2355,11 @@ void Browser::SetAsDelegate(WebContents* web_contents, bool set_delegate) {
       ChromeTranslateClient::FromWebContents(web_contents)->translate_driver();
   if (delegate) {
     ui_zoom::ZoomController::FromWebContents(web_contents)->AddObserver(this);
-    content_translate_driver.AddObserver(translate_driver_observer_.get());
+    content_translate_driver.AddObserver(this);
   } else {
-    ui_zoom::ZoomController::FromWebContents(web_contents)
-        ->RemoveObserver(this);
-    content_translate_driver.RemoveObserver(translate_driver_observer_.get());
+    ui_zoom::ZoomController::FromWebContents(web_contents)->RemoveObserver(
+        this);
+    content_translate_driver.RemoveObserver(this);
   }
 }
 
@@ -2351,25 +2410,39 @@ bool Browser::ShouldShowLocationBar() const {
   if (is_type_tabbed())
     return true;
 
-  // Trusted app windows and system windows never show a location bar.
-  return !is_app() && !is_trusted_source();
-}
+  // Non-app windows that aren't tabbed or system windows should always show a
+  // location bar, unless they are from a trusted source.
+  if (!is_app())
+    return !is_trusted_source();
 
-bool Browser::ShouldUseWebAppFrame() const {
-  // Only use the web app frame for apps in ash, and only if streamlined hosted
-  // apps are enabled.
-  if (!is_app() || host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH ||
-      !IsWebAppFrameEnabled()) {
+  if (ShouldUseWebAppFrame())
     return false;
-  }
 
-  // Use the web app frame for hosted apps (which include bookmark apps).
+  // Bookmark apps should show the location bar.
   const std::string extension_id =
       web_app::GetExtensionIdFromApplicationName(app_name());
   const extensions::Extension* extension =
       extensions::ExtensionRegistry::Get(profile_)->GetExtensionById(
           extension_id, extensions::ExtensionRegistry::EVERYTHING);
-  return extension && extension->is_hosted_app();
+  return extensions::ui_util::ShouldShowLocationBar(
+      extension, tab_strip_model_->GetActiveWebContents());
+}
+
+bool Browser::ShouldUseWebAppFrame() const {
+  // Only use the web app frame for apps in ash, and only if the web app frame
+  // is enabled.
+  if (!is_app() || host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH ||
+      !IsWebAppFrameEnabled()) {
+    return false;
+  }
+
+  // Use the web app frame for hosted apps.
+  const std::string extension_id =
+      web_app::GetExtensionIdFromApplicationName(app_name());
+  const extensions::Extension* extension =
+      extensions::ExtensionRegistry::Get(profile_)->GetExtensionById(
+          extension_id, extensions::ExtensionRegistry::EVERYTHING);
+  return extension && extension->from_bookmark();
 }
 
 bool Browser::SupportsWindowFeatureImpl(WindowFeature feature,
@@ -2401,6 +2474,11 @@ bool Browser::SupportsWindowFeatureImpl(WindowFeature feature,
 }
 
 void Browser::UpdateBookmarkBarState(BookmarkBarStateChangeReason reason) {
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/467185 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "467185 Browser::UpdateBookmarkBarState1"));
   BookmarkBar::State state;
   // The bookmark bar is always hidden for Guest Sessions and in fullscreen
   // mode, unless on the new tab page.
@@ -2411,6 +2489,11 @@ void Browser::UpdateBookmarkBarState(BookmarkBarStateChangeReason reason) {
       !ShouldHideUIForFullscreen()) {
     state = BookmarkBar::SHOW;
   } else {
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/467185
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "467185 Browser::UpdateBookmarkBarState2"));
     WebContents* web_contents = tab_strip_model_->GetActiveWebContents();
     BookmarkTabHelper* bookmark_tab_helper =
         web_contents ? BookmarkTabHelper::FromWebContents(web_contents) : NULL;
@@ -2434,6 +2517,12 @@ void Browser::UpdateBookmarkBarState(BookmarkBarStateChangeReason reason) {
     // end up querying state once they process the tab switch.
     return;
   }
+
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/467185 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "467185 Browser::UpdateBookmarkBarState3"));
 
   bool should_animate = reason == BOOKMARK_BAR_STATE_CHANGE_PREF_CHANGE;
   window_->BookmarkBarStateChanged(should_animate ?

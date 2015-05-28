@@ -5,26 +5,32 @@
 #include <windows.h>
 #include <shlwapi.h>
 
+#include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/debug/trace_event.h"
 #include "base/environment.h"
 #include "base/file_version_info.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "base/version.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
 #include "chrome/app/chrome_crash_reporter_client.h"
+#include "chrome/app/chrome_watcher_client_win.h"
 #include "chrome/app/chrome_watcher_command_line_win.h"
 #include "chrome/app/client_util.h"
 #include "chrome/app/image_pre_reader_win.h"
+#include "chrome/app/kasko_client.h"
+#include "chrome/chrome_watcher/chrome_watcher_main_api.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
@@ -32,8 +38,6 @@
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/util_constants.h"
-#include "components/browser_watcher/watcher_client_win.h"
-#include "components/browser_watcher/watcher_main_api_win.h"
 #include "components/crash/app/breakpad_win.h"
 #include "components/crash/app/crash_reporter_client.h"
 #include "components/metrics/client_info.h"
@@ -126,7 +130,7 @@ HMODULE MainDllLoader::Load(base::string16* version, base::FilePath* module) {
   } else if (process_type_ == "service" || process_type_.empty()) {
     dll_name = installer::kChromeDll;
   } else if (process_type_ == "watcher") {
-    dll_name = browser_watcher::kWatcherDll;
+    dll_name = kChromeWatcherDll;
   } else {
 #if defined(CHROME_MULTIPLE_DLL)
     dll_name = installer::kChromeChildDll;
@@ -179,22 +183,30 @@ int MainDllLoader::Launch(HINSTANCE instance) {
   }
 
   if (process_type_ == "watcher") {
-    base::win::ScopedHandle parent_process =
-        InterpretChromeWatcherCommandLine(cmd_line);
-    if (!parent_process.IsValid())
+    chrome::RegisterPathProvider();
+
+    base::win::ScopedHandle parent_process;
+    base::win::ScopedHandle on_initialized_event;
+    if (!InterpretChromeWatcherCommandLine(cmd_line, &parent_process,
+                                           &on_initialized_event)) {
       return chrome::RESULT_CODE_UNSUPPORTED_PARAM;
+    }
+
+    base::FilePath watcher_data_directory;
+    if (!PathService::Get(chrome::DIR_WATCHER_DATA, &watcher_data_directory))
+      return chrome::RESULT_CODE_MISSING_DATA;
 
     // Intentionally leaked.
     HMODULE watcher_dll = Load(&version, &file);
     if (!watcher_dll)
       return chrome::RESULT_CODE_MISSING_DATA;
 
-    browser_watcher::WatcherMainFunction watcher_main =
-        reinterpret_cast<browser_watcher::WatcherMainFunction>(
-            ::GetProcAddress(watcher_dll,
-                             browser_watcher::kWatcherDLLEntrypoint));
+    ChromeWatcherMainFunction watcher_main =
+        reinterpret_cast<ChromeWatcherMainFunction>(
+            ::GetProcAddress(watcher_dll, kChromeWatcherDLLEntrypoint));
     return watcher_main(chrome::kBrowserExitCodesRegistryPath,
-                        parent_process.Take());
+                        parent_process.Take(), on_initialized_event.Take(),
+                        watcher_data_directory.value().c_str());
   }
 
   // Initialize the sandbox services.
@@ -224,7 +236,14 @@ int MainDllLoader::Launch(HINSTANCE instance) {
   DLL_MAIN chrome_main =
       reinterpret_cast<DLL_MAIN>(::GetProcAddress(dll_, "ChromeMain"));
   int rc = chrome_main(instance, &sandbox_info);
-  return OnBeforeExit(rc, file);
+  rc = OnBeforeExit(rc, file);
+  // Sandboxed processes close some system DLL handles after lockdown so ignore
+  // EXCEPTION_INVALID_HANDLE generated on Windows 10 during shutdown of these
+  // processes.
+  // TODO(wfh): Check whether MS have fixed this in Win10 RTM. crbug.com/456193
+  if (base::win::GetVersion() >= base::win::VERSION_WIN10)
+    breakpad::ConsumeInvalidHandleExceptions();
+  return rc;
 }
 
 void MainDllLoader::RelaunchChromeBrowserWithNewCommandLineIfNeeded() {
@@ -247,9 +266,16 @@ void MainDllLoader::RelaunchChromeBrowserWithNewCommandLineIfNeeded() {
 
 class ChromeDllLoader : public MainDllLoader {
  protected:
+  // MainDllLoader implementation.
   void OnBeforeLaunch(const std::string& process_type,
                       const base::FilePath& dll_path) override;
   int OnBeforeExit(int return_code, const base::FilePath& dll_path) override;
+
+ private:
+  scoped_ptr<ChromeWatcherClient> chrome_watcher_client_;
+#if defined(KASKO)
+  scoped_ptr<KaskoClient> kasko_client_;
+#endif  // KASKO
 };
 
 void ChromeDllLoader::OnBeforeLaunch(const std::string& process_type,
@@ -259,12 +285,31 @@ void ChromeDllLoader::OnBeforeLaunch(const std::string& process_type,
 
     // Launch the watcher process if stats collection consent has been granted.
     if (g_chrome_crash_client.Get().GetCollectStatsConsent()) {
-      base::char16 exe_path[MAX_PATH];
-      ::GetModuleFileNameW(nullptr, exe_path, arraysize(exe_path));
+      base::FilePath exe_path;
+      if (PathService::Get(base::FILE_EXE, &exe_path)) {
+        chrome_watcher_client_.reset(new ChromeWatcherClient(
+            base::Bind(&GenerateChromeWatcherCommandLine, exe_path)));
+        if (chrome_watcher_client_->LaunchWatcher()) {
+#if defined(KASKO)
+          kasko::api::MinidumpType minidump_type = kasko::api::SMALL_DUMP_TYPE;
+          if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+                  switches::kFullMemoryCrashReport)) {
+            minidump_type = kasko::api::FULL_DUMP_TYPE;
+          } else {
+            bool is_per_user_install =
+                g_chrome_crash_client.Get().GetIsPerUserInstall(
+                    base::FilePath(exe_path));
+            if (g_chrome_crash_client.Get().GetShouldDumpLargerDumps(
+                    is_per_user_install)){
+              minidump_type = kasko::api::LARGER_DUMP_TYPE;
+            }
+          }
 
-      browser_watcher::WatcherClient watcher_client(base::Bind(
-          &GenerateChromeWatcherCommandLine, base::FilePath(exe_path)));
-      watcher_client.LaunchWatcher();
+          kasko_client_.reset(
+              new KaskoClient(chrome_watcher_client_.get(), minidump_type));
+#endif  // KASKO
+        }
+      }
     }
   }
 }
@@ -277,6 +322,12 @@ int ChromeDllLoader::OnBeforeExit(int return_code,
   if (chrome::RESULT_CODE_NORMAL_EXIT_CANCEL == return_code) {
     ClearDidRun(dll_path);
   }
+
+#if defined(KASKO)
+  kasko_client_.reset();
+#endif  // KASKO
+  chrome_watcher_client_.reset();
+
   return return_code;
 }
 

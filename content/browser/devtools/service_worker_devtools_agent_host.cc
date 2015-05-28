@@ -26,6 +26,18 @@ void TerminateServiceWorkerOnIO(
   }
 }
 
+void UnregisterServiceWorkerOnIO(
+    base::WeakPtr<ServiceWorkerContextCore> context_weak,
+    int64 version_id) {
+  if (ServiceWorkerContextCore* context = context_weak.get()) {
+    if (ServiceWorkerVersion* version = context->GetLiveVersion(version_id)) {
+        version->StopWorker(base::Bind(&StatusNoOp));
+        context->UnregisterServiceWorker(
+            version->scope(), base::Bind(&StatusNoOp));
+    }
+  }
+}
+
 void SetDevToolsAttachedOnIO(
     base::WeakPtr<ServiceWorkerContextCore> context_weak,
     int64 version_id,
@@ -40,12 +52,9 @@ void SetDevToolsAttachedOnIO(
 
 ServiceWorkerDevToolsAgentHost::ServiceWorkerDevToolsAgentHost(
     WorkerId worker_id,
-    const ServiceWorkerIdentifier& service_worker,
-    bool debug_service_worker_on_start)
+    const ServiceWorkerIdentifier& service_worker)
     : WorkerDevToolsAgentHost(worker_id),
       service_worker_(new ServiceWorkerIdentifier(service_worker)) {
-  if (debug_service_worker_on_start)
-    set_state(WORKER_PAUSED_FOR_DEBUG_ON_START);
 }
 
 DevToolsAgentHost::Type ServiceWorkerDevToolsAgentHost::GetType() {
@@ -74,6 +83,13 @@ bool ServiceWorkerDevToolsAgentHost::Close() {
                   service_worker_->context_weak(),
                   service_worker_->version_id()));
   return true;
+}
+
+void ServiceWorkerDevToolsAgentHost::UnregisterWorker() {
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+      base::Bind(&UnregisterServiceWorkerOnIO,
+                  service_worker_->context_weak(),
+                  service_worker_->version_id()));
 }
 
 void ServiceWorkerDevToolsAgentHost::OnClientAttached() {

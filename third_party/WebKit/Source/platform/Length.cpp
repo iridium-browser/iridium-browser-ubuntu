@@ -111,7 +111,7 @@ Vector<Length> parseHTMLAreaElementCoords(const String& string)
 }
 
 class CalculationValueHandleMap {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(CalculationValueHandleMap);
 public:
     CalculationValueHandleMap()
         : m_index(1)
@@ -159,7 +159,7 @@ public:
 
 private:
     int m_index;
-    HashMap<int, RefPtr<CalculationValue> > m_map;
+    HashMap<int, RefPtr<CalculationValue>> m_map;
 };
 
 static CalculationValueHandleMap& calcHandles()
@@ -232,10 +232,10 @@ void Length::decrementCalculatedRef() const
     calcHandles().decrementRef(calculationHandle());
 }
 
-float Length::nonNanCalculatedValue(int maxValue) const
+float Length::nonNanCalculatedValue(LayoutUnit maxValue) const
 {
     ASSERT(isCalculated());
-    float result = calculationValue().evaluate(maxValue);
+    float result = calculationValue().evaluate(maxValue.toFloat());
     if (std::isnan(result))
         return 0;
     return result;

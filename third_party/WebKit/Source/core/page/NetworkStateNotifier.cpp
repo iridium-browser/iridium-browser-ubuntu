@@ -39,8 +39,8 @@ namespace blink {
 
 NetworkStateNotifier& networkStateNotifier()
 {
-    AtomicallyInitializedStatic(NetworkStateNotifier*, networkStateNotifier = new NetworkStateNotifier);
-    return *networkStateNotifier;
+    AtomicallyInitializedStaticReference(NetworkStateNotifier, networkStateNotifier, new NetworkStateNotifier);
+    return networkStateNotifier;
 }
 
 void NetworkStateNotifier::setOnLine(bool onLine)
@@ -78,7 +78,7 @@ void NetworkStateNotifier::setWebConnectionTypeImpl(blink::WebConnectionType typ
 
     for (const auto& entry : m_observers) {
         ExecutionContext* context = entry.key;
-        context->postTask(createCrossThreadTask(&NetworkStateNotifier::notifyObserversOnContext, this, AllowCrossThreadAccess(context), type));
+        context->postTask(FROM_HERE, createCrossThreadTask(&NetworkStateNotifier::notifyObserversOnContext, this, AllowCrossThreadAccess(context), type));
     }
 }
 

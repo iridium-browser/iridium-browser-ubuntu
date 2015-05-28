@@ -11,24 +11,29 @@ var remoting = remoting || {};
  * WCS-based SignalStrategy implementation. Used instead of XMPPConnection
  * when XMPP cannot be used (e.g. in V1 app).
  *
- * @param {function(remoting.SignalStrategy.State):void} onStateChangedCallback
- *   Callback to call on state change.
  * @constructor
  * @implements {remoting.SignalStrategy}
  */
-remoting.WcsAdapter =
-    function(onStateChangedCallback) {
-  /** @private */
-  this.onStateChangedCallback_ = onStateChangedCallback;
-  /** @type {?function(Element):void} @private */
+remoting.WcsAdapter = function() {
+  /** @private {?function(remoting.SignalStrategy.State):void} */
+  this.onStateChangedCallback_ = null;
+  /** @private {?function(Element):void} */
   this.onIncomingStanzaCallback_ = null;
   /** @private */
   this.state_ = remoting.SignalStrategy.State.NOT_CONNECTED;
   /** @private */
   this.jid_ = '';
   /** @private */
-  this.error_ = remoting.Error.NONE;
-}
+  this.error_ = remoting.Error.none();
+};
+
+/**
+ * @param {function(remoting.SignalStrategy.State):void} onStateChangedCallback
+ */
+remoting.WcsAdapter.prototype.setStateChangedCallback = function(
+    onStateChangedCallback) {
+  this.onStateChangedCallback_ = onStateChangedCallback;
+};
 
 /**
  * @param {?function(Element):void} onIncomingStanzaCallback Callback to call on
@@ -37,34 +42,45 @@ remoting.WcsAdapter =
 remoting.WcsAdapter.prototype.setIncomingStanzaCallback =
     function(onIncomingStanzaCallback) {
   this.onIncomingStanzaCallback_ = onIncomingStanzaCallback;
-}
+};
 
-remoting.WcsAdapter.prototype.connect = function(server, authToken) {
+/**
+ * @param {string} server
+ * @param {string} username
+ * @param {string} authToken
+ */
+remoting.WcsAdapter.prototype.connect = function(server, username, authToken) {
+  base.debug.assert(this.onStateChangedCallback_ != null);
+
   remoting.wcsSandbox.setOnIq(this.onIncomingStanza_.bind(this));
-
   remoting.wcsSandbox.connect(this.onWcsConnected_.bind(this),
                               this.onError_.bind(this));
-}
+};
 
 /** @return {remoting.SignalStrategy.State} Current state */
 remoting.WcsAdapter.prototype.getState = function() {
   return this.state_;
-}
+};
 
-/** @return {remoting.Error} Error when in FAILED state. */
+/** @return {!remoting.Error} Error when in FAILED state. */
 remoting.WcsAdapter.prototype.getError = function() {
   return this.error_;
-}
+};
 
 /** @return {string} Current JID when in CONNECTED state. */
 remoting.WcsAdapter.prototype.getJid = function() {
   return this.jid_;
-}
+};
+
+/** @return {remoting.SignalStrategy.Type} The signal strategy type. */
+remoting.WcsAdapter.prototype.getType = function() {
+  return remoting.SignalStrategy.Type.WCS;
+};
 
 remoting.WcsAdapter.prototype.dispose = function() {
   this.setState_(remoting.SignalStrategy.State.CLOSED);
   remoting.wcsSandbox.setOnIq(null);
-}
+};
 
 /** @param {string} message */
 remoting.WcsAdapter.prototype.sendMessage = function(message) {
@@ -84,13 +100,21 @@ remoting.WcsAdapter.prototype.sendMessage = function(message) {
 
   // Send the stanza.
   remoting.wcsSandbox.sendIq(message);
-}
+};
+
+/**
+ * @param {remoting.LogToServer} logToServer The LogToServer instance for the
+ *     connection.
+ */
+remoting.WcsAdapter.prototype.sendConnectionSetupResults =
+    function(logToServer) {
+};
 
 /** @param {string} jid */
 remoting.WcsAdapter.prototype.onWcsConnected_ = function(jid) {
   this.jid_ = jid;
   this.setState_(remoting.SignalStrategy.State.CONNECTED);
-}
+};
 
 /** @param {string} stanza */
 remoting.WcsAdapter.prototype.onIncomingStanza_ = function(stanza) {
@@ -111,13 +135,13 @@ remoting.WcsAdapter.prototype.onIncomingStanza_ = function(stanza) {
   if (this.onIncomingStanzaCallback_) {
     this.onIncomingStanzaCallback_(parsed);
   }
-}
+};
 
-/** @param {remoting.Error} error */
+/** @param {!remoting.Error} error */
 remoting.WcsAdapter.prototype.onError_ = function(error) {
   this.error_ = error;
   this.setState_(remoting.SignalStrategy.State.FAILED);
-}
+};
 
 /**
  * @param {remoting.SignalStrategy.State} newState

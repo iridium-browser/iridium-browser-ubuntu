@@ -23,10 +23,10 @@ class SystemMonitor;
 #if defined(OS_CHROMEOS)
 class MemoryPressureObserverChromeOS;
 #endif
-namespace debug {
+namespace trace_event {
 class TraceMemoryController;
 class TraceEventSystemStatsMonitor;
-}  // namespace debug
+}  // namespace trace_event
 }  // namespace base
 
 namespace media {
@@ -150,6 +150,9 @@ class CONTENT_EXPORT BrowserMainLoop {
   void InitStartupTracing(const base::CommandLine& command_line);
   void EndStartupTracing();
 
+  bool UsingInProcessGpu() const;
+  void InitializeGpuDataManager();
+
   // Members initialized on construction ---------------------------------------
   const MainFunctionParams& parameters_;
   const base::CommandLine& parsed_command_line_;
@@ -209,8 +212,9 @@ class CONTENT_EXPORT BrowserMainLoop {
   scoped_ptr<BrowserProcessSubThread> io_thread_;
   scoped_ptr<base::Thread> indexed_db_thread_;
   scoped_ptr<MemoryObserver> memory_observer_;
-  scoped_ptr<base::debug::TraceMemoryController> trace_memory_controller_;
-  scoped_ptr<base::debug::TraceEventSystemStatsMonitor> system_stats_monitor_;
+  scoped_ptr<base::trace_event::TraceMemoryController> trace_memory_controller_;
+  scoped_ptr<base::trace_event::TraceEventSystemStatsMonitor>
+      system_stats_monitor_;
 
   bool is_tracing_startup_;
   base::FilePath startup_trace_file_;

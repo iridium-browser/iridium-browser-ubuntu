@@ -11,16 +11,17 @@
 #include "base/atomic_sequence_num.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
-#include "base/debug/trace_event_argument.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "cc/animation/animation_registrar.h"
 #include "cc/animation/layer_animation_controller.h"
 #include "cc/base/math_util.h"
 #include "cc/debug/devtools_instrumentation.h"
+#include "cc/debug/frame_viewer_instrumentation.h"
 #include "cc/debug/rendering_stats_instrumentation.h"
 #include "cc/input/layer_selection_bound.h"
 #include "cc/input/page_scale_animation.h"
@@ -43,6 +44,7 @@
 #include "cc/trees/thread_proxy.h"
 #include "cc/trees/tree_synchronizer.h"
 #include "ui/gfx/geometry/size_conversions.h"
+#include "ui/gfx/geometry/vector2d_conversions.h"
 
 namespace {
 static base::StaticAtomicSequenceNumber s_layer_tree_host_sequence_number;
@@ -50,27 +52,11 @@ static base::StaticAtomicSequenceNumber s_layer_tree_host_sequence_number;
 
 namespace cc {
 
-RendererCapabilities::RendererCapabilities(ResourceFormat best_texture_format,
-                                           bool allow_partial_texture_updates,
-                                           int max_texture_size,
-                                           bool using_shared_memory_resources)
-    : best_texture_format(best_texture_format),
-      allow_partial_texture_updates(allow_partial_texture_updates),
-      max_texture_size(max_texture_size),
-      using_shared_memory_resources(using_shared_memory_resources) {}
-
-RendererCapabilities::RendererCapabilities()
-    : best_texture_format(RGBA_8888),
-      allow_partial_texture_updates(false),
-      max_texture_size(0),
-      using_shared_memory_resources(false) {}
-
-RendererCapabilities::~RendererCapabilities() {}
-
 scoped_ptr<LayerTreeHost> LayerTreeHost::CreateThreaded(
     LayerTreeHostClient* client,
     SharedBitmapManager* shared_bitmap_manager,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+    TaskGraphRunner* task_graph_runner,
     const LayerTreeSettings& settings,
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
@@ -78,7 +64,8 @@ scoped_ptr<LayerTreeHost> LayerTreeHost::CreateThreaded(
   DCHECK(main_task_runner.get());
   DCHECK(impl_task_runner.get());
   scoped_ptr<LayerTreeHost> layer_tree_host(new LayerTreeHost(
-      client, shared_bitmap_manager, gpu_memory_buffer_manager, settings));
+      client, shared_bitmap_manager, gpu_memory_buffer_manager,
+      task_graph_runner, settings));
   layer_tree_host->InitializeThreaded(main_task_runner,
                                       impl_task_runner,
                                       external_begin_frame_source.Pass());
@@ -90,11 +77,13 @@ scoped_ptr<LayerTreeHost> LayerTreeHost::CreateSingleThreaded(
     LayerTreeHostSingleThreadClient* single_thread_client,
     SharedBitmapManager* shared_bitmap_manager,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+    TaskGraphRunner* task_graph_runner,
     const LayerTreeSettings& settings,
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
     scoped_ptr<BeginFrameSource> external_begin_frame_source) {
   scoped_ptr<LayerTreeHost> layer_tree_host(new LayerTreeHost(
-      client, shared_bitmap_manager, gpu_memory_buffer_manager, settings));
+      client, shared_bitmap_manager, gpu_memory_buffer_manager,
+      task_graph_runner, settings));
   layer_tree_host->InitializeSingleThreaded(single_thread_client,
                                             main_task_runner,
                                             external_begin_frame_source.Pass());
@@ -105,6 +94,7 @@ LayerTreeHost::LayerTreeHost(
     LayerTreeHostClient* client,
     SharedBitmapManager* shared_bitmap_manager,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+    TaskGraphRunner* task_graph_runner,
     const LayerTreeSettings& settings)
     : micro_benchmark_controller_(this),
       next_ui_resource_id_(1),
@@ -118,7 +108,7 @@ LayerTreeHost::LayerTreeHost(
       debug_state_(settings.initial_debug_state),
       top_controls_shrink_blink_size_(false),
       top_controls_height_(0.f),
-      top_controls_content_offset_(0.f),
+      top_controls_shown_ratio_(0.f),
       device_scale_factor_(1.f),
       visible_(true),
       page_scale_factor_(1.f),
@@ -130,12 +120,13 @@ LayerTreeHost::LayerTreeHost(
       background_color_(SK_ColorWHITE),
       has_transparent_background_(false),
       partial_texture_update_requests_(0),
+      did_complete_scale_animation_(false),
       in_paint_layer_contents_(false),
-      total_frames_used_for_lcd_text_metrics_(0),
       id_(s_layer_tree_host_sequence_number.GetNext() + 1),
       next_commit_forces_redraw_(false),
       shared_bitmap_manager_(shared_bitmap_manager),
       gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
+      task_graph_runner_(task_graph_runner),
       surface_id_namespace_(0u),
       next_surface_sequence_(1u) {
   if (settings_.accelerated_animation_enabled)
@@ -183,8 +174,6 @@ void LayerTreeHost::InitializeProxy(scoped_ptr<Proxy> proxy) {
 LayerTreeHost::~LayerTreeHost() {
   TRACE_EVENT0("cc", "LayerTreeHost::~LayerTreeHost");
 
-  overhang_ui_resource_ = nullptr;
-
   if (root_layer_.get())
     root_layer_->SetLayerTreeHost(NULL);
 
@@ -212,10 +201,6 @@ void LayerTreeHost::SetLayerTreeHostClientReady() {
   proxy_->SetLayerTreeHostClientReady();
 }
 
-static void LayerTreeHostOnOutputSurfaceCreatedCallback(Layer* layer) {
-  layer->OnOutputSurfaceCreated();
-}
-
 void LayerTreeHost::DeleteContentsTexturesOnImplThread(
     ResourceProvider* resource_provider) {
   DCHECK(proxy_->IsImplThread());
@@ -223,8 +208,18 @@ void LayerTreeHost::DeleteContentsTexturesOnImplThread(
     contents_texture_manager_->ClearAllMemory(resource_provider);
 }
 
+void LayerTreeHost::WillBeginMainFrame() {
+  devtools_instrumentation::WillBeginMainThreadFrame(id(),
+                                                     source_frame_number());
+  client_->WillBeginMainFrame();
+}
+
 void LayerTreeHost::DidBeginMainFrame() {
   client_->DidBeginMainFrame();
+}
+
+void LayerTreeHost::BeginMainFrameNotExpectedSoon() {
+  client_->BeginMainFrameNotExpectedSoon();
 }
 
 void LayerTreeHost::BeginMainFrame(const BeginFrameArgs& args) {
@@ -280,6 +275,15 @@ void LayerTreeHost::FinishCommitOnImplThread(LayerTreeHostImpl* host_impl) {
     contents_texture_manager_->ReduceMemory(host_impl->resource_provider());
   }
 
+  bool is_new_trace;
+  TRACE_EVENT_IS_NEW_TRACE(&is_new_trace);
+  if (is_new_trace &&
+      frame_viewer_instrumentation::IsTracingLayerTreeSnapshots() &&
+      root_layer()) {
+    LayerTreeHostCommon::CallFunctionForSubtree(
+        root_layer(), [](Layer* layer) { layer->DidBeginTracing(); });
+  }
+
   LayerTreeImpl* sync_tree = host_impl->sync_tree();
 
   if (next_commit_forces_redraw_) {
@@ -329,23 +333,12 @@ void LayerTreeHost::FinishCommitOnImplThread(LayerTreeHostImpl* host_impl) {
 
   sync_tree->PassSwapPromises(&swap_promise_list_);
 
-  // Track the change in top controls height to offset the top_controls_delta
-  // properly.  This is so that the top controls offset will be maintained
-  // across height changes.
-  float top_controls_height_delta =
-      sync_tree->top_controls_height() - top_controls_height_;
-
   sync_tree->set_top_controls_shrink_blink_size(
       top_controls_shrink_blink_size_);
   sync_tree->set_top_controls_height(top_controls_height_);
-  sync_tree->set_top_controls_content_offset(top_controls_content_offset_);
-  sync_tree->set_top_controls_delta(sync_tree->top_controls_delta() -
-                                    sync_tree->sent_top_controls_delta() -
-                                    top_controls_height_delta);
-  sync_tree->set_sent_top_controls_delta(0.f);
+  sync_tree->PushTopControlsFromMainThread(top_controls_shown_ratio_);
 
-  host_impl->SetUseGpuRasterization(UseGpuRasterization());
-  host_impl->set_gpu_rasterization_status(GetGpuRasterizationStatus());
+  host_impl->SetGpuRasterizationStatus(GetGpuRasterizationStatus());
   RecordGpuRasterizationHistogram();
 
   host_impl->SetViewportSize(device_viewport_size_);
@@ -359,11 +352,6 @@ void LayerTreeHost::FinishCommitOnImplThread(LayerTreeHostImpl* host_impl) {
   if (!ui_resource_request_queue_.empty()) {
     sync_tree->set_ui_resource_request_queue(ui_resource_request_queue_);
     ui_resource_request_queue_.clear();
-  }
-  if (overhang_ui_resource_) {
-    host_impl->SetOverhangUIResource(
-        overhang_ui_resource_->id(),
-        GetUIResourceSize(overhang_ui_resource_->id()));
   }
 
   DCHECK(!sync_tree->ViewportSizeInvalid());
@@ -403,6 +391,10 @@ void LayerTreeHost::UpdateHudLayer() {
 void LayerTreeHost::CommitComplete() {
   source_frame_number_++;
   client_->DidCommit();
+  if (did_complete_scale_animation_) {
+    client_->DidCompletePageScaleAnimation();
+    did_complete_scale_animation_ = false;
+  }
 }
 
 void LayerTreeHost::SetOutputSurface(scoped_ptr<OutputSurface> surface) {
@@ -429,7 +421,7 @@ void LayerTreeHost::DidInitializeOutputSurface() {
 
   if (root_layer()) {
     LayerTreeHostCommon::CallFunctionForSubtree(
-        root_layer(), base::Bind(&LayerTreeHostOnOutputSurfaceCreatedCallback));
+        root_layer(), [](Layer* layer) { layer->OnOutputSurfaceCreated(); });
   }
 
   client_->DidInitializeOutputSurface();
@@ -443,22 +435,16 @@ void LayerTreeHost::DidFailToInitializeOutputSurface() {
 scoped_ptr<LayerTreeHostImpl> LayerTreeHost::CreateLayerTreeHostImpl(
     LayerTreeHostImplClient* client) {
   DCHECK(proxy_->IsImplThread());
-  scoped_ptr<LayerTreeHostImpl> host_impl =
-      LayerTreeHostImpl::Create(settings_,
-                                client,
-                                proxy_.get(),
-                                rendering_stats_instrumentation_.get(),
-                                shared_bitmap_manager_,
-                                gpu_memory_buffer_manager_,
-                                id_);
-  host_impl->SetUseGpuRasterization(UseGpuRasterization());
+  scoped_ptr<LayerTreeHostImpl> host_impl = LayerTreeHostImpl::Create(
+      settings_, client, proxy_.get(), rendering_stats_instrumentation_.get(),
+      shared_bitmap_manager_, gpu_memory_buffer_manager_, task_graph_runner_,
+      id_);
+  host_impl->SetGpuRasterizationStatus(GetGpuRasterizationStatus());
   shared_bitmap_manager_ = NULL;
   gpu_memory_buffer_manager_ = NULL;
-  if (settings_.calculate_top_controls_position &&
-      host_impl->top_controls_manager()) {
-    top_controls_manager_weak_ptr_ =
-        host_impl->top_controls_manager()->AsWeakPtr();
-  }
+  task_graph_runner_ = NULL;
+  top_controls_manager_weak_ptr_ =
+      host_impl->top_controls_manager()->AsWeakPtr();
   input_handler_weak_ptr_ = host_impl->AsWeakPtr();
   return host_impl.Pass();
 }
@@ -481,8 +467,6 @@ void LayerTreeHost::FinishAllRendering() {
 void LayerTreeHost::SetDeferCommits(bool defer_commits) {
   proxy_->SetDeferCommits(defer_commits);
 }
-
-void LayerTreeHost::DidDeferCommit() {}
 
 void LayerTreeHost::SetNeedsDisplayOnAllLayers() {
   std::stack<Layer*> layer_stack;
@@ -555,35 +539,7 @@ void LayerTreeHost::SetNextCommitForcesRedraw() {
 void LayerTreeHost::SetAnimationEvents(
     scoped_ptr<AnimationEventsVector> events) {
   DCHECK(proxy_->IsMainThread());
-  for (size_t event_index = 0; event_index < events->size(); ++event_index) {
-    int event_layer_id = (*events)[event_index].layer_id;
-
-    // Use the map of all controllers, not just active ones, since non-active
-    // controllers may still receive events for impl-only animations.
-    const AnimationRegistrar::AnimationControllerMap& animation_controllers =
-        animation_registrar_->all_animation_controllers();
-    AnimationRegistrar::AnimationControllerMap::const_iterator iter =
-        animation_controllers.find(event_layer_id);
-    if (iter != animation_controllers.end()) {
-      switch ((*events)[event_index].type) {
-        case AnimationEvent::Started:
-          (*iter).second->NotifyAnimationStarted((*events)[event_index]);
-          break;
-
-        case AnimationEvent::Finished:
-          (*iter).second->NotifyAnimationFinished((*events)[event_index]);
-          break;
-
-        case AnimationEvent::Aborted:
-          (*iter).second->NotifyAnimationAborted((*events)[event_index]);
-          break;
-
-        case AnimationEvent::PropertyUpdate:
-          (*iter).second->NotifyAnimationPropertyUpdate((*events)[event_index]);
-          break;
-      }
-    }
-  }
+  animation_registrar_->SetAnimationEvents(events.Pass());
 }
 
 void LayerTreeHost::SetRootLayer(scoped_refptr<Layer> root_layer) {
@@ -625,17 +581,6 @@ void LayerTreeHost::SetDebugState(const LayerTreeDebugState& debug_state) {
   proxy_->SetDebugState(debug_state);
 }
 
-bool LayerTreeHost::UseGpuRasterization() const {
-  if (settings_.gpu_rasterization_forced) {
-    return true;
-  } else if (settings_.gpu_rasterization_enabled) {
-    return has_gpu_rasterization_trigger_ &&
-           content_is_suitable_for_gpu_rasterization_;
-  } else {
-    return false;
-  }
-}
-
 GpuRasterizationStatus LayerTreeHost::GetGpuRasterizationStatus() const {
   if (settings_.gpu_rasterization_forced) {
     return GpuRasterizationStatus::ON_FORCED;
@@ -672,27 +617,21 @@ void LayerTreeHost::SetViewportSize(const gfx::Size& device_viewport_size) {
   SetNeedsCommit();
 }
 
-void LayerTreeHost::SetTopControlsShrinkBlinkSize(bool shrink) {
-  if (top_controls_shrink_blink_size_ == shrink)
+void LayerTreeHost::SetTopControlsHeight(float height, bool shrink) {
+  if (top_controls_height_ == height &&
+      top_controls_shrink_blink_size_ == shrink)
     return;
 
+  top_controls_height_ = height;
   top_controls_shrink_blink_size_ = shrink;
   SetNeedsCommit();
 }
 
-void LayerTreeHost::SetTopControlsHeight(float height) {
-  if (top_controls_height_ == height)
+void LayerTreeHost::SetTopControlsShownRatio(float ratio) {
+  if (top_controls_shown_ratio_ == ratio)
     return;
 
-  top_controls_height_ = height;
-  SetNeedsCommit();
-}
-
-void LayerTreeHost::SetTopControlsContentOffset(float offset) {
-  if (top_controls_content_offset_ == offset)
-    return;
-
-  top_controls_content_offset_ = offset;
+  top_controls_shown_ratio_ = ratio;
   SetNeedsCommit();
 }
 
@@ -713,23 +652,6 @@ void LayerTreeHost::SetPageScaleFactorAndLimits(float page_scale_factor,
   min_page_scale_factor_ = min_page_scale_factor;
   max_page_scale_factor_ = max_page_scale_factor;
   SetNeedsCommit();
-}
-
-void LayerTreeHost::SetOverhangBitmap(const SkBitmap& bitmap) {
-  DCHECK(bitmap.width() && bitmap.height());
-  DCHECK_EQ(bitmap.bytesPerPixel(), 4);
-
-  SkBitmap bitmap_copy;
-  if (bitmap.isImmutable()) {
-    bitmap_copy = bitmap;
-  } else {
-    bitmap.copyTo(&bitmap_copy);
-    bitmap_copy.setImmutable();
-  }
-
-  UIResourceBitmap overhang_bitmap(bitmap_copy);
-  overhang_bitmap.SetWrapMode(UIResourceBitmap::REPEAT);
-  overhang_ui_resource_ = ScopedUIResource::Create(this, overhang_bitmap);
 }
 
 void LayerTreeHost::SetVisible(bool visible) {
@@ -788,6 +710,10 @@ bool LayerTreeHost::UpdateLayers(ResourceUpdateQueue* queue) {
   return result || next_commit_forces_redraw_;
 }
 
+void LayerTreeHost::DidCompletePageScaleAnimation() {
+  did_complete_scale_animation_ = true;
+}
+
 static Layer* FindFirstScrollableLayer(Layer* layer) {
   if (!layer)
     return NULL;
@@ -827,18 +753,6 @@ void LayerTreeHost::RecordGpuRasterizationHistogram() {
   }
 
   gpu_rasterization_histogram_recorded_ = true;
-}
-
-void LayerTreeHost::CalculateLCDTextMetricsCallback(Layer* layer) {
-  if (!layer->SupportsLCDText())
-    return;
-
-  lcd_text_metrics_.total_num_cc_layers++;
-  if (layer->draw_properties().can_use_lcd_text) {
-    lcd_text_metrics_.total_num_cc_layers_can_use_lcd_text++;
-    if (layer->contents_opaque())
-      lcd_text_metrics_.total_num_cc_layers_will_use_lcd_text++;
-  }
 }
 
 bool LayerTreeHost::UsingSharedMemoryResources() {
@@ -881,29 +795,6 @@ bool LayerTreeHost::UpdateLayers(Layer* root_layer,
         settings_.verify_property_trees, &update_list,
         render_surface_layer_list_id);
     LayerTreeHostCommon::CalculateDrawProperties(&inputs);
-
-    if (total_frames_used_for_lcd_text_metrics_ <=
-        kTotalFramesToUseForLCDTextMetrics) {
-      LayerTreeHostCommon::CallFunctionForSubtree(
-          root_layer,
-          base::Bind(&LayerTreeHost::CalculateLCDTextMetricsCallback,
-                     base::Unretained(this)));
-      total_frames_used_for_lcd_text_metrics_++;
-    }
-
-    if (total_frames_used_for_lcd_text_metrics_ ==
-        kTotalFramesToUseForLCDTextMetrics) {
-      total_frames_used_for_lcd_text_metrics_++;
-
-      UMA_HISTOGRAM_PERCENTAGE(
-          "Renderer4.LCDText.PercentageOfCandidateLayers",
-          lcd_text_metrics_.total_num_cc_layers_can_use_lcd_text * 100.0 /
-          lcd_text_metrics_.total_num_cc_layers);
-      UMA_HISTOGRAM_PERCENTAGE(
-          "Renderer4.LCDText.PercentageOfAALayers",
-          lcd_text_metrics_.total_num_cc_layers_will_use_lcd_text * 100.0 /
-          lcd_text_metrics_.total_num_cc_layers_can_use_lcd_text);
-    }
   }
 
   // Reset partial texture update requests.
@@ -932,17 +823,12 @@ void LayerTreeHost::TriggerPrepaint() {
   SetNeedsCommit();
 }
 
-static void LayerTreeHostReduceMemoryCallback(Layer* layer) {
-  layer->ReduceMemoryUsage();
-}
-
 void LayerTreeHost::ReduceMemoryUsage() {
   if (!root_layer())
     return;
 
   LayerTreeHostCommon::CallFunctionForSubtree(
-      root_layer(),
-      base::Bind(&LayerTreeHostReduceMemoryCallback));
+      root_layer(), [](Layer* layer) { layer->ReduceMemoryUsage(); });
 }
 
 void LayerTreeHost::SetPrioritiesForSurfaces(size_t surface_memory_bytes) {
@@ -1104,8 +990,8 @@ void LayerTreeHost::ApplyScrollAndScale(ScrollAndScaleSet* info) {
     QueueSwapPromise(swap_promise.Pass());
   }
 
-  gfx::Vector2d inner_viewport_scroll_delta;
-  gfx::Vector2d outer_viewport_scroll_delta;
+  gfx::Vector2dF inner_viewport_scroll_delta;
+  gfx::Vector2dF outer_viewport_scroll_delta;
 
   if (root_layer_.get()) {
     for (size_t i = 0; i < info->scrolls.size(); ++i) {
@@ -1148,10 +1034,13 @@ void LayerTreeHost::ApplyScrollAndScale(ScrollAndScaleSet* info) {
     ApplyPageScaleDeltaFromImplSide(info->page_scale_delta);
     elastic_overscroll_ += info->elastic_overscroll_delta;
     if (!settings_.use_pinch_virtual_viewport) {
+      // TODO(miletus): Make sure either this code path is totally gone,
+      // or revisit the flooring here if the old pinch viewport code path
+      // is causing problems with fractional scroll offset.
       client_->ApplyViewportDeltas(
-          inner_viewport_scroll_delta + outer_viewport_scroll_delta,
-          info->page_scale_delta,
-          info->top_controls_delta);
+          gfx::ToFlooredVector2d(inner_viewport_scroll_delta +
+                                 outer_viewport_scroll_delta),
+          info->page_scale_delta, info->top_controls_delta);
     } else {
       // TODO(ccameron): pass the elastic overscroll here so that input events
       // may be translated appropriately.
@@ -1223,9 +1112,6 @@ void LayerTreeHost::SetDeviceScaleFactor(float device_scale_factor) {
 void LayerTreeHost::UpdateTopControlsState(TopControlsState constraints,
                                            TopControlsState current,
                                            bool animate) {
-  if (!settings_.calculate_top_controls_position)
-    return;
-
   // Top controls are only used in threaded mode.
   proxy_->ImplThreadTaskRunner()->PostTask(
       FROM_HERE,
@@ -1236,28 +1122,12 @@ void LayerTreeHost::UpdateTopControlsState(TopControlsState constraints,
                  animate));
 }
 
-void LayerTreeHost::AsValueInto(base::debug::TracedValue* state) const {
-  state->BeginDictionary("proxy");
-  proxy_->AsValueInto(state);
-  state->EndDictionary();
-}
-
 void LayerTreeHost::AnimateLayers(base::TimeTicks monotonic_time) {
-  if (!settings_.accelerated_animation_enabled ||
-      animation_registrar_->active_animation_controllers().empty())
+  if (!settings_.accelerated_animation_enabled)
     return;
 
-  TRACE_EVENT0("cc", "LayerTreeHost::AnimateLayers");
-
-  AnimationRegistrar::AnimationControllerMap copy =
-      animation_registrar_->active_animation_controllers();
-  for (AnimationRegistrar::AnimationControllerMap::iterator iter = copy.begin();
-       iter != copy.end();
-       ++iter) {
-    (*iter).second->Animate(monotonic_time);
-    bool start_ready_animations = true;
-    (*iter).second->UpdateState(start_ready_animations, NULL);
-  }
+  if (animation_registrar_->AnimateLayers(monotonic_time))
+    animation_registrar_->UpdateAnimationState(true, NULL);
 }
 
 UIResourceId LayerTreeHost::CreateUIResource(UIResourceClient* client) {
@@ -1268,8 +1138,7 @@ UIResourceId LayerTreeHost::CreateUIResource(UIResourceClient* client) {
          ui_resource_client_map_.end());
 
   bool resource_lost = false;
-  UIResourceRequest request(UIResourceRequest::UIResourceCreate,
-                            next_id,
+  UIResourceRequest request(UIResourceRequest::UI_RESOURCE_CREATE, next_id,
                             client->GetBitmap(next_id, resource_lost));
   ui_resource_request_queue_.push_back(request);
 
@@ -1287,7 +1156,7 @@ void LayerTreeHost::DeleteUIResource(UIResourceId uid) {
   if (iter == ui_resource_client_map_.end())
     return;
 
-  UIResourceRequest request(UIResourceRequest::UIResourceDelete, uid);
+  UIResourceRequest request(UIResourceRequest::UI_RESOURCE_DELETE, uid);
   ui_resource_request_queue_.push_back(request);
   ui_resource_client_map_.erase(iter);
 }
@@ -1299,8 +1168,7 @@ void LayerTreeHost::RecreateUIResources() {
     UIResourceId uid = iter->first;
     const UIResourceClientData& data = iter->second;
     bool resource_lost = true;
-    UIResourceRequest request(UIResourceRequest::UIResourceCreate,
-                              uid,
+    UIResourceRequest request(UIResourceRequest::UI_RESOURCE_CREATE, uid,
                               data.client->GetBitmap(uid, resource_lost));
     ui_resource_request_queue_.push_back(request);
   }
@@ -1391,6 +1259,11 @@ void LayerTreeHost::SetChildrenNeedBeginFrames(
 void LayerTreeHost::SendBeginFramesToChildren(
     const BeginFrameArgs& args) const {
   client_->SendBeginFramesToChildren(args);
+}
+
+void LayerTreeHost::SetAuthoritativeVSyncInterval(
+    const base::TimeDelta& interval) {
+  proxy_->SetAuthoritativeVSyncInterval(interval);
 }
 
 }  // namespace cc

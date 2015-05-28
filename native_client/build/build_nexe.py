@@ -11,6 +11,7 @@ additional arguments, and use them to build.
 
 import hashlib
 import json
+import multiprocessing
 from optparse import OptionParser
 import os
 import re
@@ -20,27 +21,14 @@ import StringIO
 import subprocess
 import sys
 import tempfile
-import threading
+import time
+import traceback
 import urllib2
 
 from build_nexe_tools import (CommandRunner, Error, FixPath,
                               IsFile, MakeDir, RemoveFile)
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import pynacl.platform
-
-
-# When a header file defining NACL_BUILD_SUBARCH is introduced,
-# we can simply remove this map.
-# cf) https://code.google.com/p/chromium/issues/detail?id=440012.
-NACL_BUILD_ARCH_MAP = {
-  'x86-32': ['NACL_BUILD_ARCH=x86', 'NACL_BUILD_SUBARCH=32'],
-  'x86-32-nonsfi': ['NACL_BUILD_ARCH=x86', 'NACL_BUILD_SUBARCH=32'],
-  'x86-64': ['NACL_BUILD_ARCH=x86', 'NACL_BUILD_SUBARCH=64'],
-  'arm': ['NACL_BUILD_ARCH=arm', 'NACL_BUILD_SUBARCH=32'],
-  'arm-nonsfi': ['NACL_BUILD_ARCH=arm', 'NACL_BUILD_SUBARCH=32'],
-  'mips': ['NACL_BUILD_ARCH=mips', 'NACL_BUILD_SUBARCH=32'],
-  'pnacl': ['NACL_BUILD_ARCH=pnacl'],
-}
 
 
 def RemoveQuotes(opt):
@@ -149,6 +137,8 @@ class Builder(CommandRunner):
     if len(build_type) > 2 and build_type[2] == 'pnacl':
       self.is_pnacl_toolchain = True
 
+    self.is_nacl_clang = len(build_type) > 2 and build_type[2] == 'clang'
+
     if arch.endswith('-nonsfi'):
       arch = arch[:-len('-nonsfi')]
 
@@ -180,6 +170,8 @@ class Builder(CommandRunner):
     if self.is_pnacl_toolchain:
       self.tool_prefix = 'pnacl-'
       tool_subdir = 'pnacl_newlib'
+    elif self.is_nacl_clang:
+      tool_subdir = 'pnacl_newlib'
     else:
       tool_subdir = 'nacl_%s_%s' % (mainarch, toolname)
     # The pnacl-clang, etc. tools are scripts. Note that for the CommandRunner
@@ -198,7 +190,7 @@ class Builder(CommandRunner):
     # Set the toolchain directories
     self.toolchain = os.path.join(options.toolpath, tooldir)
     self.toolbin = os.path.join(self.toolchain, 'bin')
-    self.toolstamp = os.path.join(self.toolchain, 'stamp.prep')
+    self.toolstamp = os.path.join(self.toolchain, tool_subdir + '.json')
     if not IsFile(self.toolstamp):
       raise Error('Could not find toolchain prep stamp file: ' + self.toolstamp)
 
@@ -221,7 +213,7 @@ class Builder(CommandRunner):
     goma_config = self.GetGomaConfig(options.gomadir, arch, toolname)
     self.gomacc = goma_config.get('gomacc', '')
     self.goma_burst = goma_config.get('burst', False)
-    self.goma_threads = goma_config.get('threads', 1)
+    self.goma_processes = goma_config.get('processes', 1)
 
     # Define NDEBUG for Release builds.
     if options.build_config.startswith('Release'):
@@ -254,14 +246,14 @@ class Builder(CommandRunner):
 
   def GetCCompiler(self):
     """Helper which returns C compiler path."""
-    if self.is_pnacl_toolchain:
+    if self.is_pnacl_toolchain or self.is_nacl_clang:
       return self.GetBinName('clang')
     else:
       return self.GetBinName('gcc')
 
   def GetCXXCompiler(self):
     """Helper which returns C++ compiler path."""
-    if self.is_pnacl_toolchain:
+    if self.is_pnacl_toolchain or self.is_nacl_clang:
       return self.GetBinName('clang++')
     else:
       return self.GetBinName('g++')
@@ -277,6 +269,10 @@ class Builder(CommandRunner):
   def GetObjCopy(self):
     """Helper which returns objcopy path."""
     return self.GetBinName('objcopy')
+
+  def GetLe32ObjDump(self):
+    """Helper which returns objdump path."""
+    return os.path.join(self.toolbin, 'le32-nacl-objdump')
 
   def GetReadElf(self):
     """Helper which returns readelf path."""
@@ -341,7 +337,8 @@ class Builder(CommandRunner):
                         'NACL_OSX=0',
                         'NACL_LINUX=0',
                         'NACL_ANDROID=0'])
-    define_list.extend(NACL_BUILD_ARCH_MAP[arch])
+    if arch == 'pnacl':
+      define_list.extend(['NACL_BUILD_ARCH=pnacl'])
     options += ['-D' + define for define in define_list]
     self.compile_options = options + ['-I' + name for name in self.inc_paths]
 
@@ -441,9 +438,9 @@ class Builder(CommandRunner):
 
     if goma_config:
       goma_config['burst'] = IsEnvFlagTrue('NACL_GOMA_BURST')
-      default_threads = 100 if pynacl.platform.IsLinux() else 10
-      goma_config['threads'] = GetIntegerEnv('NACL_GOMA_THREADS',
-                                             default=default_threads)
+      default_processes = 100 if pynacl.platform.IsLinux() else 10
+      goma_config['processes'] = GetIntegerEnv('NACL_GOMA_PROCESSES',
+                                               default=default_processes)
     return goma_config
 
   def NeedsRebuild(self, outd, out, src, rebuilt=False):
@@ -599,6 +596,9 @@ class Builder(CommandRunner):
                       '--readelf-cmd=' + self.GetReadElf()]
       if self.commands_are_scripts:
         irt_link_cmd += ['--commands-are-scripts']
+      if self.arch == 'x86-64':
+        irt_link_cmd += ['--sandbox-base-hiding-check',
+                         '--objdump-cmd=' + self.GetLe32ObjDump()]
       irt_link_cmd += srcs_flags
       err = self.Run(irt_link_cmd, normalize_slashes=False)
       if err:
@@ -739,6 +739,61 @@ def UpdateBuildArgs(args, filename):
   return True
 
 
+def CompileProcess(build, input_queue, output_queue):
+  try:
+    while True:
+      filename = input_queue.get()
+      if filename is None:
+        return
+      output_queue.put((filename, build.Compile(filename)))
+  except Exception:
+    # Put current exception info to the queue.
+    # Since the exception info contains traceback information, it cannot
+    # be pickled, so it cannot be sent to the parent process via queue.
+    # We stringify the traceback information to send.
+    exctype, value = sys.exc_info()[:2]
+    traceback_str = "".join(traceback.format_exception(*sys.exc_info()))
+    output_queue.put((exctype, value, traceback_str))
+
+
+def SenderProcess(files, num_processes, input_queue):
+  # Push all files into the inputs queue.
+  # None is also pushed as a terminator. When worker process read None,
+  # the worker process will terminate.
+  for filename in files:
+    input_queue.put(filename)
+  for _ in xrange(num_processes):
+    input_queue.put(None)
+
+
+def CheckObjectSize(path):
+  # Here, object file should exist. However, we're seeing the case that
+  # we cannot read the object file on Windows.
+  # When some error happens, we raise an error. However, we'd like to know
+  # that the problem is solved or not after some time passed, so we continue
+  # checking object file size.
+  retry = 0
+  error_messages = []
+
+  path = FixPath(path)
+
+  while retry < 5:
+    try:
+      st = os.stat(path)
+      if st.st_size != 0:
+        break
+      error_messages.append(
+          'file size of object %s is 0 (try=%d)' % (path, retry))
+    except Exception as e:
+      error_messages.append(
+          'failed to stat() for %s (try=%d): %s' % (path, retry, e))
+
+    time.sleep(1)
+    retry += 1
+
+  if error_messages:
+    raise Error('\n'.join(error_messages))
+
 def Main(argv):
   parser = OptionParser()
   parser.add_option('--empty', dest='empty', default=False,
@@ -816,6 +871,17 @@ def Main(argv):
   options.cmd_file = options.name + '.cmd'
   UpdateBuildArgs(argv, options.cmd_file)
 
+  if options.product_directory is None:
+    parser.error('--product-dir is required')
+  product_dir = options.product_directory
+  # Normalize to forward slashes because re.sub interprets backslashes
+  # as escape characters. This also simplifies the subsequent regexes.
+  product_dir = product_dir.replace('\\', '/')
+  # Remove fake child that may be apended to the path.
+  # See untrusted.gypi.
+  product_dir = re.sub(r'/+xyz$', '', product_dir)
+
+  build = None
   try:
     if options.source_list:
       source_list_handle = open(options.source_list, 'r')
@@ -825,18 +891,6 @@ def Main(argv):
       for file_name in source_list:
         file_name = RemoveQuotes(file_name)
         if "$" in file_name:
-          # Only require product directory if we need to interpolate it.  This
-          # provides backwards compatibility in the cases where we don't need to
-          # interpolate.  The downside is this creates a subtle landmine.
-          if options.product_directory is None:
-            parser.error('--product-dir is required')
-          product_dir = options.product_directory
-          # Normalize to forward slashes because re.sub interprets backslashes
-          # as escape characters. This also simplifies the subsequent regexes.
-          product_dir = product_dir.replace('\\', '/')
-          # Remove fake child that may be apended to the path.
-          # See untrusted.gypi.
-          product_dir = re.sub(r'/+xyz$', '', product_dir)
           # The "make" backend can have an "obj" interpolation variable.
           file_name = re.sub(r'\$!?[({]?obj[)}]?', product_dir + '/obj',
                              file_name)
@@ -874,56 +928,74 @@ def Main(argv):
       build.Translate(list(files)[0])
       return 0
 
-    if build.gomacc and (build.goma_burst or build.goma_threads > 1):
-      returns = Queue.Queue()
+    if build.gomacc and (build.goma_burst or build.goma_processes > 1):
+      inputs = multiprocessing.Queue()
+      returns = multiprocessing.Queue()
 
-      # Push all files into the inputs queue
-      inputs = Queue.Queue()
-      for filename in files:
-        inputs.put(filename)
-
-      def CompileThread(input_queue, output_queue):
-        try:
-          while True:
-            try:
-              filename = input_queue.get_nowait()
-            except Queue.Empty:
-              return
-            output_queue.put(build.Compile(filename))
-        except Exception:
-          # Put current exception info to the queue.
-          output_queue.put(sys.exc_info())
-
-      # Don't limit number of threads in the burst mode.
+      # Don't limit number of processess in the burst mode.
       if build.goma_burst:
-        num_threads = len(files)
+        num_processes = len(files)
       else:
-        num_threads = min(build.goma_threads, len(files))
+        num_processes = min(build.goma_processes, len(files))
 
       # Start parallel build.
-      build_threads = []
-      for _ in xrange(num_threads):
-        thr = threading.Thread(target=CompileThread, args=(inputs, returns))
-        thr.start()
-        build_threads.append(thr)
+      build_processes = []
+      for _ in xrange(num_processes):
+        process = multiprocessing.Process(target=CompileProcess,
+                                          args=(build, inputs, returns))
+        process.start()
+        build_processes.append(process)
+
+      # Start sender process. We cannot send tasks from here, because
+      # if the input queue is stuck, no one can receive output.
+      sender_process = multiprocessing.Process(
+          target=SenderProcess,
+          args=(files, num_processes, inputs))
+      sender_process.start()
 
       # Wait for results.
+      src_to_obj = {}
       for _ in files:
         out = returns.get()
-        # An exception raised in the thread may come through the queue.
+        # An exception raised in the process may come through the queue.
         # Raise it again here.
         if (isinstance(out, tuple) and len(out) == 3 and
             isinstance(out[1], Exception)):
-          raise out[0], None, out[2]
-        elif out:
-          objs.append(out)
+          # TODO(shinyak): out[2] contains stringified traceback. It's just
+          # a string, so we cannot pass it to raise. So, we just log it here,
+          # and pass None as traceback.
+          build.Log(out[2])
+          raise out[0], out[1], None
+        elif out and len(out) == 2:
+          src_to_obj[out[0]] = out[1]
+        else:
+          raise Error('Unexpected element in CompileProcess output_queue %s' %
+                      out)
+
+      # Keep the input files ordering consistent for link phase to ensure
+      # determinism.
+      for filename in files:
+        # If input file to build.Compile is something it cannot handle, it
+        # returns None.
+        if src_to_obj[filename]:
+          obj_name = src_to_obj[filename]
+          objs.append(obj_name)
+          # TODO(shinyak): In goma environement, it turned out archive file
+          # might contain 0 byte size object, however, the object file itself
+          # is not 0 byte. There might be several possibilities:
+          # (1) archiver failed to read object file.
+          # (2) object file was written after archiver opened it.
+          # I don't know what is happening, however, let me check the object
+          # file size here.
+          CheckObjectSize(obj_name)
+
+      # Wait until all processes have stopped and verify that there are no more
+      # results.
+      for process in build_processes:
+        process.join()
+      sender_process.join()
 
       assert inputs.empty()
-
-      # Wait until all threads have stopped and verify that there are no more
-      # results.
-      for thr in build_threads:
-        thr.join()
       assert returns.empty()
 
     else:  # slow path.
@@ -943,9 +1015,12 @@ def Main(argv):
     return 0
   except Error as e:
     sys.stderr.write('%s\n' % e)
+    if build is not None:
+      build.EmitDeferredLog()
     return 1
   except:
-    build.EmitDeferredLog()
+    if build is not None:
+      build.EmitDeferredLog()
     raise
 
 if __name__ == '__main__':

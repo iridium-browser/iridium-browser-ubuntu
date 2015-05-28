@@ -18,19 +18,40 @@ class RendererD3D;
 class DisplayD3D : public DisplayImpl
 {
   public:
-    DisplayD3D(rx::RendererD3D *renderer);
-    SurfaceImpl *createWindowSurface(egl::Display *display, const egl::Config *config,
-                                     EGLNativeWindowType window, EGLint fixedSize,
-                                     EGLint width, EGLint height, EGLint postSubBufferSupported) override;
-    SurfaceImpl *createOffscreenSurface(egl::Display *display, const egl::Config *config,
-                                        EGLClientBuffer shareHandle, EGLint width, EGLint height,
-                                        EGLenum textureFormat, EGLenum textureTarget) override;
+    DisplayD3D();
+
+    egl::Error initialize(egl::Display *display) override;
+    virtual void terminate() override;
+
+    egl::Error createWindowSurface(const egl::Config *configuration, EGLNativeWindowType window, const egl::AttributeMap &attribs,
+                                   SurfaceImpl **outSurface) override;
+    egl::Error createPbufferSurface(const egl::Config *configuration, const egl::AttributeMap &attribs,
+                                    SurfaceImpl **outSurface) override;
+    egl::Error createPbufferFromClientBuffer(const egl::Config *configuration, EGLClientBuffer shareHandle,
+                                             const egl::AttributeMap &attribs, SurfaceImpl **outSurface) override;
+    egl::Error createPixmapSurface(const egl::Config *configuration, NativePixmapType nativePixmap,
+                                   const egl::AttributeMap &attribs, SurfaceImpl **outSurface) override;
+
+    egl::Error createContext(const egl::Config *config, const gl::Context *shareContext, const egl::AttributeMap &attribs,
+                             gl::Context **outContext) override;
+
+    egl::Error makeCurrent(egl::Surface *drawSurface, egl::Surface *readSurface, gl::Context *context) override;
+
+    egl::ConfigSet generateConfigs() const override;
+
+    bool isDeviceLost() const override;
+    bool testDeviceLost() override;
     egl::Error restoreLostDevice() override;
 
     bool isValidNativeWindow(EGLNativeWindowType window) const override;
 
+    std::string getVendorString() const override;
+
   private:
-    DISALLOW_COPY_AND_ASSIGN(DisplayD3D);
+    void generateExtensions(egl::DisplayExtensions *outExtensions) const override;
+    void generateCaps(egl::Caps *outCaps) const override;
+
+    egl::Display *mDisplay;
 
     rx::RendererD3D *mRenderer;
 };

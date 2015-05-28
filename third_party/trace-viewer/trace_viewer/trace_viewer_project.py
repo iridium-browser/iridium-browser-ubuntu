@@ -20,6 +20,21 @@ def _FindAllFilesRecursive(source_paths):
         all_filenames.add(x)
   return all_filenames
 
+def _IsFilenameATest(loader, x):
+  if x.endswith('_test.js'):
+    return True
+
+  if x.endswith('_test.html'):
+    return True
+
+  if x.endswith('_unittest.js'):
+    return True
+
+  if x.endswith('_unittest.html'):
+    return True
+
+  # TODO(nduca): Add content test?
+  return False
 
 class TraceViewerProject(project_module.Project):
   trace_viewer_path = os.path.abspath(os.path.join(
@@ -42,6 +57,12 @@ class TraceViewerProject(project_module.Project):
   d3_path = os.path.abspath(os.path.join(
       trace_viewer_third_party_path, 'd3'))
 
+  chai_path = os.path.abspath(os.path.join(
+      trace_viewer_third_party_path, 'chai'))
+
+  mocha_path = os.path.abspath(os.path.join(
+      trace_viewer_third_party_path, 'mocha'))
+
   test_data_path = os.path.join(trace_viewer_path, 'test_data')
   skp_data_path = os.path.join(trace_viewer_path, 'skp_data')
 
@@ -53,6 +74,8 @@ class TraceViewerProject(project_module.Project):
     self.source_paths.append(self.jszip_path)
     self.source_paths.append(self.glmatrix_path)
     self.source_paths.append(self.d3_path)
+    self.source_paths.append(self.chai_path)
+    self.source_paths.append(self.mocha_path)
 
     self.non_module_html_files.extendRel(self.trace_viewer_path, [
       'bin/index.html',
@@ -62,10 +85,24 @@ class TraceViewerProject(project_module.Project):
       self.non_module_html_files.appendRel(self.trace_viewer_path,
         'bin/trace_viewer_%s.html' % config_name)
 
+    # Igore the old viewer if it still exists.
+    self.non_module_html_files.appendRel(self.trace_viewer_path,
+      'bin/trace_viewer.html')
+
     self.non_module_html_files.extendRel(self.trace_viewer_third_party_path, [
       'gl-matrix/jsdoc-template/static/header.html',
       'gl-matrix/jsdoc-template/static/index.html',
     ])
+
+  def FindAllTestModuleResources(self):
+    all_filenames = _FindAllFilesRecursive([self.src_path])
+    test_module_filenames = [x for x in all_filenames if
+                             _IsFilenameATest(self.loader, x)]
+    test_module_filenames.sort()
+
+    # Find the equivalent resources.
+    return [self.loader.FindResourceGivenAbsolutePath(x)
+            for x in test_module_filenames]
 
   def GetConfigNames(self):
     config_files = [

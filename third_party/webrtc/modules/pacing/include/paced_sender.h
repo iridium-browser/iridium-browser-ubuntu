@@ -14,9 +14,9 @@
 #include <list>
 #include <set>
 
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/base/thread_annotations.h"
 #include "webrtc/modules/interface/module.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
@@ -87,6 +87,11 @@ class PacedSender : public Module {
   // Resume sending packets.
   void Resume();
 
+  // Enable bitrate probing. Enabled by default, mostly here to simplify
+  // testing. Must be called before any packets are being sent to have an
+  // effect.
+  void SetProbingEnabled(bool enabled);
+
   // Set target bitrates for the pacer.
   // We will pace out bursts of packets at a bitrate of |max_bitrate_kbps|.
   // |bitrate_kbps| is our estimate of what we are allowed to send on average.
@@ -116,13 +121,10 @@ class PacedSender : public Module {
 
   // Returns the number of milliseconds until the module want a worker thread
   // to call Process.
-  virtual int64_t TimeUntilNextProcess() OVERRIDE;
+  int64_t TimeUntilNextProcess() override;
 
   // Process any pending packets in the queue(s).
-  virtual int32_t Process() OVERRIDE;
-
- protected:
-  virtual bool ProbingExperimentIsEnabled() const;
+  int32_t Process() override;
 
  private:
   // Updates the number of bytes that can be sent for the next time interval.
@@ -136,25 +138,27 @@ class PacedSender : public Module {
   Clock* const clock_;
   Callback* const callback_;
 
-  scoped_ptr<CriticalSectionWrapper> critsect_;
+  rtc::scoped_ptr<CriticalSectionWrapper> critsect_;
   bool enabled_ GUARDED_BY(critsect_);
   bool paused_ GUARDED_BY(critsect_);
+  bool probing_enabled_;
   // This is the media budget, keeping track of how many bits of media
   // we can pace out during the current interval.
-  scoped_ptr<paced_sender::IntervalBudget> media_budget_ GUARDED_BY(critsect_);
+  rtc::scoped_ptr<paced_sender::IntervalBudget> media_budget_
+      GUARDED_BY(critsect_);
   // This is the padding budget, keeping track of how many bits of padding we're
   // allowed to send out during the current interval. This budget will be
   // utilized when there's no media to send.
-  scoped_ptr<paced_sender::IntervalBudget> padding_budget_
+  rtc::scoped_ptr<paced_sender::IntervalBudget> padding_budget_
       GUARDED_BY(critsect_);
 
-  scoped_ptr<BitrateProber> prober_ GUARDED_BY(critsect_);
+  rtc::scoped_ptr<BitrateProber> prober_ GUARDED_BY(critsect_);
   int bitrate_bps_ GUARDED_BY(critsect_);
 
   int64_t time_last_update_us_ GUARDED_BY(critsect_);
 
-  scoped_ptr<paced_sender::PacketQueue> packets_ GUARDED_BY(critsect_);
-  uint64_t packet_counter_ GUARDED_BY(critsect_);
+  rtc::scoped_ptr<paced_sender::PacketQueue> packets_ GUARDED_BY(critsect_);
+  uint64_t packet_counter_;
 };
 }  // namespace webrtc
 #endif  // WEBRTC_MODULES_PACING_INCLUDE_PACED_SENDER_H_

@@ -6,18 +6,23 @@ import inspect
 import os
 
 from telemetry import user_story as user_story_module
+from telemetry.util import cloud_storage
 from telemetry.wpr import archive_info
+
+PUBLIC_BUCKET = cloud_storage.PUBLIC_BUCKET
+PARTNER_BUCKET = cloud_storage.PARTNER_BUCKET
+INTERNAL_BUCKET = cloud_storage.INTERNAL_BUCKET
 
 
 class UserStorySet(object):
   """A collection of user story.
 
   A typical usage of UserStorySet would be to subclass it and then calling
-  AddUserStory for each UserStory..
+  AddUserStory for each UserStory.
   """
 
   def __init__(self, archive_data_file='', cloud_storage_bucket=None,
-               serving_dirs=None):
+               base_dir=None, serving_dirs=None):
     """Creates a new UserStorySet.
 
     Args:
@@ -27,16 +32,42 @@ class UserStorySet(object):
           Web Page Replay's archive data. Valid values are: None,
           PUBLIC_BUCKET, PARTNER_BUCKET, or INTERNAL_BUCKET (defined
           in telemetry.util.cloud_storage).
+      serving_dirs: A set of paths, relative to self.base_dir, to directories
+          containing hash files for non-wpr archive data stored in cloud
+          storage.
     """
     self.user_stories = []
     self._archive_data_file = archive_data_file
     self._wpr_archive_info = None
     archive_info.AssertValidCloudStorageBucket(cloud_storage_bucket)
     self._cloud_storage_bucket = cloud_storage_bucket
-    self._base_dir = os.path.dirname(inspect.getfile(self.__class__))
+    if base_dir:
+      if not os.path.isdir(base_dir):
+        raise ValueError('Must provide valid directory path for base_dir.')
+      self._base_dir = base_dir
+    else:
+      self._base_dir = os.path.dirname(inspect.getfile(self.__class__))
     # Convert any relative serving_dirs to absolute paths.
     self._serving_dirs = set(os.path.realpath(os.path.join(self.base_dir, d))
                              for d in serving_dirs or [])
+
+  @property
+  def allow_mixed_story_states(self):
+    """True iff UserStories are allowed to have different StoryState classes.
+
+    There are no checks in place for determining if SharedUserStoryStates are
+    being assigned correctly to all UserStorys in a given UserStorySet. The
+    majority of test cases should not need the ability to have multiple
+    ShareduserStoryStates, and usually implies you should be writing multiple
+    benchmarks instead. We provide errors to avoid accidentally assigning
+    or defaulting to the wrong SharedUserStoryState.
+    Override at your own risk. Here be dragons.
+    """
+    return False
+
+  @property
+  def file_path(self):
+    return inspect.getfile(self.__class__).replace('.pyc', '.py')
 
   @property
   def base_dir(self):
@@ -48,7 +79,11 @@ class UserStorySet(object):
 
   @property
   def serving_dirs(self):
-    return self._serving_dirs
+    all_serving_dirs = self._serving_dirs.copy()
+    for user_story in self.user_stories:
+      if user_story.serving_dir:
+        all_serving_dirs.add(user_story.serving_dir)
+    return all_serving_dirs
 
   @property
   def archive_data_file(self):
@@ -70,9 +105,16 @@ class UserStorySet(object):
     assert isinstance(user_story, user_story_module.UserStory)
     self.user_stories.append(user_story)
 
+  def RemoveUserStory(self, user_story):
+    """Removes a UserStory.
+
+    Allows the user stories to be filtered.
+    """
+    self.user_stories.remove(user_story)
+
   @classmethod
   def Name(cls):
-    """ Returns the string name of this UserStorySet.
+    """Returns the string name of this UserStorySet.
     Note that this should be a classmethod so benchmark_runner script can match
     user story class with its name specified in the run command:
     'Run <User story test name> <User story class name>'
@@ -81,21 +123,18 @@ class UserStorySet(object):
 
   @classmethod
   def Description(cls):
-    """ Return a string explaining in human-understandable terms what this
+    """Return a string explaining in human-understandable terms what this
     user story represents.
     Note that this should be a classmethod so benchmark_runner script can
-    display user stories' names along their descriptions in the list commmand.
+    display user stories' names along their descriptions in the list command.
     """
     if cls.__doc__:
       return cls.__doc__.splitlines()[0]
     else:
       return ''
 
-  def ShuffleAndFilterUserStorySet(self, finder_options):
-    pass
-
   def WprFilePathForUserStory(self, story):
-    """Convenient function to retrive WPR archive file path.
+    """Convenient function to retrieve WPR archive file path.
 
     Args:
       user_story: The UserStory to lookup.

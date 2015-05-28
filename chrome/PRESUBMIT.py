@@ -5,13 +5,13 @@
 """Presubmit script for changes affecting chrome/
 
 See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
-for more details about the presubmit API built into gcl.
+for more details about the presubmit API built into depot_tools.
 """
 
 import re
 
 INCLUDE_CPP_FILES_ONLY = (
-  r'.*\.cc$', r'.*\.h$'
+  r'.*\.(cc|h)$',
 )
 
 EXCLUDE = (

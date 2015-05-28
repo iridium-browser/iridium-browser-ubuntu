@@ -32,14 +32,10 @@
 #include "config.h"
 #include "core/frame/NavigatorID.h"
 
-#if !defined(WEBCORE_NAVIGATOR_PLATFORM) && OS(POSIX) && !OS(MACOSX)
-#include "wtf/StdLibExtras.h"
+#if !OS(MACOSX) && !OS(WIN)
+#include "wtf/Threading.h"
 #include <sys/utsname.h>
 #endif
-
-#ifndef WEBCORE_NAVIGATOR_PRODUCT
-#define WEBCORE_NAVIGATOR_PRODUCT "Gecko"
-#endif // ifndef WEBCORE_NAVIGATOR_PRODUCT
 
 namespace blink {
 
@@ -62,9 +58,7 @@ String NavigatorID::appVersion()
 
 String NavigatorID::platform()
 {
-#if defined(WEBCORE_NAVIGATOR_PLATFORM)
-    return WEBCORE_NAVIGATOR_PLATFORM;
-#elif OS(MACOSX)
+#if OS(MACOSX)
     // Match Safari and Mozilla on Mac x86.
     return "MacIntel";
 #elif OS(WIN)
@@ -72,14 +66,14 @@ String NavigatorID::platform()
     return "Win32";
 #else // Unix-like systems
     struct utsname osname;
-    DEFINE_STATIC_LOCAL(String, platformName, (uname(&osname) >= 0 ? String(osname.sysname) + String(" ") + String(osname.machine) : emptyString()));
+    AtomicallyInitializedStaticReference(String, platformName, new String(uname(&osname) >= 0 ? String(osname.sysname) + String(" ") + String(osname.machine) : emptyString()));
     return platformName;
 #endif
 }
 
 String NavigatorID::product()
 {
-    return WEBCORE_NAVIGATOR_PRODUCT;
+    return "Gecko";
 }
 
 } // namespace blink

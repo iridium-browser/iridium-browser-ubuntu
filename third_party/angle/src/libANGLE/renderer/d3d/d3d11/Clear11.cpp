@@ -7,15 +7,16 @@
 // Clear11.cpp: Framebuffer clear utility class.
 
 #include "libANGLE/renderer/d3d/d3d11/Clear11.h"
+
+#include <algorithm>
+
+#include "libANGLE/FramebufferAttachment.h"
+#include "libANGLE/formatutils.h"
+#include "libANGLE/renderer/d3d/FramebufferD3D.h"
 #include "libANGLE/renderer/d3d/d3d11/Renderer11.h"
 #include "libANGLE/renderer/d3d/d3d11/renderer11_utils.h"
 #include "libANGLE/renderer/d3d/d3d11/RenderTarget11.h"
 #include "libANGLE/renderer/d3d/d3d11/formatutils11.h"
-#include "libANGLE/formatutils.h"
-#include "libANGLE/Framebuffer.h"
-#include "libANGLE/FramebufferAttachment.h"
-
-#include <algorithm>
 
 // Precompiled shaders
 #include "libANGLE/renderer/d3d/d3d11/shaders/compiled/clearfloat11vs.h"
@@ -173,10 +174,13 @@ Clear11::~Clear11()
     SafeRelease(mRasterizerState);
 }
 
-gl::Error Clear11::clearFramebuffer(const gl::ClearParameters &clearParams, const std::vector<const gl::FramebufferAttachment*> &colorAttachments,
-                                    const std::vector<GLenum> &drawBufferStates, const gl::FramebufferAttachment *depthAttachment,
-                                    const gl::FramebufferAttachment *stencilAttachment)
+gl::Error Clear11::clearFramebuffer(const ClearParameters &clearParams, const gl::Framebuffer::Data &fboData)
 {
+    const auto &colorAttachments = fboData.mColorAttachments;
+    const auto &drawBufferStates = fboData.mDrawBufferStates;
+    const auto *depthAttachment = fboData.mDepthAttachment;
+    const auto *stencilAttachment = fboData.mStencilAttachment;
+
     ASSERT(colorAttachments.size() == drawBufferStates.size());
 
     // Iterate over the color buffers which require clearing and determine if they can be
@@ -534,13 +538,13 @@ ID3D11BlendState *Clear11::getBlendState(const std::vector<MaskedRenderTarget>& 
         blendDesc.AlphaToCoverageEnable = FALSE;
         blendDesc.IndependentBlendEnable = (rts.size() > 1) ? TRUE : FALSE;
 
-        for (unsigned int i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; i++)
+        for (unsigned int j = 0; j < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; j++)
         {
-            blendDesc.RenderTarget[i].BlendEnable = FALSE;
-            blendDesc.RenderTarget[i].RenderTargetWriteMask = gl_d3d11::ConvertColorMask(blendKey.maskChannels[i][0],
-                                                                                         blendKey.maskChannels[i][1],
-                                                                                         blendKey.maskChannels[i][2],
-                                                                                         blendKey.maskChannels[i][3]);
+            blendDesc.RenderTarget[j].BlendEnable = FALSE;
+            blendDesc.RenderTarget[j].RenderTargetWriteMask = gl_d3d11::ConvertColorMask(blendKey.maskChannels[j][0],
+                                                                                         blendKey.maskChannels[j][1],
+                                                                                         blendKey.maskChannels[j][2],
+                                                                                         blendKey.maskChannels[j][3]);
         }
 
         ID3D11Device *device = mRenderer->getDevice();
@@ -558,7 +562,7 @@ ID3D11BlendState *Clear11::getBlendState(const std::vector<MaskedRenderTarget>& 
     }
 }
 
-ID3D11DepthStencilState *Clear11::getDepthStencilState(const gl::ClearParameters &clearParams)
+ID3D11DepthStencilState *Clear11::getDepthStencilState(const ClearParameters &clearParams)
 {
     ClearDepthStencilInfo dsKey = { 0 };
     dsKey.clearDepth = clearParams.clearDepth;

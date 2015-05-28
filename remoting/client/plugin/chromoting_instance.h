@@ -25,6 +25,7 @@
 #include "remoting/client/plugin/pepper_input_handler.h"
 #include "remoting/client/plugin/pepper_plugin_thread_delegate.h"
 #include "remoting/client/plugin/pepper_video_renderer.h"
+#include "remoting/client/plugin/touch_input_scaler.h"
 #include "remoting/proto/event.pb.h"
 #include "remoting/protocol/client_stub.h"
 #include "remoting/protocol/clipboard_stub.h"
@@ -131,6 +132,8 @@ class ChromotingInstance : public ClientUserInterface,
   void OnVideoSize(const webrtc::DesktopSize& size,
                       const webrtc::DesktopVector& dpi) override;
   void OnVideoShape(const webrtc::DesktopRegion& shape) override;
+  void OnVideoFrameDirtyRegion(
+      const webrtc::DesktopRegion& dirty_region) override;
 
   // Registers a global log message handler that redirects the log output to
   // our plugin instance.
@@ -192,6 +195,8 @@ class ChromotingInstance : public ClientUserInterface,
   void HandleAllowMouseLockMessage();
   void HandleSendMouseInputWhenUnfocused();
   void HandleDelegateLargeCursors();
+  void HandleEnableDebugRegion(const base::DictionaryValue& data);
+  void HandleEnableTouchEvents();
 
   void Disconnect();
 
@@ -206,7 +211,7 @@ class ChromotingInstance : public ClientUserInterface,
   // TODO(sergeyu): When all current versions of the webapp support raw messages
   // remove this method and use PostChromotingMessage() instead.
   void PostLegacyJsonMessage(const std::string& method,
-                       scoped_ptr<base::DictionaryValue> data);
+                             scoped_ptr<base::DictionaryValue> data);
 
   // Posts trapped keys to the web-app to handle.
   void SendTrappedKey(uint32 usb_keycode, bool pressed);
@@ -230,6 +235,9 @@ class ChromotingInstance : public ClientUserInterface,
       bool pairing_supported,
       const protocol::SecretFetchedCallback& secret_fetched_callback);
 
+  // Helper to log messages in the JS console in the webapp.
+  void LogToWebapp(const std::string& message);
+
   bool initialized_;
 
   PepperPluginThreadDelegate plugin_thread_delegate_;
@@ -250,6 +258,7 @@ class ChromotingInstance : public ClientUserInterface,
   // Input pipeline components, in reverse order of distance from input source.
   protocol::MouseInputFilter mouse_input_filter_;
   protocol::InputEventTracker input_tracker_;
+  TouchInputScaler touch_input_scaler_;
   KeyEventMapper key_mapper_;
   scoped_ptr<protocol::InputFilter> normalizing_input_filter_;
   PepperInputHandler input_handler_;

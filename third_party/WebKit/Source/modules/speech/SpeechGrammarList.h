@@ -45,12 +45,12 @@ public:
     void addFromUri(ExecutionContext*, const String& src, double weight = 1.0);
     void addFromString(const String&, double weight = 1.0);
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     SpeechGrammarList();
 
-    HeapVector<Member<SpeechGrammar> > m_grammars;
+    HeapVector<Member<SpeechGrammar>> m_grammars;
 };
 
 } // namespace blink

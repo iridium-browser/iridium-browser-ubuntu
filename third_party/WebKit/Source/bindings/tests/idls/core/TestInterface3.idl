@@ -35,6 +35,7 @@
 
 [
     Custom=VisitDOMWrapper, // Conflict with [SetWrapperReferenceTo] and [SetWrapperReferenceFrom]
+    NoImplHeader,
 ] interface TestInterface3 {
     [Custom] getter boolean (unsigned long index);
     [Custom] setter boolean (unsigned long index, Node value);
@@ -44,5 +45,8 @@
     [Custom] setter Node (DOMString name, Node value);
     [Custom] deleter boolean (DOMString name);
 
-    iterable<any>;
+    void voidMethodDocument(Document document);
+
+    [RuntimeEnabled=FeatureName] iterable<any>;
+    [RuntimeEnabled=FeatureName, CallWith=ScriptState, RaisesException, ImplementedAs=iterableKeys] Iterator keys();
 };

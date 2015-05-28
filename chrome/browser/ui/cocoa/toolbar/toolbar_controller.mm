@@ -316,6 +316,8 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   [self showOptionalHomeButton];
   [self installWrenchMenu];
 
+  [self pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:NO];
+
   // Create the controllers for the back/forward menus.
   backMenuController_.reset([[BackForwardMenuController alloc]
           initWithBrowser:browser_
@@ -433,16 +435,7 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
 
 - (void)focusLocationBar:(BOOL)selectAll {
   if (locationBarView_.get()) {
-    if (selectAll &&
-        locationBarView_->GetToolbarModel()->WouldOmitURLDueToOriginChip()) {
-      // select_all is true when it's expected that the user may want to copy
-      // the URL to the clipboard. If the origin chip is being displayed (and
-      // thus the URL is not being shown in the Omnibox) show it now to support
-      // the same functionality.
-      locationBarView_->GetOmniboxView()->ShowURL();
-    } else {
-      locationBarView_->FocusLocation(selectAll ? true : false);
-    }
+    locationBarView_->FocusLocation(selectAll ? true : false);
   }
 }
 

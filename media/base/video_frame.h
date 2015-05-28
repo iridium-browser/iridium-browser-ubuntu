@@ -12,6 +12,7 @@
 #include "base/memory/shared_memory.h"
 #include "base/synchronization/lock.h"
 #include "media/base/buffers.h"
+#include "media/base/video_frame_metadata.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -19,8 +20,6 @@
 #include <CoreVideo/CVPixelBuffer.h>
 #include "base/mac/scoped_cftyperef.h"
 #endif
-
-class SkBitmap;
 
 namespace gpu {
 struct MailboxHolder;
@@ -53,20 +52,21 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   // Logged to UMA, so never reuse values.
   enum Format {
     UNKNOWN = 0,  // Unknown format value.
-    YV12 = 1,  // 12bpp YVU planar 1x1 Y, 2x2 VU samples
-    YV16 = 2,  // 16bpp YVU planar 1x1 Y, 2x1 VU samples
-    I420 = 3,  // 12bpp YVU planar 1x1 Y, 2x2 UV samples.
-    YV12A = 4,  // 20bpp YUVA planar 1x1 Y, 2x2 VU, 1x1 A samples.
+    YV12 = 1,     // 12bpp YVU planar 1x1 Y, 2x2 VU samples
+    YV16 = 2,     // 16bpp YVU planar 1x1 Y, 2x1 VU samples
+    I420 = 3,     // 12bpp YVU planar 1x1 Y, 2x2 UV samples.
+    YV12A = 4,    // 20bpp YUVA planar 1x1 Y, 2x2 VU, 1x1 A samples.
 #if defined(VIDEO_HOLE)
-    HOLE = 5,  // Hole frame.
+    HOLE = 5,            // Hole frame.
 #endif  // defined(VIDEO_HOLE)
     NATIVE_TEXTURE = 6,  // Native texture.  Pixel-format agnostic.
     YV12J = 7,  // JPEG color range version of YV12
     NV12 = 8,  // 12bpp 1x1 Y plane followed by an interleaved 2x2 UV plane.
     YV24 = 9,  // 24bpp YUV planar, no subsampling.
     ARGB = 10,  // 32bpp ARGB, 1 plane.
+    YV12HD = 11,  // Rec709 "HD" color space version of YV12
     // Please update UMA histogram enumeration when adding new formats here.
-    FORMAT_MAX = ARGB,  // Must always be equal to largest entry logged.
+    FORMAT_MAX = YV12HD,  // Must always be equal to largest entry logged.
   };
 
   // Returns the name of a Format as a string.
@@ -92,10 +92,6 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
                             const gfx::Rect& visible_rect,
                             const gfx::Size& natural_size);
 
-  // CB to write pixels from the texture backing this frame into the
-  // |const SkBitmap&| parameter.
-  typedef base::Callback<void(const SkBitmap&)> ReadPixelsCB;
-
   // CB to be called on the mailbox backing this frame when the frame is
   // destroyed.
   typedef base::Callback<void(uint32)> ReleaseMailboxCB;
@@ -113,14 +109,7 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
       const gfx::Rect& visible_rect,
       const gfx::Size& natural_size,
       base::TimeDelta timestamp,
-      const ReadPixelsCB& read_pixels_cb);
-
-#if !defined(MEDIA_FOR_CAST_IOS)
-  // Read pixels from the native texture backing |*this| and write
-  // them to |pixels| as BGRA.  |pixels| must point to a buffer at
-  // least as large as 4 * visible_rect().size().GetArea().
-  void ReadPixelsFromNativeTexture(const SkBitmap& pixels);
-#endif
+      bool allow_overlay);
 
   // Wraps packed image data residing in a memory buffer with a VideoFrame.
   // The image data resides in |data| and is assumed to be packed tightly in a
@@ -137,6 +126,24 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
       uint8* data,
       size_t data_size,
       base::SharedMemoryHandle handle,
+      size_t shared_memory_offset,
+      base::TimeDelta timestamp,
+      const base::Closure& no_longer_needed_cb);
+
+  // Wraps external YUV data of the given parameters with a VideoFrame.
+  // The returned VideoFrame does not own the data passed in. When the frame
+  // is destroyed |no_longer_needed_cb.Run()| will be called.
+  static scoped_refptr<VideoFrame> WrapExternalYuvData(
+      Format format,
+      const gfx::Size& coded_size,
+      const gfx::Rect& visible_rect,
+      const gfx::Size& natural_size,
+      int32 y_stride,
+      int32 u_stride,
+      int32 v_stride,
+      uint8* y_data,
+      uint8* u_data,
+      uint8* v_data,
       base::TimeDelta timestamp,
       const base::Closure& no_longer_needed_cb);
 
@@ -175,25 +182,6 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
       CVPixelBufferRef cv_pixel_buffer,
       base::TimeDelta timestamp);
 #endif
-
-  // Wraps external YUV data of the given parameters with a VideoFrame.
-  // The returned VideoFrame does not own the data passed in. When the frame
-  // is destroyed |no_longer_needed_cb.Run()| will be called.
-  // TODO(sheu): merge this into WrapExternalSharedMemory().
-  // http://crbug.com/270217
-  static scoped_refptr<VideoFrame> WrapExternalYuvData(
-      Format format,
-      const gfx::Size& coded_size,
-      const gfx::Rect& visible_rect,
-      const gfx::Size& natural_size,
-      int32 y_stride,
-      int32 u_stride,
-      int32 v_stride,
-      uint8* y_data,
-      uint8* u_data,
-      uint8* v_data,
-      base::TimeDelta timestamp,
-      const base::Closure& no_longer_needed_cb);
 
   // Wraps |frame| and calls |no_longer_needed_cb| when the wrapper VideoFrame
   // gets destroyed. |visible_rect| must be a sub rect within
@@ -298,6 +286,20 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   // Returns the shared-memory handle, if present
   base::SharedMemoryHandle shared_memory_handle() const;
 
+  // Returns the offset into the shared memory where the frame data begins.
+  size_t shared_memory_offset() const;
+
+  // Returns a dictionary of optional metadata.  This contains information
+  // associated with the frame that downstream clients might use for frame-level
+  // logging, quality/performance optimizations, signaling, etc.
+  //
+  // TODO(miu): Move some of the "extra" members of VideoFrame (below) into
+  // here as a later clean-up step.
+  const VideoFrameMetadata* metadata() const { return &metadata_; }
+  VideoFrameMetadata* metadata() { return &metadata_; }
+
+  bool allow_overlay() const { return allow_overlay_; }
+
 #if defined(OS_POSIX)
   // Returns backing dmabuf file descriptor for given |plane|, if present.
   int dmabuf_fd(size_t plane) const;
@@ -384,10 +386,12 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   // Native texture mailbox, if this is a NATIVE_TEXTURE frame.
   const scoped_ptr<gpu::MailboxHolder> mailbox_holder_;
   ReleaseMailboxCB mailbox_holder_release_cb_;
-  ReadPixelsCB read_pixels_cb_;
 
   // Shared memory handle, if this frame was allocated from shared memory.
   base::SharedMemoryHandle shared_memory_handle_;
+
+  // Offset in shared memory buffer.
+  size_t shared_memory_offset_;
 
 #if defined(OS_POSIX)
   // Dmabufs for each plane, if this frame is wrapping memory
@@ -408,6 +412,10 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   uint32 release_sync_point_;
 
   const bool end_of_stream_;
+
+  VideoFrameMetadata metadata_;
+
+  bool allow_overlay_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(VideoFrame);
 };

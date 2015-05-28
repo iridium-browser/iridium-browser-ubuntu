@@ -34,7 +34,9 @@
 #include "extensions/browser/extension_message_filter.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/guest_view/guest_view_message_filter.h"
 #include "extensions/browser/info_map.h"
+#include "extensions/browser/io_thread_extension_message_filter.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
@@ -257,11 +259,8 @@ ChromeContentBrowserClientExtensionsPart::ShouldTryToUseExistingProcessHost(
       GetLoadedProfiles();
   for (size_t i = 0; i < profiles.size(); ++i) {
     ProcessManager* epm = ProcessManager::Get(profiles[i]);
-    for (ProcessManager::const_iterator iter = epm->background_hosts().begin();
-         iter != epm->background_hosts().end(); ++iter) {
-      const ExtensionHost* host = *iter;
+    for (extensions::ExtensionHost* host : epm->background_hosts())
       process_ids.insert(host->render_process_host()->GetID());
-    }
   }
 
   return (process_ids.size() >
@@ -371,20 +370,6 @@ bool ChromeContentBrowserClientExtensionsPart::ShouldAllowOpenURL(
   return false;
 }
 
-// static
-void ChromeContentBrowserClientExtensionsPart::SetSigninProcess(
-    content::SiteInstance* site_instance) {
-  Profile* profile =
-      Profile::FromBrowserContext(site_instance->GetBrowserContext());
-  DCHECK(profile);
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&InfoMap::SetSigninProcess,
-                 ExtensionSystem::Get(profile)->info_map(),
-                 site_instance->GetProcess()->GetID()));
-}
-
 void ChromeContentBrowserClientExtensionsPart::RenderProcessWillLaunch(
     content::RenderProcessHost* host) {
   int id = host->GetID();
@@ -392,6 +377,8 @@ void ChromeContentBrowserClientExtensionsPart::RenderProcessWillLaunch(
 
   host->AddFilter(new ChromeExtensionMessageFilter(id, profile));
   host->AddFilter(new ExtensionMessageFilter(id, profile));
+  host->AddFilter(new IOThreadExtensionMessageFilter(id, profile));
+  host->AddFilter(new GuestViewMessageFilter(id, profile));
   extension_web_request_api_helpers::SendExtensionWebRequestStatusToHost(host);
 }
 
@@ -445,7 +432,6 @@ void ChromeContentBrowserClientExtensionsPart::SiteInstanceDeleting(
 
 void ChromeContentBrowserClientExtensionsPart::OverrideWebkitPrefs(
     RenderViewHost* rvh,
-    const GURL& url,
     WebPreferences* web_prefs) {
   const ExtensionRegistry* registry =
       ExtensionRegistry::Get(rvh->GetProcess()->GetBrowserContext());

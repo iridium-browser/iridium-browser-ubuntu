@@ -35,6 +35,11 @@ x-profiling-view > x-timeline-view {
 .report-id-message {
   -webkit-user-select: text;
 }
+
+x-timeline-view-buttons,
+x-timeline-view-buttons > #monitoring-elements {
+  display: flex;
+}
 </style>
 
 <template id="profiling-view-template">
@@ -104,7 +109,7 @@ tv.exportTo('tv.e.about_tracing', function() {
       tv.b.ui.decorate(this.timelineView_, tv.c.TimelineView);
 
       // Detach the buttons. We will reattach them to the timeline view.
-      // TODO(nduca): Make <timeline-view> have a <content select="x-buttons">
+      // TODO(nduca): Make timeline-view have a content select="x-buttons"
       // that pulls in any buttons.
       var buttons = this.querySelector('x-timeline-view-buttons');
       buttons.parentElement.removeChild(buttons);
@@ -145,7 +150,7 @@ tv.exportTo('tv.e.about_tracing', function() {
       }.bind(this);
       window.onUploadComplete = function(reportId) {
         var messageDiv = document.createElement('div');
-        var textNode =  document.createTextNode(
+        var textNode = document.createTextNode(
             'Trace uploaded successfully. Report id: ');
         messageDiv.appendChild(textNode);
         var reportLink = document.createElement('a');
@@ -397,6 +402,35 @@ tv.exportTo('tv.e.about_tracing', function() {
       this.uploadOverlay_ = null;
     },
 
+    requestFilename_: function() {
+
+      // unsafe filename patterns:
+      var illegalRe = /[\/\?<>\\:\*\|":]/g;
+      var controlRe = /[\x00-\x1f\x80-\x9f]/g;
+      var reservedRe = /^\.+$/;
+
+      var filename;
+      var defaultName = this.activeTrace_.filename;
+      var custom = prompt('Filename? (.json appended) Or leave blank:');
+      if (custom === null)
+        return false;
+
+      if (custom) {
+        filename = defaultName.replace(/\.json$/, ' ' + custom) + '.json';
+      } else {
+        var date = new Date();
+        var dateText = ' ' + date.toDateString() +
+                       ' ' + date.toLocaleTimeString();
+        filename = defaultName.replace(/\.json$/, dateText + '.json');
+      }
+
+      return filename
+              .replace(illegalRe, '.')
+              .replace(controlRe, '•')
+              .replace(reservedRe, '')
+              .replace(/\s+/g,'_');
+    },
+
     onSaveClicked_: function() {
       // Create a blob URL from the binary array.
       var blob = new Blob([this.activeTrace_.data],
@@ -406,8 +440,9 @@ tv.exportTo('tv.e.about_tracing', function() {
       // Create a link and click on it. BEST API EVAR!
       var link = document.createElementNS('http://www.w3.org/1999/xhtml', 'a');
       link.href = blobUrl;
-      link.download = this.activeTrace_.filename;
-      link.click();
+      link.download = this.requestFilename_();
+      if (link.download)
+        link.click();
     },
 
     onUploadClicked_: function() {

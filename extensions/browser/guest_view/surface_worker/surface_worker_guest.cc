@@ -20,21 +20,13 @@ const char SurfaceWorkerGuest::Type[] = "surfaceview";
 
 // static
 GuestViewBase* SurfaceWorkerGuest::Create(
-    content::BrowserContext* browser_context,
-    content::WebContents* owner_web_contents,
-    int guest_instance_id) {
-  return new SurfaceWorkerGuest(browser_context,
-                                owner_web_contents,
-                                guest_instance_id);
+    content::WebContents* owner_web_contents) {
+  return new SurfaceWorkerGuest(owner_web_contents);
 }
 
 SurfaceWorkerGuest::SurfaceWorkerGuest(
-    content::BrowserContext* browser_context,
-    content::WebContents* owner_web_contents,
-    int guest_instance_id)
-    : GuestView<SurfaceWorkerGuest>(browser_context,
-                                    owner_web_contents,
-                                    guest_instance_id),
+    content::WebContents* owner_web_contents)
+    : GuestView<SurfaceWorkerGuest>(owner_web_contents),
       weak_ptr_factory_(this) {
 }
 

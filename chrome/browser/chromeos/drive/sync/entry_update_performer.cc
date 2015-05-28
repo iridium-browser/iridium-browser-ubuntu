@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/drive/sync/entry_update_performer.h"
 
+#include <set>
+
 #include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "chrome/browser/chromeos/drive/change_list_loader.h"
@@ -36,6 +38,20 @@ struct EntryUpdatePerformer::LocalState {
 };
 
 namespace {
+
+struct PropertyCompare {
+  bool operator()(const drive::Property& x, const drive::Property& y) const {
+    if (x.key() < y.key())
+      return true;
+    if (x.key() > y.key())
+      return false;
+    if (x.value() < y.value())
+      return true;
+    if (y.value() > y.value())
+      return false;
+    return x.visibility() < y.visibility();
+  }
+};
 
 // Looks up ResourceEntry for source entry and its parent.
 FileError PrepareUpdate(ResourceMetadata* metadata,
@@ -117,11 +133,12 @@ FileError PrepareUpdate(ResourceMetadata* metadata,
 
 FileError FinishUpdate(ResourceMetadata* metadata,
                        FileCache* cache,
-                       const std::string& local_id,
+                       scoped_ptr<EntryUpdatePerformer::LocalState> local_state,
                        scoped_ptr<google_apis::FileResource> file_resource,
                        FileChange* changed_files) {
   ResourceEntry entry;
-  FileError error = metadata->GetResourceEntryById(local_id, &entry);
+  FileError error =
+      metadata->GetResourceEntryById(local_state->entry.local_id(), &entry);
   if (error != FILE_ERROR_OK)
     return error;
 
@@ -133,7 +150,7 @@ FileError FinishUpdate(ResourceMetadata* metadata,
 
   switch (error) {
     case FILE_ERROR_OK:
-      if (existing_local_id != local_id) {
+      if (existing_local_id != local_state->entry.local_id()) {
         base::FilePath existing_entry_path;
         error = metadata->GetFilePath(existing_local_id, &existing_entry_path);
         if (error != FILE_ERROR_OK)
@@ -163,11 +180,27 @@ FileError FinishUpdate(ResourceMetadata* metadata,
   if (!entry.file_info().is_directory())
     entry.mutable_file_specific_info()->set_md5(file_resource->md5_checksum());
   entry.set_resource_id(file_resource->file_id());
+
+  // Keep only those properties which have been added or changed in the proto
+  // during the update.
+  std::set<drive::Property, PropertyCompare> synced_properties(
+      local_state->entry.new_properties().begin(),
+      local_state->entry.new_properties().end());
+
+  google::protobuf::RepeatedPtrField<drive::Property> not_synced_properties;
+  for (const auto& property : entry.new_properties()) {
+    if (!synced_properties.count(property)) {
+      Property* const not_synced_property = not_synced_properties.Add();
+      not_synced_property->CopyFrom(property);
+    }
+  }
+  entry.mutable_new_properties()->Swap(&not_synced_properties);
+
   error = metadata->RefreshEntry(entry);
   if (error != FILE_ERROR_OK)
     return error;
   base::FilePath entry_path;
-  error = metadata->GetFilePath(local_id, &entry_path);
+  error = metadata->GetFilePath(local_state->entry.local_id(), &entry_path);
   if (error != FILE_ERROR_OK)
     return error;
   changed_files->Update(entry_path, entry, FileChange::ADD_OR_UPDATE);
@@ -176,7 +209,7 @@ FileError FinishUpdate(ResourceMetadata* metadata,
   if (entry.file_specific_info().cache_state().is_dirty() &&
       entry.file_specific_info().cache_state().md5() ==
       entry.file_specific_info().md5()) {
-    error = cache->ClearDirty(local_id);
+    error = cache->ClearDirty(local_state->entry.local_id());
     if (error != FILE_ERROR_OK)
       return error;
   }
@@ -207,21 +240,21 @@ EntryUpdatePerformer::EntryUpdatePerformer(
                                                        scheduler,
                                                        metadata)),
       weak_ptr_factory_(this) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 EntryUpdatePerformer::~EntryUpdatePerformer() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 void EntryUpdatePerformer::UpdateEntry(const std::string& local_id,
                                        const ClientContext& context,
                                        const FileOperationCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   scoped_ptr<LocalState> local_state(new LocalState);
-  LocalState* local_state_ptr = local_state.get();
+  LocalState* const local_state_ptr = local_state.get();
   base::PostTaskAndReplyWithResult(
       blocking_task_runner_.get(),
       FROM_HERE,
@@ -236,7 +269,7 @@ void EntryUpdatePerformer::UpdateEntryAfterPrepare(
     const FileOperationCallback& callback,
     scoped_ptr<LocalState> local_state,
     FileError error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (error != FILE_ERROR_OK) {
@@ -263,6 +296,25 @@ void EntryUpdatePerformer::UpdateEntryAfterPrepare(
   base::Time last_accessed = base::Time::FromInternalValue(
       local_state->entry.file_info().last_accessed());
 
+  // Compose a list of new properties from the proto.
+  google_apis::drive::Properties properties;
+  for (const auto& proto_property : local_state->entry.new_properties()) {
+    google_apis::drive::Property property;
+    switch (proto_property.visibility()) {
+      case Property_Visibility_PRIVATE:
+        property.set_visibility(
+            google_apis::drive::Property::VISIBILITY_PRIVATE);
+        break;
+      case Property_Visibility_PUBLIC:
+        property.set_visibility(
+            google_apis::drive::Property::VISIBILITY_PUBLIC);
+        break;
+    }
+    property.set_key(proto_property.key());
+    property.set_value(proto_property.value());
+    properties.push_back(property);
+  }
+
   // Perform content update.
   if (local_state->should_content_update) {
     if (local_state->entry.resource_id().empty()) {
@@ -271,41 +323,37 @@ void EntryUpdatePerformer::UpdateEntryAfterPrepare(
       // FinishUpdate() is responsible to resolve conflicts caused by this.
       scoped_ptr<base::ScopedClosureRunner> null_loader_lock;
 
-      DriveUploader::UploadNewFileOptions options;
+      UploadNewFileOptions options;
       options.modified_date = last_modified;
       options.last_viewed_by_me_date = last_accessed;
+      options.properties = properties;
+      LocalState* const local_state_ptr = local_state.get();
       scheduler_->UploadNewFile(
-          local_state->parent_entry.resource_id(),
-          local_state->drive_file_path,
-          local_state->cache_file_path,
-          local_state->entry.title(),
-          local_state->entry.file_specific_info().content_mime_type(),
-          options,
-          context,
+          local_state_ptr->parent_entry.resource_id(),
+          local_state_ptr->drive_file_path, local_state_ptr->cache_file_path,
+          local_state_ptr->entry.title(),
+          local_state_ptr->entry.file_specific_info().content_mime_type(),
+          options, context,
           base::Bind(&EntryUpdatePerformer::UpdateEntryAfterUpdateResource,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     context,
-                     callback,
-                     local_state->entry.local_id(),
+                     weak_ptr_factory_.GetWeakPtr(), context, callback,
+                     base::Passed(&local_state),
                      base::Passed(&null_loader_lock)));
     } else {
-      DriveUploader::UploadExistingFileOptions options;
+      UploadExistingFileOptions options;
       options.title = local_state->entry.title();
       options.parent_resource_id = local_state->parent_entry.resource_id();
       options.modified_date = last_modified;
       options.last_viewed_by_me_date = last_accessed;
+      options.properties = properties;
+      LocalState* const local_state_ptr = local_state.get();
       scheduler_->UploadExistingFile(
-          local_state->entry.resource_id(),
-          local_state->drive_file_path,
-          local_state->cache_file_path,
-          local_state->entry.file_specific_info().content_mime_type(),
-          options,
-          context,
+          local_state_ptr->entry.resource_id(),
+          local_state_ptr->drive_file_path, local_state_ptr->cache_file_path,
+          local_state_ptr->entry.file_specific_info().content_mime_type(),
+          options, context,
           base::Bind(&EntryUpdatePerformer::UpdateEntryAfterUpdateResource,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     context,
-                     callback,
-                     local_state->entry.local_id(),
+                     weak_ptr_factory_.GetWeakPtr(), context, callback,
+                     base::Passed(&local_state),
                      base::Passed(scoped_ptr<base::ScopedClosureRunner>())));
     }
     return;
@@ -318,20 +366,17 @@ void EntryUpdatePerformer::UpdateEntryAfterPrepare(
     scoped_ptr<base::ScopedClosureRunner> loader_lock =
         loader_controller_->GetLock();
 
-    DriveServiceInterface::AddNewDirectoryOptions options;
+    AddNewDirectoryOptions options;
     options.modified_date = last_modified;
     options.last_viewed_by_me_date = last_accessed;
+    options.properties = properties;
+    LocalState* const local_state_ptr = local_state.get();
     scheduler_->AddNewDirectory(
-        local_state->parent_entry.resource_id(),
-        local_state->entry.title(),
-        options,
-        context,
+        local_state_ptr->parent_entry.resource_id(),
+        local_state_ptr->entry.title(), options, context,
         base::Bind(&EntryUpdatePerformer::UpdateEntryAfterUpdateResource,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   context,
-                   callback,
-                   local_state->entry.local_id(),
-                   base::Passed(&loader_lock)));
+                   weak_ptr_factory_.GetWeakPtr(), context, callback,
+                   base::Passed(&local_state), base::Passed(&loader_lock)));
     return;
   }
 
@@ -343,29 +388,32 @@ void EntryUpdatePerformer::UpdateEntryAfterPrepare(
   }
 
   // Perform metadata update.
+  LocalState* const local_state_ptr = local_state.get();
   scheduler_->UpdateResource(
-      local_state->entry.resource_id(), local_state->parent_entry.resource_id(),
-      local_state->entry.title(), last_modified, last_accessed,
+      local_state_ptr->entry.resource_id(),
+      local_state_ptr->parent_entry.resource_id(),
+      local_state_ptr->entry.title(), last_modified, last_accessed, properties,
       context,
       base::Bind(&EntryUpdatePerformer::UpdateEntryAfterUpdateResource,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 context, callback, local_state->entry.local_id(),
+                 weak_ptr_factory_.GetWeakPtr(), context, callback,
+                 base::Passed(&local_state),
                  base::Passed(scoped_ptr<base::ScopedClosureRunner>())));
 }
 
 void EntryUpdatePerformer::UpdateEntryAfterUpdateResource(
     const ClientContext& context,
     const FileOperationCallback& callback,
-    const std::string& local_id,
+    scoped_ptr<LocalState> local_state,
     scoped_ptr<base::ScopedClosureRunner> loader_lock,
-    google_apis::GDataErrorCode status,
+    google_apis::DriveApiErrorCode status,
     scoped_ptr<google_apis::FileResource> entry) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (status == google_apis::HTTP_FORBIDDEN) {
     // Editing this entry is not allowed, revert local changes.
-    entry_revert_performer_->RevertEntry(local_id, context, callback);
+    entry_revert_performer_->RevertEntry(local_state->entry.local_id(), context,
+                                         callback);
     return;
   }
 
@@ -377,17 +425,11 @@ void EntryUpdatePerformer::UpdateEntryAfterUpdateResource(
 
   FileChange* changed_files = new FileChange;
   base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(),
-      FROM_HERE,
-      base::Bind(&FinishUpdate,
-                 metadata_,
-                 cache_,
-                 local_id,
-                 base::Passed(&entry),
-                 changed_files),
+      blocking_task_runner_.get(), FROM_HERE,
+      base::Bind(&FinishUpdate, metadata_, cache_, base::Passed(&local_state),
+                 base::Passed(&entry), changed_files),
       base::Bind(&EntryUpdatePerformer::UpdateEntryAfterFinish,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 callback,
+                 weak_ptr_factory_.GetWeakPtr(), callback,
                  base::Owned(changed_files)));
 }
 
@@ -395,7 +437,7 @@ void EntryUpdatePerformer::UpdateEntryAfterFinish(
     const FileOperationCallback& callback,
     const FileChange* changed_files,
     FileError error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   delegate_->OnFileChangedByOperation(*changed_files);

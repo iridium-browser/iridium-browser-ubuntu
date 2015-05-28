@@ -27,6 +27,7 @@
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
+#include "ui/events/event_utils.h"
 
 // ChromeOS and mobile platforms don't have a ProfileChooserView.
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -97,7 +98,8 @@ class ProfileChooserViewExtensionsTest : public ExtensionBrowserTest {
 
     ProfileChooserView::close_on_deactivate_for_testing_ = false;
 
-    ui::MouseEvent e(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(), 0, 0);
+    ui::MouseEvent e(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(),
+                     ui::EventTimeForNow(), 0, 0);
     button->NotifyClick(e);
     base::MessageLoop::current()->RunUntilIdle();
     EXPECT_TRUE(ProfileChooserView::IsShowing());
@@ -113,7 +115,8 @@ class ProfileChooserViewExtensionsTest : public ExtensionBrowserTest {
   }
 
   void ClickProfileChooserViewLockButton() {
-    ui::MouseEvent e(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(), 0, 0);
+    ui::MouseEvent e(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(),
+                     ui::EventTimeForNow(), 0, 0);
     ProfileChooserView::profile_bubble_->ButtonPressed(
         ProfileChooserView::profile_bubble_->lock_button_, e);
   }
@@ -134,6 +137,8 @@ class ProfileChooserViewExtensionsTest : public ExtensionBrowserTest {
 
   void WaitForUserManager() {
     // If the User Manager hasn't shown yet, wait for it to show up.
+    // TODO(mlerman): As per crbug.com/450221, we should somehow observe when
+    // the UserManager is created and wait for that event.
     if (!UserManager::IsShowing())
       base::MessageLoop::current()->RunUntilIdle();
     EXPECT_TRUE(UserManager::IsShowing());
@@ -162,7 +167,10 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, ViewProfileUMA) {
       ProfileMetrics::PROFILE_AVATAR_MENU_UPGRADE_VIEW, 1);
 }
 
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, LockProfile) {
+// Flaky: http://crbug.com/450221
+// WaitForUserManager()'s RunUntilIdle isn't always sufficient for the
+// UserManager to be showing.
+IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, DISABLED_LockProfile) {
   ASSERT_TRUE(profiles::IsMultipleProfilesEnabled());
 
   SetupProfilesForLock(browser()->profile());
@@ -183,8 +191,11 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, LockProfile) {
   UserManager::Hide();
 }
 
+// Flaky: http://crbug.com/450221
+// WaitForUserManager()'s RunUntilIdle isn't always sufficient for the
+// UserManager to be showing.
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
-                       LockProfileBlockExtensions) {
+                       DISABLED_LockProfileBlockExtensions) {
   ASSERT_TRUE(profiles::IsMultipleProfilesEnabled());
   // Make sure we have at least one enabled extension.
   extensions::ExtensionRegistry* registry =
@@ -203,8 +214,11 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
   UserManager::Hide();
 }
 
+// Flaky: http://crbug.com/450221
+// WaitForUserManager()'s RunUntilIdle isn't always sufficient for the
+// UserManager to be showing.
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
-                       LockProfileNoBlockOtherProfileExtensions) {
+                       DISABLED_LockProfileNoBlockOtherProfileExtensions) {
   ASSERT_TRUE(profiles::IsMultipleProfilesEnabled());
   // Make sure we have at least one enabled extension.
   extensions::ExtensionRegistry* registry =

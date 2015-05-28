@@ -117,6 +117,7 @@ public:
     BLINK_EXPORT WebString ariaAutoComplete() const;
     BLINK_EXPORT bool ariaControls(WebVector<WebAXObject>& controlsElements) const;
     BLINK_EXPORT bool ariaDescribedby(WebVector<WebAXObject>& describedbyElements) const;
+    BLINK_EXPORT WebString ariaDropEffect() const;
     BLINK_EXPORT bool ariaFlowTo(WebVector<WebAXObject>& flowToElements) const;
     BLINK_EXPORT bool ariaHasPopup() const;
     BLINK_EXPORT bool ariaLabelledby(WebVector<WebAXObject>& labelledbyElements) const;
@@ -210,6 +211,7 @@ public:
     BLINK_EXPORT unsigned cellColumnSpan() const;
     BLINK_EXPORT unsigned cellRowIndex() const;
     BLINK_EXPORT unsigned cellRowSpan() const;
+    BLINK_EXPORT WebAXSortDirection sortDirection() const;
 
     // Load inline text boxes for just this subtree, even if
     // settings->inlineTextBoxAccessibilityEnabled() is false.

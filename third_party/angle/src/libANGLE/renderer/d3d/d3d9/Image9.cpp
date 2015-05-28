@@ -13,6 +13,7 @@
 #include "libANGLE/renderer/d3d/d3d9/Renderer9.h"
 #include "libANGLE/renderer/d3d/d3d9/RenderTarget9.h"
 #include "libANGLE/renderer/d3d/d3d9/TextureStorage9.h"
+#include "libANGLE/formatutils.h"
 #include "libANGLE/Framebuffer.h"
 #include "libANGLE/FramebufferAttachment.h"
 #include "libANGLE/Renderbuffer.h"
@@ -93,7 +94,7 @@ gl::Error Image9::generateMip(IDirect3DSurface9 *destSurface, IDirect3DSurface9 
     return gl::Error(GL_NO_ERROR);
 }
 
-Image9 *Image9::makeImage9(Image *img)
+Image9 *Image9::makeImage9(ImageD3D *img)
 {
     ASSERT(HAS_DYNAMIC_TYPE(Image9*, img));
     return static_cast<Image9*>(img);
@@ -394,7 +395,7 @@ gl::Error Image9::copyToStorage(TextureStorage *storage, const gl::ImageIndex &i
     if (index.type == GL_TEXTURE_2D)
     {
         TextureStorage9_2D *storage9 = TextureStorage9_2D::makeTextureStorage9_2D(storage);
-        gl::Error error = storage9->getSurfaceLevel(index.mipIndex, true, &destSurface);
+        error = storage9->getSurfaceLevel(index.mipIndex, true, &destSurface);
         if (error.isError())
         {
             return error;
@@ -402,9 +403,9 @@ gl::Error Image9::copyToStorage(TextureStorage *storage, const gl::ImageIndex &i
     }
     else
     {
-        ASSERT(gl::IsCubemapTextureTarget(index.type));
+        ASSERT(gl::IsCubeMapTextureTarget(index.type));
         TextureStorage9_Cube *storage9 = TextureStorage9_Cube::makeTextureStorage9_Cube(storage);
-        gl::Error error = storage9->getCubeMapSurface(index.type, index.mipIndex, true, &destSurface);
+        error = storage9->getCubeMapSurface(index.type, index.mipIndex, true, &destSurface);
         if (error.isError())
         {
             return error;
@@ -477,13 +478,13 @@ gl::Error Image9::copyToSurface(IDirect3DSurface9 *destSurface, const gl::Box &a
 
 // Store the pixel rectangle designated by xoffset,yoffset,width,height with pixels stored as format/type at input
 // into the target pixel rectangle.
-gl::Error Image9::loadData(const gl::Box &area, GLint unpackAlignment, GLenum type, const void *input)
+gl::Error Image9::loadData(const gl::Box &area, const gl::PixelUnpackState &unpack, GLenum type, const void *input)
 {
     // 3D textures are not supported by the D3D9 backend.
     ASSERT(area.z == 0 && area.depth == 1);
 
     const gl::InternalFormat &formatInfo = gl::GetInternalFormatInfo(mInternalFormat);
-    GLsizei inputRowPitch = formatInfo.computeRowPitch(type, area.width, unpackAlignment);
+    GLsizei inputRowPitch = formatInfo.computeRowPitch(type, area.width, unpack.alignment, unpack.rowLength);
 
     const d3d9::TextureFormat &d3dFormatInfo = d3d9::GetTextureFormatInfo(mInternalFormat);
     ASSERT(d3dFormatInfo.loadFunction != NULL);
@@ -516,8 +517,8 @@ gl::Error Image9::loadCompressedData(const gl::Box &area, const void *input)
     ASSERT(area.z == 0 && area.depth == 1);
 
     const gl::InternalFormat &formatInfo = gl::GetInternalFormatInfo(mInternalFormat);
-    GLsizei inputRowPitch = formatInfo.computeRowPitch(GL_UNSIGNED_BYTE, area.width, 1);
-    GLsizei inputDepthPitch = formatInfo.computeDepthPitch(GL_UNSIGNED_BYTE, area.width, area.height, 1);
+    GLsizei inputRowPitch = formatInfo.computeRowPitch(GL_UNSIGNED_BYTE, area.width, 1, 0);
+    GLsizei inputDepthPitch = formatInfo.computeDepthPitch(GL_UNSIGNED_BYTE, area.width, area.height, 1, 0);
 
     const d3d9::TextureFormat &d3d9FormatInfo = d3d9::GetTextureFormatInfo(mInternalFormat);
 
@@ -549,7 +550,7 @@ gl::Error Image9::loadCompressedData(const gl::Box &area, const void *input)
 }
 
 // This implements glCopyTex[Sub]Image2D for non-renderable internal texture formats and incomplete textures
-gl::Error Image9::copy(const gl::Offset &destOffset, const gl::Rectangle &sourceArea, RenderTarget *source)
+gl::Error Image9::copy(const gl::Offset &destOffset, const gl::Rectangle &sourceArea, RenderTargetD3D *source)
 {
     ASSERT(source);
 
@@ -777,7 +778,7 @@ gl::Error Image9::copy(const gl::Offset &destOffset, const gl::Rectangle &source
     return gl::Error(GL_NO_ERROR);
 }
 
-gl::Error Image9::copy(const gl::Offset &destOffset, const gl::Rectangle &area, const gl::ImageIndex &srcIndex, TextureStorage *srcStorage)
+gl::Error Image9::copy(const gl::Offset &destOffset, const gl::Box &area, const gl::ImageIndex &srcIndex, TextureStorage *srcStorage)
 {
     // Currently unreachable, due to only being used in a D3D11-only workaround
     UNIMPLEMENTED();

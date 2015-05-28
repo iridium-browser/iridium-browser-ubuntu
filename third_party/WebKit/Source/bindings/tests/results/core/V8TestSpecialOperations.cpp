@@ -10,7 +10,6 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/UnionTypesCore.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
-#include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/V8Node.h"
 #include "bindings/core/v8/V8NodeList.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
@@ -27,7 +26,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestSpecialOperations::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestSpecialOperations::domTemplate, V8TestSpecialOperations::refObject, V8TestSpecialOperations::derefObject, V8TestSpecialOperations::trace, 0, 0, V8TestSpecialOperations::installConditionallyEnabledMethods, V8TestSpecialOperations::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestSpecialOperations::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestSpecialOperations::domTemplate, V8TestSpecialOperations::refObject, V8TestSpecialOperations::derefObject, V8TestSpecialOperations::trace, 0, 0, V8TestSpecialOperations::installConditionallyEnabledMethods, V8TestSpecialOperations::installConditionallyEnabledProperties, "TestSpecialOperations", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestSpecialOperations.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -45,7 +44,9 @@ static void namedItemMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
     TestSpecialOperations* impl = V8TestSpecialOperations::toImpl(info.Holder());
     V8StringResource<> name;
     {
-        TOSTRING_VOID_INTERNAL(name, info[0]);
+        name = info[0];
+        if (!name.prepare())
+            return;
     }
     NodeOrNodeList result;
     impl->getItem(name, result);
@@ -61,8 +62,6 @@ static void namedItemMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& i
 
 static void namedPropertyGetter(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    if (!name->IsString())
-        return;
     auto nameString = name.As<v8::String>();
     TestSpecialOperations* impl = V8TestSpecialOperations::toImpl(info.Holder());
     AtomicString propertyName = toCoreAtomicString(nameString);
@@ -82,12 +81,17 @@ static void namedPropertyGetterCallback(v8::Local<v8::Name> name, const v8::Prop
 
 static void namedPropertySetter(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    if (!name->IsString())
-        return;
     auto nameString = name.As<v8::String>();
     TestSpecialOperations* impl = V8TestSpecialOperations::toImpl(info.Holder());
-    TOSTRING_VOID(V8StringResource<>, propertyName, nameString);
+    V8StringResource<> propertyName(nameString);
+    if (!propertyName.prepare())
+        return;
     Node* propertyValue = V8Node::toImplWithTypeCheck(info.GetIsolate(), v8Value);
+    if (!propertyValue && !isUndefinedOrNull(v8Value)) {
+        exceptionState.throwTypeError("The provided value is not of type 'Node'.");
+        exceptionState.throwIfNeeded();
+        return;
+    }
     bool result = impl->anonymousNamedSetter(propertyName, propertyValue);
     if (!result)
         return;
@@ -103,8 +107,6 @@ static void namedPropertySetterCallback(v8::Local<v8::Name> name, v8::Local<v8::
 
 static void namedPropertyQuery(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
 {
-    if (!name->IsString())
-        return;
     TestSpecialOperations* impl = V8TestSpecialOperations::toImpl(info.Holder());
     AtomicString propertyName = toCoreAtomicString(name.As<v8::String>());
     v8::String::Utf8Value namedProperty(name);
@@ -166,6 +168,7 @@ static void installV8TestSpecialOperationsTemplate(v8::Local<v8::FunctionTemplat
     ALLOW_UNUSED_LOCAL(prototypeTemplate);
     {
         v8::NamedPropertyHandlerConfiguration config(TestSpecialOperationsV8Internal::namedPropertyGetterCallback, TestSpecialOperationsV8Internal::namedPropertySetterCallback, TestSpecialOperationsV8Internal::namedPropertyQueryCallback, 0, TestSpecialOperationsV8Internal::namedPropertyEnumeratorCallback);
+        config.flags = static_cast<v8::PropertyHandlerFlags>(static_cast<int>(config.flags) | static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings));
         functionTemplate->InstanceTemplate()->SetHandler(config);
     }
 

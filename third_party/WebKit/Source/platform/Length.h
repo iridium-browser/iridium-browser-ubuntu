@@ -64,7 +64,7 @@ struct PixelsAndPercent {
 class CalculationValue;
 
 class PLATFORM_EXPORT Length {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(Length);
 public:
     Length()
         :  m_intValue(0), m_quirk(false), m_type(Auto), m_isFloat(false)
@@ -291,7 +291,7 @@ public:
         ASSERT(!isMaxSizeNone());
         return m_isFloat ? m_floatValue : m_intValue;
     }
-    float nonNanCalculatedValue(int maxValue) const;
+    float nonNanCalculatedValue(LayoutUnit maxValue) const;
 
     Length subtractFromOneHundredPercent() const;
 

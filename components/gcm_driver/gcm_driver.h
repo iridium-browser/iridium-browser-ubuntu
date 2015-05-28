@@ -37,8 +37,9 @@ class GCMDriver {
   GCMDriver();
   virtual ~GCMDriver();
 
-  // Registers |sender_id| for an app. A registration ID will be returned by
-  // the GCM server.
+  // Registers |sender_ids| for an app. A registration ID will be returned by
+  // the GCM server. On Android, only a single sender ID is supported, but
+  // instead multiple simultaneous registrations are allowed.
   // |app_id|: application ID.
   // |sender_ids|: list of IDs of the servers that are allowed to send the
   //               messages to the application. These IDs are assigned by the
@@ -48,11 +49,21 @@ class GCMDriver {
                 const std::vector<std::string>& sender_ids,
                 const RegisterCallback& callback);
 
-  // Unregisters an app from using GCM.
+  // Unregisters all sender_ids for an app. Only works on non-Android.
   // |app_id|: application ID.
   // |callback|: to be called once the asynchronous operation is done.
   void Unregister(const std::string& app_id,
                   const UnregisterCallback& callback);
+
+  // Unregisters an (app_id, sender_id) pair from using GCM. Only works on
+  // Android.
+  // TODO(jianli): Switch to using GCM's unsubscribe API.
+  // |app_id|: application ID.
+  // |sender_id|: the sender ID that was passed when registering.
+  // |callback|: to be called once the asynchronous operation is done.
+  void UnregisterWithSenderId(const std::string& app_id,
+                              const std::string& sender_id,
+                              const UnregisterCallback& callback);
 
   // Sends a message to a given receiver.
   // |app_id|: application ID.
@@ -73,10 +84,6 @@ class GCMDriver {
   // Called when the user signs in to or out of a GAIA account.
   virtual void OnSignedIn() = 0;
   virtual void OnSignedOut() = 0;
-
-  // Removes all the cached and persisted GCM data. If the GCM service is
-  // restarted after the purge, a new Android ID will be obtained.
-  virtual void Purge() = 0;
 
   // Adds a handler for a given app.
   virtual void AddAppHandler(const std::string& app_id, GCMAppHandler* handler);
@@ -141,7 +148,7 @@ class GCMDriver {
 
  protected:
   // Ensures that the GCM service starts (if necessary conditions are met).
-  virtual GCMClient::Result EnsureStarted() = 0;
+  virtual GCMClient::Result EnsureStarted(GCMClient::StartMode start_mode) = 0;
 
   // Platform-specific implementation of Register.
   virtual void RegisterImpl(const std::string& app_id,
@@ -149,6 +156,10 @@ class GCMDriver {
 
   // Platform-specific implementation of Unregister.
   virtual void UnregisterImpl(const std::string& app_id) = 0;
+
+  // Platform-specific implementation of UnregisterWithSenderId.
+  virtual void UnregisterWithSenderIdImpl(const std::string& app_id,
+                                          const std::string& sender_id);
 
   // Platform-specific implementation of Send.
   virtual void SendImpl(const std::string& app_id,
@@ -174,6 +185,11 @@ class GCMDriver {
   void ClearCallbacks();
 
  private:
+  // Common code shared by Unregister and UnregisterWithSenderId.
+  void UnregisterInternal(const std::string& app_id,
+                          const std::string* sender_id,
+                          const UnregisterCallback& callback);
+
   // Called after unregistration completes in order to trigger the pending
   // registration.
   void RegisterAfterUnregister(

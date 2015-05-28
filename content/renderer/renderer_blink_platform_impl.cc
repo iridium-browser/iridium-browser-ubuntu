@@ -14,6 +14,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "cc/blink/context_provider_web_context.h"
 #include "content/child/database_util.h"
 #include "content/child/file_info_util.h"
 #include "content/child/fileapi/webfilesystem_impl.h"
@@ -39,6 +40,7 @@
 #include "content/public/common/webplugininfo.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/battery_status/battery_status_dispatcher.h"
+#include "content/renderer/cache_storage/webserviceworkercachestorage_impl.h"
 #include "content/renderer/device_sensors/device_light_event_pump.h"
 #include "content/renderer/device_sensors/device_motion_event_pump.h"
 #include "content/renderer/device_sensors/device_orientation_event_pump.h"
@@ -51,6 +53,7 @@
 #include "content/renderer/renderer_clipboard_delegate.h"
 #include "content/renderer/scheduler/renderer_scheduler.h"
 #include "content/renderer/scheduler/web_scheduler_impl.h"
+#include "content/renderer/scheduler/webthread_impl_for_scheduler.h"
 #include "content/renderer/screen_orientation/screen_orientation_observer.h"
 #include "content/renderer/webclipboard_impl.h"
 #include "content/renderer/webgraphicscontext3d_provider_impl.h"
@@ -64,6 +67,7 @@
 #include "media/filters/stream_parser_factory.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
+#include "storage/common/database/database_identifier.h"
 #include "storage/common/quota/quota_types.h"
 #include "third_party/WebKit/public/platform/WebBatteryStatusListener.h"
 #include "third_party/WebKit/public/platform/WebBlobRegistry.h"
@@ -79,7 +83,6 @@
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "ui/gfx/color_profile.h"
 #include "url/gurl.h"
-#include "webkit/common/gpu/context_provider_web_context.h"
 
 #if defined(OS_ANDROID)
 #include "content/renderer/android/synchronous_compositor_factory.h"
@@ -110,7 +113,6 @@
 
 #if defined(OS_WIN)
 #include "content/common/child_process_messages.h"
-#include "third_party/WebKit/public/platform/win/WebSandboxSupport.h"
 #endif
 
 #if defined(USE_AURA)
@@ -171,9 +173,6 @@ class RendererBlinkPlatformImpl::MimeRegistry
       const blink::WebString& key_system);
   virtual bool supportsMediaSourceMIMEType(const blink::WebString& mime_type,
                                            const blink::WebString& codecs);
-  virtual bool supportsEncryptedMediaMIMEType(const WebString& key_system,
-                                              const WebString& mime_type,
-                                              const WebString& codecs) override;
   virtual blink::WebString mimeTypeForExtension(
       const blink::WebString& file_extension);
   virtual blink::WebString mimeTypeFromFile(
@@ -190,19 +189,13 @@ class RendererBlinkPlatformImpl::FileUtilities : public WebFileUtilitiesImpl {
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
 };
 
-#if defined(OS_ANDROID)
-// WebKit doesn't use WebSandboxSupport on android so we don't need to
-// implement anything here.
-class RendererBlinkPlatformImpl::SandboxSupport {};
-#else
+#if !defined(OS_ANDROID) && !defined(OS_WIN)
 class RendererBlinkPlatformImpl::SandboxSupport
     : public blink::WebSandboxSupport {
  public:
   virtual ~SandboxSupport() {}
 
-#if defined(OS_WIN)
-  virtual bool ensureFontLoaded(HFONT);
-#elif defined(OS_MACOSX)
+#if defined(OS_MACOSX)
   virtual bool loadFont(
       NSFont* src_font,
       CGFontRef* container,
@@ -223,7 +216,7 @@ class RendererBlinkPlatformImpl::SandboxSupport
   std::map<int32_t, blink::WebFallbackFont> unicode_font_families_;
 #endif
 };
-#endif  // defined(OS_ANDROID)
+#endif  // !defined(OS_ANDROID) && !defined(OS_WIN)
 
 //------------------------------------------------------------------------------
 
@@ -231,6 +224,7 @@ RendererBlinkPlatformImpl::RendererBlinkPlatformImpl(
     RendererScheduler* renderer_scheduler)
     : BlinkPlatformImpl(renderer_scheduler->DefaultTaskRunner()),
       web_scheduler_(new WebSchedulerImpl(renderer_scheduler)),
+      main_thread_(new WebThreadImplForScheduler(renderer_scheduler)),
       clipboard_delegate_(new RendererClipboardDelegate),
       clipboard_(new WebClipboardImpl(clipboard_delegate_.get())),
       mime_registry_(new RendererBlinkPlatformImpl::MimeRegistry),
@@ -238,17 +232,19 @@ RendererBlinkPlatformImpl::RendererBlinkPlatformImpl(
       plugin_refresh_allowed_(true),
       default_task_runner_(renderer_scheduler->DefaultTaskRunner()),
       web_scrollbar_behavior_(new WebScrollbarBehaviorImpl) {
+#if !defined(OS_ANDROID) && !defined(OS_WIN)
   if (g_sandbox_enabled && sandboxEnabled()) {
     sandbox_support_.reset(new RendererBlinkPlatformImpl::SandboxSupport);
   } else {
     DVLOG(1) << "Disabling sandbox support for testing.";
   }
+#endif
 
   // ChildThread may not exist in some tests.
-  if (ChildThread::current()) {
-    sync_message_filter_ = ChildThread::current()->sync_message_filter();
-    thread_safe_sender_ = ChildThread::current()->thread_safe_sender();
-    quota_message_filter_ = ChildThread::current()->quota_message_filter();
+  if (ChildThreadImpl::current()) {
+    sync_message_filter_ = ChildThreadImpl::current()->sync_message_filter();
+    thread_safe_sender_ = ChildThreadImpl::current()->thread_safe_sender();
+    quota_message_filter_ = ChildThreadImpl::current()->quota_message_filter();
     blob_registry_.reset(new WebBlobRegistryImpl(thread_safe_sender_.get()));
     web_idb_factory_.reset(new WebIDBFactoryImpl(thread_safe_sender_.get()));
     web_database_observer_impl_.reset(
@@ -264,6 +260,12 @@ RendererBlinkPlatformImpl::~RendererBlinkPlatformImpl() {
 
 blink::WebScheduler* RendererBlinkPlatformImpl::scheduler() {
   return web_scheduler_.get();
+}
+
+blink::WebThread* RendererBlinkPlatformImpl::currentThread() {
+  if (main_thread_->isCurrentThread())
+    return main_thread_.get();
+  return BlinkPlatformImpl::currentThread();
 }
 
 blink::WebClipboard* RendererBlinkPlatformImpl::clipboard() {
@@ -287,8 +289,8 @@ blink::WebFileUtilities* RendererBlinkPlatformImpl::fileUtilities() {
 }
 
 blink::WebSandboxSupport* RendererBlinkPlatformImpl::sandboxSupport() {
-#if defined(OS_ANDROID)
-  // WebKit doesn't use WebSandboxSupport on android.
+#if defined(OS_ANDROID) || defined(OS_WIN)
+  // These platforms do not require sandbox support.
   return NULL;
 #else
   return sandbox_support_.get();
@@ -343,15 +345,15 @@ RendererBlinkPlatformImpl::prescientNetworking() {
 }
 
 void RendererBlinkPlatformImpl::cacheMetadata(const blink::WebURL& url,
-                                              double response_time,
+                                              int64 response_time,
                                               const char* data,
                                               size_t size) {
   // Let the browser know we generated cacheable metadata for this resource. The
   // browser may cache it and return it on subsequent responses to speed
   // the processing of this resource.
   std::vector<char> copy(data, data + size);
-  RenderThread::Get()->Send(
-      new ViewHostMsg_DidGenerateCacheableMetadata(url, response_time, copy));
+  RenderThread::Get()->Send(new ViewHostMsg_DidGenerateCacheableMetadata(
+      url, base::Time::FromInternalValue(response_time), copy));
 }
 
 WebString RendererBlinkPlatformImpl::defaultLocale() {
@@ -391,6 +393,16 @@ WebIDBFactory* RendererBlinkPlatformImpl::idbFactory() {
 
 //------------------------------------------------------------------------------
 
+blink::WebServiceWorkerCacheStorage* RendererBlinkPlatformImpl::cacheStorage(
+    const WebString& origin_identifier) {
+  const GURL origin =
+      storage::GetOriginFromIdentifier(origin_identifier.utf8());
+  return new WebServiceWorkerCacheStorageImpl(thread_safe_sender_.get(),
+                                              origin);
+}
+
+//------------------------------------------------------------------------------
+
 WebFileSystem* RendererBlinkPlatformImpl::fileSystem() {
   return WebFileSystemImpl::ThreadSpecificInstance(default_task_runner_);
 }
@@ -419,7 +431,7 @@ RendererBlinkPlatformImpl::MimeRegistry::supportsMediaMIMEType(
     std::vector<std::string> strict_codecs;
     net::ParseCodecString(ToASCIIOrEmpty(codecs), &strict_codecs, true);
 
-    if (!media::IsSupportedKeySystemWithMediaMimeType(
+    if (!media::PrefixedIsSupportedKeySystemWithMediaMimeType(
             mime_type_ascii, strict_codecs, key_system_ascii)) {
       return IsNotSupported;
     }
@@ -456,30 +468,6 @@ bool RendererBlinkPlatformImpl::MimeRegistry::supportsMediaSourceMIMEType(
     return false;
   return media::StreamParserFactory::IsTypeSupported(
       mime_type_ascii, parsed_codec_ids);
-}
-
-bool RendererBlinkPlatformImpl::MimeRegistry::supportsEncryptedMediaMIMEType(
-    const WebString& key_system,
-    const WebString& mime_type,
-    const WebString& codecs) {
-  // Chromium only supports ASCII parameters.
-  if (!base::IsStringASCII(key_system) || !base::IsStringASCII(mime_type) ||
-      !base::IsStringASCII(codecs)) {
-    return false;
-  }
-
-  if (key_system.isEmpty())
-    return false;
-
-  const std::string mime_type_ascii = base::UTF16ToASCII(mime_type);
-
-  std::vector<std::string> codec_vector;
-  bool strip_suffix = !net::IsStrictMediaMimeType(mime_type_ascii);
-  net::ParseCodecString(base::UTF16ToASCII(codecs), &codec_vector,
-                        strip_suffix);
-
-  return media::IsSupportedKeySystemWithMediaMimeType(
-      mime_type_ascii, codec_vector, base::UTF16ToASCII(key_system));
 }
 
 WebString RendererBlinkPlatformImpl::MimeRegistry::mimeTypeForExtension(
@@ -538,16 +526,7 @@ bool RendererBlinkPlatformImpl::FileUtilities::SendSyncMessageFromAnyThread(
 
 //------------------------------------------------------------------------------
 
-#if defined(OS_WIN)
-
-bool RendererBlinkPlatformImpl::SandboxSupport::ensureFontLoaded(HFONT font) {
-  LOGFONT logfont;
-  GetObject(font, sizeof(LOGFONT), &logfont);
-  RenderThread::Get()->PreCacheFont(logfont);
-  return true;
-}
-
-#elif defined(OS_MACOSX)
+#if defined(OS_MACOSX)
 
 bool RendererBlinkPlatformImpl::SandboxSupport::loadFont(NSFont* src_font,
                                                          CGFontRef* out,
@@ -578,13 +557,7 @@ bool RendererBlinkPlatformImpl::SandboxSupport::loadFont(NSFont* src_font,
   return FontLoader::CGFontRefFromBuffer(font_data, font_data_size, out);
 }
 
-#elif defined(OS_ANDROID)
-
-// WebKit doesn't use WebSandboxSupport on android so we don't need to
-// implement anything here. This is cleaner to support than excluding the
-// whole class for android.
-
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) && !defined(OS_ANDROID)
 
 void RendererBlinkPlatformImpl::SandboxSupport::getFallbackFontForCharacter(
     blink::WebUChar32 character,
@@ -980,11 +953,27 @@ RendererBlinkPlatformImpl::createOffscreenGraphicsContext3D(
 
   if (gpu_channel_host.get() && gl_info) {
     const gpu::GPUInfo& gpu_info = gpu_channel_host->gpu_info();
-    gl_info->vendorInfo.assign(blink::WebString::fromUTF8(gpu_info.gl_vendor));
-    gl_info->rendererInfo.assign(
-        blink::WebString::fromUTF8(gpu_info.gl_renderer));
-    gl_info->driverVersion.assign(
-        blink::WebString::fromUTF8(gpu_info.gl_version));
+    switch (gpu_info.context_info_state) {
+      case gpu::kCollectInfoSuccess:
+      case gpu::kCollectInfoNonFatalFailure:
+        gl_info->vendorInfo.assign(
+            blink::WebString::fromUTF8(gpu_info.gl_vendor));
+        gl_info->rendererInfo.assign(
+            blink::WebString::fromUTF8(gpu_info.gl_renderer));
+        gl_info->driverVersion.assign(
+            blink::WebString::fromUTF8(gpu_info.driver_version));
+        gl_info->vendorId = gpu_info.gpu.vendor_id;
+        gl_info->deviceId = gpu_info.gpu.device_id;
+        break;
+      case gpu::kCollectInfoFatalFailure:
+      case gpu::kCollectInfoNone:
+        gl_info->contextInfoCollectionFailure.assign(blink::WebString::fromUTF8(
+            "GPUInfoCollectionFailure: GPU initialization Failed. GPU "
+            "Info not Collected."));
+        break;
+      default:
+        NOTREACHED();
+    };
   }
 
   WebGraphicsContext3DCommandBufferImpl::SharedMemoryLimits limits;
@@ -1009,7 +998,7 @@ RendererBlinkPlatformImpl::createOffscreenGraphicsContext3D(
 
 blink::WebGraphicsContext3DProvider*
 RendererBlinkPlatformImpl::createSharedOffscreenGraphicsContext3DProvider() {
-  scoped_refptr<webkit::gpu::ContextProviderWebContext> provider =
+  scoped_refptr<cc_blink::ContextProviderWebContext> provider =
       RenderThreadImpl::current()->SharedMainThreadContextProvider();
   if (!provider.get())
     return NULL;

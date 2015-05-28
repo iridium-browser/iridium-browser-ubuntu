@@ -12,12 +12,17 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
+#include "net/base/elements_upload_data_stream.h"
 #include "net/base/network_change_notifier.h"
+#include "net/base/upload_bytes_element_reader.h"
+#include "net/base/upload_element_reader.h"
+#include "net/base/upload_file_element_reader.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_response_headers.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
@@ -45,12 +50,46 @@ const base::FilePath::CharType kDocRoot[] =
     FILE_PATH_LITERAL("net/data/url_fetcher_impl_unittest");
 const char kTestServerFilePrefix[] = "files/";
 
+// Request body for streams created by CreateUploadStream.
+const char kCreateUploadStreamBody[] = "rosebud";
+
+base::FilePath GetUploadFileTestPath() {
+  base::FilePath path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &path);
+  return path.Append(
+      FILE_PATH_LITERAL("net/data/url_request_unittest/BullRunSpeech.txt"));
+}
+
+// Simple URLRequestDelegate that waits for the specified fetcher to complete.
+// Can only be used once.
+class WaitingURLFetcherDelegate : public URLFetcherDelegate {
+ public:
+  WaitingURLFetcherDelegate() : fetcher_(nullptr) {}
+
+  void StartFetcherAndWait(URLFetcher* fetcher) {
+    EXPECT_FALSE(fetcher_);
+    fetcher_ = fetcher;
+    fetcher_->Start();
+    run_loop_.Run();
+    fetcher_ = nullptr;
+  }
+
+  void OnURLFetchComplete(const URLFetcher* source) override {
+    EXPECT_EQ(fetcher_, source);
+    run_loop_.Quit();
+  }
+
+ private:
+  URLFetcher* fetcher_;
+  base::RunLoop run_loop_;
+};
+
 class ThrottlingTestURLRequestContext : public TestURLRequestContext {
  public:
   ThrottlingTestURLRequestContext() : TestURLRequestContext(true) {
     set_throttler_manager(&throttler_manager_);
     Init();
-    DCHECK(throttler_manager() != NULL);
+    DCHECK(throttler_manager() != nullptr);
   }
 
  private:
@@ -81,7 +120,11 @@ class ThrottlingTestURLRequestContextGetter
 class URLFetcherTest : public testing::Test,
                        public URLFetcherDelegate {
  public:
-  URLFetcherTest() : fetcher_(NULL) {}
+  URLFetcherTest()
+      : io_message_loop_proxy_(base::MessageLoopProxy::current()),
+        num_upload_streams_created_(0),
+        fetcher_(nullptr),
+        expected_status_code_(200) {}
 
   static int GetNumFetcherCores() {
     return URLFetcherImpl::GetNumFetcherCores();
@@ -107,13 +150,30 @@ class URLFetcherTest : public testing::Test,
     return context_.get();
   }
 
+  // Callback passed to URLFetcher to create upload stream by some tests.
+  scoped_ptr<UploadDataStream> CreateUploadStream() {
+    ++num_upload_streams_created_;
+    std::vector<char> buffer(
+        kCreateUploadStreamBody,
+        kCreateUploadStreamBody + strlen(kCreateUploadStreamBody));
+    return ElementsUploadDataStream::CreateWithReader(
+        scoped_ptr<UploadElementReader>(
+            new UploadOwnedBytesElementReader(&buffer)),
+        0);
+  }
+
+  // Number of streams created by CreateUploadStream.
+  size_t num_upload_streams_created() const {
+    return num_upload_streams_created_;
+  }
+
  protected:
   // testing::Test:
   void SetUp() override {
-    testing::Test::SetUp();
+    SetUpServer();
+    ASSERT_TRUE(test_server_->Start());
 
     context_.reset(new ThrottlingTestURLRequestContext());
-    io_message_loop_proxy_ = base::MessageLoopProxy::current();
 
 #if defined(USE_NSS) || defined(OS_IOS)
     crypto::EnsureNSSInit();
@@ -127,14 +187,27 @@ class URLFetcherTest : public testing::Test,
 #endif
   }
 
+  // Initializes |test_server_| without starting it.  Allows subclasses to use
+  // their own server configuration.
+  virtual void SetUpServer() {
+    test_server_.reset(new SpawnedTestServer(SpawnedTestServer::TYPE_HTTP,
+                                             SpawnedTestServer::kLocalhost,
+                                             base::FilePath(kDocRoot)));
+  }
+
   // URLFetcher is designed to run on the main UI thread, but in our tests
   // we assume that the current thread is the IO thread where the URLFetcher
   // dispatches its requests to.  When we wish to simulate being used from
   // a UI thread, we dispatch a worker thread to do so.
   scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
 
+  scoped_ptr<SpawnedTestServer> test_server_;
+
+  size_t num_upload_streams_created_;
+
   URLFetcherImpl* fetcher_;
   scoped_ptr<TestURLRequestContext> context_;
+  int expected_status_code_;
 };
 
 // A test fixture that uses a MockHostResolver, so that name resolutions can
@@ -152,7 +225,6 @@ class URLFetcherMockDnsTest : public URLFetcherTest {
 
  protected:
   GURL test_url_;
-  scoped_ptr<SpawnedTestServer> test_server_;
   MockHostResolver resolver_;
   scoped_ptr<URLFetcher> completed_fetcher_;
 };
@@ -166,7 +238,7 @@ void URLFetcherTest::CreateFetcher(const GURL& url) {
 
 void URLFetcherTest::OnURLFetchComplete(const URLFetcher* source) {
   EXPECT_TRUE(source->GetStatus().is_success());
-  EXPECT_EQ(200, source->GetResponseCode());  // HTTP OK
+  EXPECT_EQ(expected_status_code_, source->GetResponseCode());  // HTTP OK
 
   std::string data;
   EXPECT_TRUE(source->GetResponseAsString(&data));
@@ -196,11 +268,6 @@ void URLFetcherMockDnsTest::SetUp() {
   context_->set_host_resolver(&resolver_);
   context_->Init();
 
-  test_server_.reset(new SpawnedTestServer(SpawnedTestServer::TYPE_HTTP,
-                                           SpawnedTestServer::kLocalhost,
-                                           base::FilePath(kDocRoot)));
-  ASSERT_TRUE(test_server_->Start());
-
   // test_server_.GetURL() returns a URL with 127.0.0.1 (kLocalhost), that is
   // immediately resolved by the MockHostResolver. Use a hostname instead to
   // trigger an async resolve.
@@ -225,49 +292,6 @@ void URLFetcherMockDnsTest::OnURLFetchComplete(const URLFetcher* source) {
 }
 
 namespace {
-
-// Version of URLFetcherTest that does a POST instead
-class URLFetcherPostTest : public URLFetcherTest {
- public:
-  // URLFetcherTest:
-  void CreateFetcher(const GURL& url) override;
-
-  // URLFetcherDelegate:
-  void OnURLFetchComplete(const URLFetcher* source) override;
-};
-
-// Version of URLFetcherTest that does a POST of a file using
-// SetUploadDataStream
-class URLFetcherPostFileTest : public URLFetcherTest {
- public:
-  URLFetcherPostFileTest();
-
-  void SetUploadRange(uint64 range_offset, uint64 range_length) {
-    range_offset_ = range_offset;
-    range_length_ = range_length;
-  }
-
-  // URLFetcherTest:
-  void CreateFetcher(const GURL& url) override;
-
-  // URLFetcherDelegate:
-  void OnURLFetchComplete(const URLFetcher* source) override;
-
- private:
-  base::FilePath path_;
-  uint64 range_offset_;
-  uint64 range_length_;
-};
-
-// Version of URLFetcherTest that does a POST instead with empty upload body
-class URLFetcherEmptyPostTest : public URLFetcherTest {
- public:
-  // URLFetcherTest:
-  void CreateFetcher(const GURL& url) override;
-
-  // URLFetcherDelegate:
-  void OnURLFetchComplete(const URLFetcher* source) override;
-};
 
 // Version of URLFetcherTest that tests download progress reports.
 class URLFetcherDownloadProgressTest : public URLFetcherTest {
@@ -395,6 +419,9 @@ class URLFetcherBadHTTPSTest : public URLFetcherTest {
  public:
   URLFetcherBadHTTPSTest();
 
+  // URLFetcherTest:
+  void SetUpServer() override;
+
   // URLFetcherDelegate:
   void OnURLFetchComplete(const URLFetcher* source) override;
 
@@ -520,77 +547,6 @@ class URLFetcherFileTest : public URLFetcherTest {
   // Expected file error code for the test.  OK when expecting success.
   int expected_file_error_;
 };
-
-void URLFetcherPostTest::CreateFetcher(const GURL& url) {
-  fetcher_ = new URLFetcherImpl(url, URLFetcher::POST, this);
-  fetcher_->SetRequestContext(new ThrottlingTestURLRequestContextGetter(
-      io_message_loop_proxy().get(), request_context()));
-  fetcher_->SetUploadData("application/x-www-form-urlencoded", "bobsyeruncle");
-  fetcher_->Start();
-}
-
-void URLFetcherPostTest::OnURLFetchComplete(const URLFetcher* source) {
-  std::string data;
-  EXPECT_TRUE(source->GetResponseAsString(&data));
-  EXPECT_EQ(std::string("bobsyeruncle"), data);
-  URLFetcherTest::OnURLFetchComplete(source);
-}
-
-URLFetcherPostFileTest::URLFetcherPostFileTest()
-    : range_offset_(0),
-      range_length_(kuint64max) {
-  PathService::Get(base::DIR_SOURCE_ROOT, &path_);
-  path_ = path_.Append(FILE_PATH_LITERAL("net"));
-  path_ = path_.Append(FILE_PATH_LITERAL("data"));
-  path_ = path_.Append(FILE_PATH_LITERAL("url_request_unittest"));
-  path_ = path_.Append(FILE_PATH_LITERAL("BullRunSpeech.txt"));
-}
-
-void URLFetcherPostFileTest::CreateFetcher(const GURL& url) {
-  fetcher_ = new URLFetcherImpl(url, URLFetcher::POST, this);
-  fetcher_->SetRequestContext(new ThrottlingTestURLRequestContextGetter(
-      io_message_loop_proxy().get(), request_context()));
-  fetcher_->SetUploadFilePath("application/x-www-form-urlencoded",
-                              path_,
-                              range_offset_,
-                              range_length_,
-                              base::MessageLoopProxy::current());
-  fetcher_->Start();
-}
-
-void URLFetcherPostFileTest::OnURLFetchComplete(const URLFetcher* source) {
-  std::string expected;
-  ASSERT_TRUE(base::ReadFileToString(path_, &expected));
-  ASSERT_LE(range_offset_, expected.size());
-  uint64 expected_size =
-      std::min(range_length_, expected.size() - range_offset_);
-
-  std::string data;
-  EXPECT_TRUE(source->GetResponseAsString(&data));
-  EXPECT_EQ(expected.substr(range_offset_, expected_size), data);
-  URLFetcherTest::OnURLFetchComplete(source);
-}
-
-void URLFetcherEmptyPostTest::CreateFetcher(const GURL& url) {
-  fetcher_ = new URLFetcherImpl(url, URLFetcher::POST, this);
-  fetcher_->SetRequestContext(new TestURLRequestContextGetter(
-      io_message_loop_proxy()));
-  fetcher_->SetUploadData("text/plain", std::string());
-  fetcher_->Start();
-}
-
-void URLFetcherEmptyPostTest::OnURLFetchComplete(const URLFetcher* source) {
-  EXPECT_TRUE(source->GetStatus().is_success());
-  EXPECT_EQ(200, source->GetResponseCode());  // HTTP OK
-
-  std::string data;
-  EXPECT_TRUE(source->GetResponseAsString(&data));
-  EXPECT_TRUE(data.empty());
-
-  CleanupAfterFetchComplete();
-  // Do not call the super class method URLFetcherTest::OnURLFetchComplete,
-  // since it expects a non-empty response.
-}
 
 void URLFetcherDownloadProgressTest::CreateFetcher(const GURL& url) {
   fetcher_ = new URLFetcherImpl(url, URLFetcher::GET, this);
@@ -787,6 +743,13 @@ URLFetcherBadHTTPSTest::URLFetcherBadHTTPSTest() {
   cert_dir_ = cert_dir_.AppendASCII("certificates");
 }
 
+void URLFetcherBadHTTPSTest::SetUpServer() {
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_EXPIRED);
+  test_server_.reset(new SpawnedTestServer(
+      SpawnedTestServer::TYPE_HTTPS, ssl_options, base::FilePath(kDocRoot)));
+}
+
 // The "server certificate expired" error should result in automatic
 // cancellation of the request by
 // URLRequest::Delegate::OnSSLCertificateError.
@@ -888,25 +851,15 @@ void URLFetcherFileTest::OnURLFetchComplete(const URLFetcher* source) {
 }
 
 TEST_F(URLFetcherTest, SameThreadsTest) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   // Create the fetcher on the main thread.  Since IO will happen on the main
   // thread, this will test URLFetcher's ability to do everything on one
   // thread.
-  CreateFetcher(test_server.GetURL("defaultresponse"));
+  CreateFetcher(test_server_->GetURL("defaultresponse"));
 
   base::MessageLoop::current()->Run();
 }
 
 TEST_F(URLFetcherTest, DifferentThreadsTest) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   // Create a separate thread that will create the URLFetcher.  The current
   // (main) thread will do the IO, and when the fetch is complete it will
   // terminate the main thread's message loop; then the other thread's
@@ -916,9 +869,8 @@ TEST_F(URLFetcherTest, DifferentThreadsTest) {
   ASSERT_TRUE(t.Start());
   t.message_loop()->PostTask(
       FROM_HERE,
-      base::Bind(&URLFetcherTest::CreateFetcher,
-                 base::Unretained(this),
-                 test_server.GetURL("defaultresponse")));
+      base::Bind(&URLFetcherTest::CreateFetcher, base::Unretained(this),
+                 test_server_->GetURL("defaultresponse")));
 
   base::MessageLoop::current()->Run();
 }
@@ -931,13 +883,9 @@ void CancelAllOnIO() {
 
 // Tests to make sure CancelAll() will successfully cancel existing URLFetchers.
 TEST_F(URLFetcherTest, CancelAll) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
   EXPECT_EQ(0, GetNumFetcherCores());
 
-  CreateFetcher(test_server.GetURL("defaultresponse"));
+  CreateFetcher(test_server_->GetURL("defaultresponse"));
   io_message_loop_proxy()->PostTaskAndReply(
       FROM_HERE, base::Bind(&CancelAllOnIO), base::MessageLoop::QuitClosure());
   base::MessageLoop::current()->Run();
@@ -1053,64 +1001,133 @@ TEST_F(URLFetcherMockDnsTest, RetryOnNetworkChangedAndSucceed) {
   EXPECT_EQ(200, completed_fetcher_->GetResponseCode());
 }
 
-TEST_F(URLFetcherPostTest, Basic) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
+TEST_F(URLFetcherTest, PostString) {
+  const char kUploadData[] = "bobsyeruncle";
 
-  CreateFetcher(test_server.GetURL("echo"));
-  base::MessageLoop::current()->Run();
+  WaitingURLFetcherDelegate delegate;
+  URLFetcherImpl fetcher(test_server_->GetURL("echo"), URLFetcher::POST,
+                         &delegate);
+  fetcher.SetRequestContext(new TrivialURLRequestContextGetter(
+      request_context(), base::MessageLoopProxy::current()));
+  fetcher.SetUploadData("application/x-www-form-urlencoded", kUploadData);
+  delegate.StartFetcherAndWait(&fetcher);
+
+  EXPECT_TRUE(fetcher.GetStatus().is_success());
+  EXPECT_EQ(200, fetcher.GetResponseCode());
+  std::string data;
+  EXPECT_TRUE(fetcher.GetResponseAsString(&data));
+  EXPECT_EQ(kUploadData, data);
 }
 
-TEST_F(URLFetcherPostFileTest, Basic) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
+TEST_F(URLFetcherTest, PostEmptyString) {
+  const char kUploadData[] = "";
 
-  CreateFetcher(test_server.GetURL("echo"));
-  base::MessageLoop::current()->Run();
+  WaitingURLFetcherDelegate delegate;
+  URLFetcherImpl fetcher(test_server_->GetURL("echo"), URLFetcher::POST,
+                         &delegate);
+  fetcher.SetRequestContext(new TrivialURLRequestContextGetter(
+      request_context(), base::MessageLoopProxy::current()));
+  fetcher.SetUploadData("application/x-www-form-urlencoded", kUploadData);
+  delegate.StartFetcherAndWait(&fetcher);
+
+  EXPECT_TRUE(fetcher.GetStatus().is_success());
+  EXPECT_EQ(200, fetcher.GetResponseCode());
+  std::string data;
+  EXPECT_TRUE(fetcher.GetResponseAsString(&data));
+  EXPECT_EQ(kUploadData, data);
 }
 
-TEST_F(URLFetcherPostFileTest, Range) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
+TEST_F(URLFetcherTest, PostEntireFile) {
+  base::FilePath upload_path = GetUploadFileTestPath();
 
-  SetUploadRange(30, 100);
+  WaitingURLFetcherDelegate delegate;
+  URLFetcherImpl fetcher(test_server_->GetURL("echo"), URLFetcher::POST, this);
+  fetcher.SetRequestContext(new TrivialURLRequestContextGetter(
+      request_context(), base::MessageLoopProxy::current()));
+  fetcher.SetUploadFilePath("application/x-www-form-urlencoded", upload_path, 0,
+                            kuint64max, base::MessageLoopProxy::current());
+  delegate.StartFetcherAndWait(&fetcher);
 
-  CreateFetcher(test_server.GetURL("echo"));
-  base::MessageLoop::current()->Run();
+  EXPECT_TRUE(fetcher.GetStatus().is_success());
+  EXPECT_EQ(200, fetcher.GetResponseCode());
+
+  std::string expected;
+  ASSERT_TRUE(base::ReadFileToString(upload_path, &expected));
+  std::string data;
+  EXPECT_TRUE(fetcher.GetResponseAsString(&data));
+  EXPECT_EQ(expected, data);
 }
 
-TEST_F(URLFetcherEmptyPostTest, Basic) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
+TEST_F(URLFetcherTest, PostFileRange) {
+  const size_t kRangeStart = 30;
+  const size_t kRangeLength = 100;
+  base::FilePath upload_path = GetUploadFileTestPath();
 
-  CreateFetcher(test_server.GetURL("echo"));
-  base::MessageLoop::current()->Run();
+  WaitingURLFetcherDelegate delegate;
+  URLFetcherImpl fetcher(test_server_->GetURL("echo"), URLFetcher::POST, this);
+  fetcher.SetRequestContext(new TrivialURLRequestContextGetter(
+      request_context(), base::MessageLoopProxy::current()));
+  fetcher.SetUploadFilePath("application/x-www-form-urlencoded", upload_path,
+                            kRangeStart, kRangeLength,
+                            base::MessageLoopProxy::current());
+  delegate.StartFetcherAndWait(&fetcher);
+
+  EXPECT_TRUE(fetcher.GetStatus().is_success());
+  EXPECT_EQ(200, fetcher.GetResponseCode());
+
+  std::string expected;
+  ASSERT_TRUE(base::ReadFileToString(upload_path, &expected));
+  std::string data;
+  EXPECT_TRUE(fetcher.GetResponseAsString(&data));
+  EXPECT_EQ(expected.substr(kRangeStart, kRangeLength), data);
+}
+
+TEST_F(URLFetcherTest, PostWithUploadStreamFactory) {
+  WaitingURLFetcherDelegate delegate;
+  URLFetcherImpl fetcher(test_server_->GetURL("echo"), URLFetcher::POST,
+                         &delegate);
+  fetcher.SetRequestContext(new TrivialURLRequestContextGetter(
+      request_context(), base::MessageLoopProxy::current()));
+  fetcher.SetUploadStreamFactory(
+      "text/plain",
+      base::Bind(&URLFetcherTest::CreateUploadStream, base::Unretained(this)));
+  delegate.StartFetcherAndWait(&fetcher);
+
+  EXPECT_TRUE(fetcher.GetStatus().is_success());
+  EXPECT_EQ(200, fetcher.GetResponseCode());
+  std::string data;
+  EXPECT_TRUE(fetcher.GetResponseAsString(&data));
+  EXPECT_EQ(kCreateUploadStreamBody, data);
+  EXPECT_EQ(1u, num_upload_streams_created());
+}
+
+TEST_F(URLFetcherTest, PostWithUploadStreamFactoryAndRetries) {
+  WaitingURLFetcherDelegate delegate;
+  URLFetcherImpl fetcher(test_server_->GetURL("echo?status=500"),
+                         URLFetcher::POST, &delegate);
+  fetcher.SetRequestContext(new TrivialURLRequestContextGetter(
+      request_context(), base::MessageLoopProxy::current()));
+  fetcher.SetAutomaticallyRetryOn5xx(true);
+  fetcher.SetMaxRetriesOn5xx(1);
+  fetcher.SetUploadStreamFactory(
+      "text/plain",
+      base::Bind(&URLFetcherTest::CreateUploadStream, base::Unretained(this)));
+  delegate.StartFetcherAndWait(&fetcher);
+
+  EXPECT_TRUE(fetcher.GetStatus().is_success());
+  EXPECT_EQ(500, fetcher.GetResponseCode());
+  std::string data;
+  EXPECT_TRUE(fetcher.GetResponseAsString(&data));
+  EXPECT_EQ(kCreateUploadStreamBody, data);
+  EXPECT_EQ(2u, num_upload_streams_created());
 }
 
 TEST_F(URLFetcherUploadProgressTest, Basic) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
-  CreateFetcher(test_server.GetURL("echo"));
+  CreateFetcher(test_server_->GetURL("echo"));
   base::MessageLoop::current()->Run();
 }
 
 TEST_F(URLFetcherDownloadProgressTest, Basic) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   // Get a file large enough to require more than one read into
   // URLFetcher::Core's IOBuffer.
   static const char kFileToFetch[] = "animate1.gif";
@@ -1120,72 +1137,45 @@ TEST_F(URLFetcherDownloadProgressTest, Basic) {
 
   expected_total_ = kFileSize;
 
-  CreateFetcher(test_server.GetURL(
-      std::string(kTestServerFilePrefix) + kFileToFetch));
+  CreateFetcher(
+      test_server_->GetURL(std::string(kTestServerFilePrefix) + kFileToFetch));
 
   base::MessageLoop::current()->Run();
 }
 
 TEST_F(URLFetcherDownloadProgressCancelTest, CancelWhileProgressReport) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   // Get a file large enough to require more than one read into
   // URLFetcher::Core's IOBuffer.
   static const char kFileToFetch[] = "animate1.gif";
-  CreateFetcher(test_server.GetURL(
-      std::string(kTestServerFilePrefix) + kFileToFetch));
+  CreateFetcher(
+      test_server_->GetURL(std::string(kTestServerFilePrefix) + kFileToFetch));
 
   base::MessageLoop::current()->Run();
 }
 
 TEST_F(URLFetcherHeadersTest, Headers) {
-  SpawnedTestServer test_server(
-      SpawnedTestServer::TYPE_HTTP,
-      SpawnedTestServer::kLocalhost,
-      base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
-  ASSERT_TRUE(test_server.Start());
-
-  CreateFetcher(test_server.GetURL("files/with-headers.html"));
+  CreateFetcher(test_server_->GetURL("set-header?cache-control: private"));
   base::MessageLoop::current()->Run();
   // The actual tests are in the URLFetcherHeadersTest fixture.
 }
 
 TEST_F(URLFetcherSocketAddressTest, SocketAddress) {
-  SpawnedTestServer test_server(
-      SpawnedTestServer::TYPE_HTTP,
-      SpawnedTestServer::kLocalhost,
-      base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
-  ASSERT_TRUE(test_server.Start());
-  expected_port_ = test_server.host_port_pair().port();
+  expected_port_ = test_server_->host_port_pair().port();
 
-  // Reusing "with-headers.html" but doesn't really matter.
-  CreateFetcher(test_server.GetURL("files/with-headers.html"));
+  CreateFetcher(test_server_->GetURL("defaultresponse"));
   base::MessageLoop::current()->Run();
   // The actual tests are in the URLFetcherSocketAddressTest fixture.
 }
 
 TEST_F(URLFetcherStopOnRedirectTest, StopOnRedirect) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   CreateFetcher(
-      test_server.GetURL(std::string("server-redirect?") + kRedirectTarget));
+      test_server_->GetURL(std::string("server-redirect?") + kRedirectTarget));
   base::MessageLoop::current()->Run();
   EXPECT_TRUE(callback_called_);
 }
 
 TEST_F(URLFetcherProtectTest, Overload) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
-  GURL url(test_server.GetURL("defaultresponse"));
+  GURL url(test_server_->GetURL("defaultresponse"));
 
   // Registers an entry for test url. It only allows 3 requests to be sent
   // in 200 milliseconds.
@@ -1207,12 +1197,7 @@ TEST_F(URLFetcherProtectTest, Overload) {
 }
 
 TEST_F(URLFetcherProtectTest, ServerUnavailable) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
-  GURL url(test_server.GetURL("files/server-unavailable.html"));
+  GURL url(test_server_->GetURL("files/server-unavailable.html"));
 
   // Registers an entry for test url. The backoff time is calculated by:
   //     new_backoff = 2.0 * old_backoff + 0
@@ -1236,12 +1221,7 @@ TEST_F(URLFetcherProtectTest, ServerUnavailable) {
 }
 
 TEST_F(URLFetcherProtectTestPassedThrough, ServerUnavailablePropagateResponse) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
-  GURL url(test_server.GetURL("files/server-unavailable.html"));
+  GURL url(test_server_->GetURL("files/server-unavailable.html"));
 
   // Registers an entry for test url. The backoff time is calculated by:
   //     new_backoff = 2.0 * old_backoff + 0
@@ -1267,24 +1247,12 @@ TEST_F(URLFetcherProtectTestPassedThrough, ServerUnavailablePropagateResponse) {
 }
 
 TEST_F(URLFetcherBadHTTPSTest, BadHTTPSTest) {
-  SpawnedTestServer::SSLOptions ssl_options(
-      SpawnedTestServer::SSLOptions::CERT_EXPIRED);
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTPS,
-                                ssl_options,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
-  CreateFetcher(test_server.GetURL("defaultresponse"));
+  CreateFetcher(test_server_->GetURL("defaultresponse"));
   base::MessageLoop::current()->Run();
 }
 
 TEST_F(URLFetcherCancelTest, ReleasesContext) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
-  GURL url(test_server.GetURL("files/server-unavailable.html"));
+  GURL url(test_server_->GetURL("files/server-unavailable.html"));
 
   // Create a separate thread that will create the URLFetcher.  The current
   // (main) thread will do the IO, and when the fetch is complete it will
@@ -1302,12 +1270,7 @@ TEST_F(URLFetcherCancelTest, ReleasesContext) {
 }
 
 TEST_F(URLFetcherCancelTest, CancelWhileDelayedStartTaskPending) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
-  GURL url(test_server.GetURL("files/server-unavailable.html"));
+  GURL url(test_server_->GetURL("files/server-unavailable.html"));
 
   // Register an entry for test url.
   // Using a sliding window of 4 seconds, and max of 1 request, under a fast
@@ -1340,33 +1303,23 @@ TEST_F(URLFetcherCancelTest, CancelWhileDelayedStartTaskPending) {
 }
 
 TEST_F(URLFetcherMultipleAttemptTest, SameData) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   // Create the fetcher on the main thread.  Since IO will happen on the main
   // thread, this will test URLFetcher's ability to do everything on one
   // thread.
-  CreateFetcher(test_server.GetURL("defaultresponse"));
+  CreateFetcher(test_server_->GetURL("defaultresponse"));
 
   base::MessageLoop::current()->Run();
 }
 
 TEST_F(URLFetcherFileTest, SmallGet) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
   // Get a small file.
   static const char kFileToFetch[] = "simple.html";
-  expected_file_ = test_server.GetDocumentRoot().AppendASCII(kFileToFetch);
+  expected_file_ = test_server_->GetDocumentRoot().AppendASCII(kFileToFetch);
   CreateFetcherForFile(
-      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
+      test_server_->GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
       temp_dir.path().AppendASCII(kFileToFetch));
 
   base::MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
@@ -1376,20 +1329,15 @@ TEST_F(URLFetcherFileTest, SmallGet) {
 }
 
 TEST_F(URLFetcherFileTest, LargeGet) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
   // Get a file large enough to require more than one read into
   // URLFetcher::Core's IOBuffer.
   static const char kFileToFetch[] = "animate1.gif";
-  expected_file_ = test_server.GetDocumentRoot().AppendASCII(kFileToFetch);
+  expected_file_ = test_server_->GetDocumentRoot().AppendASCII(kFileToFetch);
   CreateFetcherForFile(
-      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
+      test_server_->GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
       temp_dir.path().AppendASCII(kFileToFetch));
 
   base::MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
@@ -1401,19 +1349,14 @@ TEST_F(URLFetcherFileTest, SavedOutputFileOwnerhisp) {
   const bool kTake[] = {false, true};
   for (size_t i = 0; i < arraysize(kTake); ++i) {
     take_ownership_of_file_ = kTake[i];
-    SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                  SpawnedTestServer::kLocalhost,
-                                  base::FilePath(kDocRoot));
-    ASSERT_TRUE(test_server.Start());
-
     base::ScopedTempDir temp_dir;
     ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
     // Get a small file.
     static const char kFileToFetch[] = "simple.html";
-    expected_file_ = test_server.GetDocumentRoot().AppendASCII(kFileToFetch);
+    expected_file_ = test_server_->GetDocumentRoot().AppendASCII(kFileToFetch);
     CreateFetcherForFile(
-        test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
+        test_server_->GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
         temp_dir.path().AppendASCII(kFileToFetch));
 
     base::MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
@@ -1425,11 +1368,6 @@ TEST_F(URLFetcherFileTest, SavedOutputFileOwnerhisp) {
 }
 
 TEST_F(URLFetcherFileTest, OverwriteExistingFile) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
@@ -1440,23 +1378,18 @@ TEST_F(URLFetcherFileTest, OverwriteExistingFile) {
   ASSERT_EQ(static_cast<int>(data.size()),
             base::WriteFile(file_path_, data.data(), data.size()));
   ASSERT_TRUE(base::PathExists(file_path_));
-  expected_file_ = test_server.GetDocumentRoot().AppendASCII(kFileToFetch);
+  expected_file_ = test_server_->GetDocumentRoot().AppendASCII(kFileToFetch);
   ASSERT_FALSE(base::ContentsEqual(file_path_, expected_file_));
 
   // Get a small file.
   CreateFetcherForFile(
-      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
+      test_server_->GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
       file_path_);
 
   base::MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
 }
 
 TEST_F(URLFetcherFileTest, TryToOverwriteDirectory) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
@@ -1468,9 +1401,9 @@ TEST_F(URLFetcherFileTest, TryToOverwriteDirectory) {
 
   // Get a small file.
   expected_file_error_ = ERR_ACCESS_DENIED;
-  expected_file_ = test_server.GetDocumentRoot().AppendASCII(kFileToFetch);
+  expected_file_ = test_server_->GetDocumentRoot().AppendASCII(kFileToFetch);
   CreateFetcherForFile(
-      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
+      test_server_->GetURL(std::string(kTestServerFilePrefix) + kFileToFetch),
       file_path_);
 
   base::MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
@@ -1479,16 +1412,11 @@ TEST_F(URLFetcherFileTest, TryToOverwriteDirectory) {
 }
 
 TEST_F(URLFetcherFileTest, SmallGetToTempFile) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   // Get a small file.
   static const char kFileToFetch[] = "simple.html";
-  expected_file_ = test_server.GetDocumentRoot().AppendASCII(kFileToFetch);
+  expected_file_ = test_server_->GetDocumentRoot().AppendASCII(kFileToFetch);
   CreateFetcherForTempFile(
-      test_server.GetURL(std::string(kTestServerFilePrefix) + kFileToFetch));
+      test_server_->GetURL(std::string(kTestServerFilePrefix) + kFileToFetch));
 
   base::MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
 
@@ -1497,17 +1425,12 @@ TEST_F(URLFetcherFileTest, SmallGetToTempFile) {
 }
 
 TEST_F(URLFetcherFileTest, LargeGetToTempFile) {
-  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                SpawnedTestServer::kLocalhost,
-                                base::FilePath(kDocRoot));
-  ASSERT_TRUE(test_server.Start());
-
   // Get a file large enough to require more than one read into
   // URLFetcher::Core's IOBuffer.
   static const char kFileToFetch[] = "animate1.gif";
-  expected_file_ = test_server.GetDocumentRoot().AppendASCII(kFileToFetch);
-  CreateFetcherForTempFile(test_server.GetURL(
-      std::string(kTestServerFilePrefix) + kFileToFetch));
+  expected_file_ = test_server_->GetDocumentRoot().AppendASCII(kFileToFetch);
+  CreateFetcherForTempFile(
+      test_server_->GetURL(std::string(kTestServerFilePrefix) + kFileToFetch));
 
   base::MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().
 }
@@ -1519,15 +1442,10 @@ TEST_F(URLFetcherFileTest, SavedOutputTempFileOwnerhisp) {
   for (size_t i = 0; i < arraysize(kTake); ++i) {
     take_ownership_of_file_ = kTake[i];
 
-    SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
-                                  SpawnedTestServer::kLocalhost,
-                                  base::FilePath(kDocRoot));
-    ASSERT_TRUE(test_server.Start());
-
     // Get a small file.
     static const char kFileToFetch[] = "simple.html";
-    expected_file_ = test_server.GetDocumentRoot().AppendASCII(kFileToFetch);
-    CreateFetcherForTempFile(test_server.GetURL(
+    expected_file_ = test_server_->GetDocumentRoot().AppendASCII(kFileToFetch);
+    CreateFetcherForTempFile(test_server_->GetURL(
         std::string(kTestServerFilePrefix) + kFileToFetch));
 
     base::MessageLoop::current()->Run();  // OnURLFetchComplete() will Quit().

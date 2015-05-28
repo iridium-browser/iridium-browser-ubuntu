@@ -109,7 +109,7 @@ public:
     void setDocumentOrderIndex(unsigned index) { m_documentOrderIndex = index; }
 
     virtual void resetAnimatedType() = 0;
-    virtual void clearAnimatedType(SVGElement* targetElement) = 0;
+    virtual void clearAnimatedType() = 0;
     virtual void applyResultsToTarget() = 0;
 
     void connectSyncBaseConditions();
@@ -120,7 +120,7 @@ public:
 
     virtual bool isSVGDiscardElement() const { return false; }
 
-    void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     void addBeginTime(SMILTime eventTime, SMILTime endTime, SMILTimeWithOrigin::Origin = SMILTimeWithOrigin::ParserOrigin);
@@ -132,6 +132,9 @@ protected:
     virtual void setTargetElement(SVGElement*);
     virtual void setAttributeName(const QualifiedName&);
 
+    void schedule();
+    void unscheduleIfScheduled();
+
 private:
     virtual void buildPendingResource() override;
     void clearResourceAndEventBaseReferences();
@@ -141,7 +144,7 @@ private:
     void endedActiveInterval();
     virtual void updateAnimation(float percent, unsigned repeat, SVGSMILElement* resultElement) = 0;
 
-    virtual bool rendererIsNeeded(const RenderStyle&) override { return false; }
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override { return false; }
 
     enum BeginOrEnd {
         Begin,
@@ -186,7 +189,7 @@ private:
             return adoptPtrWillBeNoop(new Condition(type, beginOrEnd, baseID, name, offset, repeat));
         }
         ~Condition();
-        void trace(Visitor*);
+        DECLARE_TRACE();
 
         Type type() const { return m_type; }
         BeginOrEnd beginOrEnd() const { return m_beginOrEnd; }
@@ -243,6 +246,7 @@ private:
     bool m_hasEndEventConditions;
 
     bool m_isWaitingForFirstInterval;
+    bool m_isScheduled;
 
     using TimeDependentSet = WillBeHeapHashSet<RawPtrWillBeMember<SVGSMILElement>>;
     TimeDependentSet m_syncBaseDependents;

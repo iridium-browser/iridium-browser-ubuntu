@@ -125,6 +125,14 @@ const char* JobTypeToRequestType(DeviceManagementRequestJob::JobType type) {
       return dm_protocol::kValueRequestUploadCertificate;
     case DeviceManagementRequestJob::TYPE_DEVICE_STATE_RETRIEVAL:
       return dm_protocol::kValueRequestDeviceStateRetrieval;
+    case DeviceManagementRequestJob::TYPE_UPLOAD_STATUS:
+      return dm_protocol::kValueRequestUploadStatus;
+    case DeviceManagementRequestJob::TYPE_REMOTE_COMMANDS:
+      return dm_protocol::kValueRequestRemoteCommands;
+    case DeviceManagementRequestJob::TYPE_ATTRIBUTE_UPDATE_PERMISSION:
+      return dm_protocol::kValueRequestDeviceAttributeUpdatePermission;
+    case DeviceManagementRequestJob::TYPE_ATTRIBUTE_UPDATE:
+      return dm_protocol::kValueRequestDeviceAttributeUpdate;
   }
   NOTREACHED() << "Invalid job type " << type;
   return "";

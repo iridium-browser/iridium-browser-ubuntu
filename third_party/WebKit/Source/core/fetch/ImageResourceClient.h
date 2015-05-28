@@ -23,6 +23,7 @@
 #ifndef ImageResourceClient_h
 #define ImageResourceClient_h
 
+#include "core/CoreExport.h"
 #include "core/fetch/ResourceClient.h"
 #include "platform/graphics/ImageAnimationPolicy.h"
 
@@ -31,7 +32,7 @@ namespace blink {
 class ImageResource;
 class IntRect;
 
-class ImageResourceClient : public ResourceClient {
+class CORE_EXPORT ImageResourceClient : public ResourceClient {
 public:
     virtual ~ImageResourceClient() { }
     static ResourceClientType expectedType() { return ImageType; }
@@ -43,7 +44,7 @@ public:
 
     // Called to find out if this client wants to actually display the image. Used to tell when we
     // can halt animation. Content nodes that hold image refs for example would not render the image,
-    // but RenderImages would (assuming they have visibility: visible and their render tree isn't hidden
+    // but LayoutImages would (assuming they have visibility: visible and their render tree isn't hidden
     // e.g., in the b/f cache or in a background tab).
     virtual bool willRenderImage(ImageResource*) { return false; }
 

@@ -137,7 +137,7 @@ public:
         : fIndex(0), fStrings(strings)
     { }
 
-    virtual bool next(SkTypeface::LocalizedString* localizedString) SK_OVERRIDE {
+    bool next(SkTypeface::LocalizedString* localizedString) override {
         if (fIndex >= fStrings->GetCount()) {
             return false;
         }
@@ -186,7 +186,7 @@ int DWriteFontTypeface::onGetTableTags(SkFontTableTag tags[]) const {
     }
 
     int ttcIndex;
-    SkAutoTUnref<SkStream> stream(this->openStream(&ttcIndex));
+    SkAutoTDelete<SkStream> stream(this->openStream(&ttcIndex));
     return stream.get() ? SkFontStream::GetTableTags(stream, ttcIndex, tags) : 0;
 }
 
@@ -209,7 +209,7 @@ size_t DWriteFontTypeface::onGetTableData(SkFontTableTag tag, size_t offset,
     return size;
 }
 
-SkStream* DWriteFontTypeface::onOpenStream(int* ttcIndex) const {
+SkStreamAsset* DWriteFontTypeface::onOpenStream(int* ttcIndex) const {
     *ttcIndex = fDWriteFontFace->GetIndex();
 
     UINT32 numFiles;
@@ -243,9 +243,7 @@ SkScalerContext* DWriteFontTypeface::onCreateScalerContext(const SkDescriptor* d
 }
 
 void DWriteFontTypeface::onFilterRec(SkScalerContext::Rec* rec) const {
-    if (rec->fFlags & SkScalerContext::kLCD_BGROrder_Flag ||
-        rec->fFlags & SkScalerContext::kLCD_Vertical_Flag)
-    {
+    if (rec->fFlags & SkScalerContext::kLCD_Vertical_Flag) {
         rec->fMaskFormat = SkMask::kA8_Format;
     }
 
@@ -253,7 +251,6 @@ void DWriteFontTypeface::onFilterRec(SkScalerContext::Rec* rec) const {
                                   SkScalerContext::kDevKernText_Flag |
                                   SkScalerContext::kForceAutohinting_Flag |
                                   SkScalerContext::kEmbolden_Flag |
-                                  SkScalerContext::kLCD_BGROrder_Flag |
                                   SkScalerContext::kLCD_Vertical_Flag;
     rec->fFlags &= ~flagsWeDontSupport;
 

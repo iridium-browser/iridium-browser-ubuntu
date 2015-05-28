@@ -57,8 +57,7 @@ void HTMLContentElement::parseSelect()
 {
     ASSERT(m_shouldParseSelect);
 
-    CSSParser parser(CSSParserContext(document(), 0));
-    parser.parseSelector(m_select, m_selectorList);
+    CSSParser::parseSelector(CSSParserContext(document(), 0), m_select, m_selectorList);
     m_shouldParseSelect = false;
     m_isValidSelector = validateSelect();
     if (!m_isValidSelector) {
@@ -98,7 +97,7 @@ bool HTMLContentElement::validateSelect() const
     if (!m_selectorList.isValid())
         return false;
 
-    bool allowAnyPseudoClasses = RuntimeEnabledFeatures::pseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled() || (containingShadowRoot() && containingShadowRoot()->type() == ShadowRoot::UserAgentShadowRoot);
+    bool allowAnyPseudoClasses = RuntimeEnabledFeatures::pseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled() || (containingShadowRoot() && containingShadowRoot()->type() == ShadowRoot::ClosedShadowRoot);
 
     for (const CSSSelector* selector = m_selectorList.first(); selector; selector = m_selectorList.next(*selector)) {
         if (!selector->isCompound())

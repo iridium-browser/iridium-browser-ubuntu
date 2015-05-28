@@ -16,21 +16,6 @@
 
 namespace rappor {
 
-TEST(RapporServiceTest, LoadCohort) {
-  TestRapporService rappor_service;
-  rappor_service.test_prefs()->SetInteger(prefs::kRapporCohortSeed, 1);
-  EXPECT_EQ(1, rappor_service.LoadCohortForTesting());
-}
-
-TEST(RapporServiceTest, LoadSecret) {
-  TestRapporService rappor_service;
-  std::string secret = HmacByteVectorGenerator::GenerateEntropyInput();
-  std::string secret_base64;
-  base::Base64Encode(secret, &secret_base64);
-  rappor_service.test_prefs()->SetString(prefs::kRapporSecret, secret_base64);
-  EXPECT_EQ(secret, rappor_service.LoadSecretForTesting());
-}
-
 TEST(RapporServiceTest, Update) {
   TestRapporService rappor_service;
   EXPECT_LT(base::TimeDelta(), rappor_service.next_rotation());
@@ -78,6 +63,24 @@ TEST(RapporServiceTest, RecordingLevel) {
   RapporReports reports;
   rappor_service.GetReports(&reports);
   EXPECT_EQ(0, reports.report_size());
+}
+
+// Check that GetRecordedSampleForMetric works as expected.
+TEST(RapporServiceTest, GetRecordedSampleForMetric) {
+  TestRapporService rappor_service;
+
+  // Multiple samples for the same metric; only the latest is remembered.
+  rappor_service.RecordSample("MyMetric", ETLD_PLUS_ONE_RAPPOR_TYPE, "foo");
+  rappor_service.RecordSample("MyMetric", ETLD_PLUS_ONE_RAPPOR_TYPE, "bar");
+
+  std::string sample;
+  RapporType type;
+  EXPECT_FALSE(
+      rappor_service.GetRecordedSampleForMetric("WrongMetric", &sample, &type));
+  EXPECT_TRUE(
+      rappor_service.GetRecordedSampleForMetric("MyMetric", &sample, &type));
+  EXPECT_EQ("bar", sample);
+  EXPECT_EQ(ETLD_PLUS_ONE_RAPPOR_TYPE, type);
 }
 
 // Check that the incognito is respected.

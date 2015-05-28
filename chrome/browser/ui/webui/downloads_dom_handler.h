@@ -96,8 +96,8 @@ class DownloadsDOMHandler : public content::WebUIMessageHandler,
   // depend on WebUI. The other methods that depend on WebUI are
   // RegisterMessages() and HandleDrag().
   virtual content::WebContents* GetWebUIWebContents();
-  virtual void CallDownloadsList(const base::ListValue& downloads);
-  virtual void CallDownloadUpdated(const base::ListValue& download);
+  virtual void CallUpdateAll(const base::ListValue& list);
+  virtual void CallUpdateItem(const base::DictionaryValue& item);
 
   // Schedules a call to SendCurrentDownloads() in the next message loop
   // iteration. Protected rather than private for use in tests.
@@ -105,6 +105,9 @@ class DownloadsDOMHandler : public content::WebUIMessageHandler,
 
   // Protected for testing.
   virtual content::DownloadManager* GetMainNotifierManager();
+
+  // Actually remove downloads with an ID in |removals_|. This cannot be undone.
+  void FinalizeRemovals();
 
  private:
   // Shorthand for |observing_items_|, which tracks all items that this is
@@ -150,10 +153,13 @@ class DownloadsDOMHandler : public content::WebUIMessageHandler,
   scoped_ptr<AllDownloadItemNotifier> original_notifier_;
 
   // IDs of downloads to remove when this handler gets deleted.
-  std::vector<std::set<uint32>> removes_;
+  std::vector<std::set<uint32>> removals_;
 
   // Whether a call to SendCurrentDownloads() is currently scheduled.
   bool update_scheduled_;
+
+  // IDs of new downloads that the page doesn't know about yet.
+  std::set<uint32> new_downloads_;
 
   base::WeakPtrFactory<DownloadsDOMHandler> weak_ptr_factory_;
 

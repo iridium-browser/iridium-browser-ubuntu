@@ -19,9 +19,8 @@
         ]
       }
     }],
-    # TODO(hidehiko,mazda): Include nacl_helper_nonsfi for ARM when supported.
     ['disable_nacl==0 and OS=="linux" and '
-         '(target_arch=="x64" or target_arch=="ia32")', {
+         '(target_arch=="x64" or target_arch=="ia32" or target_arch=="arm")', {
       'variables': {
         'files': [
           '<(PRODUCT_DIR)/nacl_helper_nonsfi<(EXECUTABLE_SUFFIX)',
@@ -78,6 +77,17 @@
         ],
       },
     }],
+    ['OS=="mac" and asan==1 and fastbuild==0', {
+      'variables': {
+        'files': [
+          '<(PRODUCT_DIR)/<(mac_product_name) Framework.framework.dSYM/',
+          '<(PRODUCT_DIR)/<(mac_product_name) Helper.app.dSYM/',
+          '<(PRODUCT_DIR)/<(mac_product_name).app.dSYM/',
+          '<(PRODUCT_DIR)/exif.so.dSYM/',
+          '<(PRODUCT_DIR)/ffmpegsumo.so.dSYM/',
+        ],
+      },
+    }],
     ['OS=="win"', {
       'variables': {
         'files': [
@@ -115,7 +125,8 @@
     }],
   ],
   'includes': [
-    'angle.isolate',
+    '../base/base.isolate',
+    '../third_party/angle/angle.isolate',
     '../gin/v8.isolate',
   ],
 }

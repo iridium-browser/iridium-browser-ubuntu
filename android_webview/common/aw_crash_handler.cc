@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "base/logging.h"
+#include "build/build_config.h"
 
 namespace {
 
@@ -48,7 +49,7 @@ void AwExceptionHandler(int sig, siginfo_t* info, void* uc) {
     }
   }
 
-  if ((info != NULL && info->si_pid) || sig == SIGABRT) {
+  if ((info != NULL && SI_FROMUSER(info)) || sig == SIGABRT) {
     // This signal was triggered by somebody sending us the signal with kill().
     // In order to retrigger it, we have to queue a new signal by calling
     // kill() ourselves.  The special case (si_pid == 0 && sig == SIGABRT) is
@@ -66,12 +67,19 @@ namespace android_webview {
 namespace crash_handler {
 
 void RegisterCrashHandler(const std::string& version) {
+#if defined(ARCH_CPU_X86_FAMILY)
+  // Don't install signal handler on X86/64 because this breaks binary
+  // translators that handle SIGSEGV in userspace and get chained after our
+  // handler. See crbug.com/477444
+  return;
+#endif
+
   if (crash_handler_registered) {
     NOTREACHED();
     return;
   }
 
-  g_crash_msg = "### WebView crash. " + version;
+  g_crash_msg = "### WebView " + version;
   g_crash_msg_ptr = g_crash_msg.c_str();
 
   // Fail if unable to store all the old handlers.

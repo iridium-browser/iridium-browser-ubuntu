@@ -11,6 +11,7 @@ found in the LICENSE file.
 <link rel="import" href="/base/events.html">
 <link rel="import" href="/base/properties.html">
 <link rel="import" href="/base/settings.html">
+<link rel="import" href="/base/task.html">
 <link rel="import" href="/base/ui.html">
 <link rel="import" href="/base/ui/mouse_mode_selector.html">
 <link rel="import" href="/core/filter.html">
@@ -92,6 +93,10 @@ tv.exportTo('tv.c', function() {
 
       this.rulerTrack_ = new tv.c.tracks.RulerTrack(this.viewport_);
       this.rulerTrackContainer_.appendChild(this.rulerTrack_);
+
+      this.upperModelTrack_ = new tv.c.tracks.TraceModelTrack(this.viewport_);
+      this.upperModelTrack_.upperMode = true;
+      this.rulerTrackContainer_.appendChild(this.upperModelTrack_);
 
       this.modelTrackContainer_ =
           new tv.c.tracks.DrawingContainer(this.viewport_);
@@ -202,6 +207,12 @@ tv.exportTo('tv.c', function() {
       this.mouseModeSelector_.setKeyCodeForMode(m.ZOOM, '3'.charCodeAt(0));
       this.mouseModeSelector_.setKeyCodeForMode(m.TIMING, '4'.charCodeAt(0));
 
+      this.mouseModeSelector_.setKeyCodeCondition(function() {
+        // Return false when FindControl is active so that MouseMode keyboard
+        // shortcuts are ignored.
+        return this.listenToKeys_;
+      }.bind(this));
+
       this.mouseModeSelector_.setModifierForAlternateMode(
           m.SELECTION, tv.b.ui.MODIFIER.SHIFT);
       this.mouseModeSelector_.setModifierForAlternateMode(
@@ -212,6 +223,7 @@ tv.exportTo('tv.c', function() {
 
     detach: function() {
       this.modelTrack_.detach();
+      this.upperModelTrack_.detach();
 
       for (var i = 0; i < this.boundListeners_.length; i++) {
         var binding = this.boundListeners_[i];
@@ -236,6 +248,7 @@ tv.exportTo('tv.c', function() {
       var modelInstanceChanged = this.model_ !== model;
       this.model_ = model;
       this.modelTrack_.model = model;
+      this.upperModelTrack_.model = model;
 
       // Set up a reasonable viewport.
       if (modelInstanceChanged)
@@ -245,7 +258,8 @@ tv.exportTo('tv.c', function() {
     },
 
     get hasVisibleContent() {
-      return this.modelTrack_.hasVisibleContent;
+      return this.modelTrack_.hasVisibleContent ||
+          this.upperModelTrack_.hasVisibleContent;
     },
 
     setInitialViewport_: function() {
@@ -280,11 +294,12 @@ tv.exportTo('tv.c', function() {
     /**
      * @param {Filter} filter The filter to use for finding matches.
      * @param {Selection} selection The selection to add matches to.
-     * @return {Array} An array of objects that match the provided
-     * TitleFilter.
+     * @return {Task} which performs the filtering.
      */
-    addAllObjectsMatchingFilterToSelection: function(filter, selection) {
-      this.modelTrack_.addAllObjectsMatchingFilterToSelection(
+    addAllObjectsMatchingFilterToSelectionAsTask: function(filter, selection) {
+      return this.modelTrack_.addAllObjectsMatchingFilterToSelectionAsTask(
+          filter, selection);
+      this.upperModelTrack_.addAllObjectsMatchingFilterToSelection(
           filter, selection);
     },
 
@@ -301,7 +316,7 @@ tv.exportTo('tv.c', function() {
 
     /**
      * Sets the element whose focus state will determine whether
-     * to respond to keybaord input.
+     * to respond to keyboard input.
      */
     set focusElement(value) {
       this.focusElement_ = value;
@@ -310,7 +325,7 @@ tv.exportTo('tv.c', function() {
     get listenToKeys_() {
       if (!this.viewport_.isAttachedToDocumentOrInTestMode)
         return false;
-      if (this.activeElement instanceof TracingFindControl)
+      if (document.activeElement instanceof TracingFindControl)
         return false;
       if (!this.focusElement_)
         return true;
@@ -546,7 +561,9 @@ tv.exportTo('tv.c', function() {
       var adjustedWorldRange = bounds.range * 1.25;
       var newScale = this.modelTrackContainer_.canvas.width /
           adjustedWorldRange;
-      var zoomInRatio = newScale / this.viewport_.currentDisplayTransform.scaleX;
+      var zoomInRatio = newScale /
+          this.viewport_.currentDisplayTransform.scaleX;
+
       var animation = new tv.c.TimelineDisplayTransformZoomToAnimation(
           worldCenter, viewCenter,
           this.viewport_.currentDisplayTransform.panY,
@@ -588,6 +605,27 @@ tv.exportTo('tv.c', function() {
       var deltaX = tempDisplayTransform.panX - dt.panX;
       var animation = new tv.c.TimelineDisplayTransformPanAnimation(
           deltaX, 0);
+      this.viewport_.queueDisplayTransformAnimation(animation);
+    },
+
+    navToPosition: function(uiState) {
+      var location = uiState.location;
+      var scaleX = uiState.scaleX;
+      var track = location.containingTrack;
+
+      var worldCenter = location.xWorld;
+      var viewCenter = this.modelTrackContainer_.canvas.width / 5;
+      var zoomInRatio = scaleX /
+          this.viewport_.currentDisplayTransform.scaleX;
+
+      // Vertically scroll so track is in view.
+      track.scrollIntoViewIfNeeded();
+
+      // Perform zoom and panX animation.
+      var animation = new tv.c.TimelineDisplayTransformZoomToAnimation(
+          worldCenter, viewCenter,
+          this.viewport_.currentDisplayTransform.panY,
+          zoomInRatio);
       this.viewport_.queueDisplayTransformAnimation(animation);
     },
 

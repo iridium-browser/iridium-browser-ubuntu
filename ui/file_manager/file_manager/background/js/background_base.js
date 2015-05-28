@@ -13,23 +13,13 @@ function BackgroundBase() {
    * @type {Object.<string, chrome.app.window.AppWindow>}
    */
   this.appWindows = {};
+
+  /**
+   * Map of all currently open file dialogs. The key is an app ID.
+   * @type {!Object.<string, !Window>}
+   */
+  this.dialogs = {};
 }
-
-/**
- * Checks the current condition of background page.
- * @return {boolean} True if the background page can be closed. False if not.
- */
-BackgroundBase.prototype.canClose = function() {
-  return true;
-};
-
-/**
- * Checks the current condition of background page and closes it if possible.
- */
-BackgroundBase.prototype.tryClose = function() {
-  if (this.canClose())
-    window.close();
-};
 
 /**
  * Gets similar windows, it means with the same initial url.

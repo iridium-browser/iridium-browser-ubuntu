@@ -9,7 +9,6 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
-#include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
 #include "core/dom/ContextFeatures.h"
 #include "core/dom/Document.h"
@@ -20,7 +19,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestSpecialOperationsNotEnumerable::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestSpecialOperationsNotEnumerable::domTemplate, V8TestSpecialOperationsNotEnumerable::refObject, V8TestSpecialOperationsNotEnumerable::derefObject, V8TestSpecialOperationsNotEnumerable::trace, 0, 0, V8TestSpecialOperationsNotEnumerable::installConditionallyEnabledMethods, V8TestSpecialOperationsNotEnumerable::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestSpecialOperationsNotEnumerable::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestSpecialOperationsNotEnumerable::domTemplate, V8TestSpecialOperationsNotEnumerable::refObject, V8TestSpecialOperationsNotEnumerable::derefObject, V8TestSpecialOperationsNotEnumerable::trace, 0, 0, V8TestSpecialOperationsNotEnumerable::installConditionallyEnabledMethods, V8TestSpecialOperationsNotEnumerable::installConditionallyEnabledProperties, "TestSpecialOperationsNotEnumerable", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestSpecialOperationsNotEnumerable.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -47,14 +46,7 @@ static void indexedPropertyGetterCallback(uint32_t index, const v8::PropertyCall
 
 static void namedPropertyGetter(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    if (!name->IsString())
-        return;
     auto nameString = name.As<v8::String>();
-    if (info.Holder()->HasRealNamedProperty(nameString))
-        return;
-    if (!info.Holder()->GetRealNamedPropertyInPrototypeChain(nameString).IsEmpty())
-        return;
-
     TestSpecialOperationsNotEnumerable* impl = V8TestSpecialOperationsNotEnumerable::toImpl(info.Holder());
     AtomicString propertyName = toCoreAtomicString(nameString);
     String result = impl->anonymousNamedGetter(propertyName);
@@ -91,6 +83,8 @@ static void installV8TestSpecialOperationsNotEnumerableTemplate(v8::Local<v8::Fu
     }
     {
         v8::NamedPropertyHandlerConfiguration config(TestSpecialOperationsNotEnumerableV8Internal::namedPropertyGetterCallback, 0, 0, 0, 0);
+        config.flags = static_cast<v8::PropertyHandlerFlags>(static_cast<int>(config.flags) | static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings));
+        config.flags = static_cast<v8::PropertyHandlerFlags>(static_cast<int>(config.flags) | static_cast<int>(v8::PropertyHandlerFlags::kNonMasking));
         functionTemplate->InstanceTemplate()->SetHandler(config);
     }
 

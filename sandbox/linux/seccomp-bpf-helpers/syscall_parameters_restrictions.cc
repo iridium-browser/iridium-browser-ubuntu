@@ -27,14 +27,14 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
+#include "sandbox/linux/bpf_dsl/seccomp_macros.h"
 #include "sandbox/linux/seccomp-bpf-helpers/sigsys_handlers.h"
-#include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
 #include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
-#include "sandbox/linux/services/linux_syscalls.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 
 #if defined(OS_ANDROID)
 
-#include "sandbox/linux/services/android_futex.h"
+#include "sandbox/linux/system_headers/android_futex.h"
 
 #if !defined(F_DUPFD_CLOEXEC)
 #define F_DUPFD_CLOEXEC (F_LINUX_SPECIFIC_BASE + 6)
@@ -302,6 +302,11 @@ ResultExpr RestrictSchedTarget(pid_t target_pid, int sysno) {
 ResultExpr RestrictPrlimit64(pid_t target_pid) {
   const Arg<pid_t> pid(0);
   return If(pid == 0 || pid == target_pid, Allow()).Else(CrashSIGSYS());
+}
+
+ResultExpr RestrictGetrusage() {
+  const Arg<int> who(0);
+  return If(who == RUSAGE_SELF, Allow()).Else(CrashSIGSYS());
 }
 
 }  // namespace sandbox.

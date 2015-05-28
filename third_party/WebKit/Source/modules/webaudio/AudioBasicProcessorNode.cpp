@@ -23,46 +23,42 @@
  */
 
 #include "config.h"
-
 #if ENABLE(WEB_AUDIO)
-
 #include "modules/webaudio/AudioBasicProcessorNode.h"
 
-#include "platform/audio/AudioBus.h"
-#include "platform/audio/AudioProcessor.h"
 #include "modules/webaudio/AudioContext.h"
 #include "modules/webaudio/AudioNodeInput.h"
 #include "modules/webaudio/AudioNodeOutput.h"
+#include "platform/audio/AudioBus.h"
+#include "platform/audio/AudioProcessor.h"
 
 namespace blink {
 
-AudioBasicProcessorNode::AudioBasicProcessorNode(NodeType nodeType, AudioContext* context, float sampleRate)
-    : AudioNode(nodeType, context, sampleRate)
+AudioBasicProcessorHandler::AudioBasicProcessorHandler(NodeType nodeType, AudioNode& node, float sampleRate, PassOwnPtr<AudioProcessor> processor)
+    : AudioHandler(nodeType, node, sampleRate)
+    , m_processor(processor)
 {
     addInput();
-    addOutput(AudioNodeOutput::create(this, 1));
-
-    // The subclass must create m_processor.
+    addOutput(1);
 }
 
-AudioBasicProcessorNode::~AudioBasicProcessorNode()
+AudioBasicProcessorHandler::~AudioBasicProcessorHandler()
 {
     ASSERT(!isInitialized());
 }
 
-void AudioBasicProcessorNode::trace(Visitor* visitor)
+DEFINE_TRACE(AudioBasicProcessorHandler)
 {
-    visitor->trace(m_processor);
-    AudioNode::trace(visitor);
+    AudioHandler::trace(visitor);
 }
 
-void AudioBasicProcessorNode::dispose()
+void AudioBasicProcessorHandler::dispose()
 {
     uninitialize();
-    AudioNode::dispose();
+    AudioHandler::dispose();
 }
 
-void AudioBasicProcessorNode::initialize()
+void AudioBasicProcessorHandler::initialize()
 {
     if (isInitialized())
         return;
@@ -70,10 +66,10 @@ void AudioBasicProcessorNode::initialize()
     ASSERT(processor());
     processor()->initialize();
 
-    AudioNode::initialize();
+    AudioHandler::initialize();
 }
 
-void AudioBasicProcessorNode::uninitialize()
+void AudioBasicProcessorHandler::uninitialize()
 {
     if (!isInitialized())
         return;
@@ -81,16 +77,16 @@ void AudioBasicProcessorNode::uninitialize()
     ASSERT(processor());
     processor()->uninitialize();
 
-    AudioNode::uninitialize();
+    AudioHandler::uninitialize();
 }
 
-void AudioBasicProcessorNode::process(size_t framesToProcess)
+void AudioBasicProcessorHandler::process(size_t framesToProcess)
 {
     AudioBus* destinationBus = output(0)->bus();
 
-    if (!isInitialized() || !processor() || processor()->numberOfChannels() != numberOfChannels())
+    if (!isInitialized() || !processor() || processor()->numberOfChannels() != numberOfChannels()) {
         destinationBus->zero();
-    else {
+    } else {
         AudioBus* sourceBus = input(0)->bus();
 
         // FIXME: if we take "tail time" into account, then we can avoid calling processor()->process() once the tail dies down.
@@ -102,7 +98,7 @@ void AudioBasicProcessorNode::process(size_t framesToProcess)
 }
 
 // Nice optimization in the very common case allowing for "in-place" processing
-void AudioBasicProcessorNode::pullInputs(size_t framesToProcess)
+void AudioBasicProcessorHandler::pullInputs(size_t framesToProcess)
 {
     // Render input stream - suggest to the input to render directly into output bus for in-place processing in process() if possible.
     input(0)->pull(output(0)->bus(), framesToProcess);
@@ -111,9 +107,10 @@ void AudioBasicProcessorNode::pullInputs(size_t framesToProcess)
 // As soon as we know the channel count of our input, we can lazily initialize.
 // Sometimes this may be called more than once with different channel counts, in which case we must safely
 // uninitialize and then re-initialize with the new channel count.
-void AudioBasicProcessorNode::checkNumberOfChannelsForInput(AudioNodeInput* input)
+void AudioBasicProcessorHandler::checkNumberOfChannelsForInput(AudioNodeInput* input)
 {
-    ASSERT(context()->isAudioThread() && context()->isGraphOwner());
+    ASSERT(context()->isAudioThread());
+    ASSERT(context()->isGraphOwner());
 
     ASSERT(input == this->input(0));
     if (input != this->input(0))
@@ -139,20 +136,20 @@ void AudioBasicProcessorNode::checkNumberOfChannelsForInput(AudioNodeInput* inpu
         initialize();
     }
 
-    AudioNode::checkNumberOfChannelsForInput(input);
+    AudioHandler::checkNumberOfChannelsForInput(input);
 }
 
-unsigned AudioBasicProcessorNode::numberOfChannels()
+unsigned AudioBasicProcessorHandler::numberOfChannels()
 {
     return output(0)->numberOfChannels();
 }
 
-double AudioBasicProcessorNode::tailTime() const
+double AudioBasicProcessorHandler::tailTime() const
 {
     return m_processor->tailTime();
 }
 
-double AudioBasicProcessorNode::latencyTime() const
+double AudioBasicProcessorHandler::latencyTime() const
 {
     return m_processor->latencyTime();
 }

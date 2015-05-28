@@ -5,17 +5,15 @@
 #ifndef UI_EVENTS_OZONE_EVDEV_EVENT_FACTORY_EVDEV_H_
 #define UI_EVENTS_OZONE_EVDEV_EVENT_FACTORY_EVDEV_H_
 
-#include <vector>
-
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/task_runner.h"
 #include "ui/events/ozone/device/device_event_observer.h"
-#include "ui/events/ozone/evdev/event_converter_evdev.h"
-#include "ui/events/ozone/evdev/event_device_info.h"
+#include "ui/events/ozone/evdev/device_event_dispatcher_evdev.h"
 #include "ui/events/ozone/evdev/event_modifiers_evdev.h"
+#include "ui/events/ozone/evdev/event_thread_evdev.h"
 #include "ui/events/ozone/evdev/events_ozone_evdev_export.h"
 #include "ui/events/ozone/evdev/input_controller_evdev.h"
 #include "ui/events/ozone/evdev/keyboard_evdev.h"
@@ -32,17 +30,19 @@ namespace ui {
 
 class CursorDelegateEvdev;
 class DeviceManager;
+class InputDeviceFactoryEvdev;
+class InputDeviceFactoryEvdevProxy;
 class SystemInputInjector;
+enum class DomCode;
 
 #if !defined(USE_EVDEV)
 #error Missing dependency on ui/events/ozone:events_ozone_evdev
 #endif
 
-#if defined(USE_EVDEV_GESTURES)
-class GesturePropertyProvider;
-#endif
-
 // Ozone events implementation for the Linux input subsystem ("evdev").
+//
+// This is a UI thread object, but creates its own thread for I/O. See
+// InputDeviceFactoryEvdev for the I/O thread part.
 class EVENTS_OZONE_EVDEV_EXPORT EventFactoryEvdev : public DeviceEventObserver,
                                                     public PlatformEventSource {
  public:
@@ -51,10 +51,8 @@ class EVENTS_OZONE_EVDEV_EXPORT EventFactoryEvdev : public DeviceEventObserver,
                     KeyboardLayoutEngine* keyboard_layout_engine);
   ~EventFactoryEvdev() override;
 
-  // Get a list of device ids that matches a device type. Return true if the
-  // list is not empty. |device_ids| can be NULL.
-  bool GetDeviceIdsByType(const EventDeviceType type,
-                          std::vector<int>* device_ids);
+  // Initialize. Must be called with a valid message loop.
+  void Init();
 
   void WarpCursorTo(gfx::AcceleratedWidget widget,
                     const gfx::PointF& location);
@@ -62,6 +60,22 @@ class EVENTS_OZONE_EVDEV_EXPORT EventFactoryEvdev : public DeviceEventObserver,
   scoped_ptr<SystemInputInjector> CreateSystemInputInjector();
 
   InputController* input_controller() { return &input_controller_; }
+
+  // User input events.
+  void DispatchKeyEvent(const KeyEventParams& params);
+  void DispatchMouseMoveEvent(const MouseMoveEventParams& params);
+  void DispatchMouseButtonEvent(const MouseButtonEventParams& params);
+  void DispatchMouseWheelEvent(const MouseWheelEventParams& params);
+  void DispatchScrollEvent(const ScrollEventParams& params);
+  void DispatchTouchEvent(const TouchEventParams& params);
+
+  // Device lifecycle events.
+  void DispatchKeyboardDevicesUpdated(
+      const std::vector<KeyboardDevice>& devices);
+  void DispatchTouchscreenDevicesUpdated(
+      const std::vector<TouchscreenDevice>& devices);
+  void DispatchMouseDevicesUpdated(const std::vector<InputDevice>& devices);
+  void DispatchTouchpadDevicesUpdated(const std::vector<InputDevice>& devices);
 
  protected:
   // DeviceEventObserver overrides:
@@ -73,29 +87,15 @@ class EVENTS_OZONE_EVDEV_EXPORT EventFactoryEvdev : public DeviceEventObserver,
   void OnDispatcherListChanged() override;
 
  private:
-  // Post a task to dispatch an event.
-  void PostUiEvent(scoped_ptr<Event> event);
-
   // Dispatch event via PlatformEventSource.
-  void DispatchUiEventTask(scoped_ptr<Event> event);
-
-  // Open device at path & starting processing events (on UI thread).
-  void AttachInputDevice(scoped_ptr<EventConverterEvdev> converter);
-
-  // Close device at path (on UI thread).
-  void DetachInputDevice(const base::FilePath& file_path);
-
-  // Update observers on device changes.
-  void NotifyDeviceChange(const EventConverterEvdev& converter);
-  void NotifyKeyboardsUpdated();
-  void NotifyTouchscreensUpdated();
-  void NotifyTouchpadsUpdated();
-  void NotifyMiceUpdated();
+  void DispatchUiEvent(ui::Event* event);
 
   int NextDeviceId();
 
-  // Owned per-device event converters (by path).
-  std::map<base::FilePath, EventConverterEvdev*> converters_;
+  // Device thread initialization.
+  void StartThread();
+  void OnThreadStarted(
+      scoped_ptr<InputDeviceFactoryEvdevProxy> input_device_factory);
 
   // Used to uniquely identify input devices.
   int last_device_id_;
@@ -103,11 +103,9 @@ class EVENTS_OZONE_EVDEV_EXPORT EventFactoryEvdev : public DeviceEventObserver,
   // Interface for scanning & monitoring input devices.
   DeviceManager* device_manager_;  // Not owned.
 
-  // Task runner for event dispatch.
-  scoped_refptr<base::TaskRunner> ui_task_runner_;
-
-  // Dispatch callback for events.
-  EventDispatchCallback dispatch_callback_;
+  // Proxy for input device factory (manages device I/O objects).
+  // The real object lives on a different thread.
+  scoped_ptr<InputDeviceFactoryEvdevProxy> input_device_factory_proxy_;
 
   // Modifier key state (shift, ctrl, etc).
   EventModifiersEvdev modifiers_;
@@ -121,13 +119,14 @@ class EVENTS_OZONE_EVDEV_EXPORT EventFactoryEvdev : public DeviceEventObserver,
   // Cursor movement.
   CursorDelegateEvdev* cursor_;
 
-#if defined(USE_EVDEV_GESTURES)
-  // Gesture library property provider (used by touchpads/mice).
-  scoped_ptr<GesturePropertyProvider> gesture_property_provider_;
-#endif
-
   // Object for controlling input devices.
   InputControllerEvdev input_controller_;
+
+  // Whether we've set up the device factory.
+  bool initialized_;
+
+  // Thread for device I/O.
+  EventThreadEvdev thread_;
 
   // Support weak pointers for attach & detach callbacks.
   base::WeakPtrFactory<EventFactoryEvdev> weak_ptr_factory_;

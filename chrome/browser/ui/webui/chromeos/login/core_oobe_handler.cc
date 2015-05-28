@@ -9,7 +9,9 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
+#include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/login/helper.h"
+#include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
@@ -25,16 +27,13 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_constants.h"
+#include "components/login/localized_values_builder.h"
 #include "grit/components_strings.h"
 #include "ui/chromeos/accessibility_types.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/screen.h"
 #include "ui/keyboard/keyboard_controller.h"
-
-#if !defined(USE_ATHENA)
-#include "chrome/browser/chromeos/accessibility/magnification_manager.h"
-#endif
 
 namespace {
 
@@ -66,7 +65,8 @@ void CoreOobeHandler::SetDelegate(Delegate* delegate) {
   delegate_ = delegate;
 }
 
-void CoreOobeHandler::DeclareLocalizedValues(LocalizedValuesBuilder* builder) {
+void CoreOobeHandler::DeclareLocalizedValues(
+    ::login::LocalizedValuesBuilder* builder) {
   builder->Add("title", IDS_SHORT_PRODUCT_NAME);
   builder->Add("productName", IDS_SHORT_PRODUCT_NAME);
   builder->Add("learnMore", IDS_LEARN_MORE);
@@ -268,11 +268,9 @@ void CoreOobeHandler::HandleEnableVirtualKeyboard(bool enabled) {
 }
 
 void CoreOobeHandler::HandleEnableScreenMagnifier(bool enabled) {
-#if !defined(USE_ATHENA)
   // TODO(nkostylev): Add support for partial screen magnifier.
   DCHECK(MagnificationManager::Get());
   MagnificationManager::Get()->SetMagnifierEnabled(enabled);
-#endif
 }
 
 void CoreOobeHandler::HandleEnableSpokenFeedback(bool /* enabled */) {
@@ -326,8 +324,12 @@ void CoreOobeHandler::ShowOobeUI(bool show) {
     UpdateOobeUIVisibility();
 }
 
+void CoreOobeHandler::UpdateShutdownAndRebootVisibility(
+    bool reboot_on_shutdown) {
+  CallJS("showShutdown", !reboot_on_shutdown);
+}
+
 void CoreOobeHandler::UpdateA11yState() {
-#if !defined(USE_ATHENA)
   // TODO(dpolukhin): crbug.com/412891
   DCHECK(MagnificationManager::Get());
   base::DictionaryValue a11y_info;
@@ -342,14 +344,9 @@ void CoreOobeHandler::UpdateA11yState() {
   a11y_info.SetBoolean("virtualKeyboardEnabled",
                        AccessibilityManager::Get()->IsVirtualKeyboardEnabled());
   CallJS("refreshA11yInfo", a11y_info);
-#endif
 }
 
 void CoreOobeHandler::UpdateOobeUIVisibility() {
-#if defined(USE_ATHENA)
-  // Athena builds have their own way to display version so hide ours.
-  bool should_show_version = false;
-#else
   // Don't show version label on the stable channel by default.
   bool should_show_version = true;
   chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
@@ -357,7 +354,6 @@ void CoreOobeHandler::UpdateOobeUIVisibility() {
       channel == chrome::VersionInfo::CHANNEL_BETA) {
     should_show_version = false;
   }
-#endif
   CallJS("showVersion", should_show_version);
   CallJS("showOobeUI", show_oobe_ui_);
   if (system::InputDeviceSettings::Get()->ForceKeyboardDrivenUINavigation())
@@ -423,6 +419,8 @@ void CoreOobeHandler::HandleHeaderBarVisible() {
   LoginDisplayHost* login_display_host = LoginDisplayHostImpl::default_host();
   if (login_display_host)
     login_display_host->SetStatusAreaVisible(true);
+  if (ScreenLocker::default_screen_locker())
+    ScreenLocker::default_screen_locker()->delegate()->OnHeaderBarVisible();
 }
 
 void CoreOobeHandler::HandleSwitchToNewOobe() {

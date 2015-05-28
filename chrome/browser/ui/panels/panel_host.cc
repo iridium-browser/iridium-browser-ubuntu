@@ -8,7 +8,6 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
@@ -17,6 +16,7 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
+#include "components/ui/zoom/page_zoom.h"
 #include "components/ui/zoom/zoom_controller.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
@@ -55,7 +55,7 @@ void PanelHost::Init(const GURL& url) {
   web_contents_.reset(content::WebContents::Create(create_params));
   extensions::SetViewType(web_contents_.get(), extensions::VIEW_TYPE_PANEL);
   web_contents_->SetDelegate(this);
-  // web_contents_ may be passed to chrome_page_zoom::Zoom(), so it needs
+  // web_contents_ may be passed to PageZoom::Zoom(), so it needs
   // a ZoomController.
   ui_zoom::ZoomController::CreateForWebContents(web_contents_.get());
   content::WebContentsObserver::Observe(web_contents_.get());
@@ -138,7 +138,7 @@ void PanelHost::NavigationStateChanged(content::WebContents* source,
 void PanelHost::AddNewContents(content::WebContents* source,
                                content::WebContents* new_contents,
                                WindowOpenDisposition disposition,
-                               const gfx::Rect& initial_pos,
+                               const gfx::Rect& initial_rect,
                                bool user_gesture,
                                bool* was_blocked) {
   chrome::NavigateParams navigate_params(profile_, new_contents->GetURL(),
@@ -150,7 +150,7 @@ void PanelHost::AddNewContents(content::WebContents* source,
   navigate_params.disposition =
       disposition == NEW_BACKGROUND_TAB ? disposition : NEW_FOREGROUND_TAB;
 
-  navigate_params.window_bounds = initial_pos;
+  navigate_params.window_bounds = initial_rect;
   navigate_params.user_gesture = user_gesture;
   navigate_params.extension_app_id = panel_->extension_id();
   chrome::Navigate(&navigate_params);
@@ -269,5 +269,5 @@ void PanelHost::StopLoading() {
 }
 
 void PanelHost::Zoom(content::PageZoom zoom) {
-  chrome_page_zoom::Zoom(web_contents_.get(), zoom);
+  ui_zoom::PageZoom::Zoom(web_contents_.get(), zoom);
 }

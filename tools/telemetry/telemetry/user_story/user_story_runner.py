@@ -9,17 +9,15 @@ import random
 import sys
 import time
 
-from telemetry import decorators
-from telemetry import page as page_module
 from telemetry.core import exceptions
-from telemetry.core import util
 from telemetry.core import wpr_modes
+from telemetry.internal.actions import page_action
+from telemetry import page as page_module
 from telemetry.page import page_set as page_set_module
 from telemetry.page import page_test
-from telemetry.page import shared_page_state
-from telemetry.page.actions import page_action
 from telemetry.results import results_options
 from telemetry.user_story import user_story_filter
+from telemetry.user_story import user_story_set as user_story_set_module
 from telemetry.util import cloud_storage
 from telemetry.util import exception_formatter
 from telemetry.value import failure
@@ -35,15 +33,7 @@ def AddCommandLineArgs(parser):
   results_options.AddResultsOptions(parser)
 
   # Page set options
-  group = optparse.OptionGroup(parser, 'Page set ordering and repeat options')
-  group.add_option('--pageset-shuffle', action='store_true',
-      dest='pageset_shuffle',
-      help='Shuffle the order of pages within a pageset.')
-  group.add_option('--pageset-shuffle-order-file',
-      dest='pageset_shuffle_order_file', default=None,
-      help='Filename of an output of a previously run test on the current '
-      'pageset. The tests will run in the same order again, overriding '
-      'what is specified by --page-repeat and --pageset-repeat.')
+  group = optparse.OptionGroup(parser, 'Page set repeat options')
   group.add_option('--page-repeat', default=1, type='int',
                    help='Number of times to repeat each individual page '
                    'before proceeding with the next page in the pageset.')
@@ -72,9 +62,6 @@ def ProcessCommandLineArgs(parser, args):
   results_options.ProcessCommandLineArgs(parser, args)
 
   # Page set options
-  if args.pageset_shuffle_order_file and not args.pageset_shuffle:
-    parser.error('--pageset-shuffle-order-file requires --pageset-shuffle.')
-
   if args.page_repeat < 1:
     parser.error('--page-repeat must be a positive integer.')
   if args.pageset_repeat < 1:
@@ -99,15 +86,20 @@ def _RunUserStoryAndProcessErrorIfNeeded(expectations, user_story, results,
       results.AddValue(skip_value)
       return
     state.RunUserStory(results)
-  except (page_test.Failure, util.TimeoutException, exceptions.LoginException,
-          exceptions.ProfilingException):
+  except (page_test.Failure, exceptions.TimeoutException,
+          exceptions.LoginException, exceptions.ProfilingException):
     ProcessError()
-  except exceptions.AppCrashException:
+  except exceptions.Error:
     ProcessError()
     raise
   except page_action.PageActionNotSupported as e:
     results.AddValue(
         skip.SkipValue(user_story, 'Unsupported page action: %s' % e))
+  except Exception:
+    results.AddValue(
+        failure.FailureValue(
+            user_story, sys.exc_info(), 'Unhandlable exception raised.'))
+    raise
   else:
     if expectation == 'fail':
       logging.warning(
@@ -122,28 +114,6 @@ def _RunUserStoryAndProcessErrorIfNeeded(expectations, user_story, results,
       # Print current exception and propagate existing exception.
       exception_formatter.PrintFormattedException(
           msg='Exception from DidRunUserStory: ')
-
-@decorators.Cache
-def _UpdateUserStoryArchivesIfChanged(user_story_set):
-  # Scan every serving directory for .sha1 files
-  # and download them from Cloud Storage. Assume all data is public.
-  all_serving_dirs = user_story_set.serving_dirs.copy()
-  # Add individual page dirs to all serving dirs.
-  for user_story in user_story_set:
-    if isinstance(user_story, page_module.Page) and user_story.is_file:
-      all_serving_dirs.add(user_story.serving_dir)
-  # Scan all serving dirs.
-  for serving_dir in all_serving_dirs:
-    if os.path.splitdrive(serving_dir)[1] == '/':
-      raise ValueError('Trying to serve root directory from HTTP server.')
-    for dirpath, _, filenames in os.walk(serving_dir):
-      for filename in filenames:
-        path, extension = os.path.splitext(
-            os.path.join(dirpath, filename))
-        if extension != '.sha1':
-          continue
-        cloud_storage.GetIfChanged(path, user_story_set.bucket)
-
 
 class UserStoryGroup(object):
   def __init__(self, shared_user_story_state_class):
@@ -164,7 +134,7 @@ class UserStoryGroup(object):
     self._user_stories.append(user_story)
 
 
-def GetUserStoryGroupsWithSameSharedUserStoryClass(user_story_set):
+def StoriesGroupedByStateClass(user_story_set, allow_multiple_groups):
   """ Returns a list of user story groups which each contains user stories with
   the same shared_user_story_state_class.
 
@@ -186,6 +156,14 @@ def GetUserStoryGroupsWithSameSharedUserStoryClass(user_story_set):
   for user_story in user_story_set:
     if (user_story.shared_user_story_state_class is not
         user_story_groups[-1].shared_user_story_state_class):
+      if not allow_multiple_groups:
+        raise ValueError('This UserStorySet is only allowed to have one '
+                         'SharedUserStoryState but contains the following '
+                         'SharedUserStoryState classes: %s, %s.\n Either '
+                         'remove the extra SharedUserStoryStates or override '
+                         'allow_mixed_story_states.' % (
+                         user_story_groups[-1].shared_user_story_state_class,
+                         user_story.shared_user_story_state_class))
       user_story_groups.append(
           UserStoryGroup(user_story.shared_user_story_state_class))
     user_story_groups[-1].AddUserStory(user_story)
@@ -200,31 +178,20 @@ def Run(test, user_story_set, expectations, finder_options, results,
   We "white list" certain exceptions for which the user story runner
   can continue running the remaining user stories.
   """
-  # TODO(slamm): Remove special-case for PageTest. https://crbug.com/440101
-  if isinstance(test, page_test.PageTest):
-    test.ValidatePageSet(user_story_set)
+  # Filter page set based on options.
+  user_stories = filter(user_story_filter.UserStoryFilter.IsSelected,
+                        user_story_set)
 
-  # Reorder page set based on options.
-  user_stories = _ShuffleAndFilterUserStorySet(user_story_set, finder_options)
-
-  if (not finder_options.use_live_sites and
+  if (not finder_options.use_live_sites and user_story_set.bucket and
       finder_options.browser_options.wpr_mode != wpr_modes.WPR_RECORD):
-    _UpdateUserStoryArchivesIfChanged(user_story_set)
+    serving_dirs = user_story_set.serving_dirs
+    for directory in serving_dirs:
+      cloud_storage.GetFilesInDirectoryIfChanged(directory,
+                                                 user_story_set.bucket)
     if not _UpdateAndCheckArchives(
         user_story_set.archive_data_file, user_story_set.wpr_archive_info,
         user_stories):
       return
-
-  # TODO(slamm): Remove special-case for PageTest. https://crbug.com/440101
-  if isinstance(test, page_test.PageTest):
-    for user_story in list(user_stories):
-      if not test.CanRunForPage(user_story):
-        results.WillRunPage(user_story)
-        logging.debug('Skipping test: it cannot run for %s',
-                      user_story.display_name)
-        results.AddValue(skip.SkipValue(user_story, 'Test cannot run'))
-        results.DidRunPage(user_story)
-        user_stories.remove(user_story)
 
   if not user_stories:
     return
@@ -234,9 +201,9 @@ def Run(test, user_story_set, expectations, finder_options, results,
   if effective_max_failures is None:
     effective_max_failures = max_failures
 
-  user_story_groups = GetUserStoryGroupsWithSameSharedUserStoryClass(
-      user_stories)
-  user_story_with_discarded_first_results = set()
+  user_story_groups = StoriesGroupedByStateClass(
+      user_stories,
+      user_story_set.allow_mixed_story_states)
 
   for group in user_story_groups:
     state = None
@@ -252,13 +219,13 @@ def Run(test, user_story_set, expectations, finder_options, results,
               _WaitForThermalThrottlingIfNeeded(state.platform)
               _RunUserStoryAndProcessErrorIfNeeded(
                   expectations, user_story, results, state)
-            except exceptions.AppCrashException:
-              # Catch AppCrashException to give the story a chance to retry.
+            except exceptions.Error:
+              # Catch all Telemetry errors to give the story a chance to retry.
               # The retry is enabled by tearing down the state and creating
               # a new state instance in the next iteration.
               try:
                 # If TearDownState raises, do not catch the exception.
-                # (The AppCrashException was saved as a failure value.)
+                # (The Error was saved as a failure value.)
                 state.TearDownState(results)
               finally:
                 # Later finally-blocks use state, so ensure it is cleared.
@@ -268,14 +235,7 @@ def Run(test, user_story_set, expectations, finder_options, results,
               try:
                 if state:
                   _CheckThermalThrottling(state.platform)
-                # TODO(slamm): Make discard_first_result part of user_story API.
-                # https://crbug.com/440101
-                discard_current_run = (
-                    getattr(test, 'discard_first_result', False) and
-                    user_story not in user_story_with_discarded_first_results)
-                if discard_current_run:
-                  user_story_with_discarded_first_results.add(user_story)
-                results.DidRunPage(user_story, discard_run=discard_current_run)
+                results.DidRunPage(user_story)
               except Exception:
                 if not has_existing_exception:
                   raise
@@ -297,21 +257,6 @@ def Run(test, user_story_set, expectations, finder_options, results,
           # Print current exception and propagate existing exception.
           exception_formatter.PrintFormattedException(
               msg='Exception from TearDownState:')
-
-
-def _ShuffleAndFilterUserStorySet(user_story_set, finder_options):
-  if finder_options.pageset_shuffle_order_file:
-    if isinstance(user_story_set, page_set_module.PageSet):
-      return page_set_module.ReorderPageSet(
-          finder_options.pageset_shuffle_order_file)
-    else:
-      raise Exception(
-          'pageset-shuffle-order-file flag can only be used with page set')
-  user_stories = [u for u in user_story_set[:]
-                  if user_story_filter.UserStoryFilter.IsSelected(u)]
-  if finder_options.pageset_shuffle:
-    random.shuffle(user_stories)
-  return user_stories
 
 
 def _UpdateAndCheckArchives(archive_data_file, wpr_archive_info,

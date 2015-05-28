@@ -39,6 +39,7 @@ class AndroidDeviceManager : public base::NonThreadSafe {
 
     std::string socket_name;
     std::string display_name;
+    std::string user;
     Type type;
   };
 
@@ -186,6 +187,14 @@ class AndroidDeviceManager : public base::NonThreadSafe {
   void SetDeviceProviders(const DeviceProviders& providers);
 
   void QueryDevices(const DevicesCallback& callback);
+
+  static std::string GetBrowserName(const std::string& socket,
+                                    const std::string& package);
+  using RunCommandCallback =
+      base::Callback<void(const std::string&, const CommandCallback&)>;
+
+  static void QueryDeviceInfo(const RunCommandCallback& command_callback,
+                              const DeviceInfoCallback& callback);
 
   struct DeviceDescriptor {
     DeviceDescriptor();

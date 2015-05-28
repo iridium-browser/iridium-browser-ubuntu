@@ -173,9 +173,7 @@ class GestureEventQueueTest : public testing::Test,
     return queue()->scrolling_in_progress_;
   }
 
-  bool FlingInProgress() {
-    return queue()->fling_in_progress_;
-  }
+  bool FlingInProgress() { return queue()->fling_in_progress_; }
 
   bool WillIgnoreNextACK() {
     return queue()->ignore_next_ack_;

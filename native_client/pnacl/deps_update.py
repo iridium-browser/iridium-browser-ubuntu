@@ -127,7 +127,7 @@ def Main(args):
     upstream_branches = []
   else:
     pnacl_branch = 'origin/master'
-    # Skip changes merged (but not cherry-picked) from upstream SVN.
+    # Skip changes merged (but not cherry-picked) from upstream git.
     upstream_branches = ['origin/upstream/master']
 
   if not options.list_only:
@@ -164,12 +164,11 @@ def Main(args):
     return
 
   subprocess.check_call(['git', 'checkout', 'origin/master'])
+  branch_name = '%s-deps-%s' % (options.component, new_rev[:8])
+  subprocess.check_call(['git', 'checkout', '-b', branch_name, 'origin/master'])
   with open(deps_file, 'w') as fh:
     fh.write(deps_data)
   subprocess.check_call(['git', 'commit', '-a', '-m', msg])
-
-  branch_name = '%s-deps-%s' % (options.component, new_rev[:8])
-  subprocess.check_call(['git', 'checkout', '-b', branch_name])
 
   if options.no_upload:
     return

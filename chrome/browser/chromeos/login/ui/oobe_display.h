@@ -19,19 +19,20 @@ class CoreOobeActor;
 class DeviceDisabledScreenActor;
 class EnableDebuggingScreenActor;
 class EnrollmentScreenActor;
-class ErrorScreenActor;
+class ErrorScreen;
 class EulaView;
 class GaiaScreenHandler;
-class HIDDetectionScreenActor;
+class HIDDetectionView;
 class HostPairingScreenActor;
 class KioskAutolaunchScreenActor;
 class KioskEnableScreenActor;
+class NetworkErrorView;
 class NetworkView;
-class ResetScreenActor;
+class ResetView;
 class SupervisedUserCreationScreenHandler;
 class TermsOfServiceScreenActor;
-class UpdateScreenActor;
-class UserImageScreenActor;
+class UpdateView;
+class UserImageView;
 class UserBoardView;
 class WrongHWIDScreenActor;
 
@@ -74,21 +75,21 @@ class OobeDisplay {
   // Pointers to actors which should be used by the specific screens. Actors
   // must be owned by the OobeDisplay implementation.
   virtual CoreOobeActor* GetCoreOobeActor() = 0;
-  virtual UpdateScreenActor* GetUpdateScreenActor() = 0;
   virtual NetworkView* GetNetworkView() = 0;
   virtual EulaView* GetEulaView() = 0;
+  virtual UpdateView* GetUpdateView() = 0;
   virtual EnableDebuggingScreenActor* GetEnableDebuggingScreenActor() = 0;
   virtual EnrollmentScreenActor* GetEnrollmentScreenActor() = 0;
-  virtual ResetScreenActor* GetResetScreenActor() = 0;
+  virtual ResetView* GetResetView() = 0;
   virtual KioskAutolaunchScreenActor* GetKioskAutolaunchScreenActor() = 0;
   virtual KioskEnableScreenActor* GetKioskEnableScreenActor() = 0;
   virtual TermsOfServiceScreenActor* GetTermsOfServiceScreenActor() = 0;
-  virtual UserImageScreenActor* GetUserImageScreenActor() = 0;
-  virtual ErrorScreenActor* GetErrorScreenActor() = 0;
+  virtual UserImageView* GetUserImageView() = 0;
+  virtual ErrorScreen* GetErrorScreen() = 0;
   virtual WrongHWIDScreenActor* GetWrongHWIDScreenActor() = 0;
   virtual AutoEnrollmentCheckScreenActor*
       GetAutoEnrollmentCheckScreenActor() = 0;
-  virtual HIDDetectionScreenActor* GetHIDDetectionScreenActor() = 0;
+  virtual HIDDetectionView* GetHIDDetectionView() = 0;
   virtual SupervisedUserCreationScreenHandler*
       GetSupervisedUserCreationScreenActor() = 0;
   virtual AppLaunchSplashScreenActor* GetAppLaunchSplashScreenActor() = 0;

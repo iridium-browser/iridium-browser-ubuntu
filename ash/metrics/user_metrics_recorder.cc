@@ -8,14 +8,120 @@
 #include "ash/shelf/shelf_view.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
+#include "ash/shell_window_ids.h"
 #include "ash/wm/window_state.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/user_metrics.h"
+#include "ui/aura/window.h"
 
 namespace ash {
 
+namespace {
+
 // Time in seconds between calls to "RecordPeriodicMetrics".
 const int kAshPeriodicMetricsTimeInSeconds = 30 * 60;
+
+enum ActiveWindowStateType {
+  ACTIVE_WINDOW_STATE_TYPE_NO_ACTIVE_WINDOW,
+  ACTIVE_WINDOW_STATE_TYPE_OTHER,
+  ACTIVE_WINDOW_STATE_TYPE_MAXIMIZED,
+  ACTIVE_WINDOW_STATE_TYPE_FULLSCREEN,
+  ACTIVE_WINDOW_STATE_TYPE_SNAPPED,
+  ACTIVE_WINDOW_STATE_TYPE_DOCKED,
+  ACTIVE_WINDOW_STATE_TYPE_COUNT
+};
+
+ActiveWindowStateType GetActiveWindowState() {
+  ActiveWindowStateType active_window_state_type =
+      ACTIVE_WINDOW_STATE_TYPE_NO_ACTIVE_WINDOW;
+  wm::WindowState* active_window_state = ash::wm::GetActiveWindowState();
+  if (active_window_state) {
+    switch (active_window_state->GetStateType()) {
+      case wm::WINDOW_STATE_TYPE_MAXIMIZED:
+        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_MAXIMIZED;
+        break;
+      case wm::WINDOW_STATE_TYPE_FULLSCREEN:
+        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_FULLSCREEN;
+        break;
+      case wm::WINDOW_STATE_TYPE_LEFT_SNAPPED:
+      case wm::WINDOW_STATE_TYPE_RIGHT_SNAPPED:
+        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_SNAPPED;
+        break;
+      case wm::WINDOW_STATE_TYPE_DOCKED:
+      case wm::WINDOW_STATE_TYPE_DOCKED_MINIMIZED:
+        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_DOCKED;
+        break;
+      case wm::WINDOW_STATE_TYPE_DEFAULT:
+      case wm::WINDOW_STATE_TYPE_NORMAL:
+      case wm::WINDOW_STATE_TYPE_MINIMIZED:
+      case wm::WINDOW_STATE_TYPE_INACTIVE:
+      case wm::WINDOW_STATE_TYPE_END:
+      case wm::WINDOW_STATE_TYPE_AUTO_POSITIONED:
+        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_OTHER;
+        break;
+    }
+  }
+  return active_window_state_type;
+}
+
+// Array of window container ids that contain visible windows to be counted for
+// UMA statistics. Note the containers are ordered from top most visible
+// container to the lowest to allow the |GetNumVisibleWindows| method to short
+// circuit when processing a maximized or fullscreen window.
+int kVisibleWindowContainerIds[] = {kShellWindowId_PanelContainer,
+                                    kShellWindowId_DockedContainer,
+                                    kShellWindowId_AlwaysOnTopContainer,
+                                    kShellWindowId_DefaultContainer};
+
+// Returns an approximate count of how many windows are currently visible in the
+// primary root window.
+int GetNumVisibleWindowsInPrimaryDisplay() {
+  int visible_window_count = 0;
+  bool maximized_or_fullscreen_window_present = false;
+
+  for (const int& current_container_id : kVisibleWindowContainerIds) {
+    if (maximized_or_fullscreen_window_present)
+      break;
+
+    const aura::Window::Windows& children =
+        Shell::GetContainer(Shell::GetInstance()->GetPrimaryRootWindow(),
+                            current_container_id)->children();
+    // Reverse iterate over the child windows so that they are processed in
+    // visible stacking order.
+    for (aura::Window::Windows::const_reverse_iterator it = children.rbegin(),
+                                                       rend = children.rend();
+         it != rend; ++it) {
+      const aura::Window* child_window = *it;
+      const wm::WindowState* child_window_state =
+          wm::GetWindowState(child_window);
+
+      if (!child_window->IsVisible() || child_window_state->IsMinimized())
+        continue;
+
+      // Only count activatable windows for 2 reasons:
+      //  1. Ensures that a browser window and its transient, modal child will
+      //     only count as 1 visible window.
+      //  2. Prevents counting some windows in the
+      //     kShellWindowId_DockedContainer that were not opened by the user.
+      if (child_window_state->CanActivate())
+        ++visible_window_count;
+
+      // Stop counting windows that will be hidden by maximized or fullscreen
+      // windows. Only windows in the kShellWindowId_DefaultContainer and
+      // kShellWindowId_AlwaysOnTopContainer can be maximized or fullscreened
+      // and completely obscure windows beneath them.
+      if ((kShellWindowId_DefaultContainer == current_container_id ||
+           kShellWindowId_AlwaysOnTopContainer == current_container_id) &&
+          child_window_state->IsMaximizedOrFullscreen()) {
+        maximized_or_fullscreen_window_present = true;
+        break;
+      }
+    }
+  }
+  return visible_window_count;
+}
+
+}  // namespace
 
 UserMetricsRecorder::UserMetricsRecorder() {
   timer_.Start(FROM_HERE,
@@ -79,12 +185,33 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case ash::UMA_GESTURE_OVERVIEW:
       base::RecordAction(base::UserMetricsAction("Gesture_Overview"));
       break;
+    case ash::UMA_LAUNCHER_BUTTON_PRESSED_WITH_MOUSE:
+      base::RecordAction(
+          base::UserMetricsAction("Launcher_ButtonPressed_Mouse"));
+      break;
+    case ash::UMA_LAUNCHER_BUTTON_PRESSED_WITH_TOUCH:
+      base::RecordAction(
+          base::UserMetricsAction("Launcher_ButtonPressed_Touch"));
+      break;
     case ash::UMA_LAUNCHER_CLICK_ON_APP:
       base::RecordAction(base::UserMetricsAction("Launcher_ClickOnApp"));
       break;
     case ash::UMA_LAUNCHER_CLICK_ON_APPLIST_BUTTON:
       base::RecordAction(
           base::UserMetricsAction("Launcher_ClickOnApplistButton"));
+      break;
+    case ash::UMA_LAUNCHER_LAUNCH_TASK:
+      base::RecordAction(base::UserMetricsAction("Launcher_LaunchTask"));
+      break;
+    case UMA_MAXIMIZE_MODE_DISABLED:
+      base::RecordAction(base::UserMetricsAction("Touchview_Disabled"));
+      break;
+    case UMA_MAXIMIZE_MODE_ENABLED:
+      base::RecordAction(base::UserMetricsAction("Touchview_Enabled"));
+      break;
+    case UMA_MAXIMIZE_MODE_INITIALLY_DISABLED:
+      base::RecordAction(
+          base::UserMetricsAction("Touchview_Initially_Disabled"));
       break;
     case ash::UMA_MOUSE_DOWN:
       base::RecordAction(base::UserMetricsAction("Mouse_Down"));
@@ -305,9 +432,15 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
       base::RecordAction(
           base::UserMetricsAction("StatusArea_SignOut"));
       break;
-    case ash::UMA_STATUS_AREA_VPN_JOIN_OTHER_CLICKED:
+    case ash::UMA_STATUS_AREA_VPN_ADD_BUILT_IN_CLICKED:
+      base::RecordAction(base::UserMetricsAction("StatusArea_VPN_AddBuiltIn"));
+      break;
+    case ash::UMA_STATUS_AREA_VPN_ADD_THIRD_PARTY_CLICKED:
       base::RecordAction(
-          base::UserMetricsAction("StatusArea_VPN_JoinOther"));
+          base::UserMetricsAction("StatusArea_VPN_AddThirdParty"));
+      break;
+    case ash::UMA_STATUS_AREA_VPN_DISCONNECT_CLICKED:
+      base::RecordAction(base::UserMetricsAction("StatusArea_VPN_Disconnect"));
       break;
     case ash::UMA_STATUS_AREA_VPN_SETTINGS_CLICKED:
       base::RecordAction(
@@ -396,47 +529,11 @@ void UserMetricsRecorder::RecordPeriodicMetrics() {
                               SHELF_ALIGNMENT_UMA_ENUM_VALUE_COUNT);
   }
 
-  enum ActiveWindowStateType {
-    ACTIVE_WINDOW_STATE_TYPE_NO_ACTIVE_WINDOW,
-    ACTIVE_WINDOW_STATE_TYPE_OTHER,
-    ACTIVE_WINDOW_STATE_TYPE_MAXIMIZED,
-    ACTIVE_WINDOW_STATE_TYPE_FULLSCREEN,
-    ACTIVE_WINDOW_STATE_TYPE_SNAPPED,
-    ACTIVE_WINDOW_STATE_TYPE_DOCKED,
-    ACTIVE_WINDOW_STATE_TYPE_COUNT
-  };
+  UMA_HISTOGRAM_COUNTS_100("Ash.NumberOfVisibleWindowsInPrimaryDisplay",
+                           GetNumVisibleWindowsInPrimaryDisplay());
 
-  ActiveWindowStateType active_window_state_type =
-      ACTIVE_WINDOW_STATE_TYPE_NO_ACTIVE_WINDOW;
-  wm::WindowState* active_window_state = ash::wm::GetActiveWindowState();
-  if (active_window_state) {
-    switch (active_window_state->GetStateType()) {
-      case wm::WINDOW_STATE_TYPE_MAXIMIZED:
-        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_MAXIMIZED;
-        break;
-      case wm::WINDOW_STATE_TYPE_FULLSCREEN:
-        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_FULLSCREEN;
-        break;
-      case wm::WINDOW_STATE_TYPE_LEFT_SNAPPED:
-      case wm::WINDOW_STATE_TYPE_RIGHT_SNAPPED:
-        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_SNAPPED;
-        break;
-      case wm::WINDOW_STATE_TYPE_DOCKED:
-      case wm::WINDOW_STATE_TYPE_DOCKED_MINIMIZED:
-        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_DOCKED;
-        break;
-      case wm::WINDOW_STATE_TYPE_DEFAULT:
-      case wm::WINDOW_STATE_TYPE_NORMAL:
-      case wm::WINDOW_STATE_TYPE_MINIMIZED:
-      case wm::WINDOW_STATE_TYPE_INACTIVE:
-      case wm::WINDOW_STATE_TYPE_END:
-      case wm::WINDOW_STATE_TYPE_AUTO_POSITIONED:
-        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_OTHER;
-        break;
-    }
-  }
   UMA_HISTOGRAM_ENUMERATION("Ash.ActiveWindowShowTypeOverTime",
-                            active_window_state_type,
+                            GetActiveWindowState(),
                             ACTIVE_WINDOW_STATE_TYPE_COUNT);
 }
 

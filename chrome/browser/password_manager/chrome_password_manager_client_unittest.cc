@@ -15,9 +15,9 @@
 #include "components/autofill/content/common/autofill_messages.h"
 #include "components/password_manager/content/browser/password_manager_internals_service_factory.h"
 #include "components/password_manager/content/common/credential_manager_messages.h"
-#include "components/password_manager/content/common/credential_manager_types.h"
 #include "components/password_manager/core/browser/log_receiver.h"
 #include "components/password_manager/core/browser/password_manager_internals_service.h"
+#include "components/password_manager/core/common/credential_manager_types.h"
 #include "components/password_manager/core/common/password_manager_switches.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/web_contents.h"
@@ -28,6 +28,7 @@
 using content::BrowserContext;
 using content::WebContents;
 using testing::Return;
+using testing::_;
 
 namespace {
 
@@ -38,26 +39,18 @@ class MockLogReceiver : public password_manager::LogReceiver {
   MOCK_METHOD1(LogSavePasswordProgress, void(const std::string&));
 };
 
-class TestChromePasswordManagerClient : public ChromePasswordManagerClient {
+class MockChromePasswordManagerClient : public ChromePasswordManagerClient {
  public:
-  explicit TestChromePasswordManagerClient(content::WebContents* web_contents)
-      : ChromePasswordManagerClient(web_contents, NULL),
-        is_sync_account_credential_(false) {}
-  ~TestChromePasswordManagerClient() override {}
+  MOCK_CONST_METHOD2(IsSyncAccountCredential,
+                     bool(const std::string& username,
+                          const std::string& origin));
 
-  bool IsSyncAccountCredential(const std::string& username,
-                               const std::string& origin) const override {
-    return is_sync_account_credential_;
-  }
-
-  void set_is_sync_account_credential(bool is_sync_account_credential) {
-    is_sync_account_credential_ = is_sync_account_credential;
-  }
+  explicit MockChromePasswordManagerClient(content::WebContents* web_contents)
+      : ChromePasswordManagerClient(web_contents, nullptr) {}
+  ~MockChromePasswordManagerClient() override {}
 
  private:
-  bool is_sync_account_credential_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestChromePasswordManagerClient);
+  DISALLOW_COPY_AND_ASSIGN(MockChromePasswordManagerClient);
 };
 
 }  // namespace
@@ -82,13 +75,13 @@ class ChromePasswordManagerClientTest : public ChromeRenderViewHostTestHarness {
 };
 
 ChromePasswordManagerClientTest::ChromePasswordManagerClientTest()
-    : service_(NULL) {
+    : service_(nullptr) {
 }
 
 void ChromePasswordManagerClientTest::SetUp() {
   ChromeRenderViewHostTestHarness::SetUp();
   ChromePasswordManagerClient::CreateForWebContentsWithAutofillClient(
-      web_contents(), NULL);
+      web_contents(), nullptr);
   service_ = password_manager::PasswordManagerInternalsServiceFactory::
       GetForBrowserContext(profile());
   ASSERT_TRUE(service_);
@@ -223,34 +216,23 @@ TEST_F(ChromePasswordManagerClientTest, LogToAReceiver) {
   EXPECT_FALSE(client->IsLoggingActive());
 }
 
-TEST_F(ChromePasswordManagerClientTest,
-       ShouldAskUserToSubmitURLDefaultBehaviour) {
-  ChromePasswordManagerClient* client = GetClient();
-  // TODO(melandory) Since "Ask user to submit URL" functionality is currently
-  // in development, so the user should not be asked to submit a URL.
-  EXPECT_FALSE(client->ShouldAskUserToSubmitURL(GURL("https://hostname.com/")));
-}
-
-TEST_F(ChromePasswordManagerClientTest, ShouldAskUserToSubmitURLEmptyURL) {
-  ChromePasswordManagerClient* client = GetClient();
-  EXPECT_FALSE(client->ShouldAskUserToSubmitURL(GURL::EmptyGURL()));
-}
-
 TEST_F(ChromePasswordManagerClientTest, ShouldFilterAutofillResult_Reauth) {
   // Make client disallow only reauth requests.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(
       password_manager::switches::kDisallowAutofillSyncCredentialForReauth);
-  scoped_ptr<TestChromePasswordManagerClient> client(
-      new TestChromePasswordManagerClient(web_contents()));
+  scoped_ptr<MockChromePasswordManagerClient> client(
+      new MockChromePasswordManagerClient(web_contents()));
   autofill::PasswordForm form;
 
-  client->set_is_sync_account_credential(false);
+  EXPECT_CALL(*client, IsSyncAccountCredential(_, _))
+      .WillRepeatedly(Return(false));
   NavigateAndCommit(
       GURL("https://accounts.google.com/login?rart=123&continue=blah"));
   EXPECT_FALSE(client->ShouldFilterAutofillResult(form));
 
-  client->set_is_sync_account_credential(true);
+  EXPECT_CALL(*client, IsSyncAccountCredential(_, _))
+      .WillRepeatedly(Return(true));
   NavigateAndCommit(
       GURL("https://accounts.google.com/login?rart=123&continue=blah"));
   EXPECT_TRUE(client->ShouldFilterAutofillResult(form));
@@ -270,10 +252,11 @@ TEST_F(ChromePasswordManagerClientTest, ShouldFilterAutofillResult_Reauth) {
 TEST_F(ChromePasswordManagerClientTest, ShouldFilterAutofillResult) {
   // Normally the client should allow any credentials through, even if they
   // are the sync credential.
-  scoped_ptr<TestChromePasswordManagerClient> client(
-      new TestChromePasswordManagerClient(web_contents()));
+  scoped_ptr<MockChromePasswordManagerClient> client(
+      new MockChromePasswordManagerClient(web_contents()));
   autofill::PasswordForm form;
-  client->set_is_sync_account_credential(true);
+  EXPECT_CALL(*client, IsSyncAccountCredential(_, _))
+      .WillRepeatedly(Return(true));
   NavigateAndCommit(GURL("https://accounts.google.com/Login"));
   EXPECT_FALSE(client->ShouldFilterAutofillResult(form));
 
@@ -281,8 +264,9 @@ TEST_F(ChromePasswordManagerClientTest, ShouldFilterAutofillResult) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(
       password_manager::switches::kDisallowAutofillSyncCredential);
-  client.reset(new TestChromePasswordManagerClient(web_contents()));
-  client->set_is_sync_account_credential(true);
+  client.reset(new MockChromePasswordManagerClient(web_contents()));
+  EXPECT_CALL(*client, IsSyncAccountCredential(_, _))
+      .WillRepeatedly(Return(true));
   NavigateAndCommit(GURL("https://accounts.google.com/Login"));
   EXPECT_TRUE(client->ShouldFilterAutofillResult(form));
 }

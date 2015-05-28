@@ -39,7 +39,7 @@ typedef struct DVDSubContext
   int      has_palette;
   uint8_t  colormap[4];
   uint8_t  alpha[256];
-  uint8_t *buf;
+  uint8_t  buf[0x10000];
   int      buf_size;
   int      forced_subs_only;
 #ifdef DEBUG
@@ -107,6 +107,12 @@ static int decode_rle(uint8_t *bitmap, int linesize, int w, int h,
     int bit_len;
     int x, y, len, color;
     uint8_t *d;
+
+    if (start >= buf_size)
+        return -1;
+
+    if (w <= 0 || h <= 0)
+        return -1;
 
     bit_len = (buf_size - start) * 8;
     init_get_bits(&gb, buf + start, bit_len);
@@ -354,16 +360,25 @@ static int decode_dvd_subtitles(DVDSubContext *ctx, AVSubtitle *sub_header,
             if (w > 0 && h > 0) {
                 reset_rects(sub_header);
 
-                bitmap = av_malloc(w * h);
                 sub_header->rects = av_mallocz(sizeof(*sub_header->rects));
+                if (!sub_header->rects)
+                    goto fail;
                 sub_header->rects[0] = av_mallocz(sizeof(AVSubtitleRect));
+                if (!sub_header->rects[0])
+                    goto fail;
                 sub_header->num_rects = 1;
-                sub_header->rects[0]->pict.data[0] = bitmap;
-                decode_rle(bitmap, w * 2, w, (h + 1) / 2,
-                           buf, offset1, buf_size, is_8bit);
-                decode_rle(bitmap + w, w * 2, w, h / 2,
-                           buf, offset2, buf_size, is_8bit);
+                bitmap = sub_header->rects[0]->pict.data[0] = av_malloc(w * h);
+                if (!bitmap)
+                    goto fail;
+                if (decode_rle(bitmap, w * 2, w, (h + 1) / 2,
+                               buf, offset1, buf_size, is_8bit) < 0)
+                    goto fail;
+                if (decode_rle(bitmap + w, w * 2, w, h / 2,
+                               buf, offset2, buf_size, is_8bit) < 0)
+                    goto fail;
                 sub_header->rects[0]->pict.data[1] = av_mallocz(AVPALETTE_SIZE);
+                if (!sub_header->rects[0]->pict.data[1])
+                    goto fail;
                 if (is_8bit) {
                     if (!yuv_palette)
                         goto fail;
@@ -501,15 +516,11 @@ static int append_to_cached_buf(AVCodecContext *avctx,
 {
     DVDSubContext *ctx = avctx->priv_data;
 
-    if (ctx->buf_size > 0xffff - buf_size) {
+    if (ctx->buf_size >= sizeof(ctx->buf) - buf_size) {
         av_log(avctx, AV_LOG_WARNING, "Attempt to reconstruct "
                "too large SPU packets aborted.\n");
-        av_freep(&ctx->buf);
         return AVERROR_INVALIDDATA;
     }
-    ctx->buf = av_realloc(ctx->buf, ctx->buf_size + buf_size);
-    if (!ctx->buf)
-        return AVERROR(ENOMEM);
     memcpy(ctx->buf + ctx->buf_size, buf, buf_size);
     ctx->buf_size += buf_size;
     return 0;
@@ -525,7 +536,7 @@ static int dvdsub_decode(AVCodecContext *avctx,
     AVSubtitle *sub = data;
     int is_menu;
 
-    if (ctx->buf) {
+    if (ctx->buf_size) {
         int ret = append_to_cached_buf(avctx, buf, buf_size);
         if (ret < 0) {
             *data_size = 0;
@@ -567,7 +578,6 @@ static int dvdsub_decode(AVCodecContext *avctx,
     }
 #endif
 
-    av_freep(&ctx->buf);
     ctx->buf_size = 0;
     *data_size = 1;
     return buf_size;
@@ -597,7 +607,7 @@ static int parse_ifo_palette(DVDSubContext *ctx, char *p)
 
     ctx->has_palette = 0;
     if ((ifo = fopen(p, "r")) == NULL) {
-        av_log(ctx, AV_LOG_WARNING, "Unable to open IFO file \"%s\": %s\n", p, strerror(errno));
+        av_log(ctx, AV_LOG_WARNING, "Unable to open IFO file \"%s\": %s\n", p, av_err2str(AVERROR(errno)));
         return AVERROR_EOF;
     }
     if (fread(ifostr, 12, 1, ifo) != 1 || memcmp(ifostr, "DVDVIDEO-VTS", 12)) {
@@ -711,7 +721,6 @@ static av_cold int dvdsub_init(AVCodecContext *avctx)
 static av_cold int dvdsub_close(AVCodecContext *avctx)
 {
     DVDSubContext *ctx = avctx->priv_data;
-    av_freep(&ctx->buf);
     ctx->buf_size = 0;
     return 0;
 }

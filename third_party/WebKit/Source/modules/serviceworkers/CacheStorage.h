@@ -10,6 +10,7 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/serviceworkers/Cache.h"
 #include "modules/serviceworkers/CacheQueryOptions.h"
+#include "public/platform/WebServiceWorkerCacheStorage.h"
 #include "wtf/Forward.h"
 #include "wtf/HashMap.h"
 #include "wtf/Noncopyable.h"
@@ -19,7 +20,7 @@ namespace blink {
 class Cache;
 class WebServiceWorkerCacheStorage;
 
-class CacheStorage final : public GarbageCollected<CacheStorage>, public ScriptWrappable {
+class CacheStorage final : public GarbageCollectedFinalized<CacheStorage>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
     WTF_MAKE_NONCOPYABLE(CacheStorage);
 public:
@@ -32,7 +33,7 @@ public:
     ScriptPromise match(ScriptState*, const RequestInfo&, const CacheQueryOptions&, ExceptionState&);
 
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     class Callbacks;
@@ -44,11 +45,11 @@ private:
     friend class WithCacheCallbacks;
     friend class DeleteCallbacks;
 
-    explicit CacheStorage(WebServiceWorkerCacheStorage*);
+    explicit CacheStorage(PassOwnPtr<WebServiceWorkerCacheStorage>);
     ScriptPromise matchImpl(ScriptState*, const Request*, const CacheQueryOptions&);
 
-    WebServiceWorkerCacheStorage* m_webCacheStorage;
-    HeapHashMap<String, Member<Cache> > m_nameToCacheMap;
+    OwnPtr<WebServiceWorkerCacheStorage> m_webCacheStorage;
+    HeapHashMap<String, Member<Cache>> m_nameToCacheMap;
 };
 
 } // namespace blink

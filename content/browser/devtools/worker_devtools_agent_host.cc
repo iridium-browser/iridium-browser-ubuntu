@@ -4,8 +4,8 @@
 
 #include "content/browser/devtools/worker_devtools_agent_host.h"
 
+#include "content/browser/devtools/ipc_devtools_agent_host.h"
 #include "content/browser/devtools/protocol/devtools_protocol_handler.h"
-#include "content/common/devtools_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 
@@ -55,27 +55,31 @@ void WorkerDevToolsAgentHost::OnClientDetached() {
 
 bool WorkerDevToolsAgentHost::OnMessageReceived(
     const IPC::Message& msg) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(WorkerDevToolsAgentHost, msg)
   IPC_MESSAGE_HANDLER(DevToolsClientMsg_DispatchOnInspectorFrontend,
                       OnDispatchOnInspectorFrontend)
-  IPC_MESSAGE_HANDLER(DevToolsHostMsg_SaveAgentRuntimeState,
-                      OnSaveAgentRuntimeState)
   IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
+void WorkerDevToolsAgentHost::PauseForDebugOnStart() {
+  DCHECK(state_ == WORKER_UNINSPECTED);
+  state_ = WORKER_PAUSED_FOR_DEBUG_ON_START;
+}
+
+bool WorkerDevToolsAgentHost::IsPausedForDebugOnStart() {
+  return state_ == WORKER_PAUSED_FOR_DEBUG_ON_START;
+}
+
 void WorkerDevToolsAgentHost::WorkerReadyForInspection() {
-  if (state_ == WORKER_PAUSED_FOR_DEBUG_ON_START) {
-    RenderProcessHost* rph = RenderProcessHost::FromID(worker_id_.first);
-    Inspect(rph->GetBrowserContext());
-  } else if (state_ == WORKER_PAUSED_FOR_REATTACH) {
+  if (state_ == WORKER_PAUSED_FOR_REATTACH) {
     DCHECK(IsAttached());
     state_ = WORKER_INSPECTED;
     AttachToWorker();
-    Reattach(saved_agent_state_);
+    Reattach();
   }
 }
 
@@ -94,9 +98,9 @@ void WorkerDevToolsAgentHost::WorkerDestroyed() {
     base::Callback<void(const std::string&)> raw_message_callback(
         base::Bind(&WorkerDevToolsAgentHost::SendMessageToClient,
                 base::Unretained(this)));
-    devtools::worker::Client worker(raw_message_callback);
-    worker.DisconnectedFromWorker(
-        devtools::worker::DisconnectedFromWorkerParams::Create());
+    devtools::inspector::Client inspector(raw_message_callback);
+    inspector.TargetCrashed(
+        devtools::inspector::TargetCrashedParams::Create());
     DetachFromWorker();
   }
   state_ = WORKER_TERMINATED;
@@ -133,17 +137,11 @@ void WorkerDevToolsAgentHost::WorkerCreated() {
 }
 
 void WorkerDevToolsAgentHost::OnDispatchOnInspectorFrontend(
-    const std::string& message,
-    uint32 total_size) {
+    const DevToolsMessageChunk& message) {
   if (!IsAttached())
     return;
 
-  ProcessChunkedMessageFromAgent(message, total_size);
-}
-
-void WorkerDevToolsAgentHost::OnSaveAgentRuntimeState(
-    const std::string& state) {
-  saved_agent_state_ = state;
+  ProcessChunkedMessageFromAgent(message);
 }
 
 }  // namespace content

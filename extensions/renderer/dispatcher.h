@@ -38,6 +38,7 @@ struct ExtensionMsg_UpdatePermissions_Params;
 
 namespace blink {
 class WebFrame;
+class WebLocalFrame;
 class WebSecurityOrigin;
 }
 
@@ -72,8 +73,6 @@ class Dispatcher : public content::RenderProcessObserver,
     return function_names_;
   }
 
-  bool is_extension_process() const { return is_extension_process_; }
-
   const ExtensionSet* extensions() const { return &extensions_; }
 
   const ScriptContextSet& script_context_set() const {
@@ -98,12 +97,12 @@ class Dispatcher : public content::RenderProcessObserver,
                                                  int world_id,
                                                  bool use_effective_url);
 
-  void DidCreateScriptContext(blink::WebFrame* frame,
+  // Forwarded from the RenderFrameObserver events by ExtensionFrameHelper.
+  void DidCreateScriptContext(blink::WebLocalFrame* frame,
                               const v8::Handle<v8::Context>& context,
                               int extension_group,
                               int world_id);
-
-  void WillReleaseScriptContext(blink::WebFrame* frame,
+  void WillReleaseScriptContext(blink::WebLocalFrame* frame,
                                 const v8::Handle<v8::Context>& context,
                                 int world_id);
 
@@ -189,10 +188,19 @@ class Dispatcher : public content::RenderProcessObserver,
   void OnTransferBlobs(const std::vector<std::string>& blob_uuids);
   void OnUnloaded(const std::string& id);
   void OnUpdatePermissions(const ExtensionMsg_UpdatePermissions_Params& params);
+  void OnUpdateTabSpecificPermissions(const GURL& visible_url,
+                                      const std::string& extension_id,
+                                      const URLPatternSet& new_hosts,
+                                      bool update_origin_whitelist,
+                                      int tab_id);
+  void OnClearTabSpecificPermissions(
+      const std::vector<std::string>& extension_ids,
+      bool update_origin_whitelist,
+      int tab_id);
   void OnUsingWebRequestAPI(bool webrequest_used);
 
   // UserScriptSetManager::Observer implementation.
-  void OnUserScriptsUpdated(const std::set<std::string>& changed_extensions,
+  void OnUserScriptsUpdated(const std::set<HostID>& changed_hosts,
                             const std::vector<UserScript*>& scripts) override;
 
   void UpdateActiveExtensions();
@@ -200,9 +208,9 @@ class Dispatcher : public content::RenderProcessObserver,
   // Sets up the host permissions for |extension|.
   void InitOriginPermissions(const Extension* extension);
 
-  // Updates the host permissions for extension to include only those in
+  // Updates the host permissions for the extension url to include only those in
   // |new_patterns|, and remove from |old_patterns| that are no longer allowed.
-  void UpdateOriginPermissions(const Extension* extension,
+  void UpdateOriginPermissions(const GURL& extension_url,
                                const URLPatternSet& old_patterns,
                                const URLPatternSet& new_patterns);
 
@@ -254,12 +262,16 @@ class Dispatcher : public content::RenderProcessObserver,
       std::string* bind_name,
       ScriptContext* context);
 
+  // Requires the GuestView modules in the module system of the ScriptContext
+  // |context|.
+  void RequireGuestViewModules(ScriptContext* context);
+
   // The delegate for this dispatcher. Not owned, but must extend beyond the
   // Dispatcher's own lifetime.
   DispatcherDelegate* delegate_;
 
-  // True if this renderer is running extensions.
-  bool is_extension_process_;
+  // True if the IdleNotification timer should be set.
+  bool set_idle_notifications_;
 
   // Contains all loaded extensions.  This is essentially the renderer
   // counterpart to ExtensionService in the browser. It contains information

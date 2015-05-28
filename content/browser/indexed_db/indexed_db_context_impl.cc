@@ -273,6 +273,19 @@ base::ListValue* IndexedDBContextImpl::GetAllOriginsDetails() {
   return list.release();
 }
 
+int IndexedDBContextImpl::GetOriginBlobFileCount(const GURL& origin_url) {
+  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  int count = 0;
+  base::FileEnumerator file_enumerator(
+      GetBlobPath(storage::GetIdentifierFromOrigin(origin_url)), true,
+      base::FileEnumerator::FILES);
+  for (base::FilePath file_path = file_enumerator.Next(); !file_path.empty();
+       file_path = file_enumerator.Next()) {
+    count++;
+  }
+  return count;
+}
+
 int64 IndexedDBContextImpl::GetOriginDiskUsage(const GURL& origin_url) {
   DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
   if (data_path_.empty() || !IsInOriginSet(origin_url))
@@ -318,6 +331,39 @@ void IndexedDBContextImpl::DeleteForOrigin(const GURL& origin_url) {
     RemoveFromOriginSet(origin_url);
     origin_size_map_.erase(origin_url);
     space_available_map_.erase(origin_url);
+  }
+}
+
+void IndexedDBContextImpl::CopyOriginData(const GURL& origin_url,
+                                          IndexedDBContext* dest_context) {
+  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+
+  if (data_path_.empty() || !IsInOriginSet(origin_url))
+    return;
+
+  IndexedDBContextImpl* dest_context_impl =
+      static_cast<IndexedDBContextImpl*>(dest_context);
+
+  ForceClose(origin_url, FORCE_CLOSE_COPY_ORIGIN);
+  std::string origin_id = storage::GetIdentifierFromOrigin(origin_url);
+
+  // Make sure we're not about to delete our own database.
+  CHECK_NE(dest_context_impl->data_path().value(), data_path().value());
+
+  // Delete any existing storage paths in the destination context.
+  // A previously failed migration may have left behind partially copied
+  // directories.
+  for (const base::FilePath& dest_path :
+       dest_context_impl->GetStoragePaths(origin_url))
+    base::DeleteFile(dest_path, true);
+
+  base::FilePath dest_data_path = dest_context_impl->data_path();
+  base::CreateDirectory(dest_data_path);
+
+  for (const base::FilePath& src_data_path : GetStoragePaths(origin_url)) {
+    if (base::PathExists(src_data_path)) {
+      base::CopyDirectory(src_data_path, dest_data_path, true);
+    }
   }
 }
 
@@ -513,7 +559,7 @@ void IndexedDBContextImpl::GotUsageAndQuota(const GURL& origin_url,
                                             storage::QuotaStatusCode status,
                                             int64 usage,
                                             int64 quota) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(status == storage::kQuotaStatusOk ||
          status == storage::kQuotaErrorAbort)
       << "status was " << status;
@@ -548,7 +594,7 @@ void IndexedDBContextImpl::QueryAvailableQuota(const GURL& origin_url) {
     }
     return;
   }
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!quota_manager_proxy() || !quota_manager_proxy()->quota_manager())
     return;
   quota_manager_proxy()->quota_manager()->GetUsageAndQuota(

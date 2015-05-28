@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <vector>
 
 #include "base/files/file_enumerator.h"
@@ -45,16 +46,6 @@ const base::FilePath& GetTestDataDir() {
 }
 
 const std::vector<base::FilePath> GetTestFiles() {
-  static const base::FilePath::CharType* const kFilesToSkip[] = {
-    FILE_PATH_LITERAL("bug_459132.html"),
-    FILE_PATH_LITERAL("bug_454366b.html"),
-    FILE_PATH_LITERAL("bug_454366.html"),
-    FILE_PATH_LITERAL("25_checkout_m_llbean.com.html"),
-  };
-  std::set<base::FilePath> set_of_files_to_skip;
-  for (size_t i = 0; i < arraysize(kFilesToSkip); ++i)
-    set_of_files_to_skip.insert(base::FilePath(kFilesToSkip[i]));
-
   base::FilePath dir;
   CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &dir));
   dir = dir.AppendASCII("chrome/test/data/autofill")
@@ -64,9 +55,9 @@ const std::vector<base::FilePath> GetTestFiles() {
   std::vector<base::FilePath> files;
   for (base::FilePath input_file = input_files.Next(); !input_file.empty();
        input_file = input_files.Next()) {
-    if (!ContainsKey(set_of_files_to_skip, input_file.BaseName()))
-      files.push_back(input_file);
+    files.push_back(input_file);
   }
+  std::sort(files.begin(), files.end());
 
 #if defined(OS_MACOSX)
   base::mac::ClearAmIBundledCache();
@@ -115,9 +106,9 @@ void FormStructureBrowserTest::GenerateResults(const std::string& input,
   ContentAutofillDriver* autofill_driver =
       ContentAutofillDriverFactory::FromWebContents(web_contents)
           ->DriverForFrame(web_contents->GetMainFrame());
-  ASSERT_NE(static_cast<ContentAutofillDriver*>(NULL), autofill_driver);
+  ASSERT_NE(nullptr, autofill_driver);
   AutofillManager* autofill_manager = autofill_driver->autofill_manager();
-  ASSERT_NE(static_cast<AutofillManager*>(NULL), autofill_manager);
+  ASSERT_NE(nullptr, autofill_manager);
   std::vector<FormStructure*> forms = autofill_manager->form_structures_.get();
   *output = FormStructuresToString(forms);
 }

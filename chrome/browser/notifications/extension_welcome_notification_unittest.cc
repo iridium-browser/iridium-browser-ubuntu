@@ -224,10 +224,9 @@ class ExtensionWelcomeNotificationTest : public testing::Test {
                               base::UTF8ToUTF16("Title"),
                               base::UTF8ToUTF16("Body"),
                               gfx::Image(),
-                              blink::WebTextDirectionDefault,
                               notifier_id,
                               base::UTF8ToUTF16("Source"),
-                              base::UTF8ToUTF16(notification_id),
+                              notification_id,
                               rich_notification_data,
                               new TestNotificationDelegate("TestNotification"));
     welcome_notification_->ShowWelcomeNotificationIfNecessary(notification);

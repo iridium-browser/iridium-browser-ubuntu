@@ -6,7 +6,9 @@
 #include "base/command_line.h"
 #include "base/memory/discardable_memory.h"
 #include "base/memory/scoped_vector.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/thread_task_runner_handle.h"
+#include "content/common/in_process_child_thread_params.h"
 #include "content/common/resource_messages.h"
 #include "content/common/websocket_messages.h"
 #include "content/public/browser/content_browser_client.h"
@@ -17,6 +19,7 @@
 #include "content/renderer/render_thread_impl.h"
 #include "content/test/mock_render_process.h"
 #include "content/test/render_thread_impl_browser_test_ipc_helper.h"
+#include "gpu/GLES2/gl2extchromium.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // IPC messages for testing ----------------------------------------------------
@@ -77,11 +80,17 @@ class TestTaskCounter : public base::SingleThreadTaskRunner {
   int count_;
 };
 
+#if defined(COMPILER_MSVC)
+// See explanation for other RenderViewHostImpl which is the same issue.
+#pragma warning(push)
+#pragma warning(disable: 4250)
+#endif
+
 class RenderThreadImplForTest : public RenderThreadImpl {
  public:
-  RenderThreadImplForTest(const std::string& channel_id,
+  RenderThreadImplForTest(const InProcessChildThreadParams& params,
                           scoped_refptr<TestTaskCounter> test_task_counter)
-      : RenderThreadImpl(channel_id), test_task_counter_(test_task_counter) {}
+      : RenderThreadImpl(params), test_task_counter_(test_task_counter) {}
 
   ~RenderThreadImplForTest() override {}
 
@@ -91,11 +100,15 @@ class RenderThreadImplForTest : public RenderThreadImpl {
     RenderThreadImpl::SetResourceDispatchTaskQueue(test_task_counter_);
   }
 
-  using ChildThread::OnMessageReceived;
+  using ChildThreadImpl::OnMessageReceived;
 
  private:
   scoped_refptr<TestTaskCounter> test_task_counter_;
 };
+
+#if defined(COMPILER_MSVC)
+#pragma warning(pop)
+#endif
 
 void QuitTask(base::MessageLoop* message_loop) {
   message_loop->QuitWhenIdle();
@@ -144,8 +157,13 @@ class RenderThreadImplBrowserTest : public testing::Test {
     base::CommandLine::StringVector old_argv = cmd->argv();
 
     cmd->AppendSwitchASCII(switches::kNumRasterThreads, "1");
-    thread_ = new RenderThreadImplForTest(test_helper_->GetChannelId(),
-                                          test_task_counter_);
+    cmd->AppendSwitchASCII(switches::kUseImageTextureTarget,
+                           base::UintToString(GL_TEXTURE_2D));
+
+    thread_ = new RenderThreadImplForTest(
+        InProcessChildThreadParams(test_helper_->GetChannelId(),
+                                   test_helper_->GetIOTaskRunner()),
+        test_task_counter_);
     cmd->InitFromArgv(old_argv);
 
     thread_->EnsureWebKitInitialized();
@@ -179,38 +197,6 @@ TEST_F(RenderThreadImplBrowserTest,
 
   thread_->compositor_message_loop_proxy()->PostTask(
       FROM_HERE, base::Bind(&CheckRenderThreadInputHandlerManager, thread_));
-}
-
-// Checks that emulated discardable memory is discarded when the last widget
-// is hidden.
-// Disabled under LeakSanitizer due to memory leaks.
-TEST_F(RenderThreadImplBrowserTest,
-       WILL_LEAK(EmulatedDiscardableMemoryDiscardedWhenWidgetsHidden)) {
-  thread_->WidgetCreated();
-
-  // Allocate 128MB of discardable memory.
-  ScopedVector<base::DiscardableMemory> discardable_memory;
-  for (int i = 0; i < 32; ++i) {
-    discardable_memory.push_back(
-        base::DiscardableMemory::CreateLockedMemoryWithType(
-            base::DISCARDABLE_MEMORY_TYPE_EMULATED, 4 * 1024 * 1024).release());
-    ASSERT_TRUE(discardable_memory.back());
-    discardable_memory.back()->Unlock();
-  }
-
-  // Hide all widgets.
-  thread_->WidgetHidden();
-
-  // Count how much memory is left, should be at most one block.
-  int blocks_left = 0;
-  for (auto iter = discardable_memory.begin(); iter != discardable_memory.end();
-       ++iter) {
-    if ((*iter)->Lock() == base::DISCARDABLE_MEMORY_LOCK_STATUS_SUCCESS)
-      ++blocks_left;
-  }
-  EXPECT_LE(blocks_left, 1);
-
-  thread_->WidgetDestroyed();
 }
 
 // Disabled under LeakSanitizer due to memory leaks.

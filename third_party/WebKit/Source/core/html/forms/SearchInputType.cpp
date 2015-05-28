@@ -34,12 +34,12 @@
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/HTMLNames.h"
 #include "core/InputTypeNames.h"
-#include "core/events/KeyboardEvent.h"
 #include "core/dom/shadow/ShadowRoot.h"
+#include "core/events/KeyboardEvent.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/shadow/ShadowElementNames.h"
 #include "core/html/shadow/TextControlInnerElements.h"
-#include "core/rendering/RenderSearchField.h"
+#include "core/layout/LayoutSearchField.h"
 #include "wtf/PassOwnPtr.h"
 
 namespace blink {
@@ -62,19 +62,14 @@ void SearchInputType::countUsage()
     countUsageIfVisible(UseCounter::InputTypeSearch);
 }
 
-RenderObject* SearchInputType::createRenderer(RenderStyle*) const
+LayoutObject* SearchInputType::createLayoutObject(const ComputedStyle&) const
 {
-    return new RenderSearchField(&element());
+    return new LayoutSearchField(&element());
 }
 
 const AtomicString& SearchInputType::formControlType() const
 {
     return InputTypeNames::search;
-}
-
-bool SearchInputType::shouldRespectSpeechAttribute()
-{
-    return true;
 }
 
 bool SearchInputType::needsContainer() const
@@ -86,7 +81,7 @@ void SearchInputType::createShadowSubtree()
 {
     TextFieldInputType::createShadowSubtree();
     Element* container = containerElement();
-    Element* viewPort = element().userAgentShadowRoot()->getElementById(ShadowElementNames::editingViewPort());
+    Element* viewPort = element().closedShadowRoot()->getElementById(ShadowElementNames::editingViewPort());
     ASSERT(container);
     ASSERT(viewPort);
 
@@ -114,7 +109,7 @@ void SearchInputType::handleKeydownEvent(KeyboardEvent* event)
 
 void SearchInputType::startSearchEventTimer()
 {
-    ASSERT(element().renderer());
+    ASSERT(element().layoutObject());
     unsigned length = element().innerEditorValue().length();
 
     if (!length) {
@@ -160,9 +155,15 @@ void SearchInputType::updateView()
     updateCancelButtonVisibility();
 }
 
+const AtomicString& SearchInputType::defaultAutocapitalize() const
+{
+    DEFINE_STATIC_LOCAL(const AtomicString, sentences, ("sentences", AtomicString::ConstructFromLiteral));
+    return sentences;
+}
+
 void SearchInputType::updateCancelButtonVisibility()
 {
-    Element* button = element().userAgentShadowRoot()->getElementById(ShadowElementNames::clearButton());
+    Element* button = element().closedShadowRoot()->getElementById(ShadowElementNames::clearButton());
     if (!button)
         return;
     if (element().value().isEmpty()) {

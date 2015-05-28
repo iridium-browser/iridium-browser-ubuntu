@@ -18,15 +18,10 @@ var remoting = remoting || {};
  * @param {Element} statsElement The HTML div to which to update stats.
  */
 remoting.ConnectionStats = function(statsElement) {
-  /**
-   * @private
-   */
+  /** @private */
   this.statsElement_ = statsElement;
 
-  /**
-   * @type {remoting.ClientSession.PerfStats}
-   * @private
-   */
+  /** @private {remoting.ClientSession.PerfStats} */
   this.mostRecent_ = null
 
   remoting.windowShape.addCallback(this);
@@ -58,7 +53,7 @@ remoting.ConnectionStats.prototype.show = function(show) {
 /**
  * If the stats panel is visible, add its bounding rectangle to the specified
  * region.
- * @param {Array.<{left: number, top: number, width: number, height: number}>}
+ * @param {Array<{left: number, top: number, width: number, height: number}>}
  *     rects List of rectangles.
  */
 

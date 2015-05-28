@@ -35,7 +35,7 @@ public:
     void setDerived(const InternalDictionaryDerived&);
     void getDerived(InternalDictionaryDerived&);
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     DictionaryTest();
@@ -55,15 +55,17 @@ private:
     Nullable<int> m_longOrNullMemberWithDefault;
     Nullable<bool> m_booleanMember;
     Nullable<double> m_doubleMember;
+    Nullable<double> m_unrestrictedDoubleMember;
     String m_stringMember;
     String m_stringMemberWithDefault;
     String m_byteStringMember;
     String m_usvStringMember;
-    Nullable<Vector<String> > m_stringSequenceMember;
-    Nullable<Vector<String> > m_stringSequenceOrNullMember;
+    Nullable<Vector<String>> m_stringSequenceMember;
+    Nullable<Vector<String>> m_stringSequenceOrNullMember;
     String m_enumMember;
     String m_enumMemberWithDefault;
     String m_enumOrNullMember;
+    Nullable<Vector<String>> m_enumArrayMember;
     RefPtrWillBeMember<Element> m_elementMember;
     RefPtrWillBeMember<Element> m_elementOrNullMember;
     ScriptValue m_objectMember;
@@ -72,6 +74,7 @@ private:
     RefPtrWillBeMember<EventTarget> m_eventTargetOrNullMember;
     String m_derivedStringMember;
     String m_derivedStringMemberWithDefault;
+    bool m_requiredBooleanMember;
 };
 
 } // namespace blink

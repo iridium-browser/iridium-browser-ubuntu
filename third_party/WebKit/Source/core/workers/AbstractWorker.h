@@ -31,6 +31,7 @@
 #ifndef AbstractWorker_h
 #define AbstractWorker_h
 
+#include "core/CoreExport.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/events/EventListener.h"
 #include "core/events/EventTarget.h"
@@ -46,7 +47,7 @@ class ExceptionState;
 class KURL;
 class ExecutionContext;
 
-class AbstractWorker : public EventTargetWithInlineData, public RefCountedWillBeNoBase<AbstractWorker>, public ActiveDOMObject {
+class CORE_EXPORT AbstractWorker : public EventTargetWithInlineData, public RefCountedWillBeNoBase<AbstractWorker>, public ActiveDOMObject {
     REFCOUNTED_EVENT_TARGET(AbstractWorker);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(AbstractWorker);
 public:
@@ -58,7 +59,7 @@ public:
     AbstractWorker(ExecutionContext*);
     virtual ~AbstractWorker();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     // Helper function that converts a URL to an absolute URL and checks the result for validity.

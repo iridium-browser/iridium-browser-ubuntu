@@ -28,7 +28,7 @@ void TraceMessageFilter::OnChannelClosing() {
       OnCaptureMonitoringSnapshotAcked();
 
     if (is_awaiting_buffer_percent_full_ack_)
-      OnTraceLogStatusReply(base::debug::TraceLogStatus());
+      OnTraceLogStatusReply(base::trace_event::TraceLogStatus());
 
     TracingControllerImpl::GetInstance()->RemoveTraceMessageFilter(this);
   }
@@ -51,50 +51,54 @@ bool TraceMessageFilter::OnMessageReceived(const IPC::Message& message) {
                         OnWatchEventMatched)
     IPC_MESSAGE_HANDLER(TracingHostMsg_TraceLogStatusReply,
                         OnTraceLogStatusReply)
+    IPC_MESSAGE_HANDLER(TracingHostMsg_GlobalMemoryDumpRequest,
+                        OnGlobalMemoryDumpRequest)
+    IPC_MESSAGE_HANDLER(TracingHostMsg_ProcessMemoryDumpResponse,
+                        OnProcessMemoryDumpResponse)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
 void TraceMessageFilter::SendBeginTracing(
-    const base::debug::CategoryFilter& category_filter,
-    const base::debug::TraceOptions& options) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    const base::trace_event::CategoryFilter& category_filter,
+    const base::trace_event::TraceOptions& options) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   Send(new TracingMsg_BeginTracing(category_filter.ToString(),
                                    base::TimeTicks::NowFromSystemTraceTime(),
                                    options.ToString()));
 }
 
 void TraceMessageFilter::SendEndTracing() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!is_awaiting_end_ack_);
   is_awaiting_end_ack_ = true;
   Send(new TracingMsg_EndTracing);
 }
 
 void TraceMessageFilter::SendEnableMonitoring(
-    const base::debug::CategoryFilter& category_filter,
-    const base::debug::TraceOptions& options) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    const base::trace_event::CategoryFilter& category_filter,
+    const base::trace_event::TraceOptions& options) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   Send(new TracingMsg_EnableMonitoring(category_filter.ToString(),
       base::TimeTicks::NowFromSystemTraceTime(),
       options.ToString()));
 }
 
 void TraceMessageFilter::SendDisableMonitoring() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   Send(new TracingMsg_DisableMonitoring);
 }
 
 void TraceMessageFilter::SendCaptureMonitoringSnapshot() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!is_awaiting_capture_monitoring_snapshot_ack_);
   is_awaiting_capture_monitoring_snapshot_ack_ = true;
   Send(new TracingMsg_CaptureMonitoringSnapshot);
 }
 
 void TraceMessageFilter::SendGetTraceLogStatus() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!is_awaiting_buffer_percent_full_ack_);
   is_awaiting_buffer_percent_full_ack_ = true;
   Send(new TracingMsg_GetTraceLogStatus);
@@ -107,6 +111,18 @@ void TraceMessageFilter::SendSetWatchEvent(const std::string& category_name,
 
 void TraceMessageFilter::SendCancelWatchEvent() {
   Send(new TracingMsg_CancelWatchEvent);
+}
+
+// Called by TracingControllerImpl, which handles the multiprocess coordination.
+void TraceMessageFilter::SendProcessMemoryDumpRequest(
+    const base::trace_event::MemoryDumpRequestArgs& args) {
+  Send(new TracingMsg_ProcessMemoryDumpRequest(args));
+}
+
+// Called by TracingControllerImpl, which handles the multiprocess coordination.
+void TraceMessageFilter::SendGlobalMemoryDumpResponse(uint64 dump_guid,
+                                                      bool success) {
+  Send(new TracingMsg_GlobalMemoryDumpResponse(dump_guid, success));
 }
 
 void TraceMessageFilter::OnChildSupportsTracing() {
@@ -158,13 +174,26 @@ void TraceMessageFilter::OnWatchEventMatched() {
 }
 
 void TraceMessageFilter::OnTraceLogStatusReply(
-    const base::debug::TraceLogStatus& status) {
+    const base::trace_event::TraceLogStatus& status) {
   if (is_awaiting_buffer_percent_full_ack_) {
     is_awaiting_buffer_percent_full_ack_ = false;
     TracingControllerImpl::GetInstance()->OnTraceLogStatusReply(this, status);
   } else {
     NOTREACHED();
   }
+}
+
+void TraceMessageFilter::OnGlobalMemoryDumpRequest(
+    const base::trace_event::MemoryDumpRequestArgs& args) {
+  TracingControllerImpl::GetInstance()->RequestGlobalMemoryDump(
+      args,
+      base::Bind(&TraceMessageFilter::SendGlobalMemoryDumpResponse, this));
+}
+
+void TraceMessageFilter::OnProcessMemoryDumpResponse(uint64 dump_guid,
+                                                     bool success) {
+  TracingControllerImpl::GetInstance()->OnProcessMemoryDumpResponse(
+      this, dump_guid, success);
 }
 
 }  // namespace content

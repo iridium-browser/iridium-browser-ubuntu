@@ -21,6 +21,7 @@
       "file_manager/grid_view.js",
       "file_manager/keyboard_operations.js",
       "file_manager/open_audio_files.js",
+      "file_manager/open_image_files.js",
       "file_manager/open_video_files.js",
       "file_manager/open_zip_files.js",
       "file_manager/restore_geometry.js",
@@ -29,7 +30,6 @@
       "file_manager/suggest_app_dialog.js",
       "file_manager/tab_index.js",
       "file_manager/tasks.js",
-      "file_manager/thumbnails.js",
       "file_manager/transfer.js",
       "file_manager/traverse.js"
     ]
@@ -37,6 +37,7 @@
   "permissions": [
     "fileSystem",
     "tabs",
+    "commandLinePrivate",
     "chrome-extension://oobinhbdbiehknkpbpejbbpdbkdjmoco/*",
     "chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/*"
   ]

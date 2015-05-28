@@ -10,12 +10,12 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram.h"
 #include "base/sha1.h"
 #include "base/threading/thread.h"
+#include "base/trace_event/trace_event.h"
 #include "content/browser/browser_child_process_host_impl.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
@@ -25,6 +25,7 @@
 #include "content/browser/renderer_host/render_widget_resize_helper.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/common/in_process_child_thread_params.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -285,7 +286,7 @@ bool GpuProcessHost::ValidateHost(GpuProcessHost* host) {
 // static
 GpuProcessHost* GpuProcessHost::Get(GpuProcessKind kind,
                                     CauseForGpuLaunch cause) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   // Don't grant further access to GPU if it is not allowed.
   GpuDataManagerImpl* gpu_data_manager = GpuDataManagerImpl::GetInstance();
@@ -359,7 +360,7 @@ void GpuProcessHost::RegisterGpuMainThreadFactory(
 
 // static
 GpuProcessHost* GpuProcessHost::FromID(int host_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   for (int i = 0; i < GPU_PROCESS_KIND_COUNT; ++i) {
     GpuProcessHost* host = g_gpu_process_hosts[i];
@@ -503,8 +504,11 @@ bool GpuProcessHost::Init() {
     return false;
 
   if (in_process_) {
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
     DCHECK(g_gpu_main_thread_factory);
-    in_process_gpu_thread_.reset(g_gpu_main_thread_factory(channel_id));
+    in_process_gpu_thread_.reset(
+        g_gpu_main_thread_factory(InProcessChildThreadParams(
+            channel_id, base::MessageLoop::current()->task_runner())));
     base::Thread::Options options;
 #if defined(OS_WIN)
     // WGL needs to create its own window and pump messages on it.
@@ -934,7 +938,8 @@ bool GpuProcessHost::LaunchGpuProcess(const std::string& channel_id) {
   process_->Launch(
       new GpuSandboxedProcessLauncherDelegate(cmd_line,
                                               process_->GetHost()),
-      cmd_line);
+      cmd_line,
+      true);
   process_launched_ = true;
 
   UMA_HISTOGRAM_ENUMERATION("GPU.GPUProcessLifetimeEvents",

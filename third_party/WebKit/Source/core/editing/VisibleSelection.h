@@ -26,6 +26,7 @@
 #ifndef VisibleSelection_h
 #define VisibleSelection_h
 
+#include "core/CoreExport.h"
 #include "core/editing/SelectionType.h"
 #include "core/editing/TextGranularity.h"
 #include "core/editing/VisiblePosition.h"
@@ -38,7 +39,7 @@ class Position;
 const EAffinity SEL_DEFAULT_AFFINITY = DOWNSTREAM;
 enum SelectionDirection { DirectionForward, DirectionBackward, DirectionRight, DirectionLeft };
 
-class VisibleSelection {
+class CORE_EXPORT VisibleSelection {
     DISALLOW_ALLOCATION();
 public:
     VisibleSelection();
@@ -122,20 +123,20 @@ public:
     // or end is moved to a different position.
     //
     // Objects implementing |ChangeObserver| interface must outlive the VisibleSelection object.
-    class ChangeObserver : public WillBeGarbageCollectedMixin {
+    class CORE_EXPORT ChangeObserver : public WillBeGarbageCollectedMixin {
         WTF_MAKE_NONCOPYABLE(ChangeObserver);
     public:
         ChangeObserver();
         virtual ~ChangeObserver();
         virtual void didChangeVisibleSelection() = 0;
-        virtual void trace(Visitor*) { }
+        DEFINE_INLINE_VIRTUAL_TRACE() { }
     };
 
     void setChangeObserver(ChangeObserver&);
     void clearChangeObserver();
     void didChange(); // Fire the change observer, if any.
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     void validatePositionsIfNeeded();
 
@@ -145,12 +146,14 @@ public:
     void showTreeForThis() const;
 #endif
 
+    void setStartRespectingGranularity(TextGranularity);
+    void setEndRespectingGranularity(TextGranularity);
+
 private:
     void validate(TextGranularity = CharacterGranularity);
 
     // Support methods for validate()
     void setBaseAndExtentToDeepEquivalents();
-    void setStartAndEndFromBaseAndExtentRespectingGranularity(TextGranularity);
     void adjustSelectionToAvoidCrossingShadowBoundaries();
     void adjustSelectionToAvoidCrossingEditingBoundaries();
     void updateSelectionType();

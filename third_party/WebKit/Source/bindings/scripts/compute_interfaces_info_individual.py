@@ -168,6 +168,7 @@ class InterfaceInfoCollector(object):
             'full_paths': [],
             'include_paths': [],
         })
+        self.enumerations = set()
         self.union_types = set()
         self.typedefs = {}
 
@@ -181,6 +182,17 @@ class InterfaceInfoCollector(object):
         """Reads an idl file and collects information which is required by the
         binding code generation."""
         definitions = self.reader.read_idl_file(idl_filename)
+
+        this_union_types = collect_union_types_from_definitions(definitions)
+        self.union_types.update(this_union_types)
+        self.typedefs.update(definitions.typedefs)
+        # Check enum duplication.
+        for enum_name in definitions.enumerations.keys():
+            for defined_enum in self.enumerations:
+                if defined_enum.name == enum_name:
+                    raise Exception('Enumeration %s has multiple definitions' % enum_name)
+        self.enumerations.update(definitions.enumerations.values())
+
         if definitions.interfaces:
             definition = next(definitions.interfaces.itervalues())
             interface_info = {
@@ -203,12 +215,7 @@ class InterfaceInfoCollector(object):
                 'referenced_interfaces': None,
             }
         else:
-            raise Exception('IDL file must contain one interface or dictionary')
-
-        this_union_types = collect_union_types_from_definitions(definitions)
-        self.union_types.update(this_union_types)
-
-        self.typedefs.update(definitions.typedefs)
+            return
 
         extended_attributes = definition.extended_attributes
         implemented_as = extended_attributes.get('ImplementedAs')
@@ -262,6 +269,8 @@ class InterfaceInfoCollector(object):
     def get_component_info_as_dict(self):
         """Returns component wide information as a dict."""
         return {
+            'enumerations': dict((enum.name, enum.values)
+                                 for enum in self.enumerations),
             'typedefs': self.typedefs,
             'union_types': self.union_types,
         }

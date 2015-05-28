@@ -5,11 +5,11 @@
 #include "net/cert/crl_set_storage.h"
 
 #include "base/base64.h"
-#include "base/debug/trace_event.h"
 #include "base/format_macros.h"
 #include "base/json/json_reader.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "crypto/sha2.h"
 #include "third_party/zlib/zlib.h"
@@ -295,7 +295,7 @@ bool CRLSetStorage::Parse(base::StringPiece data,
   // anything by doing this.
 #if defined(__BYTE_ORDER)
   // Linux check
-  COMPILE_ASSERT(__BYTE_ORDER == __LITTLE_ENDIAN, assumes_little_endian);
+  static_assert(__BYTE_ORDER == __LITTLE_ENDIAN, "assumes little endian");
 #elif defined(__BIG_ENDIAN__)
   // Mac check
   #error assumes little endian

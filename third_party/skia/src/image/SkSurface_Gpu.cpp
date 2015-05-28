@@ -7,7 +7,6 @@
 
 #include "SkSurface_Gpu.h"
 
-#include "GrGpuResourceCacheAccess.h"
 #include "SkCanvas.h"
 #include "SkGpuDevice.h"
 #include "SkImage_Base.h"
@@ -24,7 +23,7 @@ SkSurface_Gpu::SkSurface_Gpu(SkGpuDevice* device)
 }
 
 SkSurface_Gpu::~SkSurface_Gpu() {
-    SkSafeUnref(fDevice);
+    fDevice->unref();
 }
 
 SkCanvas* SkSurface_Gpu::onNewCanvas() {
@@ -44,9 +43,10 @@ SkSurface* SkSurface_Gpu::onNewSurface(const SkImageInfo& info) {
                                       &this->props());
 }
 
-SkImage* SkSurface_Gpu::onNewImageSnapshot() {
+SkImage* SkSurface_Gpu::onNewImageSnapshot(Budgeted budgeted) {
     const int sampleCount = fDevice->accessRenderTarget()->numSamples();
-    SkImage* image = SkNewImageFromBitmapTexture(fDevice->accessBitmap(false), sampleCount);
+    SkImage* image = SkNewImageFromBitmapTexture(fDevice->accessBitmap(false), sampleCount,
+                                                 budgeted);
     if (image) {
         as_IB(image)->initWithProps(this->props());
     }
@@ -58,34 +58,18 @@ void SkSurface_Gpu::onDraw(SkCanvas* canvas, SkScalar x, SkScalar y,
     canvas->drawBitmap(fDevice->accessBitmap(false), x, y, paint);
 }
 
-// Create a new SkGpuDevice and, if necessary, copy the contents of the old
-// device into it. Note that this flushes the SkGpuDevice but
+// Create a new render target and, if necessary, copy the contents of the old
+// render target into it. Note that this flushes the SkGpuDevice but
 // doesn't force an OpenGL flush.
 void SkSurface_Gpu::onCopyOnWrite(ContentChangeMode mode) {
     GrRenderTarget* rt = fDevice->accessRenderTarget();
-    // are we sharing our render target with the image?
-    SkASSERT(this->getCachedImage());
-    if (rt->asTexture() == SkTextureImageGetTexture(this->getCachedImage())) {
-        GrRenderTarget* oldRT = this->fDevice->accessRenderTarget();
-        SkSurface::Budgeted budgeted = oldRT->cacheAccess().isBudgeted() ? kYes_Budgeted :
-                                                                           kNo_Budgeted;
-        SkAutoTUnref<SkGpuDevice> newDevice(
-            SkGpuDevice::Create(oldRT->getContext(), budgeted, fDevice->imageInfo(),
-                                oldRT->numSamples(), &this->props(), 0));
-        if (kRetain_ContentChangeMode == mode && !oldRT->wasDestroyed() && newDevice) {
-            oldRT->getContext()->copySurface(newDevice->accessRenderTarget(), oldRT);
-        }
-
-        SkASSERT(this->getCachedCanvas());
-        SkASSERT(this->getCachedCanvas()->getDevice() == fDevice);
-
-        this->getCachedCanvas()->setRootDevice(newDevice);
-        SkRefCnt_SafeAssign(fDevice, newDevice.get());
-
-        // For now we always treat the image snapshots as budgeted. We could make newImageSnapshot
-        // take a Budgeted param.
-        oldRT->cacheAccess().makeBudgeted();
-
+    // are we sharing our render target with the image? Note this call should never create a new
+    // image because onCopyOnWrite is only called when there is a cached image.
+    SkImage* image = this->getCachedImage(kNo_Budgeted);
+    SkASSERT(image);
+    if (rt->asTexture() == SkTextureImageGetTexture(image)) {
+        this->fDevice->replaceRenderTarget(SkSurface::kRetain_ContentChangeMode == mode);
+        SkTextureImageApplyBudgetedDecision(image);
     } else if (kDiscard_ContentChangeMode == mode) {
         this->SkSurface_Gpu::onDiscard();
     }

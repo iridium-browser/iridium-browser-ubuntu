@@ -33,6 +33,12 @@
 
 #include "core/StylePropertyShorthand.h"
 #include "core/animation/AnimationNode.h"
+#include "core/animation/CompositorAnimations.h"
+#include "core/animation/css/CSSAnimatableValueFactory.h"
+#include "core/animation/css/CSSPropertyEquality.h"
+#include "core/css/resolver/StyleResolver.h"
+#include "core/dom/Document.h"
+#include "platform/animation/AnimationUtilities.h"
 #include "platform/geometry/FloatBox.h"
 #include "platform/transforms/TransformationMatrix.h"
 #include "wtf/text/StringHash.h"
@@ -49,6 +55,14 @@ PropertySet KeyframeEffectModelBase::properties() const
     return result;
 }
 
+void KeyframeEffectModelBase::setFrames(KeyframeVector& keyframes)
+{
+    // TODO(samli): Should also notify/invalidate the player
+    m_keyframes = keyframes;
+    m_keyframeGroups = nullptr;
+    m_interpolationEffect = nullptr;
+}
+
 void KeyframeEffectModelBase::sample(int iteration, double fraction, double iterationDuration, OwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>>& result) const
 {
     ASSERT(iteration >= 0);
@@ -57,6 +71,45 @@ void KeyframeEffectModelBase::sample(int iteration, double fraction, double iter
     ensureInterpolationEffect();
 
     return m_interpolationEffect->getActiveInterpolations(fraction, iterationDuration, result);
+}
+
+void KeyframeEffectModelBase::forceConversionsToAnimatableValues(Element& element, const ComputedStyle* baseStyle)
+{
+    ensureKeyframeGroups();
+    snapshotCompositableProperties(element, baseStyle);
+    ensureInterpolationEffect(&element, baseStyle);
+}
+
+void KeyframeEffectModelBase::snapshotCompositableProperties(Element& element, const ComputedStyle* baseStyle)
+{
+    ensureKeyframeGroups();
+    for (CSSPropertyID property : CompositorAnimations::CompositableProperties) {
+        if (!affects(property))
+            continue;
+        for (auto& keyframe : m_keyframeGroups->get(property)->m_keyframes)
+            keyframe->populateAnimatableValue(property, element, baseStyle);
+    }
+}
+
+bool KeyframeEffectModelBase::updateNeutralKeyframeAnimatableValues(CSSPropertyID property, PassRefPtrWillBeRawPtr<AnimatableValue> value)
+{
+    ASSERT(CompositorAnimations::isCompositableProperty(property));
+
+    if (!value)
+        return false;
+
+    ensureKeyframeGroups();
+    auto& keyframes = m_keyframeGroups->get(property)->m_keyframes;
+    ASSERT(keyframes.size() >= 2);
+
+    auto& first = toStringPropertySpecificKeyframe(*keyframes.first());
+    auto& last = toStringPropertySpecificKeyframe(*keyframes.last());
+
+    if (!first.value())
+        first.setAnimatableValue(value);
+    if (!last.value())
+        last.setAnimatableValue(value);
+    return !first.value() || !last.value();
 }
 
 KeyframeEffectModelBase::KeyframeVector KeyframeEffectModelBase::normalizedKeyframes(const KeyframeVector& keyframes)
@@ -124,14 +177,14 @@ void KeyframeEffectModelBase::ensureKeyframeGroups() const
     // Add synthetic keyframes.
     m_hasSyntheticKeyframes = false;
     for (const auto& entry : *m_keyframeGroups) {
-        if (entry.value->addSyntheticKeyframeIfRequired())
+        if (entry.value->addSyntheticKeyframeIfRequired(m_neutralKeyframeEasing))
             m_hasSyntheticKeyframes = true;
 
         entry.value->removeRedundantKeyframes();
     }
 }
 
-void KeyframeEffectModelBase::ensureInterpolationEffect(Element* element) const
+void KeyframeEffectModelBase::ensureInterpolationEffect(Element* element, const ComputedStyle* baseStyle) const
 {
     if (m_interpolationEffect)
         return;
@@ -139,16 +192,13 @@ void KeyframeEffectModelBase::ensureInterpolationEffect(Element* element) const
 
     for (const auto& entry : *m_keyframeGroups) {
         const PropertySpecificKeyframeVector& keyframes = entry.value->keyframes();
-        ASSERT(keyframes[0]->composite() == AnimationEffect::CompositeReplace);
         for (size_t i = 0; i < keyframes.size() - 1; i++) {
-            ASSERT(keyframes[i + 1]->composite() == AnimationEffect::CompositeReplace);
             double applyFrom = i ? keyframes[i]->offset() : (-std::numeric_limits<double>::infinity());
             double applyTo = i == keyframes.size() - 2 ? std::numeric_limits<double>::infinity() : keyframes[i + 1]->offset();
             if (applyTo == 1)
                 applyTo = std::numeric_limits<double>::infinity();
 
-            m_interpolationEffect->addInterpolation(keyframes[i]->createInterpolation(entry.key, keyframes[i + 1].get(), element),
-                &keyframes[i]->easing(), keyframes[i]->offset(), keyframes[i + 1]->offset(), applyFrom, applyTo);
+            m_interpolationEffect->addInterpolationsFromKeyframes(entry.key, element, baseStyle, *keyframes[i], *keyframes[i + 1], applyFrom, applyTo);
         }
     }
 }
@@ -165,13 +215,13 @@ bool KeyframeEffectModelBase::isReplaceOnly()
     return true;
 }
 
-void KeyframeEffectModelBase::trace(Visitor* visitor)
+DEFINE_TRACE(KeyframeEffectModelBase)
 {
     visitor->trace(m_keyframes);
-    visitor->trace(m_interpolationEffect);
-#if ENABLE_OILPAN
+#if ENABLE(OILPAN)
     visitor->trace(m_keyframeGroups);
 #endif
+    visitor->trace(m_interpolationEffect);
     AnimationEffect::trace(visitor);
 }
 
@@ -207,25 +257,25 @@ void KeyframeEffectModelBase::PropertySpecificKeyframeGroup::removeRedundantKeyf
     ASSERT(m_keyframes.size() >= 2);
 }
 
-bool KeyframeEffectModelBase::PropertySpecificKeyframeGroup::addSyntheticKeyframeIfRequired()
+bool KeyframeEffectModelBase::PropertySpecificKeyframeGroup::addSyntheticKeyframeIfRequired(PassRefPtr<TimingFunction> easing)
 {
     ASSERT(!m_keyframes.isEmpty());
 
     bool addedSyntheticKeyframe = false;
 
     if (m_keyframes.first()->offset() != 0.0) {
-        m_keyframes.insert(0, m_keyframes.first()->neutralKeyframe(0, nullptr));
+        m_keyframes.insert(0, m_keyframes.first()->neutralKeyframe(0, easing));
         addedSyntheticKeyframe = true;
     }
     if (m_keyframes.last()->offset() != 1.0) {
-        appendKeyframe(m_keyframes.last()->neutralKeyframe(1, nullptr));
+        appendKeyframe(m_keyframes.last()->neutralKeyframe(1, easing));
         addedSyntheticKeyframe = true;
     }
 
     return addedSyntheticKeyframe;
 }
 
-void KeyframeEffectModelBase::PropertySpecificKeyframeGroup::trace(Visitor* visitor)
+DEFINE_TRACE(KeyframeEffectModelBase::PropertySpecificKeyframeGroup)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_keyframes);

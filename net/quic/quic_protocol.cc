@@ -101,29 +101,22 @@ QuicPublicResetPacket::QuicPublicResetPacket(
       nonce_proof(0),
       rejected_sequence_number(0) {}
 
-QuicStreamFrame::QuicStreamFrame()
-    : stream_id(0),
-      fin(false),
-      offset(0),
-      notifier(nullptr) {}
+QuicStreamFrame::QuicStreamFrame() : stream_id(0), fin(false), offset(0) {
+}
 
 QuicStreamFrame::QuicStreamFrame(const QuicStreamFrame& frame)
     : stream_id(frame.stream_id),
       fin(frame.fin),
       offset(frame.offset),
-      data(frame.data),
-      notifier(frame.notifier) {
+      data(frame.data) {
 }
 
 QuicStreamFrame::QuicStreamFrame(QuicStreamId stream_id,
                                  bool fin,
                                  QuicStreamOffset offset,
                                  IOVector data)
-    : stream_id(stream_id),
-      fin(fin),
-      offset(offset),
-      data(data),
-      notifier(nullptr) {}
+    : stream_id(stream_id), fin(fin), offset(offset), data(data) {
+}
 
 string* QuicStreamFrame::GetDataAsString() const {
   string* data_string = new string();
@@ -158,12 +151,10 @@ QuicVersionVector QuicSupportedVersions() {
 
 QuicTag QuicVersionToQuicTag(const QuicVersion version) {
   switch (version) {
-    case QUIC_VERSION_21:
-      return MakeQuicTag('Q', '0', '2', '1');
-    case QUIC_VERSION_22:
-      return MakeQuicTag('Q', '0', '2', '2');
     case QUIC_VERSION_23:
       return MakeQuicTag('Q', '0', '2', '3');
+    case QUIC_VERSION_24:
+      return MakeQuicTag('Q', '0', '2', '4');
     default:
       // This shold be an ERROR because we should never attempt to convert an
       // invalid QuicVersion to be written to the wire.
@@ -190,9 +181,8 @@ return #x
 
 string QuicVersionToString(const QuicVersion version) {
   switch (version) {
-    RETURN_STRING_LITERAL(QUIC_VERSION_21);
-    RETURN_STRING_LITERAL(QUIC_VERSION_22);
     RETURN_STRING_LITERAL(QUIC_VERSION_23);
+    RETURN_STRING_LITERAL(QUIC_VERSION_24);
     default:
       return "QUIC_VERSION_UNSUPPORTED";
   }
@@ -209,6 +199,15 @@ string QuicVersionVectorToString(const QuicVersionVector& versions) {
   return result;
 }
 
+ostream& operator<<(ostream& os, const Perspective& s) {
+  if (s == Perspective::IS_SERVER) {
+    os << "IS_SERVER";
+  } else {
+    os << "IS_CLIENT";
+  }
+  return os;
+}
+
 ostream& operator<<(ostream& os, const QuicPacketHeader& header) {
   os << "{ connection_id: " << header.public_header.connection_id
      << ", connection_id_length:" << header.public_header.connection_id_length
@@ -219,7 +218,7 @@ ostream& operator<<(ostream& os, const QuicPacketHeader& header) {
   if (header.public_header.version_flag) {
     os << " version: ";
     for (size_t i = 0; i < header.public_header.versions.size(); ++i) {
-      os << header.public_header.versions[0] << " ";
+      os << header.public_header.versions[i] << " ";
     }
   }
   os << ", fec_flag: " << header.fec_flag
@@ -260,14 +259,6 @@ QuicAckFrame::QuicAckFrame()
 
 QuicAckFrame::~QuicAckFrame() {}
 
-CongestionFeedbackMessageTCP::CongestionFeedbackMessageTCP()
-    : receive_window(0) {
-}
-
-QuicCongestionFeedbackFrame::QuicCongestionFeedbackFrame() : type(kTCP) {}
-
-QuicCongestionFeedbackFrame::~QuicCongestionFeedbackFrame() {}
-
 QuicRstStreamErrorCode AdjustErrorForVersion(
     QuicRstStreamErrorCode error_code,
     QuicVersion version) {
@@ -307,11 +298,6 @@ QuicFrame::QuicFrame(QuicStreamFrame* stream_frame)
 QuicFrame::QuicFrame(QuicAckFrame* frame)
     : type(ACK_FRAME),
       ack_frame(frame) {
-}
-
-QuicFrame::QuicFrame(QuicCongestionFeedbackFrame* frame)
-    : type(CONGESTION_FEEDBACK_FRAME),
-      congestion_feedback_frame(frame) {
 }
 
 QuicFrame::QuicFrame(QuicStopWaitingFrame* frame)
@@ -418,11 +404,6 @@ ostream& operator<<(ostream& os, const QuicFrame& frame) {
       os << "type { ACK_FRAME } " << *(frame.ack_frame);
       break;
     }
-    case CONGESTION_FEEDBACK_FRAME: {
-      os << "type { CONGESTION_FEEDBACK_FRAME } "
-         << *(frame.congestion_feedback_frame);
-      break;
-    }
     case STOP_WAITING_FRAME: {
       os << "type { STOP_WAITING_FRAME } " << *(frame.stop_waiting_frame);
       break;
@@ -482,19 +463,6 @@ ostream& operator<<(ostream& os, const QuicStreamFrame& stream_frame) {
   return os;
 }
 
-ostream& operator<<(ostream& os,
-                    const QuicCongestionFeedbackFrame& congestion_frame) {
-  os << "type: " << congestion_frame.type;
-  switch (congestion_frame.type) {
-    case kTCP: {
-      const CongestionFeedbackMessageTCP& tcp = congestion_frame.tcp;
-      os << " receive_window: " << tcp.receive_window;
-      break;
-    }
-  }
-  return os;
-}
-
 QuicGoAwayFrame::QuicGoAwayFrame()
     : error_code(QUIC_NO_ERROR),
       last_good_stream_id(0) {
@@ -543,11 +511,9 @@ QuicPacket::QuicPacket(char* buffer,
                        bool owns_buffer,
                        QuicConnectionIdLength connection_id_length,
                        bool includes_version,
-                       QuicSequenceNumberLength sequence_number_length,
-                       bool is_fec_packet)
+                       QuicSequenceNumberLength sequence_number_length)
     : QuicData(buffer, length, owns_buffer),
       buffer_(buffer),
-      is_fec_packet_(is_fec_packet),
       connection_id_length_(connection_id_length),
       includes_version_(includes_version),
       sequence_number_length_(sequence_number_length) {
@@ -592,9 +558,8 @@ StringPiece QuicPacket::Plaintext() const {
                      length() - start_of_encrypted_data);
 }
 
-RetransmittableFrames::RetransmittableFrames()
-    : encryption_level_(NUM_ENCRYPTION_LEVELS),
-      has_crypto_handshake_(NOT_HANDSHAKE) {
+RetransmittableFrames::RetransmittableFrames(EncryptionLevel level)
+    : encryption_level_(level), has_crypto_handshake_(NOT_HANDSHAKE) {
 }
 
 RetransmittableFrames::~RetransmittableFrames() {
@@ -608,9 +573,6 @@ RetransmittableFrames::~RetransmittableFrames() {
         break;
       case ACK_FRAME:
         delete it->ack_frame;
-        break;
-      case CONGESTION_FEEDBACK_FRAME:
-        delete it->congestion_feedback_frame;
         break;
       case STOP_WAITING_FRAME:
         delete it->stop_waiting_frame;
@@ -662,21 +624,30 @@ const QuicFrame& RetransmittableFrames::AddNonStreamFrame(
   return frames_.back();
 }
 
-void RetransmittableFrames::set_encryption_level(EncryptionLevel level) {
-  encryption_level_ = level;
+void RetransmittableFrames::RemoveFramesForStream(QuicStreamId stream_id) {
+  QuicFrames::iterator it = frames_.begin();
+  while (it != frames_.end()) {
+    if (it->type != STREAM_FRAME || it->stream_frame->stream_id != stream_id) {
+      ++it;
+      continue;
+    }
+    delete it->stream_frame;
+    it = frames_.erase(it);
+  }
 }
 
 SerializedPacket::SerializedPacket(
     QuicPacketSequenceNumber sequence_number,
     QuicSequenceNumberLength sequence_number_length,
-    QuicPacket* packet,
+    QuicEncryptedPacket* packet,
     QuicPacketEntropyHash entropy_hash,
     RetransmittableFrames* retransmittable_frames)
     : sequence_number(sequence_number),
       sequence_number_length(sequence_number_length),
       packet(packet),
       entropy_hash(entropy_hash),
-      retransmittable_frames(retransmittable_frames) {
+      retransmittable_frames(retransmittable_frames),
+      is_fec_packet(false) {
 }
 
 SerializedPacket::~SerializedPacket() {}
@@ -702,22 +673,26 @@ TransmissionInfo::TransmissionInfo()
       all_transmissions(nullptr),
       in_flight(false),
       is_unackable(false),
-      is_fec_packet(false) {}
+      is_fec_packet(false) {
+}
 
 TransmissionInfo::TransmissionInfo(
     RetransmittableFrames* retransmittable_frames,
     QuicSequenceNumberLength sequence_number_length,
     TransmissionType transmission_type,
-    QuicTime sent_time)
+    QuicTime sent_time,
+    QuicByteCount bytes_sent,
+    bool is_fec_packet)
     : retransmittable_frames(retransmittable_frames),
       sequence_number_length(sequence_number_length),
       sent_time(sent_time),
-      bytes_sent(0),
+      bytes_sent(bytes_sent),
       nack_count(0),
       transmission_type(transmission_type),
       all_transmissions(nullptr),
       in_flight(false),
       is_unackable(false),
-      is_fec_packet(false) {}
+      is_fec_packet(is_fec_packet) {
+}
 
 }  // namespace net

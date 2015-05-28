@@ -9,6 +9,7 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/test/app_list_test_model.h"
 #include "ui/app_list/test/app_list_test_view_delegate.h"
 #include "ui/app_list/views/app_list_folder_view.h"
@@ -18,6 +19,8 @@
 #include "ui/app_list/views/contents_view.h"
 #include "ui/app_list/views/search_box_view.h"
 #include "ui/app_list/views/test/apps_grid_view_test_api.h"
+#include "ui/events/event_utils.h"
+#include "ui/events/test/event_generator.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/view_model.h"
 #include "ui/views/widget/widget.h"
@@ -125,16 +128,12 @@ class AppListMainViewTest : public views::ViewsTestBase {
 
   void SimulateClick(views::View* view) {
     gfx::Point center = view->GetLocalBounds().CenterPoint();
-    view->OnMousePressed(ui::MouseEvent(ui::ET_MOUSE_PRESSED,
-                                        center,
-                                        center,
-                                        ui::EF_LEFT_MOUSE_BUTTON,
-                                        ui::EF_LEFT_MOUSE_BUTTON));
-    view->OnMouseReleased(ui::MouseEvent(ui::ET_MOUSE_RELEASED,
-                                         center,
-                                         center,
-                                         ui::EF_LEFT_MOUSE_BUTTON,
-                                         ui::EF_LEFT_MOUSE_BUTTON));
+    view->OnMousePressed(ui::MouseEvent(
+        ui::ET_MOUSE_PRESSED, center, center, ui::EventTimeForNow(),
+        ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
+    view->OnMouseReleased(ui::MouseEvent(
+        ui::ET_MOUSE_RELEASED, center, center, ui::EventTimeForNow(),
+        ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
   }
 
   // |point| is in |grid_view|'s coordinates.
@@ -146,7 +145,8 @@ class AppListMainViewTest : public views::ViewsTestBase {
 
     gfx::Point translated =
         gfx::PointAtOffsetFromOrigin(point - view->bounds().origin());
-    ui::MouseEvent pressed_event(ui::ET_MOUSE_PRESSED, translated, point, 0, 0);
+    ui::MouseEvent pressed_event(ui::ET_MOUSE_PRESSED, translated, point,
+                                 ui::EventTimeForNow(), 0, 0);
     grid_view->InitiateDrag(view, pointer, pressed_event);
     return view;
   }
@@ -159,7 +159,8 @@ class AppListMainViewTest : public views::ViewsTestBase {
     DCHECK(drag_view);
     gfx::Point translated =
         gfx::PointAtOffsetFromOrigin(point - drag_view->bounds().origin());
-    ui::MouseEvent drag_event(ui::ET_MOUSE_DRAGGED, translated, point, 0, 0);
+    ui::MouseEvent drag_event(ui::ET_MOUSE_DRAGGED, translated, point,
+                              ui::EventTimeForNow(), 0, 0);
     grid_view->UpdateDragFromItem(pointer, drag_event);
   }
 
@@ -265,6 +266,65 @@ TEST_F(AppListMainViewTest, ModelChanged) {
   EXPECT_EQ(kReplacementItems, RootViewModel()->view_size());
 }
 
+// Tests that mouse hovering over an app item highlights it
+TEST_F(AppListMainViewTest, MouseHoverToHighlight) {
+  delegate_->GetTestModel()->PopulateApps(2);
+  main_widget_->Show();
+
+  ui::test::EventGenerator generator(GetContext(),
+                                     main_widget_->GetNativeWindow());
+  AppListItemView* item0 = RootViewModel()->view_at(0);
+  AppListItemView* item1 = RootViewModel()->view_at(1);
+
+  // If experimental launcher, switch to All Apps page
+  if (app_list::switches::IsExperimentalAppListEnabled()) {
+    GetContentsView()->SetActiveState(AppListModel::STATE_APPS);
+    GetContentsView()->Layout();
+  }
+
+  generator.MoveMouseTo(item0->GetBoundsInScreen().CenterPoint());
+  EXPECT_TRUE(item0->is_highlighted());
+  EXPECT_FALSE(item1->is_highlighted());
+
+  generator.MoveMouseTo(item1->GetBoundsInScreen().CenterPoint());
+  EXPECT_FALSE(item0->is_highlighted());
+  EXPECT_TRUE(item1->is_highlighted());
+
+  generator.MoveMouseTo(gfx::Point(-1, -1));
+  EXPECT_FALSE(item0->is_highlighted());
+  EXPECT_FALSE(item1->is_highlighted());
+}
+
+// No touch on desktop Mac. Tracked in http://crbug.com/445520.
+#if defined(OS_MACOSX) && !defined(USE_AURA)
+#define MAYBE_TapGestureToHighlight DISABLED_TapGestureToHighlight
+#else
+#define MAYBE_TapGestureToHighlight TapGestureToHighlight
+#endif
+
+// Tests that tap gesture on app item highlights it
+TEST_F(AppListMainViewTest, MAYBE_TapGestureToHighlight) {
+  delegate_->GetTestModel()->PopulateApps(1);
+  main_widget_->Show();
+
+  ui::test::EventGenerator generator(GetContext(),
+                                     main_widget_->GetNativeWindow());
+  AppListItemView* item = RootViewModel()->view_at(0);
+
+  // If experimental launcher, switch to All Apps page
+  if (app_list::switches::IsExperimentalAppListEnabled()) {
+    GetContentsView()->SetActiveState(AppListModel::STATE_APPS);
+    GetContentsView()->Layout();
+  }
+
+  generator.set_current_location(item->GetBoundsInScreen().CenterPoint());
+  generator.PressTouch();
+  EXPECT_TRUE(item->is_highlighted());
+
+  generator.ReleaseTouch();
+  EXPECT_FALSE(item->is_highlighted());
+}
+
 // Tests dragging an item out of a single item folder and drop it at the last
 // slot.
 TEST_F(AppListMainViewTest, DragLastItemFromFolderAndDropAtLastSlot) {
@@ -309,8 +369,7 @@ TEST_F(AppListMainViewTest, DragReparentItemOntoPageSwitcher) {
 
   // Ensure we are on the apps grid view page.
   app_list::ContentsView* contents_view = GetContentsView();
-  contents_view->SetActivePage(
-      contents_view->GetPageIndexForState(AppListModel::STATE_APPS));
+  contents_view->SetActiveState(AppListModel::STATE_APPS);
   contents_view->Layout();
 
   AppListItemView* folder_item_view = CreateAndOpenSingleItemFolder();

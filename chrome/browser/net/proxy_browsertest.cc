@@ -129,9 +129,8 @@ IN_PROC_BROWSER_TEST_F(ProxyBrowserTest, MAYBE_BasicAuthWSConnect) {
 
   // Visit a page that tries to establish WebSocket connection. The title
   // of the page will be 'PASS' on success.
-  std::string scheme("http");
   GURL::Replacements replacements;
-  replacements.SetSchemeStr(scheme);
+  replacements.SetSchemeStr("http");
   ui_test_utils::NavigateToURL(browser(),
                                ws_server.GetURL("proxied_request_check.html")
                                    .ReplaceComponents(replacements));
@@ -247,6 +246,32 @@ class DataProxyScriptBrowserTest : public InProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(DataProxyScriptBrowserTest, Verify) {
+  VerifyProxyScript(browser());
+}
+
+// Fetch PAC script via a data: URL and run out-of-process using Mojo.
+class OutOfProcessProxyResolverBrowserTest : public InProcessBrowserTest {
+ public:
+  OutOfProcessProxyResolverBrowserTest() {}
+  ~OutOfProcessProxyResolverBrowserTest() override {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    std::string contents;
+    // Read in kPACScript contents.
+    ASSERT_TRUE(base::ReadFileToString(ui_test_utils::GetTestFilePath(
+        base::FilePath(base::FilePath::kCurrentDirectory),
+        base::FilePath(kPACScript)),
+        &contents));
+    command_line->AppendSwitchASCII(
+        switches::kProxyPacUrl, "data:," + contents);
+    command_line->AppendSwitch(switches::kV8PacMojoOutOfProcess);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(OutOfProcessProxyResolverBrowserTest);
+};
+
+IN_PROC_BROWSER_TEST_F(OutOfProcessProxyResolverBrowserTest, Verify) {
   VerifyProxyScript(browser());
 }
 

@@ -75,7 +75,7 @@ PassRefPtr<SkImageFilter> FEDropShadow::createImageFilter(SkiaImageFilterBuilder
     float stdY = filter()->applyVerticalScale(m_stdY);
     Color color = adaptColorToOperatingColorSpace(m_shadowColor.combineWithAlpha(m_shadowOpacity));
     SkImageFilter::CropRect cropRect = getCropRect(builder->cropOffset());
-    return adoptRef(SkDropShadowImageFilter::Create(SkFloatToScalar(dx), SkFloatToScalar(dy), SkFloatToScalar(stdX), SkFloatToScalar(stdY), color.rgb(), SkDropShadowImageFilter::kDrawShadowAndForeground_ShadowMode, input.get(), &cropRect, 0));
+    return adoptRef(SkDropShadowImageFilter::Create(SkFloatToScalar(dx), SkFloatToScalar(dy), SkFloatToScalar(stdX), SkFloatToScalar(stdY), color.rgb(), SkDropShadowImageFilter::kDrawShadowAndForeground_ShadowMode, input.get(), &cropRect));
 }
 
 
@@ -84,7 +84,7 @@ TextStream& FEDropShadow::externalRepresentation(TextStream& ts, int indent) con
     writeIndent(ts, indent);
     ts << "[feDropShadow";
     FilterEffect::externalRepresentation(ts);
-    ts << " stdDeviation=\"" << m_stdX << ", " << m_stdY << "\" dx=\"" << m_dx << "\" dy=\"" << m_dy << "\" flood-color=\"" << m_shadowColor.nameForRenderTreeAsText() <<"\" flood-opacity=\"" << m_shadowOpacity << "]\n";
+    ts << " stdDeviation=\"" << m_stdX << ", " << m_stdY << "\" dx=\"" << m_dx << "\" dy=\"" << m_dy << "\" flood-color=\"" << m_shadowColor.nameForLayoutTreeAsText() <<"\" flood-opacity=\"" << m_shadowOpacity << "]\n";
     inputEffect(0)->externalRepresentation(ts, indent + 1);
     return ts;
 }

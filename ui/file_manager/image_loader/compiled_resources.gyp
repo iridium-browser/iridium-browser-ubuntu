@@ -7,10 +7,13 @@
       'target_name': 'background',
       'variables': {
         'depends': [
-          'image_loader.js',
+          "../file_manager/common/js/file_type.js",
+          "../file_manager/foreground/js/metadata/image_orientation.js",
           'cache.js',
-          'scheduler.js',
+          'image_loader.js',
+          'piex_loader.js',
           'request.js',
+          'scheduler.js',
         ],
         'externs': [
           '<(CLOSURE_DIR)/externs/chrome_send_externs.js',
@@ -24,5 +27,3 @@
     }
   ],
 }
-
-

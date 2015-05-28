@@ -9,6 +9,7 @@ import android.test.suitebuilder.annotation.SmallTest;
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.shell.ChromeShellActivity;
 import org.chromium.chrome.shell.ChromeShellTestBase;
@@ -35,10 +36,11 @@ public class AutofillTest extends ChromeShellTestBase {
     private WindowAndroid mWindowAndroid;
     private MockAutofillCallback mMockAutofillCallback;
 
+    @SuppressFBWarnings("URF_UNREAD_FIELD")
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        ChromeShellActivity activity = launchChromeShellWithBlankPage();
+        final ChromeShellActivity activity = launchChromeShellWithBlankPage();
         assertNotNull(activity);
         waitForActiveShellToBeDoneLoading();
 
@@ -50,9 +52,7 @@ public class AutofillTest extends ChromeShellTestBase {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                mAutofillPopup = new AutofillPopup(mWindowAndroid.getActivity().get(),
-                        viewDelegate,
-                        mMockAutofillCallback);
+                mAutofillPopup = new AutofillPopup(activity, viewDelegate, mMockAutofillCallback);
                 mAutofillPopup.filterAndShow(new AutofillSuggestion[0], false);
                 mAutofillPopup.setAnchorRect(50, 500, 500, 50);
             }

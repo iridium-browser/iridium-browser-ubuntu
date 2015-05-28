@@ -30,8 +30,8 @@ class NetErrorPageController
   explicit NetErrorPageController(content::RenderFrame* render_frame);
   ~NetErrorPageController() override;
 
-  // Execute a "Load Stale" button click.
-  bool LoadStaleButtonClick();
+  // Execute a "Show saved copy" button click.
+  bool ShowSavedCopyButtonClick();
 
   // Execute a "Reload" button click.
   bool ReloadButtonClick();
@@ -42,6 +42,9 @@ class NetErrorPageController
   // Track a click when the page has suggestions from the navigation correction
   // service.
   bool TrackClick(const gin::Arguments& args);
+
+  // Track easter egg plays.
+  void TrackEasterEgg();
 
   // gin::WrappableBase
   gin::ObjectTemplateBuilder GetObjectTemplateBuilder(

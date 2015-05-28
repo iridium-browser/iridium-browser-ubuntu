@@ -13,19 +13,24 @@ import android.graphics.Paint.FontMetrics;
 import android.graphics.RectF;
 import android.text.TextPaint;
 import android.text.TextUtils;
-import android.util.DisplayMetrics;
-import android.util.TypedValue;
+import android.util.Log;
 
+import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.UrlUtilities;
 
+import java.net.URI;
 import java.util.Locale;
+
+import javax.annotation.Nullable;
 
 /**
  * Generator for transparent icons containing a rounded rectangle with a given background color,
  * having a centered character drawn on top of it.
  */
 public class RoundedIconGenerator {
+    private static final String TAG = RoundedIconGenerator.class.getSimpleName();
+
     private final int mIconWidthPx;
     private final int mIconHeightPx;
     private final int mCornerRadiusPx;
@@ -42,19 +47,35 @@ public class RoundedIconGenerator {
      * Constructs the generator and initializes the common members based on the display density.
      *
      * @param context The context used for initialization.
-     * @param iconWidthDp The width of the generated icon.
-     * @param iconHeightDp The height of the generated icon.
-     * @param cornerRadiusDp The radius of the corners in the icon.
-     * @param backgroundColor Color at which the rounded rectangle should be drawn.
-     * @param textSizeSp Size at which the text should be drawn.
+     * @param iconWidthDp The width of the generated icon in dp.
+     * @param iconHeightDp The height of the generated icon in dp.
+     * @param cornerRadiusDp The radius of the corners in the icon in dp.
+     * @param backgroundColor Color with which the rounded rectangle should be drawn.
+     * @param textSizeDp Size at which the text should be drawn in dp.
      */
     public RoundedIconGenerator(Context context, int iconWidthDp, int iconHeightDp,
-                                int cornerRadiusDp, int backgroundColor, int textSizeSp) {
-        DisplayMetrics displayMetrics = context.getResources().getDisplayMetrics();
+            int cornerRadiusDp, int backgroundColor, int textSizeDp) {
+        this((int) (context.getResources().getDisplayMetrics().density * iconWidthDp),
+                (int) (context.getResources().getDisplayMetrics().density * iconHeightDp),
+                (int) (context.getResources().getDisplayMetrics().density * cornerRadiusDp),
+                backgroundColor,
+                (int) (context.getResources().getDisplayMetrics().density * textSizeDp));
+    }
 
-        mIconWidthPx = (int) (iconWidthDp * displayMetrics.density);
-        mIconHeightPx = (int) (iconHeightDp * displayMetrics.density);
-        mCornerRadiusPx = (int) (cornerRadiusDp * displayMetrics.density);
+    /**
+     * Constructs the generator and initializes the common members ignoring display density.
+     *
+     * @param iconWidthPx The width of the generated icon in pixels.
+     * @param iconHeightPx The height of the generated icon in pixels.
+     * @param cornerRadiusPx The radius of the corners in the icon in pixels.
+     * @param backgroundColor Color at which the rounded rectangle should be drawn.
+     * @param textSizePx Size at which the text should be drawn in pixels.
+     */
+    public RoundedIconGenerator(int iconWidthPx, int iconHeightPx, int cornerRadiusPx,
+            int backgroundColor, float textSizePx) {
+        mIconWidthPx = iconWidthPx;
+        mIconHeightPx = iconHeightPx;
+        mCornerRadiusPx = cornerRadiusPx;
 
         mBackgroundRect = new RectF(0, 0, mIconWidthPx, mIconHeightPx);
 
@@ -64,8 +85,7 @@ public class RoundedIconGenerator {
         mTextPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         mTextPaint.setColor(Color.WHITE);
         mTextPaint.setFakeBoldText(true);
-        mTextPaint.setTextSize(TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_SP, textSizeSp, displayMetrics));
+        mTextPaint.setTextSize(textSizePx);
 
         FontMetrics textFontMetrics = mTextPaint.getFontMetrics();
         mTextHeight = (float) Math.ceil(textFontMetrics.bottom - textFontMetrics.top);
@@ -101,21 +121,65 @@ public class RoundedIconGenerator {
      * Returns a Bitmap representing the icon to be used for |url|.
      *
      * @param url URL for which the icon should be generated.
+     * @param includePrivateRegistries Should private registries be considered as TLDs?
      * @return The generated icon, or NULL if |url| is empty or the domain cannot be resolved.
      */
-    public Bitmap generateIconForUrl(String url) {
+    @Nullable
+    public Bitmap generateIconForUrl(String url, boolean includePrivateRegistries) {
         if (TextUtils.isEmpty(url)) return null;
 
-        String domain = UrlUtilities.getDomainAndRegistry(url, false);
-        if (TextUtils.isEmpty(domain)) {
-            if (url.startsWith(UrlConstants.CHROME_SCHEME)
-                    || url.startsWith(UrlConstants.CHROME_NATIVE_SCHEME)) {
-                domain = "chrome";
-            } else {
-                return null;
-            }
+        String text = getIconTextForUrl(url, includePrivateRegistries);
+        if (TextUtils.isEmpty(text)) return null;
+
+        return generateIconForText(text);
+    }
+
+    /**
+     * Returns a Bitmap representing the icon to be used for |url|. Private registries such
+     * as "appspot.com" will not be considered as effective TLDs.
+     *
+     * @TODO(beverloo) Update all call-sites of rounded icons to be explicit about whether
+     * private registries should be considered, matching the getDomainAndRegistry requirements.
+     * See https://crbug.com/458104.
+     *
+     * @param url URL for which the icon should be generated.
+     * @return The generated icon, or NULL if |url| is empty or the domain cannot be resolved.
+     */
+    @Nullable
+    public Bitmap generateIconForUrl(String url) {
+        return generateIconForUrl(url, false);
+    }
+
+    /**
+     * Returns the text which should be used for generating a rounded icon based on |url|.
+     *
+     * @param url URL to consider when getting the icon's text.
+     * @param includePrivateRegistries Should private registries be considered as TLDs?
+     * @return The text to use on the rounded icon, or NULL if |url| is empty or the domain cannot
+     *         be resolved.
+     */
+    @Nullable
+    @VisibleForTesting
+    public static String getIconTextForUrl(String url, boolean includePrivateRegistries) {
+        String domain = UrlUtilities.getDomainAndRegistry(url, includePrivateRegistries);
+        if (!TextUtils.isEmpty(domain)) return domain;
+
+        // Special-case chrome:// and chrome-native:// URLs.
+        if (url.startsWith(UrlConstants.CHROME_SCHEME)
+                || url.startsWith(UrlConstants.CHROME_NATIVE_SCHEME)) {
+            return "chrome";
         }
 
-        return generateIconForText(domain);
+        // Use the host component of |url| when it can be parsed as a URI.
+        try {
+            URI uri = new URI(url);
+            if (!TextUtils.isEmpty(uri.getHost())) {
+                return uri.getHost();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Unable to parse the URL for generating an icon: " + url);
+        }
+
+        return null;
     }
 }

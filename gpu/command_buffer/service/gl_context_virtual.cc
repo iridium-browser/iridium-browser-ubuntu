@@ -6,7 +6,9 @@
 
 #include "gpu/command_buffer/service/gl_state_restorer_impl.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
+#include "ui/gl/gl_gl_api_implementation.h"
 #include "ui/gl/gl_surface.h"
+#include "ui/gl/gpu_timing.h"
 
 namespace gpu {
 
@@ -82,6 +84,10 @@ void* GLContextVirtual::GetHandle() {
   return shared_context_->GetHandle();
 }
 
+scoped_refptr<gfx::GPUTimingClient> GLContextVirtual::CreateGPUTimingClient() {
+  return shared_context_->CreateGPUTimingClient();
+}
+
 void GLContextVirtual::OnSetSwapInterval(int interval) {
   shared_context_->SetSwapInterval(interval);
 }
@@ -107,6 +113,21 @@ bool GLContextVirtual::WasAllocatedUsingRobustnessExtension() {
 
 void GLContextVirtual::SetUnbindFboOnMakeCurrent() {
   shared_context_->SetUnbindFboOnMakeCurrent();
+}
+
+base::Closure GLContextVirtual::GetStateWasDirtiedExternallyCallback() {
+  return shared_context_->GetStateWasDirtiedExternallyCallback();
+}
+
+void GLContextVirtual::RestoreStateIfDirtiedExternally() {
+  // The dirty bit should only be cleared after the state has been restored,
+  // which should be done only when the context is current.
+  DCHECK(IsCurrent(NULL));
+  if (!shared_context_->GetStateWasDirtiedExternally())
+    return;
+  gfx::ScopedSetGLToRealGLApi scoped_set_gl_api;
+  GetGLStateRestorer()->RestoreState(NULL);
+  shared_context_->SetStateWasDirtiedExternally(false);
 }
 
 GLContextVirtual::~GLContextVirtual() {

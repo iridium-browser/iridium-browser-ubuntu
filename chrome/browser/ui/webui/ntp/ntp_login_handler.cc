@@ -14,7 +14,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -35,8 +34,6 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/host_zoom_map.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/page_zoom.h"
@@ -69,11 +66,15 @@ SkBitmap GetGAIAPictureForNTP(const gfx::Image& image) {
   return canvas.ExtractImageRep().sk_bitmap();
 }
 
-// Puts the |content| into a span with the given CSS class.
-base::string16 CreateSpanWithClass(const base::string16& content,
-                                   const std::string& css_class) {
-  return base::ASCIIToUTF16("<span class='" + css_class + "'>") +
-      net::EscapeForHTML(content) + base::ASCIIToUTF16("</span>");
+// Puts the |content| into an element with the given CSS class.
+base::string16 CreateElementWithClass(const base::string16& content,
+                                      const std::string& tag_name,
+                                      const std::string& css_class,
+                                      const std::string& extends_tag) {
+  base::string16 start_tag = base::ASCIIToUTF16("<" + tag_name +
+      " class='" + css_class + "' is='" + extends_tag + "'>");
+  base::string16 end_tag = base::ASCIIToUTF16("</" + tag_name + ">");
+  return start_tag + net::EscapeForHTML(content) + end_tag;
 }
 
 }  // namespace
@@ -82,17 +83,23 @@ NTPLoginHandler::NTPLoginHandler() {
 }
 
 NTPLoginHandler::~NTPLoginHandler() {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  // The profile_manager might be NULL in testing environments.
+  if (profile_manager)
+    profile_manager->GetProfileInfoCache().RemoveObserver(this);
 }
 
 void NTPLoginHandler::RegisterMessages() {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  // The profile_manager might be NULL in testing environments.
+  if (profile_manager)
+    profile_manager->GetProfileInfoCache().AddObserver(this);
+
   PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
   signin_allowed_pref_.Init(prefs::kSigninAllowed,
                             pref_service,
                             base::Bind(&NTPLoginHandler::UpdateLogin,
                                        base::Unretained(this)));
-
-  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-                 content::NotificationService::AllSources());
 
   web_ui()->RegisterMessageCallback("initializeSyncLogin",
       base::Bind(&NTPLoginHandler::HandleInitializeSyncLogin,
@@ -108,10 +115,8 @@ void NTPLoginHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-void NTPLoginHandler::Observe(int type,
-                              const content::NotificationSource& source,
-                              const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED, type);
+void NTPLoginHandler::OnProfileUserNameChanged(
+    const base::FilePath& profile_path) {
   UpdateLogin();
 }
 
@@ -172,8 +177,14 @@ void NTPLoginHandler::HandleShowAdvancedLoginUI(const base::ListValue* args) {
 
 void NTPLoginHandler::UpdateLogin() {
   Profile* profile = Profile::FromWebUI(web_ui());
-  std::string username =
-      SigninManagerFactory::GetForProfile(profile)->GetAuthenticatedUsername();
+  SigninManagerBase* signin_manager =
+      SigninManagerFactory::GetForProfile(profile);
+  if (!signin_manager) {
+    // Guests on desktop do not have a signin manager.
+    return;
+  }
+
+  std::string username = signin_manager->GetAuthenticatedUsername();
 
   base::string16 header, sub_header;
   std::string icon_url;
@@ -188,15 +199,15 @@ void NTPLoginHandler::UpdateLogin() {
       if (cache.GetNumberOfProfiles() == 1) {
         base::string16 name = cache.GetGAIANameOfProfileAtIndex(profile_index);
         if (!name.empty())
-          header = CreateSpanWithClass(name, "profile-name");
+          header = CreateElementWithClass(name, "span", "profile-name", "");
         const gfx::Image* image =
             cache.GetGAIAPictureOfProfileAtIndex(profile_index);
         if (image)
           icon_url = webui::GetBitmapDataUrl(GetGAIAPictureForNTP(*image));
       }
       if (header.empty()) {
-        header = CreateSpanWithClass(base::UTF8ToUTF16(username),
-                                     "profile-name");
+        header = CreateElementWithClass(base::UTF8ToUTF16(username), "span",
+                                        "profile-name", "");
       }
     }
   } else {
@@ -207,7 +218,8 @@ void NTPLoginHandler::UpdateLogin() {
     if (!profile->IsLegacySupervised() && signin->IsSigninAllowed()) {
       base::string16 signed_in_link = l10n_util::GetStringUTF16(
           IDS_SYNC_PROMO_NOT_SIGNED_IN_STATUS_LINK);
-      signed_in_link = CreateSpanWithClass(signed_in_link, "link-span");
+      signed_in_link =
+          CreateElementWithClass(signed_in_link, "a", "", "action-link");
       header = l10n_util::GetStringFUTF16(
           IDS_SYNC_PROMO_NOT_SIGNED_IN_STATUS_HEADER,
           l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));

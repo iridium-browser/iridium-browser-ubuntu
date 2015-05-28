@@ -27,6 +27,7 @@
 #define UseCounter_h
 
 #include "core/CSSPropertyNames.h"
+#include "core/CoreExport.h"
 #include "wtf/BitVector.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/OwnPtr.h"
@@ -54,7 +55,7 @@ class StyleSheetContents;
 // during their install of Google Chrome:
 // http://www.google.com/chrome/intl/en/privacy.html
 
-class UseCounter {
+class CORE_EXPORT UseCounter {
     WTF_MAKE_NONCOPYABLE(UseCounter);
 public:
     UseCounter();
@@ -203,7 +204,6 @@ public:
         InputTypeTextMaxLength = 191,
         InputTypePassword = 192,
         InputTypePasswordMaxLength = 193,
-        ShowModalDialog = 195,
         PrefixedPageVisibility = 196,
         CSSStyleSheetInsertRuleOptionalArg = 198, // Inconsistent with the specification and other browsers.
         DocumentBeforeUnloadRegistered = 200,
@@ -243,8 +243,6 @@ public:
         FormAssociationByParser = 248,
         SVGSVGElementInDocument = 250,
         SVGDocumentRootElement = 251,
-        EventSourceURL = 254,
-        WebSocketURL = 255,
         WorkerSubjectToCSP = 257,
         WorkerAllowedByChildBlockedByScript = 258,
         DeprecatedWebKitGradient = 260,
@@ -477,19 +475,17 @@ public:
         SRIElementWithMatchingIntegrityAttribute = 540,
         SRIElementWithNonMatchingIntegrityAttribute = 541,
         SRIElementWithUnparsableIntegrityAttribute = 542,
-        SRIElementWithIntegrityAttributeAndInsecureOrigin = 543,
-        SRIElementWithIntegrityAttributeAndInsecureResource = 544,
-        AnimationPlayerGetStartTime = 545,
-        AnimationPlayerSetStartTime = 546,
-        AnimationPlayerGetCurrentTime = 547,
-        AnimationPlayerSetCurrentTime = 548,
-        AnimationPlayerGetPlaybackRate = 549,
-        AnimationPlayerSetPlaybackRate = 550,
-        AnimationPlayerGetPlayState = 551,
-        AnimationPlayerFinish = 552,
-        AnimationPlayerPlay = 553,
-        AnimationPlayerPause = 554,
-        AnimationPlayerReverse = 555,
+        V8AnimationPlayer_StartTime_AttributeGetter = 545,
+        V8AnimationPlayer_StartTime_AttributeSetter = 546,
+        V8AnimationPlayer_CurrentTime_AttributeGetter = 547,
+        V8AnimationPlayer_CurrentTime_AttributeSetter = 548,
+        V8AnimationPlayer_PlaybackRate_AttributeGetter = 549,
+        V8AnimationPlayer_PlaybackRate_AttributeSetter = 550,
+        V8AnimationPlayer_PlayState_AttributeGetter = 551,
+        V8AnimationPlayer_Finish_Method = 552,
+        V8AnimationPlayer_Play_Method = 553,
+        V8AnimationPlayer_Pause_Method = 554,
+        V8AnimationPlayer_Reverse_Method = 555,
         // The above items are available in M39 branch.
 
         BreakIterator = 556,
@@ -540,7 +536,6 @@ public:
         TextWholeText = 599,
         AttrChildAccess = 600,
         AttrChildChange = 601,
-        DocumentGetOverrideStyle = 602,
         NotificationCloseEvent = 603,
         CSSKeyframesRuleAppendRule = 604,
         CSSKeyframesRuleInsertRule = 605,
@@ -557,7 +552,6 @@ public:
         MixedContentPlugin = 616,
         MixedContentPrefetch = 617,
         MixedContentVideo = 618,
-        CORSCredentialedNullOriginAccessAllowed = 619,
         AudioListenerDopplerFactor = 620,
         AudioListenerSpeedOfSound = 621,
         AudioListenerSetVelocity = 622,
@@ -595,9 +589,7 @@ public:
         PrefixedAudioContext = 654,
         PrefixedOfflineAudioContext = 655,
         AddEventListenerNoArguments = 656,
-        AddEventListenerOneArgument = 657,
         RemoveEventListenerNoArguments = 658,
-        RemoveEventListenerOneArgument = 659,
         SRIElementWithNonMatchingIntegrityType = 660,
         MixedContentInNonHTTPSFrameThatRestrictsMixedContent = 661,
         MixedContentInSecureFrameThatDoesNotRestrictMixedContent = 662,
@@ -606,6 +598,96 @@ public:
         MixedContentFormPresent = 665,
         GetUserMediaInsecureOrigin = 666,
         GetUserMediaSecureOrigin = 667,
+        // The above items are available in M41 branch.
+
+        DeviceMotionInsecureOrigin = 668,
+        DeviceMotionSecureOrigin = 669,
+        DeviceOrientationInsecureOrigin = 670,
+        DeviceOrientationSecureOrigin = 671,
+        SandboxViaIFrame = 672,
+        SandboxViaCSP = 673,
+        BlockedSniffingImageToScript = 674,
+        Fetch = 675,
+        FetchBodyStream = 676,
+        XMLHttpRequestAsynchronous = 677,
+        AudioBufferSourceBufferOnce = 678,
+        WhiteSpacePreFromXMLSpace = 679,
+        WhiteSpaceNowrapFromXMLSpace = 680,
+        SVGElementXmlbase = 681,
+        SVGElementXmllang = 682,
+        SVGElementXmlspace = 683,
+        WindowMoveResizeMissingArguments = 684,
+        SVGSVGElementForceRedraw = 685,
+        SVGSVGElementSuspendRedraw = 686,
+        SVGSVGElementUnsuspendRedraw = 687,
+        SVGSVGElementUnsuspendRedrawAll = 688,
+        AudioContextClose = 689,
+        ServiceWorkerClientPostMessage = 690,
+        CSSZoomNotEqualToOne = 691,
+        SVGGraphicsElementGetTransformToElement = 692,
+        ServiceWorkerClientsGetAll = 693,
+        // The above items are available in M42 branch.
+
+        ClientRectListItem = 694,
+        WindowClientInformation = 695,
+        WindowFind = 696,
+        WindowScreenLeft = 697,
+        WindowScreenTop = 698,
+        V8AnimationPlayer_Cancel_Method = 699,
+        V8AnimationPlayer_Onfinish_AttributeGetter = 700,
+        V8AnimationPlayer_Onfinish_AttributeSetter = 701,
+        ElementOffsetParent = 702,
+        ElementOffsetTop = 703,
+        ElementOffsetLeft = 704,
+        ElementOffsetWidth = 705,
+        ElementOffsetHeight = 706,
+        V8Window_WebKitAnimationEvent_ConstructorGetter = 707,
+        V8Window_WebKitAnimationEvent_AttributeSetter = 708,
+        ResourceLoadedAfterRedirectWithCSP = 709,
+        CryptoGetRandomValues = 710,
+        SubtleCryptoEncrypt = 711,
+        SubtleCryptoDecrypt = 712,
+        SubtleCryptoSign = 713,
+        SubtleCryptoVerify = 714,
+        SubtleCryptoDigest = 715,
+        SubtleCryptoGenerateKey = 716,
+        SubtleCryptoImportKey = 717,
+        SubtleCryptoExportKey = 718,
+        SubtleCryptoDeriveBits = 719,
+        SubtleCryptoDeriveKey = 720,
+        SubtleCryptoWrapKey = 721,
+        SubtleCryptoUnwrapKey = 722,
+        CryptoAlgorithmAesCbc = 723,
+        CryptoAlgorithmHmac = 724,
+        CryptoAlgorithmRsaSsaPkcs1v1_5 = 725,
+        CryptoAlgorithmSha1 = 726,
+        CryptoAlgorithmSha256 = 727,
+        CryptoAlgorithmSha384 = 728,
+        CryptoAlgorithmSha512 = 729,
+        CryptoAlgorithmAesGcm = 730,
+        CryptoAlgorithmRsaOaep = 731,
+        CryptoAlgorithmAesCtr = 732,
+        CryptoAlgorithmAesKw = 733,
+        CryptoAlgorithmRsaPss = 734,
+        CryptoAlgorithmEcdsa = 735,
+        CryptoAlgorithmEcdh = 736,
+        CryptoAlgorithmHkdf = 737,
+        CryptoAlgorithmPbkdf2 = 738,
+        DocumentSetDomain = 739,
+        UpgradeInsecureRequestsEnabled = 740,
+        UpgradeInsecureRequestsUpgradedRequest = 741,
+        DocumentDesignMode = 742,
+        GlobalCacheStorage = 743,
+        NetInfo = 744,
+        BackgroundSync = 745,
+        TabStopProperty = 746,
+        TabStopAttribute = 747,
+        SVGFilterRes = 749,
+        V8Permissions_Query_Method = 750,
+        V8HTMLInputElement_Autocapitalize_AttributeGetter = 754,
+        V8HTMLInputElement_Autocapitalize_AttributeSetter = 755,
+        V8HTMLTextAreaElement_Autocapitalize_AttributeGetter = 756,
+        V8HTMLTextAreaElement_Autocapitalize_AttributeSetter = 757,
 
         // Add new features immediately above this line. Don't change assigned
         // numbers of any item, and don't reuse removed slots.
@@ -637,8 +719,8 @@ public:
     // deprecation warnings when we're actively interested in removing them from
     // the platform.
     //
-    // The ExecutionContext* overload doesn't work for shared workers and
-    // service workers.
+    // For shared workers and service workers, the ExecutionContext* overload
+    // doesn't count the usage but only sends a console warning.
     static void countDeprecation(const LocalFrame*, Feature);
     static void countDeprecation(ExecutionContext*, Feature);
     static void countDeprecation(const Document&, Feature);
@@ -646,7 +728,7 @@ public:
     // if you don't want to count metrics in private scripts. You should use
     // countDeprecationIfNotPrivateScript() in a binding layer.
     static void countDeprecationIfNotPrivateScript(v8::Isolate*, ExecutionContext*, Feature);
-    String deprecationMessage(Feature);
+    static String deprecationMessage(Feature);
 
     void didCommitLoad();
 
@@ -659,30 +741,38 @@ public:
     static void muteForInspector();
     static void unmuteForInspector();
 
+    class CountBits {
+    public:
+        bool recordMeasurement(Feature feature)
+        {
+            if (UseCounter::m_muteCount)
+                return false;
+            ASSERT(feature != PageDestruction); // PageDestruction is reserved as a scaling factor.
+            ASSERT(feature < NumberOfFeatures);
+            if (!m_bits) {
+                m_bits = adoptPtr(new BitVector(NumberOfFeatures));
+                m_bits->clearAll();
+            }
+
+            if (m_bits->quickGet(feature))
+                return false;
+
+            m_bits->quickSet(feature);
+            return true;
+        }
+        void updateMeasurements();
+
+    private:
+        OwnPtr<BitVector> m_bits;
+    };
+
 private:
     static int m_muteCount;
 
-    bool recordMeasurement(Feature feature)
-    {
-        if (UseCounter::m_muteCount)
-            return false;
-        ASSERT(feature != PageDestruction); // PageDestruction is reserved as a scaling factor.
-        ASSERT(feature < NumberOfFeatures);
-        if (!m_countBits) {
-            m_countBits = adoptPtr(new BitVector(NumberOfFeatures));
-            m_countBits->clearAll();
-        }
-
-        if (m_countBits->quickGet(feature))
-            return false;
-
-        m_countBits->quickSet(feature);
-        return true;
-    }
-
+    bool recordMeasurement(Feature feature) { return m_countBits.recordMeasurement(feature); }
     void updateMeasurements();
 
-    OwnPtr<BitVector> m_countBits;
+    CountBits m_countBits;
     BitVector m_CSSFeatureBits;
 };
 

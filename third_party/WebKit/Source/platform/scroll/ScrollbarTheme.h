@@ -28,7 +28,7 @@
 
 #include "platform/PlatformExport.h"
 #include "platform/geometry/IntRect.h"
-#include "platform/graphics/paint/DisplayItem.h"
+#include "platform/graphics/paint/DisplayItemClient.h"
 #include "platform/scroll/ScrollTypes.h"
 
 namespace blink {
@@ -38,7 +38,7 @@ class PlatformMouseEvent;
 class ScrollbarThemeClient;
 
 class PLATFORM_EXPORT ScrollbarTheme {
-    WTF_MAKE_NONCOPYABLE(ScrollbarTheme); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(ScrollbarTheme); WTF_MAKE_FAST_ALLOCATED(ScrollbarTheme);
 public:
     ScrollbarTheme() { }
     virtual ~ScrollbarTheme() { }
@@ -80,8 +80,7 @@ public:
 
     virtual void invalidatePart(ScrollbarThemeClient*, ScrollbarPart);
 
-    virtual void paintScrollCorner(GraphicsContext*, const IntRect& cornerRect);
-
+    virtual void paintScrollCorner(GraphicsContext*, const DisplayItemClientWrapper&, const IntRect& cornerRect);
     virtual void paintTickmarks(GraphicsContext*, ScrollbarThemeClient*, const IntRect&) { }
     virtual void paintOverhangBackground(GraphicsContext*, const IntRect&, const IntRect&, const IntRect&);
     virtual void paintOverhangShadows(GraphicsContext*, const IntSize&, const IntRect&, const IntRect&, const IntRect&) { }
@@ -134,8 +133,6 @@ public:
 
     static void setMockScrollbarsEnabled(bool flag);
     static bool mockScrollbarsEnabled();
-
-    DisplayItemClient displayItemClient() const { return static_cast<DisplayItemClientInternalVoid*>((void*)this); }
 
 protected:
     bool paintInternal(ScrollbarThemeClient*, GraphicsContext*, const IntRect& damageRect);

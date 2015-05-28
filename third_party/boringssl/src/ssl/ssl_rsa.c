@@ -74,10 +74,6 @@ int SSL_use_certificate(SSL *ssl, X509 *x) {
     OPENSSL_PUT_ERROR(SSL, SSL_use_certificate, ERR_R_PASSED_NULL_PARAMETER);
     return 0;
   }
-  if (!ssl_cert_inst(&ssl->cert)) {
-    OPENSSL_PUT_ERROR(SSL, SSL_use_certificate, ERR_R_MALLOC_FAILURE);
-    return 0;
-  }
   return ssl_set_cert(ssl->cert, x);
 }
 
@@ -152,11 +148,6 @@ int SSL_use_RSAPrivateKey(SSL *ssl, RSA *rsa) {
     return 0;
   }
 
-  if (!ssl_cert_inst(&ssl->cert)) {
-    OPENSSL_PUT_ERROR(SSL, SSL_use_RSAPrivateKey, ERR_R_MALLOC_FAILURE);
-    return 0;
-  }
-
   pkey = EVP_PKEY_new();
   if (pkey == NULL) {
     OPENSSL_PUT_ERROR(SSL, SSL_use_RSAPrivateKey, ERR_R_EVP_LIB);
@@ -182,12 +173,6 @@ static int ssl_set_pkey(CERT *c, EVP_PKEY *pkey) {
   }
 
   if (c->pkeys[i].x509 != NULL) {
-    EVP_PKEY *pktmp;
-    pktmp = X509_get_pubkey(c->pkeys[i].x509);
-    EVP_PKEY_copy_parameters(pktmp, pkey);
-    EVP_PKEY_free(pktmp);
-    ERR_clear_error();
-
     /* Sanity-check that the private key and the certificate match, unless the
      * key is opaque (in case of, say, a smartcard). */
     if (!EVP_PKEY_is_opaque(pkey) &&
@@ -275,11 +260,6 @@ int SSL_use_PrivateKey(SSL *ssl, EVP_PKEY *pkey) {
     return 0;
   }
 
-  if (!ssl_cert_inst(&ssl->cert)) {
-    OPENSSL_PUT_ERROR(SSL, SSL_use_PrivateKey, ERR_R_MALLOC_FAILURE);
-    return 0;
-  }
-
   ret = ssl_set_pkey(ssl->cert, pkey);
   return ret;
 }
@@ -349,10 +329,6 @@ int SSL_CTX_use_certificate(SSL_CTX *ctx, X509 *x) {
                       ERR_R_PASSED_NULL_PARAMETER);
     return 0;
   }
-  if (!ssl_cert_inst(&ctx->cert)) {
-    OPENSSL_PUT_ERROR(SSL, SSL_CTX_use_certificate, ERR_R_MALLOC_FAILURE);
-    return 0;
-  }
 
   return ssl_set_cert(ctx->cert, x);
 }
@@ -375,9 +351,6 @@ static int ssl_set_cert(CERT *c, X509 *x) {
   }
 
   if (c->pkeys[i].privatekey != NULL) {
-    EVP_PKEY_copy_parameters(pkey, c->pkeys[i].privatekey);
-    ERR_clear_error();
-
     /* Sanity-check that the private key and the certificate match, unless the
      * key is opaque (in case of, say, a smartcard). */
     if (!EVP_PKEY_is_opaque(c->pkeys[i].privatekey) &&
@@ -475,11 +448,6 @@ int SSL_CTX_use_RSAPrivateKey(SSL_CTX *ctx, RSA *rsa) {
     return 0;
   }
 
-  if (!ssl_cert_inst(&ctx->cert)) {
-    OPENSSL_PUT_ERROR(SSL, SSL_CTX_use_RSAPrivateKey, ERR_R_MALLOC_FAILURE);
-    return 0;
-  }
-
   pkey = EVP_PKEY_new();
   if (pkey == NULL) {
     OPENSSL_PUT_ERROR(SSL, SSL_CTX_use_RSAPrivateKey, ERR_R_EVP_LIB);
@@ -557,11 +525,6 @@ int SSL_CTX_use_RSAPrivateKey_ASN1(SSL_CTX *ctx, const uint8_t *d, long len) {
 int SSL_CTX_use_PrivateKey(SSL_CTX *ctx, EVP_PKEY *pkey) {
   if (pkey == NULL) {
     OPENSSL_PUT_ERROR(SSL, SSL_CTX_use_PrivateKey, ERR_R_PASSED_NULL_PARAMETER);
-    return 0;
-  }
-
-  if (!ssl_cert_inst(&ctx->cert)) {
-    OPENSSL_PUT_ERROR(SSL, SSL_CTX_use_PrivateKey, ERR_R_MALLOC_FAILURE);
     return 0;
   }
 

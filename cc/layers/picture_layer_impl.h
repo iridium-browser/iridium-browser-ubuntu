@@ -5,7 +5,7 @@
 #ifndef CC_LAYERS_PICTURE_LAYER_IMPL_H_
 #define CC_LAYERS_PICTURE_LAYER_IMPL_H_
 
-#include <set>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -16,7 +16,6 @@
 #include "cc/resources/picture_layer_tiling_set.h"
 #include "cc/resources/picture_pile_impl.h"
 #include "cc/resources/tiling_set_eviction_queue.h"
-#include "cc/resources/tiling_set_raster_queue.h"
 #include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkPicture.h"
 
@@ -39,32 +38,30 @@ class CC_EXPORT PictureLayerImpl
     PictureLayerImpl* pending;
   };
 
-  static scoped_ptr<PictureLayerImpl> Create(LayerTreeImpl* tree_impl,
-                                             int id,
-                                             bool is_mask) {
-    return make_scoped_ptr(new PictureLayerImpl(tree_impl, id, is_mask));
+  static scoped_ptr<PictureLayerImpl> Create(
+      LayerTreeImpl* tree_impl,
+      int id,
+      bool is_mask,
+      scoped_refptr<SyncedScrollOffset> scroll_offset) {
+    return make_scoped_ptr(
+        new PictureLayerImpl(tree_impl, id, is_mask, scroll_offset));
   }
   ~PictureLayerImpl() override;
 
   bool is_mask() const { return is_mask_; }
-
-  scoped_ptr<TilingSetEvictionQueue> CreateEvictionQueue(
-      TreePriority tree_priority);
-  scoped_ptr<TilingSetRasterQueue> CreateRasterQueue(bool prioritize_low_res);
 
   // LayerImpl overrides.
   const char* LayerTypeAsString() const override;
   scoped_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
   void PushPropertiesTo(LayerImpl* layer) override;
   void AppendQuads(RenderPass* render_pass,
-                   const Occlusion& occlusion_in_content_space,
                    AppendQuadsData* append_quads_data) override;
-  bool UpdateTiles(const Occlusion& occlusion_in_content_space,
-                   bool resourceless_software_draw) override;
   void NotifyTileStateChanged(const Tile* tile) override;
   void DidBeginTracing() override;
   void ReleaseResources() override;
+  void RecreateResources() override;
   skia::RefPtr<SkPicture> GetPicture() override;
+  Region GetInvalidationRegion() override;
 
   // PictureLayerTilingClient overrides.
   scoped_refptr<Tile> CreateTile(float contents_scale,
@@ -78,10 +75,17 @@ class CC_EXPORT PictureLayerImpl
   TilePriority::PriorityBin GetMaxTilePriorityBin() const override;
   WhichTree GetTree() const override;
   bool RequiresHighResToDraw() const override;
+  gfx::Rect GetEnclosingRectInTargetSpace() const override;
 
+  void set_gpu_raster_max_texture_size(gfx::Size gpu_raster_max_texture_size) {
+    gpu_raster_max_texture_size_ = gpu_raster_max_texture_size;
+  }
   void UpdateRasterSource(scoped_refptr<RasterSource> raster_source,
                           Region* new_invalidation,
                           const PictureLayerTilingSet* pending_set);
+  bool UpdateTiles(bool resourceless_software_draw);
+  void UpdateCanUseLCDTextAfterCommit();
+  bool RasterSourceUsesLCDText() const;
 
   // Mask-related functions.
   void GetContentsResourceId(ResourceProvider::ResourceId* resource_id,
@@ -95,13 +99,13 @@ class CC_EXPORT PictureLayerImpl
 
   bool CanHaveTilings() const;
 
+  PictureLayerTilingSet* picture_layer_tiling_set() { return tilings_.get(); }
+
   // Functions used by tile manager.
   PictureLayerImpl* GetPendingOrActiveTwinLayer() const;
   bool IsOnActiveOrPendingTree() const;
   // Virtual for testing.
   virtual bool HasValidTilePriorities() const;
-  bool AllTilesRequiredForActivationAreReadyToDraw() const;
-  bool AllTilesRequiredForDrawAreReadyToDraw() const;
 
   // Used for benchmarking
   RasterSource* GetRasterSource() const { return raster_source_.get(); }
@@ -110,15 +114,17 @@ class CC_EXPORT PictureLayerImpl
   friend class LayerRasterTileIterator;
   using TileRequirementCheck = bool (PictureLayerTiling::*)(const Tile*) const;
 
-  PictureLayerImpl(LayerTreeImpl* tree_impl, int id, bool is_mask);
+  PictureLayerImpl(LayerTreeImpl* tree_impl,
+                   int id,
+                   bool is_mask,
+                   scoped_refptr<SyncedScrollOffset> scroll_offset);
   PictureLayerTiling* AddTiling(float contents_scale);
   void RemoveAllTilings();
   void AddTilingsForRasterScale();
-  bool UpdateTilePriorities(const Occlusion& occlusion_in_content_space);
   virtual bool ShouldAdjustRasterScale() const;
   virtual void RecalculateRasterScales();
   void CleanUpTilingsOnActiveLayer(
-      std::vector<PictureLayerTiling*> used_tilings);
+      const std::vector<PictureLayerTiling*>& used_tilings);
   float MinimumContentsScale() const;
   float MaximumContentsScale() const;
   void ResetRasterScale();
@@ -126,17 +132,12 @@ class CC_EXPORT PictureLayerImpl
   PictureLayerImpl* GetRecycledTwinLayer() const;
 
   void SanityCheckTilingState() const;
-  // Checks if all tiles required for a certain action (e.g. activation) are
-  // ready to draw.  is_tile_required_callback gets called on all candidate
-  // tiles and returns true if the tile is required for the action.
-  bool AllTilesRequiredAreReadyToDraw(
-      TileRequirementCheck is_tile_required_callback) const;
-
   bool ShouldAdjustRasterScaleDuringScaleAnimations() const;
 
   void GetDebugBorderProperties(SkColor* color, float* width) const override;
-  void GetAllTilesForTracing(std::set<const Tile*>* tiles) const override;
-  void AsValueInto(base::debug::TracedValue* dict) const override;
+  void GetAllTilesAndPrioritiesForTracing(
+      std::map<const Tile*, TilePriority>* tile_map) const override;
+  void AsValueInto(base::trace_event::TracedValue* dict) const override;
 
   virtual void UpdateIdealScales();
   float MaximumTilingContentsScale() const;
@@ -161,9 +162,6 @@ class CC_EXPORT PictureLayerImpl
 
   bool raster_source_scale_is_fixed_;
   bool was_screen_space_transform_animating_;
-  // A sanity state check to make sure UpdateTilePriorities only gets called
-  // after a CalculateContentsScale/ManageTilings.
-  bool should_update_tile_priorities_;
   bool only_used_low_res_last_append_quads_;
   const bool is_mask_;
 
@@ -177,6 +175,15 @@ class CC_EXPORT PictureLayerImpl
   // frame that has a valid viewport for prioritizing tiles.
   gfx::Rect visible_rect_for_tile_priority_;
   gfx::Rect viewport_rect_for_tile_priority_in_content_space_;
+
+  gfx::Size gpu_raster_max_texture_size_;
+
+  // List of tilings that were used last time we appended quads. This can be
+  // used as an optimization not to remove tilings if they are still being
+  // drawn. Note that accessing this vector should only be done in the context
+  // of comparing pointers, since objects pointed to are not guaranteed to
+  // exist.
+  std::vector<PictureLayerTiling*> last_append_quads_tilings_;
 
   DISALLOW_COPY_AND_ASSIGN(PictureLayerImpl);
 };

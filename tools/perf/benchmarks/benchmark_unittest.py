@@ -4,10 +4,10 @@
 
 """For all the benchmarks that set options, test that the options are valid."""
 
+from collections import defaultdict
 import logging
 import os
 import unittest
-from collections import defaultdict
 
 from telemetry import benchmark as benchmark_module
 from telemetry.core import browser_options
@@ -46,7 +46,6 @@ class TestNoBenchmarkNamesDuplication(unittest.TestCase):
       self.assertEquals(1, len(names_to_benchmarks[n]),
                         'Multiple benchmarks with the same name %s are '
                         'found: %s' % (n, str(names_to_benchmarks[n])))
-
 
 def _AddBenchmarkOptionsTests(suite):
   # Using |index_by_class_name=True| allows returning multiple benchmarks

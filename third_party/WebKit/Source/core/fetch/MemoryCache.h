@@ -78,7 +78,7 @@ public:
     {
         return adoptPtrWillBeNoop(new MemoryCacheEntry(resource));
     }
-    void trace(Visitor*);
+    DECLARE_TRACE();
 #if ENABLE(OILPAN)
     void dispose();
 #endif
@@ -121,7 +121,7 @@ public:
     RawPtrWillBeMember<MemoryCacheEntry> m_tail;
 
     MemoryCacheLRUList() : m_head(nullptr), m_tail(nullptr) { }
-    void trace(Visitor*);
+    DECLARE_TRACE();
 };
 
 }
@@ -131,11 +131,11 @@ WTF_ALLOW_MOVE_INIT_AND_COMPARE_WITH_MEM_FUNCTIONS(blink::MemoryCacheLRUList);
 namespace blink {
 
 class MemoryCache final : public NoBaseWillBeGarbageCollectedFinalized<MemoryCache>, public WebThread::TaskObserver {
-    WTF_MAKE_NONCOPYABLE(MemoryCache); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_NONCOPYABLE(MemoryCache); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(MemoryCache);
 public:
     static PassOwnPtrWillBeRawPtr<MemoryCache> create();
     ~MemoryCache();
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     struct TypeStatistic {
         int count;
@@ -210,7 +210,7 @@ public:
     // This should be called when a Resource object becomes unnecesarry.
     void unregisterLiveResource(Resource&);
 
-    static void removeURLFromCache(ExecutionContext*, const KURL&);
+    void removeURLFromCache(const KURL&);
 
     Statistics getStatistics();
 
@@ -228,6 +228,8 @@ public:
     virtual void didProcessTask() override;
 
     void pruneAll();
+
+    void updateFramePaintTimestamp();
 
 private:
     enum PruneStrategy {
@@ -276,6 +278,7 @@ private:
     double m_maxPruneDeferralDelay;
     double m_pruneTimeStamp;
     double m_pruneFrameTimeStamp;
+    double m_lastFramePaintTimeStamp; // used for detecting decoded resource thrash in the cache
 
     size_t m_capacity;
     size_t m_minDeadCapacity;

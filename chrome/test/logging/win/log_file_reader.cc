@@ -4,11 +4,11 @@
 
 #include "chrome/test/logging/win/log_file_reader.h"
 
-#include "base/debug/trace_event_win.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/logging_win.h"
 #include "base/synchronization/lock.h"
+#include "base/trace_event/trace_event_win.h"
 #include "base/win/event_trace_consumer.h"
 #include "chrome/test/logging/win/mof_data_parser.h"
 
@@ -39,18 +39,19 @@ logging::LogSeverity EventLevelToSeverity(uint8 level) {
   }
 }
 
-// TODO(grt) This reverses a mapping produced by base/debug/trace_event_win.cc's
-// TraceEventETWProvider::TraceEvent.  TraceEventETWProvider should expose a way
-// to map an event type back to a trace type.
+// TODO(grt): This reverses a mapping produced by
+// base/trace_event/trace_event_win.cc's TraceEventETWProvider::TraceEvent.
+// TraceEventETWProvider should expose a way to map an event type back to a
+// trace type.
 char EventTypeToTraceType(uint8 event_type) {
   switch (event_type) {
-    case base::debug::kTraceEventTypeBegin:
+    case base::trace_event::kTraceEventTypeBegin:
       return TRACE_EVENT_PHASE_BEGIN;
       break;
-    case base::debug::kTraceEventTypeEnd:
+    case base::trace_event::kTraceEventTypeEnd:
       return TRACE_EVENT_PHASE_END;
       break;
-    case base::debug::kTraceEventTypeInstant:
+    case base::trace_event::kTraceEventTypeInstant:
       return TRACE_EVENT_PHASE_INSTANT;
       break;
     default:
@@ -212,7 +213,8 @@ void LogFileReader::DispatchEvent(const EVENT_TRACE* event) {
       parsed = OnLogMessageEvent(event);
     else if (event->Header.Class.Type == logging::LOG_MESSAGE_FULL)
       parsed = OnLogMessageFullEvent(event);
-  } else if (IsEqualGUID(event->Header.Guid, base::debug::kTraceEventClass32)) {
+  } else if (IsEqualGUID(event->Header.Guid,
+                         base::trace_event::kTraceEventClass32)) {
     parsed = OnTraceEvent(event);
   } else if (IsEqualGUID(event->Header.Guid, EventTraceGuid)) {
     parsed = OnFileHeader(event);
@@ -259,4 +261,4 @@ void ReadLogFile(const base::FilePath& log_file, LogFileDelegate* delegate) {
   LogFileReader::ReadFile(log_file, delegate);
 }
 
-}  // logging_win
+}  // namespace logging_win

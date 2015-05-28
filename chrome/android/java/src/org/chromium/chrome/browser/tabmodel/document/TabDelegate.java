@@ -10,6 +10,7 @@ import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.document.PendingDocumentData;
 import org.chromium.chrome.browser.tabmodel.document.DocumentTabModel.Entry;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.WebContents;
 
 /**
  * Provides Tabs to a DocumentTabModel.
@@ -42,21 +43,14 @@ public interface TabDelegate {
     /**
      * Creates a new Activity for the pre-created WebContents.
      * @param isIncognito Whether the Activity is supposed to hold an incognito Tab.
-     * @param webContentsPtr Native-side WebContents pointer to use for the new Tab.
+     * @param webContents WebContents to use with the new Tab.
      * @param parentTabId ID of the spawning Tab.
      */
-    void createTabWithNativeContents(boolean isIncognito, long webContentsPtr, int parentTabId);
+    void createTabWithWebContents(boolean isIncognito, WebContents webContents, int parentTabId);
 
     /**
      * Creates a new Tab for a URL typed into DevTools.
      * @param url URL to spawn a Tab for.
      */
     void createTabForDevTools(String url);
-
-    /**
-     * Check if the tab is covered by its child activity.
-     * @param tab Tab to be checked.
-     * @return Whether the tab is covered by its child activity.
-     */
-    boolean isTabCoveredByChildActivity(Tab tab);
 }

@@ -18,8 +18,7 @@ from telemetry.value import scalar
 
 class _MapsMeasurement(page_test.PageTest):
   def __init__(self):
-    super(_MapsMeasurement, self).__init__(
-      action_name_to_run='RunPageInteractions')
+    super(_MapsMeasurement, self).__init__()
 
   def ValidateAndMeasurePage(self, page, tab, results):
     js_get_results = 'document.getElementsByTagName("pre")[0].innerText'
@@ -28,9 +27,9 @@ class _MapsMeasurement(page_test.PageTest):
     total = re.search('total=([0-9]+)', test_results).group(1)
     render = re.search('render=([0-9.]+),([0-9.]+)', test_results).group(2)
     results.AddValue(scalar.ScalarValue(
-        results.current_page, 'total_time', 'ms', total))
+        results.current_page, 'total_time', 'ms', int(total)))
     results.AddValue(scalar.ScalarValue(
-        results.current_page, 'render_mean_time', 'ms', render))
+        results.current_page, 'render_mean_time', 'ms', float(render)))
 
 class MapsPage(page_module.Page):
   def __init__(self, page_set, base_dir):
@@ -41,7 +40,7 @@ class MapsPage(page_module.Page):
         make_javascript_deterministic=False)
 
   def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
+    super(MapsPage, self).RunNavigateSteps(action_runner)
     action_runner.WaitForJavaScriptCondition('window.testDone')
 
 
@@ -49,6 +48,10 @@ class MapsPage(page_module.Page):
 class MapsBenchmark(benchmark.Benchmark):
   """Basic Google Maps benchmarks."""
   test = _MapsMeasurement
+
+  @classmethod
+  def Name(cls):
+    return 'maps'
 
   def CreatePageSet(self, options):
     page_set_path = os.path.join(
@@ -62,6 +65,10 @@ class MapsBenchmark(benchmark.Benchmark):
 class MapsNoVsync(MapsBenchmark):
   """Runs the Google Maps benchmark with Vsync disabled"""
   tag = 'novsync'
+
+  @classmethod
+  def Name(cls):
+    return 'maps.novsync'
 
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs('--disable-gpu-vsync')

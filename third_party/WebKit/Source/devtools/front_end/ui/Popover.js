@@ -138,10 +138,22 @@ WebInspector.Popover.prototype = {
         this._disposed = true;
     },
 
+    /**
+     * @param {boolean} canShrink
+     */
     setCanShrink: function(canShrink)
     {
         this._hasFixedHeight = !canShrink;
         this._contentDiv.classList.toggle("fixed-height", this._hasFixedHeight);
+    },
+
+    /**
+     * @param {boolean} noMargins
+     */
+    setNoMargins: function(noMargins)
+    {
+        this._hasNoMargins = noMargins;
+        this._contentDiv.classList.toggle("no-margin", this._hasNoMargins);
     },
 
     /**
@@ -152,11 +164,12 @@ WebInspector.Popover.prototype = {
      */
     _positionElement: function(anchorElement, preferredWidth, preferredHeight, arrowDirection)
     {
-        const borderWidth = 25;
+        const borderWidth = this._hasNoMargins ? 0 : 7;
         const scrollerWidth = this._hasFixedHeight ? 0 : 11;
-        const arrowHeight = 15;
+        const arrowHeight = this._hasNoMargins ? 8 : 15;
         const arrowOffset = 10;
-        const borderRadius = 10;
+        const borderRadius = 4;
+        const arrowRadius = 6;
 
         // Skinny tooltips are not pretty, their arrow location is not nice.
         preferredWidth = Math.max(preferredWidth, 50);
@@ -201,11 +214,13 @@ WebInspector.Popover.prototype = {
         }
 
         var horizontalAlignment;
+        this._popupArrowElement.removeAttribute("style");
         if (anchorBox.x + newElementPosition.width < totalWidth) {
             newElementPosition.x = Math.max(borderRadius, anchorBox.x - borderRadius - arrowOffset);
             horizontalAlignment = "left";
+            this._popupArrowElement.style.left = arrowOffset + "px";
         } else if (newElementPosition.width + borderRadius * 2 < totalWidth) {
-            newElementPosition.x = totalWidth - newElementPosition.width - borderRadius;
+            newElementPosition.x = totalWidth - newElementPosition.width - borderRadius - 2 * borderWidth;
             horizontalAlignment = "right";
             // Position arrow accurately.
             var arrowRightPosition = Math.max(0, totalWidth - anchorBox.x - anchorBox.width - borderRadius - arrowOffset);
@@ -220,13 +235,12 @@ WebInspector.Popover.prototype = {
             if (verticalAlignment === WebInspector.Popover.Orientation.Bottom)
                 newElementPosition.y -= scrollerWidth;
             // Position arrow accurately.
-            this._popupArrowElement.style.left = Math.max(0, anchorBox.x - borderRadius * 2 - arrowOffset) + "px";
-            this._popupArrowElement.style.left += anchorBox.width / 2;
+            this._popupArrowElement.style.left = Math.max(0, anchorBox.x - newElementPosition.x - borderRadius - arrowRadius + anchorBox.width / 2) + "px";
         }
 
         this.element.className = WebInspector.Popover._classNamePrefix + " " + verticalAlignment + "-" + horizontalAlignment + "-arrow";
         WebInspector.installComponentRootStyles(this.element);
-        this.element.positionAt(newElementPosition.x - borderWidth, newElementPosition.y - borderWidth, container);
+        this.element.positionAt(newElementPosition.x, newElementPosition.y - borderWidth, container);
         this.element.style.width = newElementPosition.width + borderWidth * 2 + "px";
         this.element.style.height = newElementPosition.height + borderWidth * 2 + "px";
     },
@@ -244,7 +258,6 @@ WebInspector.Popover.prototype = {
  */
 WebInspector.PopoverHelper = function(panelElement, getAnchor, showPopover, onHide, disableOnClick)
 {
-    this._panelElement = panelElement;
     this._getAnchor = getAnchor;
     this._showPopover = showPopover;
     this._onHide = onHide;
@@ -353,14 +366,6 @@ WebInspector.PopoverHelper.prototype = {
             clearTimeout(this._hoverTimer);
             delete this._hoverTimer;
         }
-    },
-
-    /**
-     * @return {boolean}
-     */
-    isHoverTimerActive: function()
-    {
-        return !!this._hoverTimer;
     },
 
     /**

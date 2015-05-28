@@ -22,7 +22,12 @@ debug.txt
 *.rej
 .gclient_entries
 /third_party
-tests/third_party
+/src/tests/third_party/googlemock
+/src/tests/third_party/googletest
+/src/tests/third_party/libpng
+/src/tests/third_party/zlib
+/src/tests/third_party/deqp
+/src/tests/third_party/gles_conformance_tests
 out
 lib/*
 Makefile
@@ -30,3 +35,4 @@ Makefile
 *~
 .gclient
 angle_internal
+TestResults.qpa

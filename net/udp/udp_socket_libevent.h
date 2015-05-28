@@ -14,8 +14,8 @@
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
-#include "net/base/net_log.h"
 #include "net/base/rand_callback.h"
+#include "net/log/net_log.h"
 #include "net/socket/socket_descriptor.h"
 #include "net/udp/datagram_socket.h"
 
@@ -246,6 +246,7 @@ class NET_EXPORT UDPSocketLibevent : public base::NonThreadSafe {
   int RandomBind(const IPAddressNumber& address);
 
   int socket_;
+
   int addr_family_;
   bool is_connected_;
 

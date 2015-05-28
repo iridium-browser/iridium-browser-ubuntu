@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// TCP cubic send side congestion algorithm, emulates the behavior of
-// TCP cubic.
+// TCP cubic send side congestion algorithm, emulates the behavior of TCP cubic.
 
 #ifndef NET_QUIC_CONGESTION_CONTROL_TCP_CUBIC_SENDER_H_
 #define NET_QUIC_CONGESTION_CONTROL_TCP_CUBIC_SENDER_H_
@@ -15,7 +14,6 @@
 #include "net/quic/congestion_control/hybrid_slow_start.h"
 #include "net/quic/congestion_control/prr_sender.h"
 #include "net/quic/congestion_control/send_algorithm_interface.h"
-#include "net/quic/crypto/cached_network_parameters.h"
 #include "net/quic/quic_bandwidth.h"
 #include "net/quic/quic_connection_stats.h"
 #include "net/quic/quic_protocol.h"
@@ -42,11 +40,12 @@ class NET_EXPORT_PRIVATE TcpCubicSender : public SendAlgorithmInterface {
 
   // Start implementation of SendAlgorithmInterface.
   void SetFromConfig(const QuicConfig& config,
-                     bool is_server,
-                     bool using_pacing) override;
+                     Perspective perspective) override;
   bool ResumeConnectionState(
-      const CachedNetworkParameters& cached_network_params) override;
+      const CachedNetworkParameters& cached_network_params,
+      bool max_bandwidth_resumption) override;
   void SetNumEmulatedConnections(int num_connections) override;
+  void SetMaxCongestionWindow(QuicByteCount max_congestion_window) override;
   void OnCongestionEvent(bool rtt_updated,
                          QuicByteCount bytes_in_flight,
                          const CongestionVector& acked_packets,
@@ -57,7 +56,6 @@ class NET_EXPORT_PRIVATE TcpCubicSender : public SendAlgorithmInterface {
                     QuicByteCount bytes,
                     HasRetransmittableData is_retransmittable) override;
   void OnRetransmissionTimeout(bool packets_retransmitted) override;
-  void RevertRetransmissionTimeout() override;
   QuicTime::Delta TimeUntilSend(
       QuicTime now,
       QuicByteCount bytes_in_flight,
@@ -117,15 +115,11 @@ class NET_EXPORT_PRIVATE TcpCubicSender : public SendAlgorithmInterface {
   // Congestion window in packets.
   QuicPacketCount congestion_window_;
 
-  // Congestion window before the last RTO.
-  // Must be 0 before or after RTO recovery.
-  QuicPacketCount previous_congestion_window_;
+  // Minimum congestion window in packets.
+  QuicPacketCount min_congestion_window_;
 
   // Slow start congestion window in packets, aka ssthresh.
   QuicPacketCount slowstart_threshold_;
-
-  // Slow start threshold before the last loss event or RTO.
-  QuicPacketCount previous_slowstart_threshold_;
 
   // Whether the last loss event caused us to exit slowstart.
   // Used for stats collection of slowstart_packets_lost

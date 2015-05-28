@@ -47,19 +47,41 @@ void ReceiveStatisticsProxy::DecoderTiming(int decode_ms,
                                            int min_playout_delay_ms,
                                            int render_delay_ms) {
   CriticalSectionScoped lock(crit_.get());
-  stats_.avg_delay_ms = target_delay_ms;
+  stats_.decode_ms = decode_ms;
+  stats_.max_decode_ms = max_decode_ms;
+  stats_.current_delay_ms = current_delay_ms;
+  stats_.target_delay_ms = target_delay_ms;
+  stats_.jitter_buffer_ms = jitter_buffer_ms;
+  stats_.min_playout_delay_ms = min_playout_delay_ms;
+  stats_.render_delay_ms = render_delay_ms;
+}
+
+void ReceiveStatisticsProxy::RtcpPacketTypesCounterUpdated(
+    uint32_t ssrc,
+    const RtcpPacketTypeCounter& packet_counter) {
+  CriticalSectionScoped lock(crit_.get());
+  if (stats_.ssrc != ssrc)
+    return;
+  stats_.rtcp_packet_type_counts = packet_counter;
 }
 
 void ReceiveStatisticsProxy::StatisticsUpdated(
     const webrtc::RtcpStatistics& statistics,
     uint32_t ssrc) {
   CriticalSectionScoped lock(crit_.get());
-
+  // TODO(pbos): Handle both local and remote ssrcs here and DCHECK that we
+  // receive stats from one of them.
+  if (stats_.ssrc != ssrc)
+    return;
   stats_.rtcp_stats = statistics;
 }
 
 void ReceiveStatisticsProxy::CNameChanged(const char* cname, uint32_t ssrc) {
   CriticalSectionScoped lock(crit_.get());
+  // TODO(pbos): Handle both local and remote ssrcs here and DCHECK that we
+  // receive stats from one of them.
+  if (stats_.ssrc != ssrc)
+    return;
   stats_.c_name = cname;
 }
 
@@ -67,7 +89,8 @@ void ReceiveStatisticsProxy::DataCountersUpdated(
     const webrtc::StreamDataCounters& counters,
     uint32_t ssrc) {
   CriticalSectionScoped lock(crit_.get());
-
+  if (stats_.ssrc != ssrc)
+    return;
   stats_.rtp_stats = counters;
 }
 

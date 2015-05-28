@@ -24,14 +24,84 @@ namespace api_vpn = extensions::core_api::vpn_provider;
 
 const char kCIDRSeperator[] = "/";
 
+bool CheckIPCIDRSanity(const std::string& value, bool cidr, bool ipv6) {
+  int dots = ipv6 ? 0 : 3;
+  int sep = cidr ? 1 : 0;
+  int colon = ipv6 ? 7 : 0;
+  bool hex_allowed = ipv6;
+  int counter = 0;
+
+  for (const auto& elem : value) {
+    if (IsAsciiDigit(elem)) {
+      counter++;
+      continue;
+    }
+    if (elem == '.') {
+      if (!dots)
+        return false;
+      dots--;
+    } else if (elem == kCIDRSeperator[0]) {
+      if (!sep || dots || colon == 7 || !counter)
+        return false;
+      // Separator observed, no more dots and colons, only digits are allowed
+      // after observing separator. So setting hex_allowed to false.
+      sep--;
+      counter = 0;
+      colon = 0;
+      hex_allowed = false;
+    } else if (elem == ':') {
+      if (!colon)
+        return false;
+      colon--;
+    } else if (!hex_allowed || !IsHexDigit(elem)) {
+      return false;
+    } else {
+      counter++;
+    }
+  }
+  return !sep && !dots && (colon < 7) && counter;
+}
+
+bool CheckIPCIDRSanityList(const std::vector<std::string>& list,
+                           bool cidr,
+                           bool ipv6) {
+  for (const auto& address : list) {
+    if (!CheckIPCIDRSanity(address, cidr, ipv6)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void ConvertParameters(const api_vpn::Parameters& parameters,
                        base::DictionaryValue* parameter_value,
                        std::string* error) {
-  std::vector<std::string> cidr_parts;
-  if (Tokenize(parameters.address, kCIDRSeperator, &cidr_parts) != 2) {
-    *error = "Invalid CIDR address.";
+  if (!CheckIPCIDRSanity(parameters.address, true /* CIDR */,
+                         false /*IPV4 */)) {
+    *error = "Address CIDR sanity check failed.";
     return;
   }
+
+  if (!CheckIPCIDRSanityList(parameters.exclusion_list, true /* CIDR */,
+                             false /*IPV4 */)) {
+    *error = "Exclusion list CIDR sanity check failed.";
+    return;
+  }
+
+  if (!CheckIPCIDRSanityList(parameters.inclusion_list, true /* CIDR */,
+                             false /*IPV4 */)) {
+    *error = "Inclusion list CIDR sanity check failed.";
+    return;
+  }
+
+  if (!CheckIPCIDRSanityList(parameters.dns_servers, false /* Not CIDR */,
+                             false /*IPV4 */)) {
+    *error = "DNS server IP sanity check failed.";
+    return;
+  }
+
+  std::vector<std::string> cidr_parts;
+  CHECK(Tokenize(parameters.address, kCIDRSeperator, &cidr_parts) == 2);
 
   parameter_value->SetStringWithoutPathExpansion(
       shill::kAddressParameterThirdPartyVpn, cidr_parts[0]);
@@ -40,8 +110,12 @@ void ConvertParameters(const api_vpn::Parameters& parameters,
       shill::kSubnetPrefixParameterThirdPartyVpn, cidr_parts[1]);
 
   parameter_value->SetStringWithoutPathExpansion(
-      shill::kBypassTunnelForIpParameterThirdPartyVpn,
-      JoinString(parameters.bypass_tunnel_for_ip, shill::kIPDelimiter));
+      shill::kExclusionListParameterThirdPartyVpn,
+      JoinString(parameters.exclusion_list, shill::kIPDelimiter));
+
+  parameter_value->SetStringWithoutPathExpansion(
+      shill::kInclusionListParameterThirdPartyVpn,
+      JoinString(parameters.inclusion_list, shill::kIPDelimiter));
 
   if (parameters.mtu) {
     parameter_value->SetStringWithoutPathExpansion(
@@ -76,6 +150,19 @@ void VpnThreadExtensionFunction::SignalCallCompletionSuccess() {
   Respond(NoArguments());
 }
 
+void VpnThreadExtensionFunction::SignalCallCompletionSuccessWithId(
+    const std::string& configuration_id) {
+  Respond(OneArgument(new base::StringValue(configuration_id)));
+}
+
+void VpnThreadExtensionFunction::SignalCallCompletionSuccessWithWarning(
+    const std::string& warning) {
+  if (!warning.empty()) {
+    WriteToConsole(content::CONSOLE_MESSAGE_LEVEL_WARNING, warning);
+  }
+  Respond(NoArguments());
+}
+
 void VpnThreadExtensionFunction::SignalCallCompletionFailure(
     const std::string& error_name,
     const std::string& error_message) {
@@ -104,10 +191,13 @@ ExtensionFunction::ResponseAction VpnProviderCreateConfigFunction::Run() {
     return RespondNow(Error("Invalid profile."));
   }
 
+  // Use the configuration name as ID. In the future, a different ID scheme may
+  // be used, requiring a mapping between the two.
   service->CreateConfiguration(
       extension_id(), extension()->name(), params->name,
-      base::Bind(&VpnProviderCreateConfigFunction::SignalCallCompletionSuccess,
-                 this),
+      base::Bind(
+          &VpnProviderCreateConfigFunction::SignalCallCompletionSuccessWithId,
+          this, params->name),
       base::Bind(&VpnProviderNotifyConnectionStateChangedFunction::
                      SignalCallCompletionFailure,
                  this));
@@ -132,7 +222,7 @@ ExtensionFunction::ResponseAction VpnProviderDestroyConfigFunction::Run() {
   }
 
   service->DestroyConfiguration(
-      extension_id(), params->name,
+      extension_id(), params->id,
       base::Bind(&VpnProviderDestroyConfigFunction::SignalCallCompletionSuccess,
                  this),
       base::Bind(&VpnProviderNotifyConnectionStateChangedFunction::
@@ -167,7 +257,8 @@ ExtensionFunction::ResponseAction VpnProviderSetParametersFunction::Run() {
 
   service->SetParameters(
       extension_id(), parameter_value,
-      base::Bind(&VpnProviderSetParametersFunction::SignalCallCompletionSuccess,
+      base::Bind(&VpnProviderSetParametersFunction::
+                     SignalCallCompletionSuccessWithWarning,
                  this),
       base::Bind(&VpnProviderNotifyConnectionStateChangedFunction::
                      SignalCallCompletionFailure,

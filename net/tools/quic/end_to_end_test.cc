@@ -51,6 +51,7 @@ using base::StringPiece;
 using base::WaitableEvent;
 using net::EpollServer;
 using net::test::GenerateBody;
+using net::test::MockQuicConnectionDebugVisitor;
 using net::test::QuicConnectionPeer;
 using net::test::QuicFlowControllerPeer;
 using net::test::QuicSentPacketManagerPeer;
@@ -70,21 +71,19 @@ namespace tools {
 namespace test {
 namespace {
 
-const char* kFooResponseBody = "Artichoke hearts make me happy.";
-const char* kBarResponseBody = "Palm hearts are pretty delicious, also.";
+const char kFooResponseBody[] = "Artichoke hearts make me happy.";
+const char kBarResponseBody[] = "Palm hearts are pretty delicious, also.";
 
 // Run all tests with the cross products of all versions.
 struct TestParams {
   TestParams(const QuicVersionVector& client_supported_versions,
              const QuicVersionVector& server_supported_versions,
              QuicVersion negotiated_version,
-             bool use_pacing,
              bool use_fec,
              QuicTag congestion_control_tag)
       : client_supported_versions(client_supported_versions),
         server_supported_versions(server_supported_versions),
         negotiated_version(negotiated_version),
-        use_pacing(use_pacing),
         use_fec(use_fec),
         congestion_control_tag(congestion_control_tag) {
   }
@@ -95,7 +94,6 @@ struct TestParams {
     os << " client_supported_versions: "
        << QuicVersionVectorToString(p.client_supported_versions);
     os << " negotiated_version: " << QuicVersionToString(p.negotiated_version);
-    os << " use_pacing: " << p.use_pacing;
     os << " use_fec: " << p.use_fec;
     os << " congestion_control_tag: "
        << QuicUtils::TagToString(p.congestion_control_tag) << " }";
@@ -105,7 +103,6 @@ struct TestParams {
   QuicVersionVector client_supported_versions;
   QuicVersionVector server_supported_versions;
   QuicVersion negotiated_version;
-  bool use_pacing;
   bool use_fec;
   QuicTag congestion_control_tag;
 };
@@ -117,34 +114,40 @@ vector<TestParams> GetTestParams() {
   // TODO(rtenneti): Add kTBBR after BBR code is checked in.
   // QuicTag congestion_control_tags[] = {kRENO, kTBBR, kQBIC};
   QuicTag congestion_control_tags[] = {kRENO, kQBIC};
+  QuicVersionVector spdy3_versions;
+  QuicVersionVector spdy4_versions;
+  for (QuicVersion version : all_supported_versions) {
+    if (version > QUIC_VERSION_23) {
+      spdy4_versions.push_back(version);
+    } else {
+      spdy3_versions.push_back(version);
+    }
+  }
   for (size_t congestion_control_index = 0;
        congestion_control_index < arraysize(congestion_control_tags);
        congestion_control_index++) {
     QuicTag congestion_control_tag =
         congestion_control_tags[congestion_control_index];
     for (int use_fec = 0; use_fec < 2; ++use_fec) {
-      for (int use_pacing = 0; use_pacing < 2; ++use_pacing) {
+      for (int spdy_version = 3; spdy_version <= 4; ++spdy_version) {
+        const QuicVersionVector* client_versions =
+            spdy_version == 3 ? &spdy3_versions : &spdy4_versions;
         // Add an entry for server and client supporting all versions.
-        params.push_back(TestParams(all_supported_versions,
-                                    all_supported_versions,
-                                    all_supported_versions[0],
-                                    use_pacing != 0,
-                                    use_fec != 0,
+        params.push_back(TestParams(*client_versions, all_supported_versions,
+                                    (*client_versions)[0], use_fec != 0,
                                     congestion_control_tag));
 
-        // Test client supporting all versions and server supporting 1 version.
-        // Simulate an old server and exercise version downgrade in the client.
-        // Protocol negotiation should occur. Skip the i = 0 case because it is
-        // essentially the same as the default case.
-        for (size_t i = 1; i < all_supported_versions.size(); ++i) {
+        // Test client supporting all versions and server supporting 1
+        // version. Simulate an old server and exercise version downgrade in
+        // the client. Protocol negotiation should occur. Skip the i = 0 case
+        // because it is essentially the same as the default case.
+        for (QuicVersion version : *client_versions) {
           QuicVersionVector server_supported_versions;
-          server_supported_versions.push_back(all_supported_versions[i]);
-          params.push_back(TestParams(all_supported_versions,
+          server_supported_versions.push_back(version);
+          params.push_back(TestParams(*client_versions,
                                       server_supported_versions,
                                       server_supported_versions[0],
-                                      use_pacing != 0,
-                                      use_fec != 0,
-                                      congestion_control_tag));
+                                      use_fec != 0, congestion_control_tag));
         }
       }
     }
@@ -211,10 +214,8 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
         3 * kInitialSessionFlowControlWindowForTest);
 
     QuicInMemoryCachePeer::ResetForTests();
-    AddToCache("GET", "https://www.google.com/foo",
-               "HTTP/1.1", "200", "OK", kFooResponseBody);
-    AddToCache("GET", "https://www.google.com/bar",
-               "HTTP/1.1", "200", "OK", kBarResponseBody);
+    AddToCache("/foo", 200, "OK", kFooResponseBody);
+    AddToCache("/bar", 200, "OK", kBarResponseBody);
   }
 
   ~EndToEndTest() override {
@@ -272,10 +273,6 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
 
   bool Initialize() {
     QuicTagVector copt;
-
-    if (GetParam().use_pacing) {
-      copt.push_back(kPACE);
-    }
     server_config_.SetConnectionOptionsToSend(copt);
 
     // TODO(nimia): Consider setting the congestion control algorithm for the
@@ -346,14 +343,12 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
     }
   }
 
-  void AddToCache(StringPiece method,
-                  StringPiece path,
-                  StringPiece version,
-                  StringPiece response_code,
+  void AddToCache(StringPiece path,
+                  int response_code,
                   StringPiece response_detail,
                   StringPiece body) {
     QuicInMemoryCache::GetInstance()->AddSimpleResponse(
-        method, path, version, response_code, response_detail, body);
+        "www.google.com", path, response_code, response_detail, body);
   }
 
   void SetPacketLossPercentage(int32 loss) {
@@ -505,9 +500,8 @@ TEST_P(EndToEndTest, MultipleClients) {
 
 TEST_P(EndToEndTest, RequestOverMultiplePackets) {
   // Send a large enough request to guarantee fragmentation.
-  string huge_request =
-      "https://www.google.com/some/path?query=" + string(kMaxPacketSize, '.');
-  AddToCache("GET", huge_request, "HTTP/1.1", "200", "OK", kBarResponseBody);
+  string huge_request = "/some/path?query=" + string(kMaxPacketSize, '.');
+  AddToCache(huge_request, 200, "OK", kBarResponseBody);
 
   ASSERT_TRUE(Initialize());
 
@@ -517,9 +511,8 @@ TEST_P(EndToEndTest, RequestOverMultiplePackets) {
 
 TEST_P(EndToEndTest, MultiplePacketsRandomOrder) {
   // Send a large enough request to guarantee fragmentation.
-  string huge_request =
-      "https://www.google.com/some/path?query=" + string(kMaxPacketSize, '.');
-  AddToCache("GET", huge_request, "HTTP/1.1", "200", "OK", kBarResponseBody);
+  string huge_request = "/some/path?query=" + string(kMaxPacketSize, '.');
+  AddToCache(huge_request, 200, "OK", kBarResponseBody);
 
   ASSERT_TRUE(Initialize());
   SetPacketSendDelay(QuicTime::Delta::FromMilliseconds(2));
@@ -749,7 +742,7 @@ TEST_P(EndToEndTest, DoNotSetResumeWriteAlarmIfConnectionFlowControlBlocked) {
 
   // Ensure both stream and connection level are flow control blocked by setting
   // the send window offset to 0.
-  const uint64 kFlowControlWindow =
+  const uint64 flow_control_window =
       server_config_.GetInitialStreamFlowControlWindowToSend();
   QuicSpdyClientStream* stream = client_->GetOrCreateStream();
   QuicSession* session = client_->client()->session();
@@ -764,7 +757,7 @@ TEST_P(EndToEndTest, DoNotSetResumeWriteAlarmIfConnectionFlowControlBlocked) {
 
   // The stream now attempts to write, fails because it is still connection
   // level flow control blocked, and is added to the write blocked list.
-  QuicWindowUpdateFrame window_update(stream->id(), 2 * kFlowControlWindow);
+  QuicWindowUpdateFrame window_update(stream->id(), 2 * flow_control_window);
   stream->OnWindowUpdateFrame(window_update);
 
   // Prior to fixing b/14677858 this call would result in an infinite loop in
@@ -920,16 +913,6 @@ TEST_P(EndToEndTest, ClientSuggestsRTT) {
   const QuicSentPacketManager& server_sent_packet_manager =
       *GetSentPacketManagerFromFirstServerSession();
 
-  // BBR automatically enables pacing.
-  EXPECT_EQ(GetParam().use_pacing ||
-            (FLAGS_quic_allow_bbr &&
-             GetParam().congestion_control_tag == kTBBR),
-            server_sent_packet_manager.using_pacing());
-  EXPECT_EQ(GetParam().use_pacing ||
-            (FLAGS_quic_allow_bbr &&
-             GetParam().congestion_control_tag == kTBBR),
-            client_sent_packet_manager.using_pacing());
-
   EXPECT_EQ(kInitialRTT,
             client_sent_packet_manager.GetRttStats()->initial_rtt_us());
   EXPECT_EQ(kInitialRTT,
@@ -1002,8 +985,6 @@ TEST_P(EndToEndTest, MinInitialRTT) {
 }
 
 TEST_P(EndToEndTest, 0ByteConnectionId) {
-  ValueRestore<bool> old_flag(&FLAGS_allow_truncated_connection_ids_for_quic,
-                              true);
   client_config_.SetBytesForConnectionIdToSend(0);
   ASSERT_TRUE(Initialize());
 
@@ -1017,8 +998,6 @@ TEST_P(EndToEndTest, 0ByteConnectionId) {
 }
 
 TEST_P(EndToEndTest, 1ByteConnectionId) {
-  ValueRestore<bool> old_flag(&FLAGS_allow_truncated_connection_ids_for_quic,
-                              true);
   client_config_.SetBytesForConnectionIdToSend(1);
   ASSERT_TRUE(Initialize());
 
@@ -1031,8 +1010,6 @@ TEST_P(EndToEndTest, 1ByteConnectionId) {
 }
 
 TEST_P(EndToEndTest, 4ByteConnectionId) {
-  ValueRestore<bool> old_flag(&FLAGS_allow_truncated_connection_ids_for_quic,
-                              true);
   client_config_.SetBytesForConnectionIdToSend(4);
   ASSERT_TRUE(Initialize());
 
@@ -1045,8 +1022,6 @@ TEST_P(EndToEndTest, 4ByteConnectionId) {
 }
 
 TEST_P(EndToEndTest, 8ByteConnectionId) {
-  ValueRestore<bool> old_flag(&FLAGS_allow_truncated_connection_ids_for_quic,
-                              true);
   client_config_.SetBytesForConnectionIdToSend(8);
   ASSERT_TRUE(Initialize());
 
@@ -1059,8 +1034,6 @@ TEST_P(EndToEndTest, 8ByteConnectionId) {
 }
 
 TEST_P(EndToEndTest, 15ByteConnectionId) {
-  ValueRestore<bool> old_flag(&FLAGS_allow_truncated_connection_ids_for_quic,
-                              true);
   client_config_.SetBytesForConnectionIdToSend(15);
   ASSERT_TRUE(Initialize());
 
@@ -1091,7 +1064,7 @@ TEST_P(EndToEndTest, MaxStreamsUberTest) {
   GenerateBody(&large_body, 10240);
   int max_streams = 100;
 
-  AddToCache("GET", "/large_response", "HTTP/1.1", "200", "OK", large_body);;
+  AddToCache("/large_response", 200, "OK", large_body);;
 
   client_->client()->WaitForCryptoHandshakeConfirmed();
   SetPacketLossPercentage(10);
@@ -1111,7 +1084,7 @@ TEST_P(EndToEndTest, StreamCancelErrorTest) {
   string small_body;
   GenerateBody(&small_body, 256);
 
-  AddToCache("GET", "/small_response", "HTTP/1.1", "200", "OK", small_body);
+  AddToCache("/small_response", 200, "OK", small_body);
 
   client_->client()->WaitForCryptoHandshakeConfirmed();
 
@@ -1356,26 +1329,167 @@ TEST_P(EndToEndTest, RequestWithNoBodyWillNeverSendStreamFrameWithFIN) {
   server_thread_->Resume();
 }
 
-TEST_P(EndToEndTest, EnablePacingViaFlag) {
-  // When pacing is enabled via command-line flag, it will always be enabled,
-  // regardless of the config. or the specific congestion-control algorithm.
-  ValueRestore<bool> old_flag(&FLAGS_quic_enable_pacing, true);
+// A TestAckNotifierDelegate verifies that its OnAckNotification method has been
+// called exactly once on destruction.
+class TestAckNotifierDelegate : public QuicAckNotifier::DelegateInterface {
+ public:
+  TestAckNotifierDelegate() {}
+
+  void OnAckNotification(int /*num_retransmitted_packets*/,
+                         int /*num_retransmitted_bytes*/,
+                         QuicTime::Delta /*delta_largest_observed*/) override {
+    ASSERT_FALSE(has_been_notified_);
+    has_been_notified_ = true;
+  }
+
+  bool has_been_notified() const { return has_been_notified_; }
+
+ protected:
+  // Object is ref counted.
+  ~TestAckNotifierDelegate() override { EXPECT_TRUE(has_been_notified_); }
+
+ private:
+  bool has_been_notified_ = false;
+};
+
+TEST_P(EndToEndTest, AckNotifierWithPacketLossAndBlockedSocket) {
+  // Verify that even in the presence of packet loss and occasionally blocked
+  // socket,  an AckNotifierDelegate will get informed that the data it is
+  // interested in has been ACKed. This tests end-to-end ACK notification, and
+  // demonstrates that retransmissions do not break this functionality.
+  SetPacketLossPercentage(5);
   ASSERT_TRUE(Initialize());
 
+  // Wait for the server SHLO before upping the packet loss.
   client_->client()->WaitForCryptoHandshakeConfirmed();
-  server_thread_->WaitForCryptoHandshakeConfirmed();
+  SetPacketLossPercentage(30);
+  client_writer_->set_fake_blocked_socket_percentage(10);
 
-  // Pause the server so we can access the server's internals without races.
+  // Create a POST request and send the headers only.
+  HTTPMessage request(HttpConstants::HTTP_1_1, HttpConstants::POST, "/foo");
+  request.set_has_complete_message(false);
+  client_->SendMessage(request);
+
+  // The TestAckNotifierDelegate will cause a failure if not notified.
+  scoped_refptr<TestAckNotifierDelegate> delegate(new TestAckNotifierDelegate);
+
+  // Test the AckNotifier's ability to track multiple packets by making the
+  // request body exceed the size of a single packet.
+  string request_string =
+      "a request body bigger than one packet" + string(kMaxPacketSize, '.');
+
+  // Send the request, and register the delegate for ACKs.
+  client_->SendData(request_string, true, delegate.get());
+  client_->WaitForResponse();
+  EXPECT_EQ(kFooResponseBody, client_->response_body());
+  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+
+  // Send another request to flush out any pending ACKs on the server.
+  client_->SendSynchronousRequest(request_string);
+
+  // Pause the server to avoid races.
   server_thread_->Pause();
-  QuicDispatcher* dispatcher =
-      QuicServerPeer::GetDispatcher(server_thread_->server());
-  ASSERT_EQ(1u, dispatcher->session_map().size());
-  const QuicSentPacketManager& client_sent_packet_manager =
-      client_->client()->session()->connection()->sent_packet_manager();
-  const QuicSentPacketManager& server_sent_packet_manager =
-      *GetSentPacketManagerFromFirstServerSession();
-  EXPECT_TRUE(server_sent_packet_manager.using_pacing());
-  EXPECT_TRUE(client_sent_packet_manager.using_pacing());
+  // Make sure the delegate does get the notification it expects.
+  while (!delegate->has_been_notified()) {
+    // Waits for up to 50 ms.
+    client_->client()->WaitForEvents();
+  }
+  server_thread_->Resume();
+}
+
+// Send a public reset from the server for a different connection ID.
+// It should be ignored.
+TEST_P(EndToEndTest, ServerSendPublicResetWithDifferentConnectionId) {
+  ASSERT_TRUE(Initialize());
+
+  // Send the public reset.
+  QuicConnectionId incorrect_connection_id =
+      client_->client()->session()->connection()->connection_id() + 1;
+  QuicPublicResetPacket header;
+  header.public_header.connection_id = incorrect_connection_id;
+  header.public_header.reset_flag = true;
+  header.public_header.version_flag = false;
+  header.rejected_sequence_number = 10101;
+  QuicFramer framer(server_supported_versions_, QuicTime::Zero(),
+                    Perspective::IS_SERVER);
+  scoped_ptr<QuicEncryptedPacket> packet(framer.BuildPublicResetPacket(header));
+  testing::NiceMock<MockQuicConnectionDebugVisitor> visitor;
+  client_->client()->session()->connection()->set_debug_visitor(&visitor);
+  EXPECT_CALL(visitor, OnIncorrectConnectionId(incorrect_connection_id))
+      .Times(1);
+  // We must pause the server's thread in order to call WritePacket without
+  // race conditions.
+  server_thread_->Pause();
+  server_writer_->WritePacket(packet->data(), packet->length(),
+                              server_address_.address(),
+                              client_->client()->client_address());
+  server_thread_->Resume();
+
+  // The connection should be unaffected.
+  EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
+  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+
+  client_->client()->session()->connection()->set_debug_visitor(nullptr);
+}
+
+// Send a public reset from the client for a different connection ID.
+// It should be ignored.
+TEST_P(EndToEndTest, ClientSendPublicResetWithDifferentConnectionId) {
+  ASSERT_TRUE(Initialize());
+
+  // Send the public reset.
+  QuicConnectionId incorrect_connection_id =
+      client_->client()->session()->connection()->connection_id() + 1;
+  QuicPublicResetPacket header;
+  header.public_header.connection_id = incorrect_connection_id;
+  header.public_header.reset_flag = true;
+  header.public_header.version_flag = false;
+  header.rejected_sequence_number = 10101;
+  QuicFramer framer(server_supported_versions_, QuicTime::Zero(),
+                    Perspective::IS_CLIENT);
+  scoped_ptr<QuicEncryptedPacket> packet(framer.BuildPublicResetPacket(header));
+  client_writer_->WritePacket(packet->data(), packet->length(),
+                              client_->client()->client_address().address(),
+                              server_address_);
+
+  // The connection should be unaffected.
+  EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
+  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+}
+
+// Send a version negotiation packet from the server for a different
+// connection ID.  It should be ignored.
+TEST_P(EndToEndTest, ServerSendVersionNegotiationWithDifferentConnectionId) {
+  ASSERT_TRUE(Initialize());
+
+  // Send the version negotiation packet.
+  QuicConnectionId incorrect_connection_id =
+      client_->client()->session()->connection()->connection_id() + 1;
+  QuicVersionNegotiationPacket header;
+  header.connection_id = incorrect_connection_id;
+  header.reset_flag = true;
+  header.version_flag = true;
+  QuicFramer framer(server_supported_versions_, QuicTime::Zero(),
+                    Perspective::IS_SERVER);
+  scoped_ptr<QuicEncryptedPacket> packet(
+      framer.BuildVersionNegotiationPacket(header, server_supported_versions_));
+  testing::NiceMock<MockQuicConnectionDebugVisitor> visitor;
+  client_->client()->session()->connection()->set_debug_visitor(&visitor);
+  EXPECT_CALL(visitor, OnIncorrectConnectionId(incorrect_connection_id))
+      .Times(1);
+  // We must pause the server's thread in order to call WritePacket without
+  // race conditions.
+  server_thread_->Pause();
+  server_writer_->WritePacket(packet->data(), packet->length(),
+                              server_address_.address(),
+                              client_->client()->client_address());
+  server_thread_->Resume();
+
+  // The connection should be unaffected.
+  EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
+  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+
+  client_->client()->session()->connection()->set_debug_visitor(nullptr);
 }
 
 }  // namespace

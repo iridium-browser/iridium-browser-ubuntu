@@ -10,9 +10,7 @@
 #include "../../include/javascript/JS_Object.h"
 #include "../../include/javascript/JS_Value.h"
 #include "../../include/javascript/console.h"
-//#include "../../include/javascript/JS_Module.h"
 #include "../../include/javascript/JS_EventHandler.h"
-//#include "../../include/javascript/JS_ResMgr.h"
 #include "../../include/javascript/JS_Context.h"
 
 /* ------------------------ console ------------------------ */
@@ -32,8 +30,6 @@ END_JS_STATIC_METHOD()
 
 IMPLEMENT_JS_CLASS(CJS_Console,console)
 
-#define MAXCONSOLECONTENTS			10000
-
 console::console(CJS_Object* pJSObject): CJS_EmbedObj(pJSObject)
 {
 }
@@ -42,34 +38,26 @@ console::~console()
 {
 }
 
-FX_BOOL console::clear(OBJ_METHOD_PARAMS)
+FX_BOOL console::clear(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value& vRet, CFX_WideString& sError)
 {
-
-
-
 	return TRUE;
 }
 
-FX_BOOL console::hide(OBJ_METHOD_PARAMS)
+FX_BOOL console::hide(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value& vRet, CFX_WideString& sError)
 {
-
-
-	
-
 	return TRUE;
 }
 
-FX_BOOL console::println(OBJ_METHOD_PARAMS)
+FX_BOOL console::println(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value& vRet, CFX_WideString& sError)
 {
 	if (params.size() < 1)
 	{
 		return FALSE;
 	}
-  
 	return TRUE;
 }
 
-FX_BOOL console::show(OBJ_METHOD_PARAMS)
+FX_BOOL console::show(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value& vRet, CFX_WideString& sError)
 {
 	return TRUE;
 }

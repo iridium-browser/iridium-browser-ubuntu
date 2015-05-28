@@ -11,6 +11,8 @@
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "platform/JSONValues.h"
 #include "platform/heap/Handle.h"
+#include "platform/weborigin/DatabaseIdentifier.h"
+#include "public/platform/Platform.h"
 #include "public/platform/WebServiceWorkerCache.h"
 #include "public/platform/WebServiceWorkerCacheError.h"
 #include "public/platform/WebServiceWorkerCacheStorage.h"
@@ -41,19 +43,15 @@ namespace blink {
 
 namespace {
 
-WebServiceWorkerCacheStorage* assertCacheStorage(ErrorString* errorString, ServiceWorkerGlobalScope* globalScope)
+PassOwnPtr<WebServiceWorkerCacheStorage> assertCacheStorage(ErrorString* errorString, ServiceWorkerGlobalScope* globalScope)
 {
-    ServiceWorkerGlobalScopeClient* client = ServiceWorkerGlobalScopeClient::from(globalScope);
-    if (!client) {
-        *errorString = "Could not find service worker global scope.";
+    String identifier = createDatabaseIdentifierFromSecurityOrigin(globalScope->securityOrigin());
+    OwnPtr<WebServiceWorkerCacheStorage> caches = adoptPtr(Platform::current()->cacheStorage(identifier));
+    if (!caches) {
+        *errorString = "Cache Storage not available in global scope.";
         return nullptr;
     }
-    WebServiceWorkerCacheStorage* cache = client->cacheStorage();
-    if (!cache) {
-        *errorString = "Cache not available on service worker global client.";
-        return nullptr;
-    }
-    return cache;
+    return caches.release();
 }
 
 CString serviceWorkerCacheErrorString(WebServiceWorkerCacheError* error)
@@ -293,24 +291,21 @@ private:
 } // namespace
 
 InspectorServiceWorkerCacheAgent::InspectorServiceWorkerCacheAgent(ServiceWorkerGlobalScope* scope)
-    : InspectorBaseAgent<blink::InspectorServiceWorkerCacheAgent>("ServiceWorkerCache")
+    : InspectorBaseAgent<blink::InspectorServiceWorkerCacheAgent, InspectorFrontend::ServiceWorkerCache>("ServiceWorkerCache")
     , m_globalScope(scope)
 {
 }
 
 InspectorServiceWorkerCacheAgent::~InspectorServiceWorkerCacheAgent() { }
 
-void InspectorServiceWorkerCacheAgent::trace(Visitor* visitor)
+DEFINE_TRACE(InspectorServiceWorkerCacheAgent)
 {
     InspectorBaseAgent::trace(visitor);
 }
 
-void InspectorServiceWorkerCacheAgent::clearFrontend() { }
-void InspectorServiceWorkerCacheAgent::restore() { }
-
 void InspectorServiceWorkerCacheAgent::requestCacheNames(ErrorString* errorString, PassRefPtrWillBeRawPtr<RequestCacheNamesCallback> callback)
 {
-    WebServiceWorkerCacheStorage* cache = assertCacheStorage(errorString, m_globalScope);
+    OwnPtr<WebServiceWorkerCacheStorage> cache = assertCacheStorage(errorString, m_globalScope);
     if (!cache) {
         callback->sendFailure(*errorString);
         return;
@@ -321,7 +316,7 @@ void InspectorServiceWorkerCacheAgent::requestCacheNames(ErrorString* errorStrin
 
 void InspectorServiceWorkerCacheAgent::requestEntries(ErrorString* errorString, const String& cacheName, int skipCount, int pageSize, PassRefPtrWillBeRawPtr<RequestEntriesCallback> callback)
 {
-    WebServiceWorkerCacheStorage* cache = assertCacheStorage(errorString, m_globalScope);
+    OwnPtr<WebServiceWorkerCacheStorage> cache = assertCacheStorage(errorString, m_globalScope);
     if (!cache) {
         callback->sendFailure(*errorString);
         return;
@@ -335,7 +330,7 @@ void InspectorServiceWorkerCacheAgent::requestEntries(ErrorString* errorString, 
 
 void InspectorServiceWorkerCacheAgent::deleteCache(ErrorString* errorString, const String& cacheName, PassRefPtrWillBeRawPtr<DeleteCacheCallback> callback)
 {
-    WebServiceWorkerCacheStorage* cache = assertCacheStorage(errorString, m_globalScope);
+    OwnPtr<WebServiceWorkerCacheStorage> cache = assertCacheStorage(errorString, m_globalScope);
     if (!cache) {
         callback->sendFailure(*errorString);
         return;

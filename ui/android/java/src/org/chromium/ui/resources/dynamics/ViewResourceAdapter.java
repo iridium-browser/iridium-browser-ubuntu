@@ -6,6 +6,7 @@ package org.chromium.ui.resources.dynamics;
 
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Rect;
 import android.view.View;
 import android.view.View.OnLayoutChangeListener;
@@ -47,16 +48,19 @@ public class ViewResourceAdapter implements DynamicResource, OnLayoutChangeListe
     public Bitmap getBitmap() {
         if (!isDirty()) return mBitmap;
         TraceEvent.begin("ViewResourceAdapter:getBitmap");
-        validateBitmap();
+        if (validateBitmap()) {
+            Canvas canvas = new Canvas(mBitmap);
 
-        Canvas canvas = new Canvas(mBitmap);
+            onCaptureStart(canvas, mDirtyRect.isEmpty() ? null : mDirtyRect);
 
-        onCaptureStart(canvas, mDirtyRect.isEmpty() ? null : mDirtyRect);
+            if (!mDirtyRect.isEmpty()) canvas.clipRect(mDirtyRect);
+            capture(canvas);
 
-        if (!mDirtyRect.isEmpty()) canvas.clipRect(mDirtyRect);
-        mView.draw(canvas);
-
-        onCaptureEnd();
+            onCaptureEnd();
+        } else {
+            assert mBitmap.getWidth() == 1 && mBitmap.getHeight() == 1;
+            mBitmap.setPixel(0, 0, Color.TRANSPARENT);
+        }
 
         mDirtyRect.setEmpty();
         TraceEvent.end("ViewResourceAdapter:getBitmap");
@@ -114,7 +118,7 @@ public class ViewResourceAdapter implements DynamicResource, OnLayoutChangeListe
     }
 
     /**
-     * Called before {@link View#draw(Canvas)} is called.
+     * Called before {@link #capture(Canvas)} is called.
      * @param canvas    The {@link Canvas} that will be drawn to.
      * @param dirtyRect The dirty {@link Rect} or {@code null} if the entire area is being redrawn.
      */
@@ -122,7 +126,15 @@ public class ViewResourceAdapter implements DynamicResource, OnLayoutChangeListe
     }
 
     /**
-     * Called after {@link View#draw(Canvas)}.
+     * Called to draw the {@link View}'s contents into the passed in {@link Canvas}.
+     * @param canvas The {@link Canvas} that will be drawn to.
+     */
+    protected void capture(Canvas canvas) {
+        mView.draw(canvas);
+    }
+
+    /**
+     * Called after {@link #capture(Canvas)}.
      */
     protected void onCaptureEnd() {
     }
@@ -143,22 +155,30 @@ public class ViewResourceAdapter implements DynamicResource, OnLayoutChangeListe
         outContentAperture.set(0, 0, mView.getWidth(), mView.getHeight());
     }
 
-    private void validateBitmap() {
+    /**
+     * @return Whether |mBitmap| is corresponding to |mView| or not.
+     */
+    private boolean validateBitmap() {
+        int viewWidth = mView.getWidth();
+        int viewHeight = mView.getHeight();
+        boolean isEmpty = viewWidth == 0 || viewHeight == 0;
+        if (isEmpty) {
+            viewWidth = 1;
+            viewHeight = 1;
+        }
         if (mBitmap != null
-                && (mBitmap.getWidth() != mView.getWidth()
-                || mBitmap.getHeight() != mView.getHeight())) {
+                && (mBitmap.getWidth() != viewWidth || mBitmap.getHeight() != viewHeight)) {
             mBitmap.recycle();
             mBitmap = null;
         }
 
-        if (mView.getWidth() == 0 || mView.getHeight() == 0) return;
-
         if (mBitmap == null) {
-            mBitmap = Bitmap.createBitmap(
-                    mView.getWidth(), mView.getHeight(), Bitmap.Config.ARGB_8888);
+            mBitmap = Bitmap.createBitmap(viewWidth, viewHeight, Bitmap.Config.ARGB_8888);
             mBitmap.setHasAlpha(true);
-            mDirtyRect.set(0, 0, mView.getWidth(), mView.getHeight());
+            mDirtyRect.set(0, 0, viewWidth, viewHeight);
             mBitmapSize.set(0, 0, mBitmap.getWidth(), mBitmap.getHeight());
         }
+
+        return !isEmpty;
     }
 }

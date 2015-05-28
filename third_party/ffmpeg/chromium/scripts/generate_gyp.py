@@ -15,6 +15,9 @@ Running build_ffmpeg.sh for ia32, arm, arm-neon and mips32 platforms is
 required prior to running this script. The arm, arm-neon and mips32 platforms
 assume a Chromium OS build environment.
 
+The Ensemble branding supports the following architectures: ia32, x86, arm, and
+mipsel.
+
 Step 1: Have a Chromium OS checkout (refer to http://dev.chromium.org)
   mkdir chromeos
   repo init ...
@@ -138,7 +141,7 @@ GN_SOURCE_END = """]
 
 # Controls GYP conditional stanza generation.
 SUPPORTED_ARCHITECTURES = ['ia32', 'arm', 'arm-neon', 'x64', 'mipsel']
-SUPPORTED_TARGETS = ['Chromium', 'Chrome', 'ChromiumOS', 'ChromeOS']
+SUPPORTED_TARGETS = ['Chromium', 'Chrome', 'ChromiumOS', 'ChromeOS', 'Ensemble']
 # Mac doesn't have any platform specific files, so just use linux and win.
 SUPPORTED_PLATFORMS = ['linux', 'win']
 
@@ -287,7 +290,7 @@ def GetSourceFileSet(object_to_sources, object_files):
     object_files: A list of object file paths.
 
   Returns:
-    A python set of source files requried to build said objects.
+    A python set of source files required to build said objects.
   """
   source_set = set()
   for name in object_files:
@@ -435,16 +438,16 @@ class SourceSet(object):
 
     # Only build a non-trivial conditional if it's a subset of all supported
     # architectures. targets. Arch conditions look like:
-    #   (cpu_arch == "arm" || (cpu_arch == "arm" && arm_use_neon))
+    #   (current_cpu == "arm" || (current_cpu == "arm" && arm_use_neon))
     arch_conditions = []
     if self.architectures != set(SUPPORTED_ARCHITECTURES):
       for arch in self.architectures:
         if arch == 'arm-neon':
-          arch_conditions.append('(cpu_arch == "arm" && arm_use_neon)')
+          arch_conditions.append('(current_cpu == "arm" && arm_use_neon)')
         elif arch == 'ia32':
-          arch_conditions.append('cpu_arch == "x86"')
+          arch_conditions.append('current_cpu == "x86"')
         else:
-          arch_conditions.append('cpu_arch == "%s"' % arch)
+          arch_conditions.append('current_cpu == "%s"' % arch)
 
     # Only build a non-trivial conditional if it's a subset of all supported
     # targets. Branding conditions look like:

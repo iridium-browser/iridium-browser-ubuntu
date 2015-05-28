@@ -54,6 +54,7 @@
   # anything to be done in this file (instead of a higher-level .gyp file).
   'targets': [
     {
+      # GN version: //third_party/widevine/cdm:adapter_resources
       'target_name': 'widevinecdmadapter_resources',
       'type': 'none',
       'conditions': [
@@ -99,6 +100,7 @@
           'conditions': [
             [ 'os_posix == 1 and OS != "mac"', {
               'libraries': [
+                '-lrt',
                 # Copied by widevine_cdm_binaries.
                 '<(PRODUCT_DIR)/libwidevinecdm.so',
               ],

@@ -6,6 +6,8 @@
 #define InterpolationEffect_h
 
 #include "core/animation/Interpolation.h"
+#include "core/animation/Keyframe.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/animation/TimingFunction.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/RefCounted.h"
@@ -26,7 +28,16 @@ public:
         m_interpolations.append(InterpolationRecord::create(interpolation, easing, start, end, applyFrom, applyTo));
     }
 
-    void trace(Visitor*);
+    void addInterpolationsFromKeyframes(CSSPropertyID, Element*, const ComputedStyle* baseStyle, Keyframe::PropertySpecificKeyframe& keyframeA, Keyframe::PropertySpecificKeyframe& keyframeB, double applyFrom, double applyTo);
+
+    template<typename T>
+    inline void forEachInterpolation(const T& callback)
+    {
+        for (auto& record : m_interpolations)
+            callback(*record->m_interpolation);
+    }
+
+    DECLARE_TRACE();
 
 private:
     InterpolationEffect()
@@ -47,7 +58,7 @@ private:
             return adoptPtrWillBeNoop(new InterpolationRecord(interpolation, easing, start, end, applyFrom, applyTo));
         }
 
-        void trace(Visitor*);
+        DECLARE_TRACE();
 
     private:
         InterpolationRecord(PassRefPtrWillBeRawPtr<Interpolation> interpolation, PassRefPtr<TimingFunction> easing, double start, double end, double applyFrom, double applyTo)
@@ -61,7 +72,7 @@ private:
         }
     };
 
-    WillBeHeapVector<OwnPtrWillBeMember<InterpolationRecord> > m_interpolations;
+    WillBeHeapVector<OwnPtrWillBeMember<InterpolationRecord>> m_interpolations;
 };
 
 } // namespace blink

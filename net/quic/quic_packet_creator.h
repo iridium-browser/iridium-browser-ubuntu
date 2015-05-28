@@ -9,6 +9,7 @@
 #ifndef NET_QUIC_QUIC_PACKET_CREATOR_H_
 #define NET_QUIC_QUIC_PACKET_CREATOR_H_
 
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -98,7 +99,7 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
   // Caller must ensure that any open FEC group is closed before calling this
   // method.
   SerializedPacket ReserializeAllFrames(
-      const QuicFrames& frames,
+      const RetransmittableFrames& frames,
       QuicSequenceNumberLength original_length);
 
   // Returns true if there are frames pending to be serialized.
@@ -107,6 +108,7 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
   // Returns true if there are retransmittable frames pending to be serialized.
   bool HasPendingRetransmittableFrames() const;
 
+  // TODO(jri): Remove this method.
   // Returns whether FEC protection is currently enabled. Note: Enabled does not
   // mean that an FEC group is currently active; i.e., IsFecProtected() may
   // still return false.
@@ -157,18 +159,15 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
   // that value as a member of SerializedPacket.
   SerializedPacket SerializeFec();
 
-  // Creates a packet with connection close frame. Caller owns the created
-  // packet. Also, sets the entropy hash of the serialized packet to a random
-  // bool and returns that value as a member of SerializedPacket.
-  SerializedPacket SerializeConnectionClose(
-      QuicConnectionCloseFrame* close_frame);
-
   // Creates a version negotiation packet which supports |supported_versions|.
   // Caller owns the created  packet. Also, sets the entropy hash of the
   // serialized packet to a random bool and returns that value as a member of
   // SerializedPacket.
   QuicEncryptedPacket* SerializeVersionNegotiationPacket(
       const QuicVersionVector& supported_versions);
+
+  // Returns a dummy packet that is valid but contains no useful information.
+  static SerializedPacket NoPacket();
 
   // Sets the encryption level that will be applied to new packets.
   void set_encryption_level(EncryptionLevel level) {
@@ -181,10 +180,6 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
     return sequence_number_;
   }
 
-  void set_sequence_number(QuicPacketSequenceNumber s) {
-    sequence_number_ = s;
-  }
-
   QuicConnectionIdLength connection_id_length() const {
     return connection_id_length_;
   }
@@ -193,23 +188,16 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
     connection_id_length_ = length;
   }
 
-  QuicSequenceNumberLength next_sequence_number_length() const {
-    return next_sequence_number_length_;
-  }
-
-  void set_next_sequence_number_length(QuicSequenceNumberLength length) {
-    next_sequence_number_length_ = length;
-  }
-
   QuicByteCount max_packet_length() const {
     return max_packet_length_;
   }
 
-  void set_max_packet_length(QuicByteCount length) {
-    // |max_packet_length_| should not be changed mid-packet or mid-FEC group.
-    DCHECK(fec_group_.get() == nullptr && queued_frames_.empty());
-    max_packet_length_ = length;
-  }
+  // Sets the encrypter to use for the encryption level and updates the max
+  // plaintext size.
+  void SetEncrypter(EncryptionLevel level, QuicEncrypter* encrypter);
+
+  // Sets the maximum packet length.
+  void SetMaxPacketLength(QuicByteCount length);
 
   // Returns current max number of packets covered by an FEC group.
   size_t max_packets_per_fec_group() const {
@@ -222,14 +210,15 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
   // To turn off FEC protection, use StopFecProtectingPackets().
   void set_max_packets_per_fec_group(size_t max_packets_per_fec_group);
 
+  // Returns the currently open FEC group's number. If there isn't an open FEC
+  // group, returns the last closed FEC group number. Returns 0 when FEC is
+  // disabled or no FEC group has been created yet.
+  QuicFecGroupNumber fec_group_number() { return fec_group_number_; }
+
  private:
   friend class test::QuicPacketCreatorPeer;
 
   static bool ShouldRetransmit(const QuicFrame& frame);
-
-  // Updates sequence number and max packet lengths on a packet or FEC group
-  // boundary.
-  void MaybeUpdateLengths();
 
   // Updates lengths and also starts an FEC group if FEC protection is on and
   // there is not already an FEC group open.
@@ -278,6 +267,7 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
   // packet_size_ is mutable because it's just a cache of the current size.
   // packet_size should never be read directly, use PacketSize() instead.
   mutable size_t packet_size_;
+  mutable size_t max_plaintext_size_;
   QuicFrames queued_frames_;
   scoped_ptr<RetransmittableFrames> queued_retransmittable_frames_;
 

@@ -4,8 +4,8 @@
 
 #include "ui/aura/window_tree_host.h"
 
-#include "base/debug/trace_event.h"
 #include "base/thread_task_runner_handle.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/env.h"
@@ -211,7 +211,7 @@ void WindowTreeHost::CreateCompositor(
   // TODO(beng): I think this setup should probably all move to a "accelerated
   // widget available" function.
   if (!dispatcher()) {
-    window()->Init(WINDOW_LAYER_NOT_DRAWN);
+    window()->Init(ui::LAYER_NOT_DRAWN);
     window()->set_host(this);
     window()->SetName("RootWindow");
     window()->SetEventTargeter(

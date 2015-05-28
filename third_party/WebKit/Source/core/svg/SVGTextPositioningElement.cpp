@@ -23,7 +23,7 @@
 #include "core/svg/SVGTextPositioningElement.h"
 
 #include "core/SVGNames.h"
-#include "core/rendering/svg/RenderSVGText.h"
+#include "core/layout/svg/LayoutSVGText.h"
 #include "core/svg/SVGLengthList.h"
 #include "core/svg/SVGNumberList.h"
 
@@ -31,10 +31,10 @@ namespace blink {
 
 SVGTextPositioningElement::SVGTextPositioningElement(const QualifiedName& tagName, Document& document)
     : SVGTextContentElement(tagName, document)
-    , m_x(SVGAnimatedLengthList::create(this, SVGNames::xAttr, SVGLengthList::create(LengthModeWidth)))
-    , m_y(SVGAnimatedLengthList::create(this, SVGNames::yAttr, SVGLengthList::create(LengthModeHeight)))
-    , m_dx(SVGAnimatedLengthList::create(this, SVGNames::dxAttr, SVGLengthList::create(LengthModeWidth)))
-    , m_dy(SVGAnimatedLengthList::create(this, SVGNames::dyAttr, SVGLengthList::create(LengthModeHeight)))
+    , m_x(SVGAnimatedLengthList::create(this, SVGNames::xAttr, SVGLengthList::create(SVGLengthMode::Width)))
+    , m_y(SVGAnimatedLengthList::create(this, SVGNames::yAttr, SVGLengthList::create(SVGLengthMode::Height)))
+    , m_dx(SVGAnimatedLengthList::create(this, SVGNames::dxAttr, SVGLengthList::create(SVGLengthMode::Width)))
+    , m_dy(SVGAnimatedLengthList::create(this, SVGNames::dyAttr, SVGLengthList::create(SVGLengthMode::Height)))
     , m_rotate(SVGAnimatedNumberList::create(this, SVGNames::rotateAttr, SVGNumberList::create()))
 {
     addToPropertyMap(m_x);
@@ -44,7 +44,7 @@ SVGTextPositioningElement::SVGTextPositioningElement(const QualifiedName& tagNam
     addToPropertyMap(m_rotate);
 }
 
-void SVGTextPositioningElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGTextPositioningElement)
 {
     visitor->trace(m_x);
     visitor->trace(m_y);
@@ -67,11 +67,6 @@ bool SVGTextPositioningElement::isSupportedAttribute(const QualifiedName& attrNa
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGTextPositioningElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
-}
-
 void SVGTextPositioningElement::svgAttributeChanged(const QualifiedName& attrName)
 {
     if (!isSupportedAttribute(attrName)) {
@@ -89,18 +84,18 @@ void SVGTextPositioningElement::svgAttributeChanged(const QualifiedName& attrNam
     if (updateRelativeLengths)
         updateRelativeLengthsInformation();
 
-    RenderObject* renderer = this->renderer();
+    LayoutObject* renderer = this->layoutObject();
     if (!renderer)
         return;
 
     ASSERT(updateRelativeLengths || attrName == SVGNames::rotateAttr);
 
-    if (RenderSVGText* textRenderer = RenderSVGText::locateRenderSVGTextAncestor(renderer))
+    if (LayoutSVGText* textRenderer = LayoutSVGText::locateLayoutSVGTextAncestor(renderer))
         textRenderer->setNeedsPositioningValuesUpdate();
     markForLayoutAndParentResourceInvalidation(renderer);
 }
 
-SVGTextPositioningElement* SVGTextPositioningElement::elementFromRenderer(RenderObject& renderer)
+SVGTextPositioningElement* SVGTextPositioningElement::elementFromRenderer(LayoutObject& renderer)
 {
     if (!renderer.isSVGText() && !renderer.isSVGInline())
         return 0;

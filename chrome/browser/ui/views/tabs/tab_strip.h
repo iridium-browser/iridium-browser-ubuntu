@@ -213,6 +213,7 @@ class TabStrip : public views::View,
   // TabController overrides:
   const ui::ListSelectionModel& GetSelectionModel() override;
   bool SupportsMultipleSelection() override;
+  bool ShouldHideCloseButtonForInactiveTabs() override;
   void SelectTab(Tab* tab) override;
   void ExtendSelectionTo(Tab* tab) override;
   void ToggleSelected(Tab* tab) override;
@@ -244,8 +245,7 @@ class TabStrip : public views::View,
 
   // views::View overrides:
   void Layout() override;
-  void PaintChildren(gfx::Canvas* canvas,
-                     const views::CullSet& cull_set) override;
+  void PaintChildren(const ui::PaintContext& context) override;
   const char* GetClassName() const override;
   gfx::Size GetPreferredSize() const override;
   // NOTE: the drag and drop methods are invoked from FrameView. This is done
@@ -270,10 +270,10 @@ class TabStrip : public views::View,
 
   friend class TabDragController;
   friend class TabDragControllerTest;
-  FRIEND_TEST_ALL_PREFIXES(TabDragControllerTest, GestureEndShouldEndDragTest);
   friend class TabStripTest;
+  FRIEND_TEST_ALL_PREFIXES(TabDragControllerTest, GestureEndShouldEndDragTest);
   FRIEND_TEST_ALL_PREFIXES(TabStripTest, TabHitTestMaskWhenStacked);
-  FRIEND_TEST_ALL_PREFIXES(TabStripTest, ClippedTabCloseButton);
+  FRIEND_TEST_ALL_PREFIXES(TabStripTest, TabCloseButtonVisibilityWhenStacked);
 
   // Used during a drop session of a url. Tracks the position of the drop as
   // well as a window used to highlight where the drop occurs.
@@ -431,9 +431,7 @@ class TabStrip : public views::View,
   FindClosingTabResult FindClosingTab(const Tab* tab);
 
   // Paints all the tabs in |tabs_closing_map_[index]|.
-  void PaintClosingTabs(gfx::Canvas* canvas,
-                        int index,
-                        const views::CullSet& cull_set);
+  void PaintClosingTabs(int index, const ui::PaintContext& context);
 
   // Invoked when a mouse event occurs over |source|. Potentially switches the
   // |stacked_layout_|.

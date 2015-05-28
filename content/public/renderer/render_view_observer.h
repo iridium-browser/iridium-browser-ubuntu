@@ -73,8 +73,6 @@ class CONTENT_EXPORT RenderViewObserver : public IPC::Listener,
       blink::WebLocalFrame* frame,
       const blink::WebVector<blink::WebString>& newly_matching_selectors,
       const blink::WebVector<blink::WebString>& stopped_matching_selectors) {}
-  virtual void DidCreateDataSource(blink::WebLocalFrame* frame,
-                                   blink::WebDataSource* ds) {}
   virtual void PrintPage(blink::WebLocalFrame* frame, bool user_initiated) {}
   virtual void FocusedNodeChanged(const blink::WebNode& node) {}
   virtual void DraggableRegionsChanged(blink::WebFrame* frame) {}
@@ -89,7 +87,11 @@ class CONTENT_EXPORT RenderViewObserver : public IPC::Listener,
   // These match incoming IPCs.
   virtual void Navigate(const GURL& url) {}
   virtual void ClosePage() {}
-  virtual void Resized() {}
+
+  // This indicates that animations to scroll the focused element into view (if
+  // any) have completed. May be called more than once for a single focus. Can
+  // be called from browser, renderer, or compositor.
+  virtual void FocusChangeComplete() {}
 
   virtual void OnStop() {}
 

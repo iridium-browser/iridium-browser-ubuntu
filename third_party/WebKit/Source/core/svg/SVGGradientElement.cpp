@@ -20,15 +20,12 @@
  */
 
 #include "config.h"
-
 #include "core/svg/SVGGradientElement.h"
 
 #include "core/XLinkNames.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/ElementTraversal.h"
-#include "core/rendering/svg/RenderSVGPath.h"
-#include "core/rendering/svg/RenderSVGResourceLinearGradient.h"
-#include "core/rendering/svg/RenderSVGResourceRadialGradient.h"
+#include "core/layout/svg/LayoutSVGResourceContainer.h"
 #include "core/svg/SVGStopElement.h"
 #include "core/svg/SVGTransformList.h"
 
@@ -57,7 +54,7 @@ SVGGradientElement::SVGGradientElement(const QualifiedName& tagName, Document& d
     addToPropertyMap(m_gradientUnits);
 }
 
-void SVGGradientElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGGradientElement)
 {
     visitor->trace(m_gradientTransform);
     visitor->trace(m_spreadMethod);
@@ -78,11 +75,6 @@ bool SVGGradientElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGGradientElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
-}
-
 void SVGGradientElement::svgAttributeChanged(const QualifiedName& attrName)
 {
     if (!isSupportedAttribute(attrName)) {
@@ -92,7 +84,7 @@ void SVGGradientElement::svgAttributeChanged(const QualifiedName& attrName)
 
     SVGElement::InvalidationGuard invalidationGuard(this);
 
-    RenderSVGResourceContainer* renderer = toRenderSVGResourceContainer(this->renderer());
+    LayoutSVGResourceContainer* renderer = toLayoutSVGResourceContainer(this->layoutObject());
     if (renderer)
         renderer->invalidateCacheAndMarkForLayout();
 }
@@ -104,8 +96,8 @@ void SVGGradientElement::childrenChanged(const ChildrenChange& change)
     if (change.byParser)
         return;
 
-    if (RenderObject* object = renderer())
-        object->setNeedsLayoutAndFullPaintInvalidation();
+    if (LayoutObject* object = layoutObject())
+        object->setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::ChildChanged);
 }
 
 Vector<Gradient::ColorStop> SVGGradientElement::buildStops()

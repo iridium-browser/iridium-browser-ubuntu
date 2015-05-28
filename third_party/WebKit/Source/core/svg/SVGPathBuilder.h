@@ -25,7 +25,6 @@
 #define SVGPathBuilder_h
 
 #include "core/svg/SVGPathConsumer.h"
-#include "platform/geometry/FloatPoint.h"
 
 namespace blink {
 
@@ -33,28 +32,16 @@ class Path;
 
 class SVGPathBuilder final : public SVGPathConsumer {
 public:
-    SVGPathBuilder(Path& path) : m_path(path) { }
+    SVGPathBuilder(Path& path) : m_path(path), m_closed(true) { }
 
 private:
     virtual void incrementPathSegmentCount() override { }
     virtual bool continueConsuming() override { return true; }
 
-    // Used in UnalteredParsing/NormalizedParsing modes.
-    virtual void moveTo(const FloatPoint&, bool closed, PathCoordinateMode) override;
-    virtual void lineTo(const FloatPoint&, PathCoordinateMode) override;
-    virtual void curveToCubic(const FloatPoint&, const FloatPoint&, const FloatPoint&, PathCoordinateMode) override;
-    virtual void closePath() override;
-
-    // Only used in UnalteredParsing mode.
-    virtual void lineToHorizontal(float, PathCoordinateMode) override { ASSERT_NOT_REACHED(); }
-    virtual void lineToVertical(float, PathCoordinateMode) override { ASSERT_NOT_REACHED(); }
-    virtual void curveToCubicSmooth(const FloatPoint&, const FloatPoint&, PathCoordinateMode) override { ASSERT_NOT_REACHED(); }
-    virtual void curveToQuadratic(const FloatPoint&, const FloatPoint&, PathCoordinateMode) override { ASSERT_NOT_REACHED(); }
-    virtual void curveToQuadraticSmooth(const FloatPoint&, PathCoordinateMode) override { ASSERT_NOT_REACHED(); }
-    virtual void arcTo(float, float, float, bool, bool, const FloatPoint&, PathCoordinateMode) override { ASSERT_NOT_REACHED(); }
+    virtual void emitSegment(const PathSegmentData&) override;
 
     Path& m_path;
-    FloatPoint m_current;
+    bool m_closed;
 };
 
 } // namespace blink

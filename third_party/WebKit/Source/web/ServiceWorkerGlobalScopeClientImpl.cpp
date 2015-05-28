@@ -48,19 +48,29 @@ ServiceWorkerGlobalScopeClientImpl::~ServiceWorkerGlobalScopeClientImpl()
 {
 }
 
-void ServiceWorkerGlobalScopeClientImpl::getClients(WebServiceWorkerClientsCallbacks* callbacks)
+void ServiceWorkerGlobalScopeClientImpl::getClients(const WebServiceWorkerClientQueryOptions& options, WebServiceWorkerClientsCallbacks* callbacks)
 {
-    m_client.getClients(callbacks);
+    m_client.getClients(options, callbacks);
+}
+
+void ServiceWorkerGlobalScopeClientImpl::openWindow(const WebURL& url, WebServiceWorkerClientCallbacks* callbacks)
+{
+    m_client.openWindow(url, callbacks);
+}
+
+void ServiceWorkerGlobalScopeClientImpl::setCachedMetadata(const WebURL& url, const char* data, size_t size)
+{
+    m_client.setCachedMetadata(url, data, size);
+}
+
+void ServiceWorkerGlobalScopeClientImpl::clearCachedMetadata(const WebURL& url)
+{
+    m_client.clearCachedMetadata(url);
 }
 
 WebURL ServiceWorkerGlobalScopeClientImpl::scope() const
 {
     return m_client.scope();
-}
-
-WebServiceWorkerCacheStorage* ServiceWorkerGlobalScopeClientImpl::cacheStorage() const
-{
-    return m_client.cacheStorage();
 }
 
 void ServiceWorkerGlobalScopeClientImpl::didHandleActivateEvent(int eventID, WebServiceWorkerEventResult result)
@@ -103,9 +113,9 @@ void ServiceWorkerGlobalScopeClientImpl::didHandleCrossOriginConnectEvent(int co
     m_client.didHandleCrossOriginConnectEvent(connectEventID, acceptConnect);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::postMessageToClient(int clientID, const WebString& message, PassOwnPtr<WebMessagePortChannelArray> webChannels)
+void ServiceWorkerGlobalScopeClientImpl::postMessageToClient(const WebString& clientUUID, const WebString& message, PassOwnPtr<WebMessagePortChannelArray> webChannels)
 {
-    m_client.postMessageToClient(clientID, message, webChannels.leakPtr());
+    m_client.postMessageToClient(clientUUID, message, webChannels.leakPtr());
 }
 
 void ServiceWorkerGlobalScopeClientImpl::postMessageToCrossOriginClient(const WebCrossOriginServiceWorkerClient& client, const WebString& message, PassOwnPtr<WebMessagePortChannelArray> webChannels)
@@ -118,9 +128,14 @@ void ServiceWorkerGlobalScopeClientImpl::skipWaiting(WebServiceWorkerSkipWaiting
     m_client.skipWaiting(callbacks);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::focus(int clientID, WebServiceWorkerClientFocusCallback* callback)
+void ServiceWorkerGlobalScopeClientImpl::claim(WebServiceWorkerClientsClaimCallbacks* callbacks)
 {
-    m_client.focus(clientID, callback);
+    m_client.claim(callbacks);
+}
+
+void ServiceWorkerGlobalScopeClientImpl::focus(const WebString& clientUUID, WebServiceWorkerClientCallbacks* callback)
+{
+    m_client.focus(clientUUID, callback);
 }
 
 ServiceWorkerGlobalScopeClientImpl::ServiceWorkerGlobalScopeClientImpl(WebServiceWorkerContextClient& client)

@@ -1,14 +1,15 @@
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-from measurements import smooth_gesture_util
 
 from telemetry.core.platform import tracing_category_filter
 from telemetry.core.platform import tracing_options
+from telemetry.page import action_runner
 from telemetry.timeline.model import TimelineModel
-from telemetry.page.actions import action_runner
 from telemetry.value import trace
 from telemetry.web_perf import timeline_interaction_record as tir_module
+
+from measurements import smooth_gesture_util
 
 
 RUN_SMOOTH_ACTIONS = 'RunSmoothAllActions'
@@ -44,7 +45,7 @@ class TimelineController(object):
     # Start the smooth marker for all actions.
     runner = action_runner.ActionRunner(tab)
     self._interaction = runner.BeginInteraction(
-        RUN_SMOOTH_ACTIONS, is_smooth=True)
+        RUN_SMOOTH_ACTIONS)
 
   def Stop(self, tab, results):
     # End the smooth marker for all actions.
@@ -68,7 +69,7 @@ class TimelineController(object):
           'TimelineController cannot issue more than 1 %s record' %
           RUN_SMOOTH_ACTIONS)
         run_smooth_actions_record = r
-      elif r.is_smooth:
+      else:
         self._smooth_records.append(
           smooth_gesture_util.GetAdjustedInteractionIfContainGesture(
             self.model, r))

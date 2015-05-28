@@ -20,15 +20,22 @@ const char kDataReductionProxyAltFallback[] =
 // The origin of the data reduction proxy dev.
 const char kDataReductionProxyDev[]      = "spdy-proxy-dev-auth-origin";
 
+// The name of a Data Reduction Proxy experiment to run. These experiments are
+// defined by the proxy server. Use --force-fieldtrials for Data Reduction
+// Proxy field trials.
+const char kDataReductionProxyExperiment[] = "data-reduction-proxy-experiment";
+
 // The origin of the data reduction proxy fallback.
 const char kDataReductionProxyFallback[] = "spdy-proxy-auth-fallback";
 
 // A test key for data reduction proxy authentication.
 const char kDataReductionProxyKey[] = "spdy-proxy-auth-value";
 
-// Sets a canary URL to test before committing to using the data reduction
-// proxy. Note this canary does not go through the data reduction proxy.
-const char kDataReductionProxyProbeURL[] = "data-reduction-proxy-probe-url";
+// Sets a secure proxy check URL to test before committing to using the Data
+// Reduction Proxy. Note this check does not go through the Data Reduction
+// Proxy.
+const char kDataReductionProxySecureProxyCheckURL[] =
+    "data-reduction-proxy-secure-proxy-check-url";
 
 // Sets a URL to fetch to warm up the data reduction proxy on startup and
 // network changes.
@@ -50,6 +57,22 @@ const char kEnableDataReductionProxy[] = "enable-spdy-proxy-auth";
 
 // Enable the alternative data reduction proxy.
 const char kEnableDataReductionProxyAlt[] = "enable-data-reduction-proxy-alt";
+
+// Enable Data Reduction Proxy Lo-Fi mode.
+const char kEnableDataReductionProxyLoFi[] =
+    "enable-data-reduction-proxy-lo-fi";
+
+// Enable the data reduction proxy bypass warning.
+const char kEnableDataReductionProxyBypassWarning[] =
+    "enable-data-reduction-proxy-bypass-warning";
+
+// Clear data savings on Chrome startup.
+const char kClearDataReductionProxyDataSavings[] =
+    "clear-data-reduction-proxy-data-savings";
+
+// Enable the data reduction proxy config client.
+const char kEnableDataReductionProxyConfigClient[] =
+    "enable-data-reduction-proxy-config-client";
 
 }  // namespace switches
 }  // namespace data_reduction_proxy

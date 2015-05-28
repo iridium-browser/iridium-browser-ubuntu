@@ -4,7 +4,7 @@
 
 #include "cc/layers/video_frame_provider_client_impl.h"
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/base/math_util.h"
 #include "cc/layers/video_layer_impl.h"
 #include "media/base/video_frame.h"
@@ -13,17 +13,13 @@ namespace cc {
 
 // static
 scoped_refptr<VideoFrameProviderClientImpl>
-    VideoFrameProviderClientImpl::Create(
-        VideoFrameProvider* provider) {
-  return make_scoped_refptr(
-      new VideoFrameProviderClientImpl(provider));
+VideoFrameProviderClientImpl::Create(VideoFrameProvider* provider) {
+  return make_scoped_refptr(new VideoFrameProviderClientImpl(provider));
 }
-
-VideoFrameProviderClientImpl::~VideoFrameProviderClientImpl() {}
 
 VideoFrameProviderClientImpl::VideoFrameProviderClientImpl(
     VideoFrameProvider* provider)
-    : active_video_layer_(nullptr), provider_(provider) {
+    : provider_(provider), active_video_layer_(nullptr), stopped_(false) {
   // This only happens during a commit on the compositor thread while the main
   // thread is blocked. That makes this a thread-safe call to set the video
   // frame provider client that does not require a lock. The same is true of
@@ -39,15 +35,42 @@ VideoFrameProviderClientImpl::VideoFrameProviderClientImpl(
       0.0, 0.0, 0.0, 1.0);
 }
 
+VideoFrameProviderClientImpl::~VideoFrameProviderClientImpl() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(stopped_);
+}
+
+VideoLayerImpl* VideoFrameProviderClientImpl::ActiveVideoLayer() const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return active_video_layer_;
+}
+
+void VideoFrameProviderClientImpl::SetActiveVideoLayer(
+    VideoLayerImpl* video_layer) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(video_layer);
+  active_video_layer_ = video_layer;
+}
+
 void VideoFrameProviderClientImpl::Stop() {
-  if (!provider_)
-    return;
-  provider_->SetVideoFrameProviderClient(nullptr);
-  provider_ = nullptr;
+  DCHECK(thread_checker_.CalledOnValidThread());
+  // It's called when the main thread is blocked, so lock isn't needed.
+  if (provider_) {
+    provider_->SetVideoFrameProviderClient(nullptr);
+    provider_ = nullptr;
+  }
+  active_video_layer_ = nullptr;
+  stopped_ = true;
+}
+
+bool VideoFrameProviderClientImpl::Stopped() const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return stopped_;
 }
 
 scoped_refptr<media::VideoFrame>
 VideoFrameProviderClientImpl::AcquireLockAndCurrentFrame() {
+  DCHECK(thread_checker_.CalledOnValidThread());
   provider_lock_.Acquire();  // Balanced by call to ReleaseLock().
   if (!provider_)
     return nullptr;
@@ -57,13 +80,21 @@ VideoFrameProviderClientImpl::AcquireLockAndCurrentFrame() {
 
 void VideoFrameProviderClientImpl::PutCurrentFrame(
     const scoped_refptr<media::VideoFrame>& frame) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   provider_lock_.AssertAcquired();
   provider_->PutCurrentFrame(frame);
 }
 
 void VideoFrameProviderClientImpl::ReleaseLock() {
+  DCHECK(thread_checker_.CalledOnValidThread());
   provider_lock_.AssertAcquired();
   provider_lock_.Release();
+}
+
+const gfx::Transform& VideoFrameProviderClientImpl::StreamTextureMatrix()
+    const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return stream_texture_matrix_;
 }
 
 void VideoFrameProviderClientImpl::StopUsingProvider() {
@@ -78,11 +109,13 @@ void VideoFrameProviderClientImpl::DidReceiveFrame() {
                "VideoFrameProviderClientImpl::DidReceiveFrame",
                "active_video_layer",
                !!active_video_layer_);
+  DCHECK(thread_checker_.CalledOnValidThread());
   if (active_video_layer_)
     active_video_layer_->SetNeedsRedraw();
 }
 
 void VideoFrameProviderClientImpl::DidUpdateMatrix(const float* matrix) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   stream_texture_matrix_ = gfx::Transform(
       matrix[0], matrix[4], matrix[8], matrix[12],
       matrix[1], matrix[5], matrix[9], matrix[13],

@@ -38,7 +38,6 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/dns/address_sorter.h"
 #include "net/dns/dns_client.h"
@@ -47,8 +46,10 @@
 #include "net/dns/dns_response.h"
 #include "net/dns/dns_transaction.h"
 #include "net/dns/host_resolver_proc.h"
+#include "net/log/net_log.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/udp/datagram_client_socket.h"
+#include "url/url_canon_ip.h"
 
 #if defined(OS_WIN)
 #include "net/base/winsock_init.h"
@@ -70,6 +71,17 @@ const unsigned kNegativeCacheEntryTTLSeconds = 0;
 
 // Minimum TTL for successful resolutions with DnsTask.
 const unsigned kMinimumTTLSeconds = kCacheEntryTTLSeconds;
+
+const char kLocalhost[] = "localhost.";
+
+// Time between IPv6 probes, i.e. for how long results of each IPv6 probe are
+// cached.
+const int kIPv6ProbePeriodMs = 1000;
+
+// Google DNS address used for IPv6 probes.
+const uint8_t kIPv6ProbeAddress[] =
+    { 0x20, 0x01, 0x48, 0x60, 0x48, 0x60, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0x88 };
 
 // We use a separate histogram name for each platform to facilitate the
 // display of error codes by their symbolic name (since each platform has
@@ -142,6 +154,17 @@ enum DnsResolveStatus {
   RESOLVE_STATUS_SUSPECT_NETBIOS,
   RESOLVE_STATUS_MAX
 };
+
+// ICANN uses this localhost address to indicate a name collision.
+//
+// The policy in Chromium is to fail host resolving if it resolves to
+// this special address.
+//
+// Not however that IP literals are exempt from this policy, so it is still
+// possible to navigate to http://127.0.53.53/ directly.
+//
+// For more details: https://www.icann.org/news/announcement-2-2014-08-01-en
+const unsigned char kIcanNameCollisionIp[] = {127, 0, 53, 53};
 
 void UmaAsyncDnsResolveStatus(DnsResolveStatus result) {
   UMA_HISTOGRAM_ENUMERATION("AsyncDNS.ResolveStatus",
@@ -365,6 +388,15 @@ base::Value* NetLogJobAttachCallback(const NetLog::Source& source,
 base::Value* NetLogDnsConfigCallback(const DnsConfig* config,
                                      NetLog::LogLevel /* log_level */) {
   return config->ToValue();
+}
+
+base::Value* NetLogIPv6AvailableCallback(bool ipv6_available,
+                                         bool cached,
+                                         NetLog::LogLevel /* log_level */) {
+  base::DictionaryValue* dict = new base::DictionaryValue();
+  dict->SetBoolean("ipv6_available", ipv6_available);
+  dict->SetBoolean("cached", cached);
+  return dict;
 }
 
 // The logging routines are defined here because some requests are resolved
@@ -661,6 +693,17 @@ class HostResolverImpl::ProcTask
                                                key_.host_resolver_flags,
                                                &results,
                                                &os_error);
+
+    // Fail the resolution if the result contains 127.0.53.53. See the comment
+    // block of kIcanNameCollisionIp for details on why.
+    for (const auto& it : results) {
+      const IPAddressNumber& cur = it.address();
+      if (cur.size() == arraysize(kIcanNameCollisionIp) &&
+          0 == memcmp(&cur.front(), kIcanNameCollisionIp, cur.size())) {
+        error = ERR_ICANN_NAME_COLLISION;
+        break;
+      }
+    }
 
     origin_loop_->PostTask(
         FROM_HERE,
@@ -1268,7 +1311,13 @@ class HostResolverImpl::Job : public PrioritizedDispatcher::Job,
   }
 
   void AddRequest(scoped_ptr<Request> req) {
-    DCHECK_EQ(key_.hostname, req->info().hostname());
+    // .localhost queries are redirected to "localhost." to make sure
+    // that they are never sent out on the network, per RFC 6761.
+    if (IsLocalhostTLD(req->info().hostname())) {
+      DCHECK_EQ(key_.hostname, kLocalhost);
+    } else {
+      DCHECK_EQ(key_.hostname, req->info().hostname());
+    }
 
     req->set_job(this);
     priority_tracker_.Add(req->priority());
@@ -1809,6 +1858,7 @@ HostResolverImpl::HostResolverImpl(const Options& options, NetLog* net_log)
       num_dns_failures_(0),
       probe_ipv6_support_(true),
       use_local_ipv6_(false),
+      last_ipv6_probe_result_(true),
       resolved_known_ipv6_hostname_(false),
       additional_resolver_flags_(0),
       fallback_to_proctask_(true),
@@ -2148,35 +2198,20 @@ void HostResolverImpl::SetHaveOnlyLoopbackAddresses(bool result) {
 }
 
 HostResolverImpl::Key HostResolverImpl::GetEffectiveKeyForRequest(
-    const RequestInfo& info, const BoundNetLog& net_log) const {
+    const RequestInfo& info, const BoundNetLog& net_log) {
   HostResolverFlags effective_flags =
       info.host_resolver_flags() | additional_resolver_flags_;
   AddressFamily effective_address_family = info.address_family();
 
   if (info.address_family() == ADDRESS_FAMILY_UNSPECIFIED) {
-    if (probe_ipv6_support_ && !use_local_ipv6_) {
-      // Google DNS address.
-      const uint8 kIPv6Address[] =
-          { 0x20, 0x01, 0x48, 0x60, 0x48, 0x60, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0x88 };
-      IPAddressNumber address(kIPv6Address,
-                              kIPv6Address + arraysize(kIPv6Address));
-      BoundNetLog probe_net_log = BoundNetLog::Make(
-          net_log.net_log(), NetLog::SOURCE_IPV6_REACHABILITY_CHECK);
-      probe_net_log.BeginEvent(NetLog::TYPE_IPV6_REACHABILITY_CHECK,
-                               net_log.source().ToEventParametersCallback());
-      bool rv6 = IsGloballyReachable(address, probe_net_log);
-      probe_net_log.EndEvent(NetLog::TYPE_IPV6_REACHABILITY_CHECK);
-      if (rv6)
-        net_log.AddEvent(NetLog::TYPE_HOST_RESOLVER_IMPL_IPV6_SUPPORTED);
-
-      if (rv6) {
-        UMA_HISTOGRAM_BOOLEAN("Net.IPv6ConnectSuccessMatch",
-            default_address_family_ == ADDRESS_FAMILY_UNSPECIFIED);
-      } else {
-        UMA_HISTOGRAM_BOOLEAN("Net.IPv6ConnectFailureMatch",
-            default_address_family_ != ADDRESS_FAMILY_UNSPECIFIED);
-
+    unsigned char ip_number[4];
+    url::Component host_comp(0, info.hostname().size());
+    int num_components;
+    if (probe_ipv6_support_ && !use_local_ipv6_ &&
+        // Don't bother IPv6 probing when resolving IPv4 literals.
+        url::IPv4AddressToNumber(info.hostname().c_str(), host_comp, ip_number,
+                                 &num_components) != url::CanonHostInfo::IPV4) {
+      if (!IsIPv6Reachable(net_log)) {
         effective_address_family = ADDRESS_FAMILY_IPV4;
         effective_flags |= HOST_RESOLVER_DEFAULT_FAMILY_SET_DUE_TO_NO_IPV6;
       }
@@ -2185,7 +2220,29 @@ HostResolverImpl::Key HostResolverImpl::GetEffectiveKeyForRequest(
     }
   }
 
-  return Key(info.hostname(), effective_address_family, effective_flags);
+  std::string hostname = info.hostname();
+  // Redirect .localhost queries to "localhost." to make sure that they
+  // are never sent out on the network, per RFC 6761.
+  if (IsLocalhostTLD(info.hostname()))
+    hostname = kLocalhost;
+
+  return Key(hostname, effective_address_family, effective_flags);
+}
+
+bool HostResolverImpl::IsIPv6Reachable(const BoundNetLog& net_log) {
+  base::TimeTicks now = base::TimeTicks::Now();
+  bool cached = true;
+  if ((now - last_ipv6_probe_time_).InMilliseconds() > kIPv6ProbePeriodMs) {
+    IPAddressNumber address(kIPv6ProbeAddress,
+                            kIPv6ProbeAddress + arraysize(kIPv6ProbeAddress));
+    last_ipv6_probe_result_ = IsGloballyReachable(address, net_log);
+    last_ipv6_probe_time_ = now;
+    cached = false;
+  }
+  net_log.AddEvent(NetLog::TYPE_IPV6_REACHABILITY_CHECK,
+                   base::Bind(&NetLogIPv6AvailableCallback,
+                              last_ipv6_probe_result_, cached));
+  return last_ipv6_probe_result_;
 }
 
 void HostResolverImpl::AbortAllInProgressJobs() {
@@ -2257,6 +2314,7 @@ void HostResolverImpl::TryServingAllJobsFromHosts() {
 
 void HostResolverImpl::OnIPAddressChanged() {
   resolved_known_ipv6_hostname_ = false;
+  last_ipv6_probe_time_ = base::TimeTicks();
   // Abandon all ProbeJobs.
   probe_weak_ptr_factory_.InvalidateWeakPtrs();
   if (cache_.get())

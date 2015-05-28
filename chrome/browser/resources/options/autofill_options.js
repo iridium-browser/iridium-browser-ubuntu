@@ -89,12 +89,8 @@ cr.define('options', function() {
         return true;  // Always follow the href
       };
 
-      $('autofill-wallet-card-area').hidden =
-          !loadTimeData.getBoolean('enableAutofillWalletIntegration');
-      // TODO(estade): there should probably be some indication of success.
-      $('remask-server-cards-link').onclick = function(event) {
-        chrome.send('remaskServerCards');
-      };
+      this.walletIntegrationAvailableStateChanged_(
+          loadTimeData.getBoolean('autofillWalletIntegrationAvailable'));
 
       // TODO(jhawkins): What happens when Autofill is disabled whilst on the
       // Autofill options page?
@@ -179,28 +175,6 @@ cr.define('options', function() {
     },
 
     /**
-     * Requests profile data for the address represented by |guid| from the
-     * PersonalDataManager. Once the data is loaded, the AutofillOptionsHandler
-     * calls showEditAddressOverlay().
-     * @param {string} guid The GUID of the address to edit.
-     * @private
-     */
-    loadAddressEditor_: function(guid) {
-      chrome.send('loadAddressEditor', [guid]);
-    },
-
-    /**
-     * Requests profile data for the credit card represented by |guid| from the
-     * PersonalDataManager. Once the data is loaded, the AutofillOptionsHandler
-     * calls showEditCreditCardOverlay().
-     * @param {string} guid The GUID of the credit card to edit.
-     * @private
-     */
-    loadCreditCardEditor_: function(guid) {
-      chrome.send('loadCreditCardEditor', [guid]);
-    },
-
-    /**
      * Shows the 'Edit address' overlay, using the data in |address| to fill the
      * input fields. |address| is a list with one item, an associative array
      * that contains the address data.
@@ -226,6 +200,16 @@ cr.define('options', function() {
       AutofillEditCreditCardOverlay.loadCreditCard(creditCard);
       PageManager.showPageByName('autofillEditCreditCard');
     },
+
+    /**
+     * Toggles the visibility of the Wallet integration checkbox.
+     * @param {boolean} available Whether the user has the option of using
+     *     Wallet data.
+     * @private
+     */
+    walletIntegrationAvailableStateChanged_: function(available) {
+      $('autofill-wallet-setting-area').hidden = !available;
+    },
   };
 
   AutofillOptions.setAddressList = function(entries) {
@@ -240,16 +224,13 @@ cr.define('options', function() {
     AutofillOptions.getInstance().removeData_(guid, metricsAction);
   };
 
-  AutofillOptions.loadAddressEditor = function(guid) {
-    AutofillOptions.getInstance().loadAddressEditor_(guid);
-  };
-
-  AutofillOptions.loadCreditCardEditor = function(guid) {
-    AutofillOptions.getInstance().loadCreditCardEditor_(guid);
-  };
-
   AutofillOptions.editAddress = function(address) {
     AutofillOptions.getInstance().showEditAddressOverlay_(address);
+  };
+
+  AutofillOptions.walletIntegrationAvailableStateChanged = function(available) {
+    AutofillOptions.getInstance().
+        walletIntegrationAvailableStateChanged_(available);
   };
 
   /**

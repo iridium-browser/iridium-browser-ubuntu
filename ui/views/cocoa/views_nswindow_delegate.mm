@@ -23,6 +23,18 @@
   return parent_->native_widget_mac();
 }
 
+- (NSCursor*)cursor {
+  return cursor_.get();
+}
+
+- (void)setCursor:(NSCursor*)newCursor {
+  if (cursor_.get() == newCursor)
+    return;
+
+  cursor_.reset([newCursor retain]);
+  [parent_->ns_window() resetCursorRects];
+}
+
 - (void)onWindowOrderWillChange:(NSWindowOrderingMode)orderingMode {
   parent_->OnVisibilityChangedTo(orderingMode != NSWindowOut);
 }
@@ -33,6 +45,13 @@
 
 - (void)onWindowWillDisplay {
   parent_->OnVisibilityChangedTo(true);
+}
+
+- (void)sheetDidEnd:(NSWindow*)sheet
+         returnCode:(NSInteger)returnCode
+        contextInfo:(void*)contextInfo {
+  [sheet orderOut:nil];
+  parent_->OnWindowWillClose();
 }
 
 // NSWindowDelegate implementation.
@@ -57,13 +76,11 @@
 }
 
 - (void)windowDidBecomeKey:(NSNotification*)notification {
-  parent_->native_widget_mac()->GetWidget()->OnNativeWidgetActivationChanged(
-      true);
+  parent_->OnWindowKeyStatusChangedTo(true);
 }
 
 - (void)windowDidResignKey:(NSNotification*)notification {
-  parent_->native_widget_mac()->GetWidget()->OnNativeWidgetActivationChanged(
-      false);
+  parent_->OnWindowKeyStatusChangedTo(false);
 }
 
 - (void)windowWillClose:(NSNotification*)notification {

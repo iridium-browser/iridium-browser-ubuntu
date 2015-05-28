@@ -69,9 +69,10 @@ from pylib.device import device_errors
 def OutputJsonList(json_input, json_output):
   with file(json_input, 'r') as i:
     all_steps = json.load(i)
-  step_names = all_steps['steps'].keys()
+  step_values = [{'test': k, 'device_affinity': v['device_affinity']}
+      for k, v in all_steps['steps'].iteritems()]
   with file(json_output, 'w') as o:
-    o.write(json.dumps(step_names))
+    o.write(json.dumps(step_values))
   return 0
 
 
@@ -249,9 +250,10 @@ class TestRunner(base_test_runner.BaseTestRunner):
     logging.info('%s : %s', test_name, cmd)
     start_time = datetime.datetime.now()
 
-    timeout = 5400
+    timeout = self._tests['steps'][test_name].get('timeout', 5400)
     if self._options.no_timeout:
       timeout = None
+    logging.info('Timeout for %s test: %s', test_name, timeout)
     full_cmd = cmd
     if self._options.dry_run:
       full_cmd = 'echo %s' % cmd

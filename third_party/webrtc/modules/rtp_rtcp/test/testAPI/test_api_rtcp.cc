@@ -179,14 +179,14 @@ class RtpRtcpRtcpTest : public ::testing::Test {
   }
 
   int test_id;
-  scoped_ptr<TestRtpFeedback> rtp_feedback1_;
-  scoped_ptr<TestRtpFeedback> rtp_feedback2_;
-  scoped_ptr<ReceiveStatistics> receive_statistics1_;
-  scoped_ptr<ReceiveStatistics> receive_statistics2_;
-  scoped_ptr<RTPPayloadRegistry> rtp_payload_registry1_;
-  scoped_ptr<RTPPayloadRegistry> rtp_payload_registry2_;
-  scoped_ptr<RtpReceiver> rtp_receiver1_;
-  scoped_ptr<RtpReceiver> rtp_receiver2_;
+  rtc::scoped_ptr<TestRtpFeedback> rtp_feedback1_;
+  rtc::scoped_ptr<TestRtpFeedback> rtp_feedback2_;
+  rtc::scoped_ptr<ReceiveStatistics> receive_statistics1_;
+  rtc::scoped_ptr<ReceiveStatistics> receive_statistics2_;
+  rtc::scoped_ptr<RTPPayloadRegistry> rtp_payload_registry1_;
+  rtc::scoped_ptr<RTPPayloadRegistry> rtp_payload_registry2_;
+  rtc::scoped_ptr<RtpReceiver> rtp_receiver1_;
+  rtc::scoped_ptr<RtpReceiver> rtp_receiver2_;
   RtpRtcp* module1;
   RtpRtcp* module2;
   TestRtpReceiver* receiver;
@@ -319,10 +319,10 @@ TEST_F(RtpRtcpRtcpTest, RTCP) {
   EXPECT_EQ(test_sequence_number, stats.extended_max_sequence_number);
   EXPECT_EQ(reportBlockReceived.jitter, stats.jitter);
 
-  uint16_t RTT;
-  uint16_t avgRTT;
-  uint16_t minRTT;
-  uint16_t maxRTT;
+  int64_t RTT;
+  int64_t avgRTT;
+  int64_t minRTT;
+  int64_t maxRTT;
 
   // Get RoundTripTime.
   EXPECT_EQ(0, module1->RTT(test_ssrc + 1, &RTT, &avgRTT, &minRTT, &maxRTT));

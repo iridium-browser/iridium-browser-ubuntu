@@ -287,7 +287,7 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
   new_options.allow_new_privs = true;
 #endif
 
-  ProcessHandle process_handle;
+  Process process;
 
   {
     // Note how we grab the lock before the process possibly gets created.
@@ -295,19 +295,22 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
     // in the set.
     AutoLock lock(g_live_processes_lock.Get());
 
-    if (!LaunchProcess(command_line, new_options, &process_handle))
+    process = LaunchProcess(command_line, new_options);
+    if (!process.IsValid())
       return -1;
 
-    g_live_processes.Get().insert(std::make_pair(process_handle, command_line));
+    // TODO(rvargas) crbug.com/417532: Don't store process handles.
+    g_live_processes.Get().insert(std::make_pair(process.Handle(),
+                                                 command_line));
   }
 
   int exit_code = 0;
-  if (!WaitForExitCodeWithTimeout(process_handle, &exit_code, timeout)) {
+  if (!process.WaitForExitWithTimeout(timeout, &exit_code)) {
     *was_timeout = true;
     exit_code = -1;  // Set a non-zero exit code to signal a failure.
 
     // Ensure that the process terminates.
-    KillProcess(process_handle, -1, true);
+    process.Terminate(-1, true);
   }
 
   {
@@ -322,14 +325,12 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
       // or due to it timing out, we need to clean up any child processes that
       // it might have created. On Windows, child processes are automatically
       // cleaned up using JobObjects.
-      KillProcessGroup(process_handle);
+      KillProcessGroup(process.Handle());
     }
 #endif
 
-    g_live_processes.Get().erase(process_handle);
+    g_live_processes.Get().erase(process.Handle());
   }
-
-  CloseProcessHandle(process_handle);
 
   return exit_code;
 }
@@ -382,6 +383,9 @@ void DoLaunchChildTestProcess(
   }
 #elif defined(OS_POSIX)
   options.new_process_group = true;
+#if defined(OS_LINUX)
+  options.kill_on_parent_death = true;
+#endif  // defined(OS_LINUX)
 
   FileHandleMappingVector fds_mapping;
   ScopedFD output_file_fd;
@@ -685,12 +689,6 @@ void TestLauncher::OnTestFinished(const TestResult& result) {
   test_started_count_ += retry_started_count;
 }
 
-// static
-std::string TestLauncher::FormatFullTestName(const std::string& test_case_name,
-                                             const std::string& test_name) {
-  return test_case_name + "." + test_name;
-}
-
 bool TestLauncher::Init() {
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
 
@@ -828,6 +826,11 @@ bool TestLauncher::Init() {
     }
   }
 
+  if (!launcher_delegate_->GetTests(&tests_)) {
+    LOG(ERROR) << "Failed to get list of tests.";
+    return false;
+  }
+
   if (!results_tracker_.Init(*command_line)) {
     LOG(ERROR) << "Failed to initialize test results tracker.";
     return 1;
@@ -899,12 +902,10 @@ bool TestLauncher::Init() {
 }
 
 void TestLauncher::RunTests() {
-  std::vector<SplitTestName> tests(GetCompiledInTests());
-
   std::vector<std::string> test_names;
-
-  for (size_t i = 0; i < tests.size(); i++) {
-    std::string test_name = FormatFullTestName(tests[i].first, tests[i].second);
+  for (size_t i = 0; i < tests_.size(); i++) {
+    std::string test_name = FormatFullTestName(
+        tests_[i].first, tests_[i].second);
 
     results_tracker_.AddTest(test_name);
 
@@ -917,7 +918,7 @@ void TestLauncher::RunTests() {
         continue;
     }
 
-    if (!launcher_delegate_->ShouldRunTest(tests[i].first, tests[i].second))
+    if (!launcher_delegate_->ShouldRunTest(tests_[i].first, tests_[i].second))
       continue;
 
     // Skip the test that doesn't match the filter (if given).

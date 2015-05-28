@@ -23,7 +23,8 @@ function AppWindowWrapper(url, id, options) {
   this.url_ = url;
   this.id_ = id;
   // Do deep copy for the template of options to assign customized params later.
-  this.options_ = JSON.parse(JSON.stringify(options));
+  this.options_ = /** @type chrome.app.window.CreateWindowOptions */(
+      JSON.parse(JSON.stringify(options)));
   this.window_ = null;
   this.appState_ = null;
   this.openingOrOpened_ = false;
@@ -53,31 +54,6 @@ AppWindowWrapper.MAXIMIZED_KEY_ = 'isMaximized';
  */
 AppWindowWrapper.makeGeometryKey = function(url) {
   return 'windowGeometry' + ':' + url;
-};
-
-/**
- * Focuses the window on the specified desktop.
- * @param {chrome.app.window.AppWindow} appWindow Application window.
- * @param {string=} opt_profileId The profiled ID of the target window. If it is
- *     dropped, the window is focused on the current window.
- */
-AppWindowWrapper.focusOnDesktop = function(appWindow, opt_profileId) {
-  new Promise(function(onFulfilled, onRejected) {
-    if (opt_profileId) {
-      onFulfilled(opt_profileId);
-    } else {
-      chrome.fileManagerPrivate.getProfiles(
-          function(profiles, currentId, displayedId) {
-            onFulfilled(currentId);
-          });
-    }
-  }).then(function(profileId) {
-    appWindow.contentWindow.chrome.fileManagerPrivate.visitDesktop(
-        profileId,
-        function() {
-          appWindow.focus();
-        });
-  });
 };
 
 /**
@@ -249,11 +225,6 @@ AppWindowWrapper.prototype.onClosed_ = function() {
 
   // Remove the window from the set.
   delete window.background.appWindows[this.id_];
-
-  // If there is no application window, reset window ID.
-  if (!Object.keys(window.background.appWindows).length)
-    nextFileManagerWindowID = 0;
-  window.background.tryClose();
 };
 
 /**
@@ -334,7 +305,7 @@ SingletonAppWindowWrapper.prototype.reopen = function(opt_callback) {
     }
 
     try {
-      var appState = JSON.parse(value);
+      var appState = assertInstanceof(JSON.parse(value), Object);
     } catch (e) {
       console.error('Corrupt launch data for ' + this.id_, value);
       opt_callback && opt_callback();

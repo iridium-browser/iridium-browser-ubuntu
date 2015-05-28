@@ -21,6 +21,7 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_image/user_image.h"
+#include "components/user_manager/user_manager.h"
 #include "components/wallpaper/wallpaper_layout.h"
 #include "components/wallpaper/wallpaper_manager_base.h"
 #include "content/public/browser/notification_observer.h"
@@ -30,22 +31,27 @@
 
 namespace chromeos {
 
-class WallpaperManager : public wallpaper::WallpaperManagerBase {
+class WallpaperManager :
+    public wallpaper::WallpaperManagerBase,
+    public user_manager::UserManager::UserSessionStateObserver {
  public:
   class PendingWallpaper;
 
-  WallpaperManager();
   ~WallpaperManager() override;
 
-  // Get pointer to singleton WallpaperManager instance, create it if necessary.
+  // Creates an instance of Wallpaper Manager. If there is no instance, create
+  // one. Otherwise, returns the existing instance.
+  static void Initialize();
+
+  // Gets pointer to singleton WallpaperManager instance.
   static WallpaperManager* Get();
+
+  // Deletes the existing instance of WallpaperManager. Allows the
+  // WallpaperManager to remove any observers it has registered.
+  static void Shutdown();
 
   // Returns the appropriate wallpaper resolution for all root windows.
   WallpaperResolution GetAppropriateResolution() override;
-
-  // Indicates imminent shutdown, allowing the WallpaperManager to remove any
-  // observers it has registered.
-  void Shutdown() override;
 
   // Adds PowerManagerClient, TimeZoneSettings and CrosSettings observers.
   void AddObservers() override;
@@ -115,11 +121,16 @@ class WallpaperManager : public wallpaper::WallpaperManagerBase {
   // Returns queue size.
   size_t GetPendingListSizeForTesting() const override;
 
+  // Overridden from user_manager::UserManager::UserSessionStateObserver:
+  void UserChangedChildStatus(user_manager::User* user) override;
+
  private:
   friend class TestApi;
   friend class WallpaperManagerBrowserTest;
   friend class WallpaperManagerBrowserTestDefaultWallpaper;
   friend class WallpaperManagerPolicyTest;
+
+  WallpaperManager();
 
   // Returns modifiable PendingWallpaper.
   // Returns pending_inactive_ or creates new PendingWallpaper if necessary.
@@ -130,7 +141,6 @@ class WallpaperManager : public wallpaper::WallpaperManagerBase {
   void RemovePendingWallpaperFromList(PendingWallpaper* pending);
 
   // WallpaperManagerBase overrides:
-  void ClearObsoleteWallpaperPrefs() override;
   void InitializeRegisteredDeviceWallpaper() override;
   bool GetUserWallpaperInfo(const std::string& user_id,
                             wallpaper::WallpaperInfo* info) const override;

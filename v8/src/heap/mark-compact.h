@@ -16,6 +16,9 @@ namespace internal {
 // to the first live object in the page (only used for old and map objects).
 typedef bool (*IsAliveFunction)(HeapObject* obj, int* size, int* offset);
 
+// Callback function to mark an object in a given heap.
+typedef void (*MarkObjectFunction)(Heap* heap, HeapObject* object);
+
 // Forward declarations.
 class CodeFlusher;
 class MarkCompactCollector;
@@ -168,6 +171,8 @@ class MarkingDeque {
   // heap.
   INLINE(void PushBlack(HeapObject* object)) {
     DCHECK(object->IsHeapObject());
+    // TODO(jochen): Remove again before we branch for 4.2.
+    CHECK(object->IsHeapObject() && object->map()->IsMap());
     if (IsFull()) {
       Marking::BlackToGrey(object);
       MemoryChunk::IncrementLiveBytesFromGC(object->address(), -object->Size());
@@ -180,6 +185,8 @@ class MarkingDeque {
 
   INLINE(void PushGrey(HeapObject* object)) {
     DCHECK(object->IsHeapObject());
+    // TODO(jochen): Remove again before we branch for 4.2.
+    CHECK(object->IsHeapObject() && object->map()->IsMap());
     if (IsFull()) {
       SetOverflowed();
     } else {
@@ -262,6 +269,11 @@ class SlotsBuffer {
 
   void Add(ObjectSlot slot) {
     DCHECK(0 <= idx_ && idx_ < kNumberOfElements);
+#ifdef DEBUG
+    if (slot >= reinterpret_cast<ObjectSlot>(NUMBER_OF_SLOT_TYPES)) {
+      DCHECK_NOT_NULL(*slot);
+    }
+#endif
     slots_[idx_++] = slot;
   }
 
@@ -350,6 +362,15 @@ class SlotsBuffer {
   static bool AddTo(SlotsBufferAllocator* allocator,
                     SlotsBuffer** buffer_address, SlotType type, Address addr,
                     AdditionMode mode);
+
+  // Eliminates all stale entries from the slots buffer, i.e., slots that
+  // are not part of live objects anymore. This method must be called after
+  // marking, when the whole transitive closure is known and must be called
+  // before sweeping when mark bits are still intact.
+  static void RemoveInvalidSlots(Heap* heap, SlotsBuffer* buffer);
+
+  // Ensures that there are no invalid slots in the chain of slots buffers.
+  static void VerifySlots(Heap* heap, SlotsBuffer* buffer);
 
   static const int kNumberOfElements = 1021;
 
@@ -538,6 +559,7 @@ class MarkCompactCollector {
   static const uint32_t kMultiFreeEncoding = 1;
 
   static inline bool IsMarked(Object* obj);
+  static bool IsUnmarkedHeapObjectWithHeap(Heap* heap, Object** p);
 
   inline Heap* heap() const { return heap_; }
   inline Isolate* isolate() const;
@@ -647,13 +669,13 @@ class MarkCompactCollector {
 
   bool evacuation() const { return evacuation_; }
 
-  // Mark the global table which maps weak objects to dependent code without
-  // marking its contents.
-  void MarkWeakObjectToCodeTable();
-
   // Special case for processing weak references in a full collection. We need
   // to artificially keep AllocationSites alive for a time.
   void MarkAllocationSite(AllocationSite* site);
+
+  // Mark objects in implicit references groups if their parent object
+  // is marked.
+  void MarkImplicitRefGroups(MarkObjectFunction mark_object);
 
   MarkingDeque* marking_deque() { return &marking_deque_; }
 
@@ -662,6 +684,14 @@ class MarkCompactCollector {
   void InitializeMarkingDeque();
 
   void UncommitMarkingDeque();
+
+  // The following four methods can just be called after marking, when the
+  // whole transitive closure is known. They must be called before sweeping
+  // when mark bits are still intact.
+  bool IsSlotInBlackObject(Page* p, Address slot, HeapObject** out_object);
+  bool IsSlotInBlackObjectSlow(Page* p, Address slot);
+  bool IsSlotInLiveObject(Address slot);
+  void VerifyIsSlotInLiveObject(Address slot, HeapObject* object);
 
  private:
   class SweeperTask;
@@ -673,6 +703,8 @@ class MarkCompactCollector {
   bool WillBeDeoptimized(Code* code);
   void RemoveDeadInvalidatedCode();
   void ProcessInvalidatedCode(ObjectVisitor* visitor);
+  void ClearInvalidSlotsBufferEntries(PagedSpace* space);
+  void ClearInvalidStoreAndSlotsBufferEntries();
 
   void StartSweeperThreads();
 
@@ -758,10 +790,6 @@ class MarkCompactCollector {
   // the string table are weak.
   void MarkStringTable(RootMarkingVisitor* visitor);
 
-  // Mark objects in implicit references groups if their parent object
-  // is marked.
-  void MarkImplicitRefGroups();
-
   // Mark objects reachable (transitively) from objects in the marking stack
   // or overflowed in the heap.
   void ProcessMarkingDeque();
@@ -780,6 +808,10 @@ class MarkCompactCollector {
   // otherwise a map can die and deoptimize the code.
   void ProcessTopOptimizedFrame(ObjectVisitor* visitor);
 
+  // Retain dying maps for <FLAG_retain_maps_for_n_gc> garbage collections to
+  // increase chances of reusing of map transition tree in future.
+  void RetainMaps();
+
   // Mark objects reachable (transitively) from objects in the marking
   // stack.  This function empties the marking stack, but may leave
   // overflowed objects in the heap, in which case the marking stack's
@@ -794,23 +826,17 @@ class MarkCompactCollector {
   // Callback function for telling whether the object *p is an unmarked
   // heap object.
   static bool IsUnmarkedHeapObject(Object** p);
-  static bool IsUnmarkedHeapObjectWithHeap(Heap* heap, Object** p);
 
   // Map transitions from a live map to a dead map must be killed.
   // We replace them with a null descriptor, with the same key.
   void ClearNonLiveReferences();
   void ClearNonLivePrototypeTransitions(Map* map);
   void ClearNonLiveMapTransitions(Map* map, MarkBit map_mark);
-  void ClearMapTransitions(Map* map);
+  void ClearMapTransitions(Map* map, Map* dead_transition);
   bool ClearMapBackPointer(Map* map);
   void TrimDescriptorArray(Map* map, DescriptorArray* descriptors,
                            int number_of_own_descriptors);
   void TrimEnumCache(Map* map, DescriptorArray* descriptors);
-
-  void ClearDependentCode(DependentCode* dependent_code);
-  void ClearNonLiveDependentCode(DependentCode* dependent_code);
-  int ClearNonLiveDependentCodeInGroup(DependentCode* dependent_code, int group,
-                                       int start, int end, int new_start);
 
   // Mark all values associated with reachable keys in weak collections
   // encountered so far.  This might push new object or even new weak maps onto

@@ -40,6 +40,21 @@ struct Color
     Color(T r, T g, T b, T a) : red(r), green(g), blue(b), alpha(a) { }
 };
 
+template <typename T>
+bool operator==(const Color<T> &a, const Color<T> &b)
+{
+    return a.red == b.red &&
+           a.green == b.green &&
+           a.blue == b.blue &&
+           a.alpha == b.alpha;
+}
+
+template <typename T>
+bool operator!=(const Color<T> &a, const Color<T> &b)
+{
+    return !(a == b);
+}
+
 typedef Color<float> ColorF;
 typedef Color<int> ColorI;
 typedef Color<unsigned int> ColorUI;
@@ -54,6 +69,9 @@ struct Rectangle
     Rectangle() : x(0), y(0), width(0), height(0) { }
     Rectangle(int x_in, int y_in, int width_in, int height_in) : x(x_in), y(y_in), width(width_in), height(height_in) { }
 };
+
+bool operator==(const Rectangle &a, const Rectangle &b);
+bool operator!=(const Rectangle &a, const Rectangle &b);
 
 bool ClipRectangle(const Rectangle &source, const Rectangle &clip, Rectangle *intersection);
 
@@ -75,6 +93,8 @@ struct Extents
 
     Extents() : width(0), height(0), depth(0) { }
     Extents(int width_, int height_, int depth_) : width(width_), height(height_), depth(depth_) { }
+
+    bool empty() const { return (width * height * depth) == 0; }
 };
 
 struct Box
@@ -176,42 +196,37 @@ struct SamplerState
     GLenum swizzleAlpha;
 
     bool swizzleRequired() const;
-};
 
-struct ClearParameters
-{
-    bool clearColor[gl::IMPLEMENTATION_MAX_DRAW_BUFFERS];
-    ColorF colorFClearValue;
-    ColorI colorIClearValue;
-    ColorUI colorUIClearValue;
-    GLenum colorClearType;
-    bool colorMaskRed;
-    bool colorMaskGreen;
-    bool colorMaskBlue;
-    bool colorMaskAlpha;
-
-    bool clearDepth;
-    float depthClearValue;
-
-    bool clearStencil;
-    GLint stencilClearValue;
-    GLuint stencilWriteMask;
-
-    bool scissorEnabled;
-    Rectangle scissor;
+    bool operator==(const SamplerState &other) const;
+    bool operator!=(const SamplerState &other) const;
 };
 
 struct PixelUnpackState
 {
     BindingPointer<Buffer> pixelBuffer;
     GLint alignment;
+    GLint rowLength;
+    GLint skipRows;
+    GLint skipPixels;
+    GLint imageHeight;
+    GLint skipImages;
 
     PixelUnpackState()
-        : alignment(4)
+        : alignment(4),
+          rowLength(0),
+          skipRows(0),
+          skipPixels(0),
+          imageHeight(0),
+          skipImages(0)
     {}
 
-    explicit PixelUnpackState(GLint alignmentIn)
-        : alignment(alignmentIn)
+    PixelUnpackState(GLint alignmentIn, GLint rowLengthIn)
+        : alignment(alignmentIn),
+          rowLength(rowLengthIn),
+          skipRows(0),
+          skipPixels(0),
+          imageHeight(0),
+          skipImages(0)
     {}
 };
 
@@ -220,15 +235,24 @@ struct PixelPackState
     BindingPointer<Buffer> pixelBuffer;
     GLint alignment;
     bool reverseRowOrder;
+    GLint rowLength;
+    GLint skipRows;
+    GLint skipPixels;
 
     PixelPackState()
         : alignment(4),
-          reverseRowOrder(false)
+          reverseRowOrder(false),
+          rowLength(0),
+          skipRows(0),
+          skipPixels(0)
     {}
 
     explicit PixelPackState(GLint alignmentIn, bool reverseRowOrderIn)
         : alignment(alignmentIn),
-          reverseRowOrder(reverseRowOrderIn)
+          reverseRowOrder(reverseRowOrderIn),
+          rowLength(0),
+          skipRows(0),
+          skipPixels(0)
     {}
 };
 
@@ -257,14 +281,6 @@ struct VertexFormat
 
 namespace rx
 {
-
-enum VertexConversionType
-{
-    VERTEX_CONVERT_NONE = 0,
-    VERTEX_CONVERT_CPU  = 1,
-    VERTEX_CONVERT_GPU  = 2,
-    VERTEX_CONVERT_BOTH = 3
-};
 
 enum VendorID : uint32_t
 {

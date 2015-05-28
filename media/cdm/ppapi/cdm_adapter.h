@@ -37,8 +37,8 @@ void* GetCdmHost(int host_interface_version, void* user_data);
 // Content Decryption Module (CDM).
 class CdmAdapter : public pp::Instance,
                    public pp::ContentDecryptor_Private,
-                   public cdm::Host_6,
-                   public cdm::Host_7 {
+                   public cdm::Host_7,
+                   public cdm::Host_8 {
  public:
   CdmAdapter(PP_Instance instance, pp::Module* module);
   virtual ~CdmAdapter();
@@ -51,12 +51,14 @@ class CdmAdapter : public pp::Instance,
   // PPP_ContentDecryptor_Private implementation.
   // Note: Results of calls to these methods must be reported through the
   // PPB_ContentDecryptor_Private interface.
-  void Initialize(const std::string& key_system) override;
+  void Initialize(const std::string& key_system,
+                  bool allow_distinctive_identifier,
+                  bool allow_persistent_state) override;
   void SetServerCertificate(uint32_t promise_id,
                             pp::VarArrayBuffer server_certificate) override;
   void CreateSessionAndGenerateRequest(uint32_t promise_id,
                                        PP_SessionType session_type,
-                                       const std::string& init_data_type,
+                                       PP_InitDataType init_data_type,
                                        pp::VarArrayBuffer init_data) override;
   void LoadSession(uint32_t promise_id,
                    PP_SessionType session_type,
@@ -82,7 +84,7 @@ class CdmAdapter : public pp::Instance,
       pp::Buffer_Dev encrypted_buffer,
       const PP_EncryptedBlockInfo& encrypted_block_info) override;
 
-  // cdm::Host_6 and cdm::Host_7 implementation.
+  // cdm::Host_7 and cdm::Host_8 implementation.
   cdm::Buffer* Allocate(uint32_t capacity) override;
   void SetTimer(int64_t delay_ms, void* context) override;
   cdm::Time GetCurrentWallTime() override;
@@ -95,22 +97,6 @@ class CdmAdapter : public pp::Instance,
                        uint32_t system_code,
                        const char* error_message,
                        uint32_t error_message_size) override;
-  void OnExpirationChange(const char* session_id,
-                          uint32_t session_id_size,
-                          cdm::Time new_expiry_time) override;
-  void OnSessionClosed(const char* session_id,
-                       uint32_t session_id_size) override;
-  void SendPlatformChallenge(const char* service_id,
-                             uint32_t service_id_size,
-                             const char* challenge,
-                             uint32_t challenge_size) override;
-  void EnableOutputProtection(uint32_t desired_protection_mask) override;
-  void QueryOutputProtectionStatus() override;
-  void OnDeferredInitializationDone(cdm::StreamType stream_type,
-                                    cdm::Status decoder_status) override;
-  cdm::FileIO* CreateFileIO(cdm::FileIOClient* client) override;
-
-  // cdm::Host_7 implementation.
   void OnSessionMessage(const char* session_id,
                         uint32_t session_id_size,
                         cdm::MessageType message_type,
@@ -123,32 +109,26 @@ class CdmAdapter : public pp::Instance,
                            bool has_additional_usable_key,
                            const cdm::KeyInformation* keys_info,
                            uint32_t keys_info_count) override;
+  void OnExpirationChange(const char* session_id,
+                          uint32_t session_id_size,
+                          cdm::Time new_expiry_time) override;
+  void OnSessionClosed(const char* session_id,
+                       uint32_t session_id_size) override;
   void OnLegacySessionError(const char* session_id,
                             uint32_t session_id_size,
                             cdm::Error error,
                             uint32_t system_code,
                             const char* error_message,
                             uint32_t error_message_size) override;
-
-  // cdm::Host_6 implementation.
-  void OnResolveKeyIdsPromise(uint32_t promise_id,
-                              const cdm::BinaryData* usable_key_ids,
-                              uint32_t usable_key_ids_size) override;
-  void OnSessionMessage(const char* session_id,
-                        uint32_t session_id_size,
-                        const char* message,
-                        uint32_t message_size,
-                        const char* destination_url,
-                        uint32_t destination_url_size) override;
-  void OnSessionUsableKeysChange(const char* session_id,
-                                 uint32_t session_id_size,
-                                 bool has_additional_usable_key) override;
-  void OnSessionError(const char* session_id,
-                      uint32_t session_id_size,
-                      cdm::Error error,
-                      uint32_t system_code,
-                      const char* error_message,
-                      uint32_t error_message_size) override;
+  void SendPlatformChallenge(const char* service_id,
+                             uint32_t service_id_size,
+                             const char* challenge,
+                             uint32_t challenge_size) override;
+  void EnableOutputProtection(uint32_t desired_protection_mask) override;
+  void QueryOutputProtectionStatus() override;
+  void OnDeferredInitializationDone(cdm::StreamType stream_type,
+                                    cdm::Status decoder_status) override;
+  cdm::FileIO* CreateFileIO(cdm::FileIOClient* client) override;
 
  private:
   // These are reported to UMA server. Do not change the existing values!
@@ -288,6 +268,8 @@ class CdmAdapter : public pp::Instance,
   pp::CompletionCallbackFactory<CdmAdapter> callback_factory_;
   linked_ptr<CdmWrapper> cdm_;
   std::string key_system_;
+  bool allow_distinctive_identifier_;
+  bool allow_persistent_state_;
 
   // If the CDM returned kDeferredInitialization during InitializeAudioDecoder()
   // or InitializeVideoDecoder(), the (Audio|Video)DecoderConfig.request_id is

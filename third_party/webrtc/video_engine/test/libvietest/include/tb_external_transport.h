@@ -19,12 +19,12 @@
 #include <map>
 
 #include "webrtc/common_types.h"
+#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 
 namespace webrtc
 {
 class CriticalSectionWrapper;
 class EventWrapper;
-class ThreadWrapper;
 class ViENetwork;
 }
 
@@ -85,10 +85,8 @@ public:
                         TbExternalTransport::SsrcChannelMap* receive_channels);
     ~TbExternalTransport(void);
 
-    virtual int SendPacket(int channel, const void *data, size_t len) OVERRIDE;
-    virtual int SendRTCPPacket(int channel,
-                               const void *data,
-                               size_t len) OVERRIDE;
+    int SendPacket(int channel, const void* data, size_t len) override;
+    int SendRTCPPacket(int channel, const void* data, size_t len) override;
 
     // Should only be called before/after traffic is being processed.
     // Only one observer can be set (multiple calls will overwrite each other).
@@ -149,7 +147,7 @@ private:
     int sender_channel_;
     SsrcChannelMap* receive_channels_;
     webrtc::ViENetwork& _vieNetwork;
-    webrtc::ThreadWrapper& _thread;
+    rtc::scoped_ptr<webrtc::ThreadWrapper> _thread;
     webrtc::EventWrapper& _event;
     webrtc::CriticalSectionWrapper& _crit;
     webrtc::CriticalSectionWrapper& _statCrit;

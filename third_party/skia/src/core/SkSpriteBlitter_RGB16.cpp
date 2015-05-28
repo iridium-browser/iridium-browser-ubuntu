@@ -54,7 +54,7 @@ public:
         : SkSpriteBlitter(source) {}
 
     // overrides
-    virtual void blitRect(int x, int y, int width, int height) SK_OVERRIDE {
+    void blitRect(int x, int y, int width, int height) override {
         uint16_t* SK_RESTRICT dst = fDevice->getAddr16(x, y);
         const uint16_t* SK_RESTRICT src = fSource->getAddr16(x - fLeft,
                                                              y - fTop);
@@ -264,7 +264,7 @@ public:
     // overrides
 
     virtual void setup(const SkBitmap& device, int left, int top,
-                       const SkPaint& paint) SK_OVERRIDE {
+                       const SkPaint& paint) override {
         this->INHERITED::setup(device, left, top, paint);
 
         unsigned flags = 0;
@@ -278,16 +278,16 @@ public:
         if (paint.isDither()) {
             flags |= SkBlitRow::kDither_Flag;
         }
-        fProc = SkBlitRow::Factory(flags, kRGB_565_SkColorType);
+        fProc = SkBlitRow::Factory16(flags);
     }
 
-    virtual void blitRect(int x, int y, int width, int height) SK_OVERRIDE {
+    void blitRect(int x, int y, int width, int height) override {
         uint16_t* SK_RESTRICT dst = fDevice->getAddr16(x, y);
         const SkPMColor* SK_RESTRICT src = fSource->getAddr32(x - fLeft,
                                                               y - fTop);
         size_t dstRB = fDevice->rowBytes();
         size_t srcRB = fSource->rowBytes();
-        SkBlitRow::Proc proc = fProc;
+        SkBlitRow::Proc16 proc = fProc;
         U8CPU alpha = fPaint->getAlpha();
 
         while (--height >= 0) {
@@ -299,7 +299,7 @@ public:
     }
 
 private:
-    SkBlitRow::Proc fProc;
+    SkBlitRow::Proc16 fProc;
 
     typedef SkSpriteBlitter INHERITED;
 };

@@ -1,5 +1,6 @@
 html {
     height: 100%;
+    overflow: hidden;
 }
 
 body {
@@ -34,18 +35,21 @@ html /deep/ .platform-windows {
 }
 
 html /deep/ .platform-mac .monospace,
+html /deep/ .platform-mac.monospace,
 html /deep/ .platform-mac .source-code {
     font-size: 11px !important;
     font-family: Menlo, monospace;
 }
 
 html /deep/ .platform-windows .monospace,
+html /deep/ .platform-windows.monospace,
 html /deep/ .platform-windows .source-code {
     font-size: 12px !important;
     font-family: Consolas, Lucida Console, monospace;
 }
 
 html /deep/ .platform-linux .monospace,
+html /deep/ .platform-linux.monospace,
 html /deep/ .platform-linux .source-code {
     font-size: 11px !important;
     font-family: dejavu sans mono, monospace;
@@ -140,14 +144,24 @@ body /deep/ .highlighted-search-result {
     background-color: rgba(255, 255, 0, 0.8);
 }
 
+body /deep/ .link {
+    cursor: pointer;
+    text-decoration: underline;
+    color: rgb(17, 85, 204);
+}
+
 body /deep/ button,
 body /deep/ input,
 body /deep/ select {
-  font-family: inherit;
-  font-size: inherit;
+    font-family: inherit;
+    font-size: inherit;
 }
 
 body /deep/ input[type="search"]:focus,
 body /deep/ input[type="text"]:focus {
     outline: auto 5px -webkit-focus-ring-color;
+}
+
+.overflow-auto {
+    overflow: auto;
 }

@@ -45,7 +45,6 @@ static_library("extensions") {
     "//chrome/common/safe_browsing:proto",
     "//chrome/installer/util",
     "//components/copresence",
-    "//components/history/core/browser:proto",
     "//components/onc",
     "//components/proximity_auth",
     "//components/strings",
@@ -64,6 +63,7 @@ static_library("extensions") {
     "//skia",
     "//storage/common",
     "//sync",
+    "//third_party/WebKit/public:image_resources",
     "//third_party/WebKit/public:resources",
     "//third_party/cacheinvalidation",
     "//third_party/icu",
@@ -72,6 +72,7 @@ static_library("extensions") {
     "//third_party/webrtc/modules/desktop_capture",
     "//ui/accessibility:ax_gen",
     "//ui/base",
+    "//ui/base/ime",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/resources",
@@ -109,17 +110,6 @@ static_library("extensions") {
       "api/tabs/ash_panel_contents.cc",
       "api/tabs/ash_panel_contents.h",
     ]
-  }
-  if (use_athena) {
-    defines += [ USE_ATHENA ]
-    sources += rebase_path(gypi_values.chrome_browser_extensions_athena_sources,
-                           ".",
-                           "//chrome")
-  } else {
-    sources +=
-        rebase_path(gypi_values.chrome_browser_extensions_non_athena_sources,
-                    ".",
-                    "//chrome")
   }
 
   if (is_linux) {
@@ -188,13 +178,6 @@ static_library("extensions") {
     deps += [ "//components/wifi" ]
     sources += rebase_path(
             gypi_values.chrome_browser_extensions_networking_private_sources_winmac,
-            ".",
-            "//chrome")
-  }
-
-  if (is_desktop_linux) {
-    sources += rebase_path(
-            gypi_values.chrome_browser_extensions_networking_private_sources_linux,
             ".",
             "//chrome")
   }

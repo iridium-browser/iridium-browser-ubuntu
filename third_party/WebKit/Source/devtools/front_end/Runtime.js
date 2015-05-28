@@ -107,9 +107,10 @@ function normalizePath(path)
 
 /**
  * @param {!Array.<string>} scriptNames
+ * @param {string=} base
  * @return {!Promise.<undefined>}
  */
-function loadScriptsPromise(scriptNames)
+function loadScriptsPromise(scriptNames, base)
 {
     /** @type {!Array.<!Promise.<string>>} */
     var promises = [];
@@ -119,7 +120,7 @@ function loadScriptsPromise(scriptNames)
     var scriptToEval = 0;
     for (var i = 0; i < scriptNames.length; ++i) {
         var scriptName = scriptNames[i];
-        var sourceURL = self._importScriptPathPrefix + scriptName;
+        var sourceURL = (base || self._importScriptPathPrefix) + scriptName;
         var schemaIndex = sourceURL.indexOf("://") + 3;
         sourceURL = sourceURL.substring(0, schemaIndex) + normalizePath(sourceURL.substring(schemaIndex));
         if (_loadedScripts[sourceURL])
@@ -266,8 +267,10 @@ Runtime.startApplication = function(appName)
          */
         function instantiateRuntime(moduleDescriptors)
         {
-            for (var i = 0; !Runtime.isReleaseMode() && i < moduleDescriptors.length; ++i)
+            for (var i = 0; !Runtime.isReleaseMode() && i < moduleDescriptors.length; ++i) {
                 moduleDescriptors[i]["name"] = configuration[i]["name"];
+                moduleDescriptors[i]["condition"] = configuration[i]["condition"];
+            }
             self.runtime = new Runtime(moduleDescriptors, coreModuleNames);
         }
     }
@@ -364,6 +367,10 @@ Runtime._assert = function(value, message)
 }
 
 Runtime.prototype = {
+    useTestBase: function()
+    {
+        Runtime._remoteBase = "http://localhost:8000/inspector-sources/";
+    },
 
     /**
      * @param {!Runtime.ModuleDescriptor} descriptor
@@ -481,11 +488,7 @@ Runtime.prototype = {
         {
             if (extension._type !== type && extension._typeClass() !== type)
                 return false;
-            var activatorExperiment = extension.descriptor()["experiment"];
-            if (activatorExperiment && !Runtime.experiments.isEnabled(activatorExperiment))
-                return false;
-            activatorExperiment = extension._module._descriptor["experiment"];
-            if (activatorExperiment && !Runtime.experiments.isEnabled(activatorExperiment))
+            if (!extension.enabled())
                 return false;
             return !context || extension.isApplicable(context);
         }
@@ -581,6 +584,11 @@ Runtime.ModuleDescriptor = function()
      * @type {!Array.<string>}
      */
     this.scripts;
+
+    /**
+     * @type {boolean|undefined}
+     */
+    this.remote;
 }
 
 /**
@@ -632,12 +640,29 @@ Runtime.Module.prototype = {
     },
 
     /**
+     * @return {boolean}
+     */
+    enabled: function()
+    {
+        var activatorExperiment = this._descriptor["experiment"];
+        if (activatorExperiment && !Runtime.experiments.isEnabled(activatorExperiment))
+            return false;
+        var condition = this._descriptor["condition"];
+        if (condition && !Runtime.queryParam(condition))
+            return false;
+        return true;
+    },
+
+    /**
      * @return {!Promise.<undefined>}
      */
     _loadPromise: function()
     {
         if (this._loaded)
             return Promise.resolve();
+
+        if (!this.enabled())
+            return Promise.reject(new Error("Module " + this._name + " is not enabled"));
 
         if (this._pendingLoadPromise)
             return this._pendingLoadPromise;
@@ -692,7 +717,7 @@ Runtime.Module.prototype = {
             }
             var sourceURL = window.location.href;
             if (window.location.search)
-                sourceURL.replace(window.location.search, "");
+                sourceURL = sourceURL.replace(window.location.search, "");
             sourceURL = sourceURL.substring(0, sourceURL.lastIndexOf("/") + 1) + path;
             Runtime.cachedResources[path] = content + "\n/*# sourceURL=" + sourceURL + " */";
         }
@@ -706,8 +731,10 @@ Runtime.Module.prototype = {
         if (!this._descriptor.scripts)
             return Promise.resolve();
 
-        if (Runtime.isReleaseMode())
-            return loadScriptsPromise([this._name + "_module.js"]);
+        if (Runtime.isReleaseMode()) {
+            var base = this._descriptor.remote && Runtime._remoteBase || undefined;
+            return loadScriptsPromise([this._name + "_module.js"], base);
+        }
 
         return loadScriptsPromise(this._descriptor.scripts.map(this._modularizeURL, this));
     },
@@ -775,6 +802,20 @@ Runtime.Extension.prototype = {
     module: function()
     {
         return this._module;
+    },
+
+    /**
+     * @return {boolean}
+     */
+    enabled: function()
+    {
+        var activatorExperiment = this.descriptor()["experiment"];
+        if (activatorExperiment && !Runtime.experiments.isEnabled(activatorExperiment))
+            return false;
+        var condition = this.descriptor()["condition"];
+        if (condition && !Runtime.queryParam(condition))
+            return false;
+        return this._module.enabled();
     },
 
     /**
@@ -989,7 +1030,8 @@ Runtime.Experiment.prototype = {
     var params = queryParams.substring(1).split("&");
     for (var i = 0; i < params.length; ++i) {
         var pair = params[i].split("=");
-        Runtime._queryParamsObject[pair[0]] = pair[1];
+        var name = pair.shift();
+        Runtime._queryParamsObject[name] = pair.join("=");
     }
 
     // Patch settings from the URL param (for tests).
@@ -1008,6 +1050,11 @@ Runtime.Experiment.prototype = {
 
 // This must be constructed after the query parameters have been parsed.
 Runtime.experiments = new Runtime.ExperimentsSupport();
+
+/**
+ * @type {?string}
+ */
+Runtime._remoteBase = Runtime.queryParam("remoteBase");
 
 /** @type {!Runtime} */
 var runtime;

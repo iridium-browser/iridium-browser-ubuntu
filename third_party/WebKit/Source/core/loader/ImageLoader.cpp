@@ -29,16 +29,15 @@
 #include "core/dom/Microtask.h"
 #include "core/events/Event.h"
 #include "core/events/EventSender.h"
-#include "core/fetch/CrossOriginAccessControl.h"
 #include "core/fetch/FetchRequest.h"
 #include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "core/rendering/RenderImage.h"
-#include "core/rendering/RenderVideo.h"
-#include "core/rendering/svg/RenderSVGImage.h"
+#include "core/layout/LayoutImage.h"
+#include "core/layout/LayoutVideo.h"
+#include "core/layout/svg/LayoutSVGImage.h"
 #include "platform/Logging.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/WebURLRequest.h"
@@ -81,14 +80,26 @@ public:
     Task(ImageLoader* loader, UpdateFromElementBehavior updateBehavior)
         : m_loader(loader)
         , m_shouldBypassMainWorldCSP(shouldBypassMainWorldCSP(loader))
-        , m_weakFactory(this)
         , m_updateBehavior(updateBehavior)
+        , m_weakFactory(this)
     {
     }
 
     virtual void run() override
     {
         if (m_loader) {
+#if ENABLE(OILPAN)
+            // Oilpan: this WebThread::Task microtask may run after the
+            // loader has been GCed, but not yet lazily swept & finalized
+            // (when this task's loader reference will be cleared.)
+            //
+            // Handle this transient condition by explicitly checking here
+            // before going ahead with the update operation. Unsafe to do it
+            // if so, as the objects that the loader refers to may have been
+            // finalized by this time.
+            if (Heap::willObjectBeLazilySwept(m_loader))
+                return;
+#endif
             m_loader->doUpdateFromElement(m_shouldBypassMainWorldCSP, m_updateBehavior);
         }
     }
@@ -106,8 +117,8 @@ public:
 private:
     ImageLoader* m_loader;
     BypassMainWorldBehavior m_shouldBypassMainWorldCSP;
-    WeakPtrFactory<Task> m_weakFactory;
     UpdateFromElementBehavior m_updateBehavior;
+    WeakPtrFactory<Task> m_weakFactory;
 };
 
 ImageLoader::ImageLoader(Element* element)
@@ -145,7 +156,7 @@ ImageLoader::~ImageLoader()
         errorEventSender().cancelEvent(this);
 }
 
-void ImageLoader::trace(Visitor* visitor)
+DEFINE_TRACE(ImageLoader)
 {
     visitor->trace(m_element);
 }
@@ -181,7 +192,7 @@ void ImageLoader::setImageWithoutConsideringPendingLoadEvent(ImageResource* newI
             oldImage->removeClient(this);
     }
 
-    if (RenderImageResource* imageResource = renderImageResource())
+    if (LayoutImageResource* imageResource = layoutImageResource())
         imageResource->resetAnimation();
 }
 
@@ -193,17 +204,6 @@ static void configureRequest(FetchRequest& request, ImageLoader::BypassMainWorld
     AtomicString crossOriginMode = element.fastGetAttribute(HTMLNames::crossoriginAttr);
     if (!crossOriginMode.isNull())
         request.setCrossOriginAccessControl(element.document().securityOrigin(), crossOriginMode);
-}
-
-ResourcePtr<ImageResource> ImageLoader::createImageResourceForImageDocument(Document& document, FetchRequest& request)
-{
-    bool autoLoadOtherImages = document.fetcher()->autoLoadImages();
-    document.fetcher()->setAutoLoadImages(false);
-    ResourcePtr<ImageResource> newImage = new ImageResource(request.resourceRequest());
-    newImage->setLoading(true);
-    document.fetcher()->m_documentResources.set(newImage->url(), newImage.get());
-    document.fetcher()->setAutoLoadImages(autoLoadOtherImages);
-    return newImage;
 }
 
 inline void ImageLoader::dispatchErrorEvent()
@@ -258,17 +258,23 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
         ResourceLoaderOptions resourceLoaderOptions = ResourceFetcher::defaultResourceOptions();
         ResourceRequest resourceRequest(url);
         resourceRequest.setFetchCredentialsMode(WebURLRequest::FetchCredentialsModeSameOrigin);
-        if (isHTMLPictureElement(element()->parentNode()) || !element()->fastGetAttribute(HTMLNames::srcsetAttr).isNull()) {
-            resourceLoaderOptions.mixedContentBlockingTreatment = TreatAsActiveContent;
+        if (isHTMLPictureElement(element()->parentNode()) || !element()->fastGetAttribute(HTMLNames::srcsetAttr).isNull())
             resourceRequest.setRequestContext(WebURLRequest::RequestContextImageSet);
-        }
         FetchRequest request(resourceRequest, element()->localName(), resourceLoaderOptions);
         configureRequest(request, bypassBehavior, *m_element);
 
-        if (m_loadingImageDocument)
-            newImage = createImageResourceForImageDocument(document, request);
-        else
-            newImage = document.fetcher()->fetchImage(request);
+        // Prevent the immediate creation of a ResourceLoader (and therefore a network
+        // request) for ImageDocument loads. In this case, the image contents have already
+        // been requested as a main resource and ImageDocumentParser will take care of
+        // funneling the main resource bytes into the ImageResource.
+        if (m_loadingImageDocument) {
+            request.setDefer(FetchRequest::DeferredByClient);
+            request.setContentSecurityCheck(DoNotCheckContentSecurityPolicy);
+        }
+
+        newImage = document.fetcher()->fetchImage(request);
+        if (m_loadingImageDocument && newImage)
+            newImage->setLoading(true);
 
         if (!newImage && !pageIsBeingDismissed(&document)) {
             crossSiteOrCSPViolationOccurred(imageSourceURL);
@@ -285,8 +291,11 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
     }
 
     ImageResource* oldImage = m_image.get();
-    if (newImage != oldImage) {
-        sourceImageChanged();
+    if (updateBehavior == UpdateSizeChanged && m_element->layoutObject() && m_element->layoutObject()->isImage() && newImage == oldImage) {
+        toLayoutImage(m_element->layoutObject())->intrinsicSizeChanged();
+    } else {
+        if (newImage != oldImage)
+            sourceImageChanged();
 
         if (m_hasPendingLoadEvent) {
             loadEventSender().cancelEvent(this);
@@ -314,11 +323,9 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
 
         if (oldImage)
             oldImage->removeClient(this);
-    } else if (updateBehavior == UpdateSizeChanged && m_element->renderer() && m_element->renderer()->isImage()) {
-        toRenderImage(m_element->renderer())->intrinsicSizeChanged();
     }
 
-    if (RenderImageResource* imageResource = renderImageResource())
+    if (LayoutImageResource* imageResource = layoutImageResource())
         imageResource->resetAnimation();
 
     // Only consider updating the protection ref-count of the Element immediately before returning
@@ -427,30 +434,30 @@ void ImageLoader::notifyFinished(Resource* resource)
     loadEventSender().dispatchEventSoon(this);
 }
 
-RenderImageResource* ImageLoader::renderImageResource()
+LayoutImageResource* ImageLoader::layoutImageResource()
 {
-    RenderObject* renderer = m_element->renderer();
+    LayoutObject* renderer = m_element->layoutObject();
 
     if (!renderer)
         return 0;
 
     // We don't return style generated image because it doesn't belong to the ImageLoader.
     // See <https://bugs.webkit.org/show_bug.cgi?id=42840>
-    if (renderer->isImage() && !static_cast<RenderImage*>(renderer)->isGeneratedContent())
-        return toRenderImage(renderer)->imageResource();
+    if (renderer->isImage() && !static_cast<LayoutImage*>(renderer)->isGeneratedContent())
+        return toLayoutImage(renderer)->imageResource();
 
     if (renderer->isSVGImage())
-        return toRenderSVGImage(renderer)->imageResource();
+        return toLayoutSVGImage(renderer)->imageResource();
 
     if (renderer->isVideo())
-        return toRenderVideo(renderer)->imageResource();
+        return toLayoutVideo(renderer)->imageResource();
 
     return 0;
 }
 
 void ImageLoader::updateRenderer()
 {
-    RenderImageResource* imageResource = renderImageResource();
+    LayoutImageResource* imageResource = layoutImageResource();
 
     if (!imageResource)
         return;

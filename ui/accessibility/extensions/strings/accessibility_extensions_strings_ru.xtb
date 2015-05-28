@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="ru">
 <translation id="1408730541890277710">Замена изображений альтернативным текстом</translation>
+<translation id="6017514345406065928">Зеленый</translation>
 <translation id="595639123821853262">Негатив</translation>
 <translation id="8260673944985561857">Режим активного курсора</translation>
 <translation id="3410969471888629217">Сбросить настройки</translation>
 <translation id="6050189528197190982">Оттенки серого</translation>
+<translation id="8261559421026395104">Улучшить восприятие цвета:</translation>
 <translation id="5094574508723441140">Резкий контраст</translation>
 <translation id="8609925175482059018">Нажав клавишу &lt;span class='key'&gt;F7&lt;/span&gt;, вы можете включить или отключить режим активного курсора.</translation>
 <translation id="3435896845095436175">Включить</translation>
@@ -14,6 +16,8 @@
 <translation id="2394933097471027016">На этой странице можно включить режим активного курсора. Попробуйте!</translation>
 <translation id="3622586652998721735">Установить по умолчанию</translation>
 <translation id="2179565792157161713">Открыть подробное описание в новой вкладке</translation>
+<translation id="7942349550061667556">Красный</translation>
+<translation id="1555130319947370107">Синий</translation>
 <translation id="2471847333270902538">Цветовая схема сайта <ph name="SITE"/>:</translation>
 <translation id="381767806621926835">Нажмите правой кнопкой мыши на элемент с атрибутами longdesc или aria-describedat, чтобы просмотреть его подробное описание.</translation>
 <translation id="786423340267544509">Добавить границу к элементам с атрибутами aria-describedat или longdesc</translation>
@@ -31,6 +35,7 @@
 <translation id="4896660567607030658">Отключить эффекты при появлении курсора</translation>
 <translation id="5631241868147802353">Цветовая схема по умолчанию:</translation>
 <translation id="5173942593318174089">Выделять позицию курсора с помощью анимации</translation>
+<translation id="7379645913608427028">Интенсивность</translation>
 <translation id="894241283505723656">Подробные описания в контекстном меню</translation>
 <translation id="5555153510860501336">Резкий контраст отключен</translation>
 <translation id="1703735871906654364">Режим активного курсора</translation>
@@ -38,6 +43,7 @@
 <translation id="6550675742724504774">Параметры</translation>
 <translation id="5650358096585648000">Эффекты при появлении курсора</translation>
 <translation id="4388820049312272371">Выделять позицию курсора с помощью вспышки</translation>
+<translation id="2223143012868735942">Фильтр для веб-страниц, позволяющий улучшить цветовосприятие.</translation>
 <translation id="4023902424053835668">Навигация по тексту веб-страниц при помощи клавиш со стрелками</translation>
 <translation id="2795227192542594043">Это расширение позволяет перемещать курсор и выделять текст на веб-странице с помощью клавиатуры.</translation>
 <translation id="4394049700291259645">Отключить</translation>

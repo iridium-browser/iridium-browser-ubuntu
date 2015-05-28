@@ -26,23 +26,25 @@
 #ifndef DocumentLifecycleObserver_h
 #define DocumentLifecycleObserver_h
 
-#include "platform/LifecycleContext.h"
+#include "core/dom/Document.h"
+#include "platform/LifecycleObserver.h"
 
 namespace blink {
 
-class Document;
+class DocumentLifecycleNotifier;
 
-template<> void observerContext(Document*, LifecycleObserver<Document>*);
-template<> void unobserverContext(Document*, LifecycleObserver<Document>*);
-
-class DocumentLifecycleObserver : public LifecycleObserver<Document> {
+class DocumentLifecycleObserver : public LifecycleObserver<Document, DocumentLifecycleObserver, DocumentLifecycleNotifier> {
 public:
-    explicit DocumentLifecycleObserver(Document*);
-    virtual ~DocumentLifecycleObserver();
     virtual void documentWasDetached() { }
 #if !ENABLE(OILPAN)
     virtual void documentWasDisposed() { }
 #endif
+
+protected:
+    explicit DocumentLifecycleObserver(Document* document)
+        : LifecycleObserver(document)
+    {
+    }
 };
 
 } // namespace blink

@@ -183,7 +183,8 @@ bool CreateShortcutsInPaths(
   // Generates file name to use with persisted ico and shortcut file.
   base::FilePath icon_file =
       web_app::internals::GetIconFilePath(web_app_path, shortcut_info.title);
-  if (!web_app::internals::CheckAndSaveIcon(icon_file, shortcut_info.favicon)) {
+  if (!web_app::internals::CheckAndSaveIcon(icon_file, shortcut_info.favicon,
+                                            false)) {
     return false;
   }
 
@@ -357,7 +358,7 @@ void CreateIconAndSetRelaunchDetails(const base::FilePath& web_app_path,
     return;
 
   ui::win::SetAppIconForWindow(icon_file.value(), hwnd);
-  web_app::internals::CheckAndSaveIcon(icon_file, shortcut_info.favicon);
+  web_app::internals::CheckAndSaveIcon(icon_file, shortcut_info.favicon, true);
 }
 
 void OnShortcutInfoLoadedForSetRelaunchDetails(
@@ -393,16 +394,23 @@ void OnShortcutInfoLoadedForSetRelaunchDetails(
 // |path| is the full path of the shim binary to be created.
 bool CreateAppShimBinary(const base::FilePath& path) {
   // TODO(mgiuca): Hard-link instead of copying, if on the same file system.
-  base::FilePath chrome_binary_directory;
-  if (!PathService::Get(base::DIR_EXE, &chrome_binary_directory)) {
+  // Get the Chrome version directory (the directory containing the chrome.dll
+  // module). This is the directory where app_shim.exe is located.
+  base::FilePath chrome_version_directory;
+  if (!PathService::Get(base::DIR_MODULE, &chrome_version_directory)) {
     NOTREACHED();
     return false;
   }
 
   base::FilePath generic_shim_path =
-      chrome_binary_directory.Append(kAppShimExe);
+      chrome_version_directory.Append(kAppShimExe);
   if (!base::CopyFile(generic_shim_path, path)) {
-    LOG(ERROR) << "Could not copy app shim exe to " << path.value();
+    if (!base::PathExists(generic_shim_path)) {
+      LOG(ERROR) << "Could not find app shim exe at "
+                 << generic_shim_path.value();
+    } else {
+      LOG(ERROR) << "Could not copy app shim exe to " << path.value();
+    }
     return false;
   }
 
@@ -536,7 +544,7 @@ base::FilePath CreateShortcutInWebAppDir(const base::FilePath& web_app_dir,
   } else {
     internals::CheckAndSaveIcon(
         internals::GetIconFilePath(web_app_dir, shortcut_info.title),
-        shortcut_info.favicon);
+        shortcut_info.favicon, true);
   }
   return web_app_dir_shortcut;
 }
@@ -557,23 +565,22 @@ void UpdateShortcutsForAllApps(Profile* profile,
 
 namespace internals {
 
-// Saves |image| to |icon_file| if the file is outdated and refresh shell's
-// icon cache to ensure correct icon is displayed. Returns true if icon_file
-// is up to date or successfully updated.
 bool CheckAndSaveIcon(const base::FilePath& icon_file,
-                      const gfx::ImageFamily& image) {
-  if (ShouldUpdateIcon(icon_file, image)) {
-    if (SaveIconWithCheckSum(icon_file, image)) {
-      // Refresh shell's icon cache. This call is quite disruptive as user would
-      // see explorer rebuilding the icon cache. It would be great that we find
-      // a better way to achieve this.
-      SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT,
-                     NULL, NULL);
-    } else {
-      return false;
-    }
-  }
+                      const gfx::ImageFamily& image,
+                      bool refresh_shell_icon_cache) {
+  if (!ShouldUpdateIcon(icon_file, image))
+    return true;
 
+  if (!SaveIconWithCheckSum(icon_file, image))
+    return false;
+
+  if (refresh_shell_icon_cache) {
+    // Refresh shell's icon cache. This call is quite disruptive as user would
+    // see explorer rebuilding the icon cache. It would be great that we find
+    // a better way to achieve this.
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, NULL,
+                   NULL);
+  }
   return true;
 }
 
@@ -667,7 +674,7 @@ void UpdatePlatformShortcuts(
 
   // Update the icon if necessary.
   base::FilePath icon_file = GetIconFilePath(web_app_path, shortcut_info.title);
-  CheckAndSaveIcon(icon_file, shortcut_info.favicon);
+  CheckAndSaveIcon(icon_file, shortcut_info.favicon, true);
 }
 
 void DeletePlatformShortcuts(const base::FilePath& web_app_path,

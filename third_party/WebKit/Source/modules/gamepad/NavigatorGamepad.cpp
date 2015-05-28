@@ -97,15 +97,12 @@ GamepadList* NavigatorGamepad::gamepads()
 {
     if (!m_gamepads)
         m_gamepads = GamepadList::create();
-    if (frame() && frame()->host()) {
-        // The frame must be attached to start updating.
-        startUpdating();
+    if (startUpdatingIfAttached())
         sampleGamepads<Gamepad>(m_gamepads.get());
-    }
     return m_gamepads.get();
 }
 
-void NavigatorGamepad::trace(Visitor* visitor)
+DEFINE_TRACE(NavigatorGamepad)
 {
     visitor->trace(m_gamepads);
     visitor->trace(m_pendingEvents);
@@ -113,6 +110,16 @@ void NavigatorGamepad::trace(Visitor* visitor)
     DOMWindowProperty::trace(visitor);
     PlatformEventController::trace(visitor);
     DOMWindowLifecycleObserver::trace(visitor);
+}
+
+bool NavigatorGamepad::startUpdatingIfAttached()
+{
+    // The frame must be attached to start updating.
+    if (frame() && frame()->host()) {
+        startUpdating();
+        return true;
+    }
+    return false;
 }
 
 void NavigatorGamepad::didUpdateData()
@@ -214,7 +221,7 @@ void NavigatorGamepad::didAddEventListener(LocalDOMWindow*, const AtomicString& 
 {
     if (isGamepadEvent(eventType)) {
         if (page() && page()->visibilityState() == PageVisibilityStateVisible)
-            startUpdating();
+            startUpdatingIfAttached();
         m_hasEventListener = true;
     }
 }
@@ -245,7 +252,7 @@ void NavigatorGamepad::pageVisibilityChanged()
     // Inform the embedder whether it needs to provide gamepad data for us.
     bool visible = page()->visibilityState() == PageVisibilityStateVisible;
     if (visible && (m_hasEventListener || m_gamepads))
-        startUpdating();
+        startUpdatingIfAttached();
     else
         stopUpdating();
 

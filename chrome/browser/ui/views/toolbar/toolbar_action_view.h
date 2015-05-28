@@ -13,8 +13,8 @@
 #include "ui/views/drag_controller.h"
 #include "ui/views/view.h"
 
-class Browser;
 class ExtensionAction;
+class Profile;
 
 namespace extensions {
 class Extension;
@@ -53,9 +53,6 @@ class ToolbarActionView : public views::MenuButton,
     // Sets the delegate's active popup owner to be |popup_owner|.
     virtual void SetPopupOwner(ToolbarActionView* popup_owner) = 0;
 
-    // Hides the active popup of the delegate, if one exists.
-    virtual void HideActivePopup() = 0;
-
     // Returns the primary ToolbarActionView associated with the given
     // |extension|.
     virtual ToolbarActionView* GetMainViewForAction(
@@ -66,7 +63,7 @@ class ToolbarActionView : public views::MenuButton,
   };
 
   ToolbarActionView(ToolbarActionViewController* view_controller,
-                    Browser* browser,
+                    Profile* profile,
                     Delegate* delegate);
   ~ToolbarActionView() override;
 
@@ -74,13 +71,13 @@ class ToolbarActionView : public views::MenuButton,
   // an action wants to run.
   static void DecorateWantsToRunBorder(views::LabelButtonBorder* border);
 
-  // Overridden from views::View:
+  // views::MenuButton:
   void GetAccessibleState(ui::AXViewState* state) override;
 
-  // Overridden from views::ButtonListener:
+  // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
-  // Overridden from content::NotificationObserver:
+  // content::NotificationObserver:
   void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
@@ -90,6 +87,10 @@ class ToolbarActionView : public views::MenuButton,
   // behavior.  MenuButton has the notion of a child popup being shown where the
   // button will stay in the pushed state until the "menu" (a popup in this
   // case) is dismissed.
+  // TODO(devlin): This is a good idea, but it has some funny UI side-effects,
+  // like the fact that label buttons enter a pressed state immediately, but
+  // menu buttons only enter a pressed state on release (if they're draggable).
+  // We should probably just pick a behavior, and stick to it.
   bool Activate() override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
@@ -97,6 +98,7 @@ class ToolbarActionView : public views::MenuButton,
   bool OnKeyReleased(const ui::KeyEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
   scoped_ptr<views::LabelButtonBorder> CreateDefaultBorder() const override;
+  bool ShouldEnterPushedState(const ui::Event& event) override;
 
   // ToolbarActionViewDelegate: (public because called by others).
   void UpdateState() override;
@@ -105,7 +107,6 @@ class ToolbarActionView : public views::MenuButton,
   ToolbarActionViewController* view_controller() {
     return view_controller_;
   }
-  Browser* browser() { return browser_; }
 
   // Returns button icon so it can be accessed during tests.
   gfx::ImageSkia GetIconForTest();
@@ -113,13 +114,13 @@ class ToolbarActionView : public views::MenuButton,
   bool wants_to_run_for_testing() const { return wants_to_run_; }
 
  private:
-  // Overridden from views::View:
+  // views::MenuButton:
+  gfx::Size GetPreferredSize() const override;
+  const char* GetClassName() const override;
+  void OnDragDone() override;
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override;
-  void OnDragDone() override;
-  gfx::Size GetPreferredSize() const override;
-  void PaintChildren(gfx::Canvas* canvas,
-                     const views::CullSet& cull_set) override;
+  void PaintChildren(const ui::PaintContext& context) override;
   void OnPaintBorder(gfx::Canvas* canvas) override;
 
   // ToolbarActionViewDelegateViews:
@@ -130,9 +131,8 @@ class ToolbarActionView : public views::MenuButton,
   ToolbarActionViewController* GetPreferredPopupViewController() override;
   views::View* GetReferenceViewForPopup() override;
   views::MenuButton* GetContextMenuButton() override;
-  void HideActivePopup() override;
-  void OnPopupShown(bool grant_tab_permissions) override;
-  void CleanupPopup() override;
+  void OnPopupShown(bool by_user) override;
+  void OnPopupClosed() override;
 
   // A lock to keep the MenuButton pressed when a menu or popup is visible.
   scoped_ptr<views::MenuButton::PressedLock> pressed_lock_;
@@ -140,8 +140,8 @@ class ToolbarActionView : public views::MenuButton,
   // The controller for this toolbar action view.
   ToolbarActionViewController* view_controller_;
 
-  // The associated browser.
-  Browser* browser_;
+  // The associated profile.
+  Profile* profile_;
 
   // Delegate that usually represents a container for ToolbarActionView.
   Delegate* delegate_;

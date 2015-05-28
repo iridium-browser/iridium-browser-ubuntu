@@ -5,31 +5,27 @@
 #include "chrome/browser/ui/views/extensions/extension_action_platform_delegate_views.h"
 
 #include "base/logging.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/extensions/api/commands/command_service.h"
-#include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/accelerator_priority.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_action_view_delegate_views.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
+#include "chrome/common/extensions/command.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
-#include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
 using extensions::ActionInfo;
-using extensions::CommandService;
 
 namespace {
 
@@ -51,7 +47,6 @@ ExtensionActionPlatformDelegate::Create(
 ExtensionActionPlatformDelegateViews::ExtensionActionPlatformDelegateViews(
     ExtensionActionViewController* controller)
     : controller_(controller),
-      popup_(nullptr),
       weak_factory_(this) {
   content::NotificationSource notification_source = content::Source<Profile>(
       controller_->browser()->profile()->GetOriginalProfile());
@@ -65,14 +60,8 @@ ExtensionActionPlatformDelegateViews::ExtensionActionPlatformDelegateViews(
 
 ExtensionActionPlatformDelegateViews::~ExtensionActionPlatformDelegateViews() {
   if (context_menu_owner == this)
-    context_menu_owner = NULL;
-  if (IsShowingPopup())
-    CloseOwnPopup();
+    context_menu_owner = nullptr;
   UnregisterCommand(false);
-}
-
-gfx::NativeView ExtensionActionPlatformDelegateViews::GetPopupNativeView() {
-  return popup_ ? popup_->GetWidget()->GetNativeView() : nullptr;
 }
 
 bool ExtensionActionPlatformDelegateViews::IsMenuRunning() const {
@@ -102,21 +91,21 @@ void ExtensionActionPlatformDelegateViews::OnDelegateSet() {
   GetDelegateViews()->GetAsView()->set_context_menu_controller(this);
 }
 
-bool ExtensionActionPlatformDelegateViews::IsShowingPopup() const {
-  return popup_ != nullptr;
-}
-
 void ExtensionActionPlatformDelegateViews::CloseActivePopup() {
-  GetDelegateViews()->HideActivePopup();
+  if (controller_->extension_action()->action_type() ==
+          ActionInfo::TYPE_BROWSER) {
+    BrowserView::GetBrowserViewForBrowser(controller_->browser())->toolbar()->
+        browser_actions()->HideActivePopup();
+  } else {
+    DCHECK_EQ(ActionInfo::TYPE_PAGE,
+              controller_->extension_action()->action_type());
+    // Page actions only know how to close their own popups.
+    controller_->HidePopup();
+  }
 }
 
-void ExtensionActionPlatformDelegateViews::CloseOwnPopup() {
-  // We should only be asked to close the popup if we're showing one.
-  DCHECK(popup_);
-  CleanupPopup(true);
-}
-
-bool ExtensionActionPlatformDelegateViews::ShowPopupWithUrl(
+extensions::ExtensionViewHost*
+ExtensionActionPlatformDelegateViews::ShowPopupWithUrl(
     ExtensionActionViewController::PopupShowAction show_action,
     const GURL& popup_url,
     bool grant_tab_permissions) {
@@ -129,16 +118,12 @@ bool ExtensionActionPlatformDelegateViews::ShowPopupWithUrl(
   ExtensionPopup::ShowAction popup_show_action =
       show_action == ExtensionActionViewController::SHOW_POPUP ?
           ExtensionPopup::SHOW : ExtensionPopup::SHOW_AND_INSPECT;
-  popup_ = ExtensionPopup::ShowPopup(popup_url,
-                                     controller_->browser(),
-                                     reference_view,
-                                     arrow,
-                                     popup_show_action);
-  popup_->GetWidget()->AddObserver(this);
-
-  GetDelegateViews()->OnPopupShown(grant_tab_permissions);
-
-  return true;
+  ExtensionPopup* popup = ExtensionPopup::ShowPopup(popup_url,
+                                                    controller_->browser(),
+                                                    reference_view,
+                                                    arrow,
+                                                    popup_show_action);
+  return popup->host();
 }
 
 void ExtensionActionPlatformDelegateViews::Observe(
@@ -147,14 +132,14 @@ void ExtensionActionPlatformDelegateViews::Observe(
     const content::NotificationDetails& details) {
   DCHECK(type == extensions::NOTIFICATION_EXTENSION_COMMAND_ADDED ||
          type == extensions::NOTIFICATION_EXTENSION_COMMAND_REMOVED);
-  std::pair<const std::string, const std::string>* payload =
-      content::Details<std::pair<const std::string, const std::string> >(
-          details).ptr();
-  if (controller_->extension()->id() == payload->first &&
-      (payload->second ==
-       extensions::manifest_values::kBrowserActionCommandEvent ||
-       payload->second ==
-       extensions::manifest_values::kPageActionCommandEvent)) {
+  extensions::ExtensionCommandRemovedDetails* payload =
+      content::Details<extensions::ExtensionCommandRemovedDetails>(details)
+          .ptr();
+  if (controller_->extension()->id() == payload->extension_id &&
+      (payload->command_name ==
+           extensions::manifest_values::kBrowserActionCommandEvent ||
+       payload->command_name ==
+           extensions::manifest_values::kPageActionCommandEvent)) {
     if (type == extensions::NOTIFICATION_EXTENSION_COMMAND_ADDED)
       RegisterCommand();
     else
@@ -189,13 +174,6 @@ bool ExtensionActionPlatformDelegateViews::CanHandleAccelerators() const {
           true;
 }
 
-void ExtensionActionPlatformDelegateViews::OnWidgetDestroying(
-    views::Widget* widget) {
-  DCHECK(popup_);
-  DCHECK_EQ(popup_->GetWidget(), widget);
-  CleanupPopup(false);
-}
-
 void ExtensionActionPlatformDelegateViews::ShowContextMenuForView(
     views::View* source,
     const gfx::Point& point,
@@ -224,19 +202,16 @@ void ExtensionActionPlatformDelegateViews::ShowContextMenuForView(
 
 void ExtensionActionPlatformDelegateViews::DoShowContextMenu(
     ui::MenuSourceType source_type) {
-  if (!controller_->extension()->ShowConfigureContextMenus())
+  ui::MenuModel* context_menu_model = controller_->GetContextMenu();
+  // It's possible the extension doesn't have a context menu.
+  if (!context_menu_model)
     return;
 
   DCHECK(!context_menu_owner);
   context_menu_owner = this;
 
   // We shouldn't have both a popup and a context menu showing.
-  GetDelegateViews()->HideActivePopup();
-
-  // Reconstructs the menu every time because the menu's contents are dynamic.
-  scoped_refptr<ExtensionContextMenuModel> context_menu_model(
-      new ExtensionContextMenuModel(
-          controller_->extension(), controller_->browser(), controller_));
+  CloseActivePopup();
 
   gfx::Point screen_loc;
   views::View::ConvertPointToScreen(GetDelegateViews()->GetAsView(),
@@ -249,8 +224,7 @@ void ExtensionActionPlatformDelegateViews::DoShowContextMenu(
 
   views::Widget* parent = GetDelegateViews()->GetParentForContextMenu();
 
-  menu_runner_.reset(
-      new views::MenuRunner(context_menu_model.get(), run_types));
+  menu_runner_.reset(new views::MenuRunner(context_menu_model, run_types));
 
   if (menu_runner_->RunMenuAt(
           parent,
@@ -310,15 +284,6 @@ bool ExtensionActionPlatformDelegateViews::CloseActiveMenuIfNeeded() {
   }
 
   return false;
-}
-
-void ExtensionActionPlatformDelegateViews::CleanupPopup(bool close_widget) {
-  DCHECK(popup_);
-  GetDelegateViews()->CleanupPopup();
-  popup_->GetWidget()->RemoveObserver(this);
-  if (close_widget)
-    popup_->GetWidget()->Close();
-  popup_ = NULL;
 }
 
 ToolbarActionViewDelegateViews*

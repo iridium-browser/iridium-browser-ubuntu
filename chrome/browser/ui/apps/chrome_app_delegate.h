@@ -14,11 +14,6 @@
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/rect.h"
 
-namespace content {
-class BrowserContext;
-class WebContents;
-}
-
 class ScopedKeepAlive;
 
 class ChromeAppDelegate : public extensions::AppDelegate,
@@ -39,6 +34,7 @@ class ChromeAppDelegate : public extensions::AppDelegate,
 
   // extensions::AppDelegate:
   void InitWebContents(content::WebContents* web_contents) override;
+  void RenderViewCreated(content::RenderViewHost* render_view_host) override;
   void ResizeWebContents(content::WebContents* web_contents,
                          const gfx::Size& size) override;
   content::WebContents* OpenURLFromTab(
@@ -48,7 +44,7 @@ class ChromeAppDelegate : public extensions::AppDelegate,
   void AddNewContents(content::BrowserContext* context,
                       content::WebContents* new_contents,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_pos,
+                      const gfx::Rect& initial_rect,
                       bool user_gesture,
                       bool* was_blocked) override;
   content::ColorChooser* ShowColorChooser(content::WebContents* web_contents,

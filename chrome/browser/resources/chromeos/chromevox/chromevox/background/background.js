@@ -9,7 +9,6 @@
 goog.provide('cvox.ChromeVoxBackground');
 
 goog.require('cvox.AbstractEarcons');
-goog.require('cvox.AccessibilityApiHandler');
 goog.require('cvox.BrailleBackground');
 goog.require('cvox.BrailleCaptionsBackground');
 goog.require('cvox.ChromeVox');
@@ -87,8 +86,6 @@ cvox.ChromeVoxBackground.prototype.init = function() {
    */
   this.backgroundBraille_ = new cvox.BrailleBackground();
 
-  this.accessibilityApiHandler_ = new cvox.AccessibilityApiHandler(
-      this.tts, this.backgroundBraille_, this.earcons);
     this.tabsApiHandler_ = new cvox.TabsApiHandler(
       this.tts, this.backgroundBraille_, this.earcons);
 
@@ -97,11 +94,10 @@ cvox.ChromeVoxBackground.prototype.init = function() {
   cvox.ChromeVox.braille = this.backgroundBraille_;
   cvox.ChromeVox.earcons = this.earcons;
 
-  // TODO(dtseng): Remove the second check on or after m33.
   if (cvox.ChromeVox.isChromeOS &&
-      chrome.accessibilityPrivate.onChromeVoxLoadStateChanged) {
-    chrome.accessibilityPrivate.onChromeVoxLoadStateChanged.addListener(
-        this.onLoadStateChanged);
+      chrome.accessibilityPrivate.onIntroduceChromeVox) {
+    chrome.accessibilityPrivate.onIntroduceChromeVox.addListener(
+        this.onIntroduceChromeVox);
   }
 
   // Set up a message passing system for goog.provide() calls from
@@ -145,7 +141,7 @@ cvox.ChromeVoxBackground.prototype.init = function() {
 
 /**
  * Inject ChromeVox into a tab.
- * @param {Array.<Tab>} tabs The tab where ChromeVox scripts should be injected.
+ * @param {Array<Tab>} tabs The tab where ChromeVox scripts should be injected.
  */
 cvox.ChromeVoxBackground.prototype.injectChromeVoxIntoTabs = function(tabs) {
   var listOfFiles;
@@ -224,9 +220,6 @@ cvox.ChromeVoxBackground.prototype.injectChromeVoxIntoTabs = function(tabs) {
  */
 cvox.ChromeVoxBackground.prototype.onTtsMessage = function(msg) {
   if (msg['action'] == 'speak') {
-    // Tell the handler for native UI (chrome of chrome) events that
-    // the last speech came from web, and not from native UI.
-    this.accessibilityApiHandler_.setWebContext();
     this.tts.speak(msg['text'],
                    /** cvox.QueueMode */msg['queueMode'],
                    msg['properties']);
@@ -388,14 +381,16 @@ cvox.ChromeVoxBackground.prototype.addBridgeListener = function() {
       break;
     case 'TTS':
       if (msg['startCallbackId'] != undefined) {
-        msg['properties']['startCallback'] = function() {
+        msg['properties']['startCallback'] = function(opt_cleanupOnly) {
           port.postMessage({'message': 'TTS_CALLBACK',
+                            'cleanupOnly': opt_cleanupOnly,
                             'id': msg['startCallbackId']});
         };
       }
       if (msg['endCallbackId'] != undefined) {
-        msg['properties']['endCallback'] = function() {
+        msg['properties']['endCallback'] = function(opt_cleanupOnly) {
           port.postMessage({'message': 'TTS_CALLBACK',
+                            'cleanupOnly': opt_cleanupOnly,
                             'id': msg['endCallbackId']});
         };
       }
@@ -449,26 +444,16 @@ cvox.ChromeVoxBackground.prototype.isIncognito_ = function() {
 };
 
 
-// TODO(dtseng): The loading param is no longer used. Remove it once the
-// upstream Chrome API changes.
 /**
- * Handles the onChromeVoxLoadStateChanged event.
- * @param {boolean} loading True if ChromeVox is loading; false if it is
- * unloading.
- * @param {boolean} makeAnnouncements True if announcements should be made.
+ * Handles the onIntroduceChromeVox event.
  */
-cvox.ChromeVoxBackground.prototype.onLoadStateChanged = function(
-    loading, makeAnnouncements) {
-    if (loading) {
-      if (makeAnnouncements) {
-        cvox.ChromeVox.tts.speak(cvox.ChromeVox.msgs.getMsg('chromevox_intro'),
-                                 cvox.QueueMode.QUEUE,
-                                 {doNotInterrupt: true});
-        cvox.ChromeVox.braille.write(cvox.NavBraille.fromText(
-            cvox.ChromeVox.msgs.getMsg('intro_brl')));
-      }
-    }
-  };
+cvox.ChromeVoxBackground.prototype.onIntroduceChromeVox = function() {
+  cvox.ChromeVox.tts.speak(cvox.ChromeVox.msgs.getMsg('chromevox_intro'),
+                           cvox.QueueMode.QUEUE,
+                           {doNotInterrupt: true});
+  cvox.ChromeVox.braille.write(cvox.NavBraille.fromText(
+      cvox.ChromeVox.msgs.getMsg('intro_brl')));
+};
 
 
 // Create the background page object and export a function window['speak']

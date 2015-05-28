@@ -5,23 +5,33 @@
 #ifndef CSSParser_h
 #define CSSParser_h
 
-#include "core/css/parser/BisonCSSParser.h"
+#include "core/CSSPropertyNames.h"
+#include "core/css/parser/CSSParserMode.h"
+#include "platform/graphics/Color.h"
 
 namespace blink {
 
+class CSSParserObserver;
+class CSSSelectorList;
+class Element;
+class ImmutableStylePropertySet;
+class MutableStylePropertySet;
+class StyleColor;
+class StyleRuleBase;
+class StyleRuleKeyframe;
+class StyleSheetContents;
+
 // This class serves as the public API for the css/parser subsystem
-
-// FIXME: This should probably be a static-only class or a singleton class
 class CSSParser {
-    STACK_ALLOCATED();
+    STATIC_ONLY(CSSParser);
 public:
-    explicit CSSParser(const CSSParserContext&);
-
-    bool parseDeclaration(MutableStylePropertySet*, const String&, CSSParserObserver*, StyleSheetContents* contextStyleSheet);
-    void parseSelector(const String&, CSSSelectorList&);
-
+    // As well as regular rules, allows @import and @namespace but not @charset
     static PassRefPtrWillBeRawPtr<StyleRuleBase> parseRule(const CSSParserContext&, StyleSheetContents*, const String&);
+    // TODO(timloh): Split into parseSheet and parseSheetForInspector
     static void parseSheet(const CSSParserContext&, StyleSheetContents*, const String&, const TextPosition& startPosition, CSSParserObserver*, bool logErrors = false);
+    static void parseSelector(const CSSParserContext&, const String&, CSSSelectorList&);
+    // TODO(timloh): Split into parseDeclarationList and parseDeclarationListForInspector
+    static bool parseDeclarationList(const CSSParserContext&, MutableStylePropertySet*, const String&, CSSParserObserver*, StyleSheetContents* contextStyleSheet);
     static bool parseValue(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, CSSParserMode, StyleSheetContents*);
 
     // This is for non-shorthands only
@@ -29,11 +39,13 @@ public:
 
     static PassRefPtrWillBeRawPtr<ImmutableStylePropertySet> parseInlineStyleDeclaration(const String&, Element*);
 
-    static PassOwnPtr<Vector<double> > parseKeyframeKeyList(const String&);
+    static PassOwnPtr<Vector<double>> parseKeyframeKeyList(const String&);
     static PassRefPtrWillBeRawPtr<StyleRuleKeyframe> parseKeyframeRule(const CSSParserContext&, StyleSheetContents*, const String&);
 
     static bool parseSupportsCondition(const String&);
 
+    // The color will only be changed when string contains a valid CSS color, so callers
+    // can set it to a default color and ignore the boolean result.
     static bool parseColor(RGBA32& color, const String&, bool strict = false);
     static bool parseSystemColor(RGBA32& color, const String&);
     static StyleColor colorFromRGBColorString(const String&);
@@ -41,10 +53,6 @@ public:
 private:
     static bool parseValue(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, const CSSParserContext&);
     static bool parseFastPath(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, CSSParserMode);
-
-    // FIXME: We should store an OwnPtr<BisonCSSParser> and CSSParserContext here
-    // to avoid initializing the BisonCSSParser when using the new CSS parser.
-    BisonCSSParser m_bisonParser;
 };
 
 CSSPropertyID cssPropertyID(const String&);

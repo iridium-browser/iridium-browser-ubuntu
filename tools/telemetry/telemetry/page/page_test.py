@@ -2,8 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from telemetry.page import action_runner as action_runner_module
 from telemetry.page import test_expectations
-from telemetry.page.actions import action_runner as action_runner_module
 
 
 class TestNotSupportedOnPlatformError(Exception):
@@ -43,38 +43,22 @@ class PageTest(object):
              page, 'body_children', 'count', body_child_count))
 
   Args:
-    action_name_to_run: This is the method name in telemetry.page.Page
-        subclasses to run.
     discard_first_run: Discard the first run of this page. This is
         usually used with page_repeat and pageset_repeat options.
-    is_action_name_to_run_optional: Determines what to do if
-        action_name_to_run is not empty but the page doesn't have that
-        action. The page will run (without any action) if
-        is_action_name_to_run_optional is True, otherwise the page
-        will fail.
   """
 
   def __init__(self,
-               action_name_to_run='',
                needs_browser_restart_after_each_page=False,
                discard_first_result=False,
-               clear_cache_before_each_run=False,
-               is_action_name_to_run_optional=False):
+               clear_cache_before_each_run=False):
     super(PageTest, self).__init__()
 
     self.options = None
-    if action_name_to_run:
-      assert action_name_to_run.startswith('Run') \
-          and '_' not in action_name_to_run, \
-          ('Wrong way of naming action_name_to_run. By new convention,'
-           'action_name_to_run must start with Run- prefix and in CamelCase.')
-    self._action_name_to_run = action_name_to_run
     self._needs_browser_restart_after_each_page = (
         needs_browser_restart_after_each_page)
     self._discard_first_result = discard_first_result
     self._clear_cache_before_each_run = clear_cache_before_each_run
     self._close_tabs_before_run = True
-    self._is_action_name_to_run_optional = is_action_name_to_run_optional
 
   @property
   def is_multi_tab_test(self):
@@ -154,12 +138,6 @@ class PageTest(object):
   def DidStartBrowser(self, browser):
     """Override to customize the browser right after it has launched."""
 
-  def CanRunForPage(self, page):  # pylint: disable=W0613
-    """Override to customize if the test can be ran for the given page."""
-    if self._action_name_to_run and not self._is_action_name_to_run_optional:
-      return hasattr(page, self._action_name_to_run)
-    return True
-
   def SetOptions(self, options):
     """Sets the BrowserFinderOptions instance to use."""
     self.options = options
@@ -201,10 +179,6 @@ class PageTest(object):
     create a new tab for every page, return browser.tabs.New()."""
     return browser.tabs[0]
 
-  def ValidatePageSet(self, page_set):
-    """Override to examine the page set before the test run.  Useful for
-    example to validate that the pageset can be used with the test."""
-
   def ValidateAndMeasurePage(self, page, tab, results):
     """Override to check test assertions and perform measurement.
 
@@ -240,15 +214,9 @@ class PageTest(object):
     if interactive:
       action_runner.PauseInteractive()
     else:
-      self._RunMethod(page, self._action_name_to_run, action_runner)
+      page.RunPageInteractions(action_runner)
     self.DidRunActions(page, tab)
-
     self.ValidateAndMeasurePage(page, tab, results)
-
-  def _RunMethod(self, page, method_name, action_runner):
-    if hasattr(page, method_name):
-      run_method = getattr(page, method_name)
-      run_method(action_runner)
 
   def RunNavigateSteps(self, page, tab):
     """Navigates the tab to the page URL attribute.
@@ -258,7 +226,3 @@ class PageTest(object):
     action_runner = action_runner_module.ActionRunner(
         tab, skip_waits=page.skip_waits)
     page.RunNavigateSteps(action_runner)
-
-  @property
-  def action_name_to_run(self):
-    return self._action_name_to_run

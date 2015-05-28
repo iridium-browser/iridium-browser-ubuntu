@@ -20,13 +20,31 @@ ServiceWorkerClient* ServiceWorkerClient::create(const WebServiceWorkerClientInf
 }
 
 ServiceWorkerClient::ServiceWorkerClient(const WebServiceWorkerClientInfo& info)
-    : m_id(info.clientID)
+    : m_uuid(info.uuid)
     , m_url(info.url.string())
+    , m_frameType(info.frameType)
 {
 }
 
 ServiceWorkerClient::~ServiceWorkerClient()
 {
+}
+
+String ServiceWorkerClient::frameType() const
+{
+    switch (m_frameType) {
+    case WebURLRequest::FrameTypeAuxiliary:
+        return "auxiliary";
+    case WebURLRequest::FrameTypeNested:
+        return "nested";
+    case WebURLRequest::FrameTypeNone:
+        return "none";
+    case WebURLRequest::FrameTypeTopLevel:
+        return "top-level";
+    }
+
+    ASSERT_NOT_REACHED();
+    return String();
 }
 
 void ServiceWorkerClient::postMessage(ExecutionContext* context, PassRefPtr<SerializedScriptValue> message, const MessagePortArray* ports, ExceptionState& exceptionState)
@@ -38,7 +56,7 @@ void ServiceWorkerClient::postMessage(ExecutionContext* context, PassRefPtr<Seri
 
     WebString messageString = message->toWireString();
     OwnPtr<WebMessagePortChannelArray> webChannels = MessagePort::toWebMessagePortChannelArray(channels.release());
-    ServiceWorkerGlobalScopeClient::from(context)->postMessageToClient(m_id, messageString, webChannels.release());
+    ServiceWorkerGlobalScopeClient::from(context)->postMessageToClient(m_uuid, messageString, webChannels.release());
 }
 
 } // namespace blink

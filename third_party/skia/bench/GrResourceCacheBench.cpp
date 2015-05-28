@@ -11,9 +11,10 @@
 #if SK_SUPPORT_GPU
 
 #include "GrGpuResource.h"
+#include "GrGpuResourcePriv.h"
 #include "GrContext.h"
 #include "GrGpu.h"
-#include "GrResourceCache2.h"
+#include "GrResourceCache.h"
 #include "SkCanvas.h"
 
 enum {
@@ -28,42 +29,40 @@ public:
         this->registerWithCache();
     }
 
-    static GrResourceKey ComputeKey(int i) {
-        GrCacheID::Key key;
-        memset(&key, 0, sizeof(key));
-        key.fData32[0] = i;
-        static int gDomain = GrCacheID::GenerateDomain();
-        return GrResourceKey(GrCacheID(gDomain, key), 0);
+    static void ComputeKey(int i, GrUniqueKey* key) {
+        static GrUniqueKey::Domain kDomain = GrUniqueKey::GenerateDomain();
+        GrUniqueKey::Builder builder(key, kDomain, 1);
+        builder[0] = i;
     }
 
-
 private:
-    size_t onGpuMemorySize() const SK_OVERRIDE { return 100; }
+    size_t onGpuMemorySize() const override { return 100; }
 
     typedef GrGpuResource INHERITED;
 };
 
 static void populate_cache(GrGpu* gpu, int resourceCount) {
     for (int i = 0; i < resourceCount; ++i) {
-        GrResourceKey key = BenchResource::ComputeKey(i);
+        GrUniqueKey key;
+        BenchResource::ComputeKey(i, &key);
         GrGpuResource* resource = SkNEW_ARGS(BenchResource, (gpu));
-        resource->cacheAccess().setContentKey(key);
+        resource->resourcePriv().setUniqueKey(key);
         resource->unref();
     }
 }
 
 class GrResourceCacheBenchAdd : public Benchmark {
 public:
-    bool isSuitableFor(Backend backend) SK_OVERRIDE {
+    bool isSuitableFor(Backend backend) override {
         return backend == kNonRendering_Backend;
     }
 
 protected:
-    const char* onGetName() SK_OVERRIDE {
+    const char* onGetName() override {
         return "grresourcecache_add";
     }
 
-    void onDraw(const int loops, SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(const int loops, SkCanvas* canvas) override {
         SkAutoTUnref<GrContext> context(GrContext::CreateMockContext());
         if (NULL == context) {
             return;
@@ -71,17 +70,17 @@ protected:
         // Set the cache budget to be very large so no purging occurs.
         context->setResourceCacheLimits(CACHE_SIZE_COUNT, 1 << 30);
 
-        GrResourceCache2* cache2 = context->getResourceCache2();
+        GrResourceCache* cache = context->getResourceCache();
 
         // Make sure the cache is empty.
-        cache2->purgeAllUnlocked();
-        SkASSERT(0 == cache2->getResourceCount() && 0 == cache2->getResourceBytes());
+        cache->purgeAllUnlocked();
+        SkASSERT(0 == cache->getResourceCount() && 0 == cache->getResourceBytes());
 
         GrGpu* gpu = context->getGpu();
 
         for (int i = 0; i < loops; ++i) {
             populate_cache(gpu, CACHE_SIZE_COUNT);
-            SkASSERT(CACHE_SIZE_COUNT == cache2->getResourceCount());
+            SkASSERT(CACHE_SIZE_COUNT == cache->getResourceCount());
         }
     }
 
@@ -91,16 +90,16 @@ private:
 
 class GrResourceCacheBenchFind : public Benchmark {
 public:
-    bool isSuitableFor(Backend backend) SK_OVERRIDE {
+    bool isSuitableFor(Backend backend) override {
         return backend == kNonRendering_Backend;
     }
 
 protected:
-    const char* onGetName() SK_OVERRIDE {
+    const char* onGetName() override {
         return "grresourcecache_find";
     }
 
-    void onPreDraw() SK_OVERRIDE {
+    void onPreDraw() override {
         fContext.reset(GrContext::CreateMockContext());
         if (!fContext) {
             return;
@@ -108,27 +107,28 @@ protected:
         // Set the cache budget to be very large so no purging occurs.
         fContext->setResourceCacheLimits(CACHE_SIZE_COUNT, 1 << 30);
 
-        GrResourceCache2* cache2 = fContext->getResourceCache2();
+        GrResourceCache* cache = fContext->getResourceCache();
 
         // Make sure the cache is empty.
-        cache2->purgeAllUnlocked();
-        SkASSERT(0 == cache2->getResourceCount() && 0 == cache2->getResourceBytes());
+        cache->purgeAllUnlocked();
+        SkASSERT(0 == cache->getResourceCount() && 0 == cache->getResourceBytes());
 
         GrGpu* gpu = fContext->getGpu();
 
         populate_cache(gpu, CACHE_SIZE_COUNT);
     }
 
-    void onDraw(const int loops, SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(const int loops, SkCanvas* canvas) override {
         if (!fContext) {
             return;
         }
-        GrResourceCache2* cache2 = fContext->getResourceCache2();
-        SkASSERT(CACHE_SIZE_COUNT == cache2->getResourceCount());
+        GrResourceCache* cache = fContext->getResourceCache();
+        SkASSERT(CACHE_SIZE_COUNT == cache->getResourceCount());
         for (int i = 0; i < loops; ++i) {
             for (int k = 0; k < CACHE_SIZE_COUNT; ++k) {
-                GrResourceKey key = BenchResource::ComputeKey(k);
-                SkAutoTUnref<GrGpuResource> resource(cache2->findAndRefContentResource(key));
+                GrUniqueKey key;
+                BenchResource::ComputeKey(k, &key);
+                SkAutoTUnref<GrGpuResource> resource(cache->findAndRefUniqueResource(key));
                 SkASSERT(resource);
             }
         }

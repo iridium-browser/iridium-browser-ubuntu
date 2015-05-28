@@ -31,8 +31,6 @@ class RasterizeAndRecordBenchmarkImpl : public MicroBenchmarkImpl {
   void RunOnLayer(PictureLayerImpl* layer) override;
 
  private:
-  void Run(LayerImpl* layer);
-
   struct RasterizeResults {
     RasterizeResults();
     ~RasterizeResults();
@@ -50,7 +48,6 @@ class RasterizeAndRecordBenchmarkImpl : public MicroBenchmarkImpl {
 
   RasterizeResults rasterize_results_;
   int rasterize_repeat_count_;
-  NamespaceToken task_namespace_;
 };
 
 }  // namespace cc

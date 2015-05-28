@@ -12,31 +12,33 @@
 
 namespace blink {
 
+class ScriptPromiseResolver;
 class ScriptState;
 
 class ServiceWorkerWindowClient final : public ServiceWorkerClient {
     DEFINE_WRAPPERTYPEINFO();
 public:
+    // To be used by CallbackPromiseAdapter.
+    typedef WebServiceWorkerClientInfo WebType;
+
+    static ServiceWorkerWindowClient* take(ScriptPromiseResolver*, WebType*);
+    static void dispose(WebType*);
+
     static ServiceWorkerWindowClient* create(const WebServiceWorkerClientInfo&);
     ~ServiceWorkerWindowClient() override;
 
     // WindowClient.idl
     String visibilityState() const;
     bool focused() const { return m_isFocused; }
-    String frameType() const;
     ScriptPromise focus(ScriptState*);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit ServiceWorkerWindowClient(const WebServiceWorkerClientInfo&);
 
-    // FIXME: remove m_visibilityState when m_pageVisibilityState will be used
-    // by Chromium.
-    String m_visibilityState;
     WebPageVisibilityState m_pageVisibilityState;
     bool m_isFocused;
-    WebURLRequest::FrameType m_frameType;
 };
 
 } // namespace blink

@@ -23,28 +23,33 @@ function DevToolsAPIImpl()
     this._lastCallId = 0;
 
     /**
-     * @type {!Object.<number, function(?string)>}
+     * @type {!Object.<number, function(?Object)>}
      */
     this._callbacks = {};
+
+    /**
+     * @type {?function(!Array.<!Adb.Device>)}
+     */
+    this._devicesUpdatedCallback = null;
 }
 
 DevToolsAPIImpl.prototype = {
     /**
      * @param {number} id
-     * @param {?string} error
+     * @param {?Object} arg
      */
-    embedderMessageAck: function(id, error)
+    embedderMessageAck: function(id, arg)
     {
         var callback = this._callbacks[id];
         delete this._callbacks[id];
         if (callback)
-            callback(error);
+            callback(arg);
     },
 
     /**
      * @param {string} method
      * @param {!Array.<*>} args
-     * @param {?function(?string)} callback
+     * @param {?function(?Object)} callback
      */
     sendMessageToEmbedder: function(method, args, callback)
     {
@@ -55,6 +60,14 @@ DevToolsAPIImpl.prototype = {
         if (args.length)
             message.params = args;
         DevToolsHost.sendMessageToEmbedder(JSON.stringify(message));
+    },
+
+    /**
+     * @param {function(!Array.<!Adb.Device>)} callback
+     */
+    setDevicesUpdatedCallback: function(callback)
+    {
+        this._devicesUpdatedCallback = callback;
     },
 
     /**
@@ -163,6 +176,8 @@ DevToolsAPIImpl.prototype = {
      */
     devicesUpdated: function(devices)
     {
+        if (this._devicesUpdatedCallback)
+            this._devicesUpdatedCallback.call(null, devices);
         this._dispatchOnInspectorFrontendAPI("devicesUpdated", [devices]);
     },
 
@@ -318,6 +333,15 @@ DevToolsAPIImpl.prototype = {
     showConsole: function()
     {
         this._dispatchOnInspectorFrontendAPI("showConsole", []);
+    },
+
+    /**
+     * @param {number} id
+     * @param {string} chunk
+     */
+    streamWrite: function(id, chunk)
+    {
+        this._dispatchOnInspectorFrontendAPI("streamWrite", [id, chunk]);
     }
 }
 

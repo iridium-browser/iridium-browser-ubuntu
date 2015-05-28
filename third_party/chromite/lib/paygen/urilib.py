@@ -4,17 +4,12 @@
 
 """Utilities for standard operations on URIs of different kinds."""
 
-# pylint: disable=bad-continuation
-
 from __future__ import print_function
 
 import re
 import sys
 import urllib
 import urllib2
-
-import fixup_path
-fixup_path.FixupPath()
 
 from chromite.lib.paygen import filelib
 from chromite.lib.paygen import gslib
@@ -30,8 +25,7 @@ PROTOCOL_HTTPS = 'https'
 
 PROTOCOLS = (PROTOCOL_GS,
              PROTOCOL_HTTP,
-             PROTOCOL_HTTPS,
-             )
+             PROTOCOL_HTTPS)
 
 PROTOCOL_SEP = '://'
 
@@ -46,8 +40,9 @@ TYPE_LOCAL = 'file'
 
 class NotSupportedForType(RuntimeError):
   """Raised when operation is not supported for a particular file type"""
+
   def __init__(self, uri_type, extra_msg=None):
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     function = sys._getframe(1).f_code.co_name
     msg = 'Function %s not supported for %s URIs' % (function, uri_type)
     if extra_msg:
@@ -58,8 +53,9 @@ class NotSupportedForType(RuntimeError):
 
 class NotSupportedForTypes(RuntimeError):
   """Raised when operation is not supported for all particular file type"""
+
   def __init__(self, extra_msg=None, *uri_types):
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     function = sys._getframe(1).f_code.co_name
     msg = ('Function %s not supported for set of URIs with types: %s' %
            (function, ', '.join(uri_types)))
@@ -71,8 +67,9 @@ class NotSupportedForTypes(RuntimeError):
 
 class NotSupportedBetweenTypes(RuntimeError):
   """Raised when operation is not supported between particular file types"""
+
   def __init__(self, uri_type1, uri_type2, extra_msg=None):
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     function = sys._getframe(1).f_code.co_name
     msg = ('Function %s not supported between %s and %s URIs' %
            (function, uri_type1, uri_type2))
@@ -254,6 +251,7 @@ class URLopener(urllib.FancyURLopener):
   """URLopener that will actually complain when download fails."""
   # The urllib.urlretrieve function, which seems like a good fit for this,
   # does not give access to error code.
+
   def http_error_default(self, *args, **kwargs):
     urllib.URLopener.http_error_default(self, *args, **kwargs)
 
@@ -315,6 +313,7 @@ def Copy(src_uri, dest_uri):
     return URLRetrieve(src_uri, dest_uri)
 
   raise NotSupportedBetweenTypes(uri_type1, uri_type2)
+
 
 def Remove(*args, **kwargs):
   """Delete the file(s) at uris, or directory(s) with recurse set.

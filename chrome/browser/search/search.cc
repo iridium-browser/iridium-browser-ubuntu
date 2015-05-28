@@ -65,8 +65,6 @@ const char kUseSearchPathForInstant[] = "use_search_path_for_instant";
 const char kAltInstantURLPath[] = "search";
 const char kAltInstantURLQueryParams[] = "&qbp=1";
 
-const char kDisplaySearchButtonFlagName[] = "display_search_button";
-const char kOriginChipFlagName[] = "origin_chip";
 #if !defined(OS_IOS) && !defined(OS_ANDROID)
 const char kEnableQueryExtractionFlagName[] = "query_extraction";
 #endif
@@ -486,8 +484,7 @@ GURL GetInstantURL(Profile* profile, bool force_instant_results) {
   if (!instant_url.SchemeIsSecure() &&
       !google_util::StartsWithCommandLineGoogleBaseURL(instant_url)) {
     GURL::Replacements replacements;
-    const std::string secure_scheme(url::kHttpsScheme);
-    replacements.SetSchemeStr(secure_scheme);
+    replacements.SetSchemeStr(url::kHttpsScheme);
     instant_url = instant_url.ReplaceComponents(replacements);
   }
 
@@ -581,49 +578,6 @@ bool ShouldReuseInstantSearchBasePage() {
 
 GURL GetLocalInstantURL(Profile* profile) {
   return GURL(chrome::kChromeSearchLocalNtpUrl);
-}
-
-DisplaySearchButtonConditions GetDisplaySearchButtonConditions() {
-  const base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
-  if (cl->HasSwitch(switches::kDisableSearchButtonInOmnibox))
-    return DISPLAY_SEARCH_BUTTON_NEVER;
-  if (cl->HasSwitch(switches::kEnableSearchButtonInOmniboxForStr))
-    return DISPLAY_SEARCH_BUTTON_FOR_STR;
-  if (cl->HasSwitch(switches::kEnableSearchButtonInOmniboxForStrOrIip))
-    return DISPLAY_SEARCH_BUTTON_FOR_STR_OR_IIP;
-  if (cl->HasSwitch(switches::kEnableSearchButtonInOmniboxAlways))
-    return DISPLAY_SEARCH_BUTTON_ALWAYS;
-
-  FieldTrialFlags flags;
-  if (!GetFieldTrialInfo(&flags))
-    return DISPLAY_SEARCH_BUTTON_NEVER;
-  uint64 value =
-      GetUInt64ValueForFlagWithDefault(kDisplaySearchButtonFlagName, 0, flags);
-  return (value < DISPLAY_SEARCH_BUTTON_NUM_VALUES) ?
-      static_cast<DisplaySearchButtonConditions>(value) :
-      DISPLAY_SEARCH_BUTTON_NEVER;
-}
-
-bool ShouldDisplayOriginChip() {
-  return GetOriginChipCondition() != ORIGIN_CHIP_DISABLED;
-}
-
-OriginChipCondition GetOriginChipCondition() {
-  const base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
-  if (cl->HasSwitch(switches::kDisableOriginChip))
-    return ORIGIN_CHIP_DISABLED;
-  if (cl->HasSwitch(switches::kEnableOriginChipAlways))
-    return ORIGIN_CHIP_ALWAYS;
-  if (cl->HasSwitch(switches::kEnableOriginChipOnSrp))
-    return ORIGIN_CHIP_ON_SRP;
-
-  FieldTrialFlags flags;
-  if (!GetFieldTrialInfo(&flags))
-    return ORIGIN_CHIP_DISABLED;
-  uint64 value =
-      GetUInt64ValueForFlagWithDefault(kOriginChipFlagName, 0, flags);
-  return (value < ORIGIN_CHIP_NUM_VALUES) ?
-      static_cast<OriginChipCondition>(value) : ORIGIN_CHIP_DISABLED;
 }
 
 bool ShouldShowGoogleLocalNTP() {

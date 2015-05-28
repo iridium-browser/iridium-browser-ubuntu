@@ -6,9 +6,9 @@ from telemetry.page import page
 from telemetry.page import page_set
 from telemetry.page import page_test
 
-from webgl_conformance import WebglConformanceValidator
 from webgl_conformance import conformance_harness_script
 from webgl_conformance import conformance_path
+from webgl_conformance import WebglConformanceValidator
 
 
 robustness_harness_script = conformance_harness_script + r"""
@@ -55,11 +55,15 @@ class WebglRobustnessPage(page.Page):
     self.script_to_evaluate_on_commit = robustness_harness_script
 
   def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
+    super(WebglRobustnessPage, self).RunNavigateSteps(action_runner)
     action_runner.WaitForJavaScriptCondition('webglTestHarness._finished')
 
 class WebglRobustness(benchmark.Benchmark):
   test = WebglConformanceValidator
+
+  @classmethod
+  def Name(cls):
+    return 'webgl_robustness'
 
   def CreatePageSet(self, options):
     ps = page_set.PageSet(

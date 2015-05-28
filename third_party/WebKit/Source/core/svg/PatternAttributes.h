@@ -33,10 +33,10 @@ class PatternAttributes final {
     DISALLOW_ALLOCATION();
 public:
     PatternAttributes()
-        : m_x(SVGLength::create(LengthModeWidth))
-        , m_y(SVGLength::create(LengthModeHeight))
-        , m_width(SVGLength::create(LengthModeWidth))
-        , m_height(SVGLength::create(LengthModeHeight))
+        : m_x(SVGLength::create(SVGLengthMode::Width))
+        , m_y(SVGLength::create(SVGLengthMode::Height))
+        , m_width(SVGLength::create(SVGLengthMode::Width))
+        , m_height(SVGLength::create(SVGLengthMode::Height))
         , m_viewBox()
         , m_preserveAspectRatio(SVGPreserveAspectRatio::create())
         , m_patternUnits(SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX)
@@ -137,7 +137,7 @@ public:
     bool hasPatternTransform() const { return m_patternTransformSet; }
     bool hasPatternContentElement() const { return m_patternContentElementSet; }
 
-    void trace(Visitor* visitor)
+    DEFINE_INLINE_TRACE()
     {
         visitor->trace(m_x);
         visitor->trace(m_y);
@@ -172,6 +172,28 @@ private:
     bool m_patternTransformSet : 1;
     bool m_patternContentElementSet : 1;
 };
+
+#if ENABLE(OILPAN)
+// Wrapper object for the PatternAttributes part object.
+class PatternAttributesWrapper : public GarbageCollectedFinalized<PatternAttributesWrapper> {
+public:
+    static PatternAttributesWrapper* create()
+    {
+        return new PatternAttributesWrapper;
+    }
+
+    PatternAttributes& attributes() { return m_attributes; }
+    void set(const PatternAttributes& attributes) { m_attributes = attributes; }
+    DEFINE_INLINE_TRACE() { visitor->trace(m_attributes); }
+
+private:
+    PatternAttributesWrapper()
+    {
+    }
+
+    PatternAttributes m_attributes;
+};
+#endif
 
 } // namespace blink
 

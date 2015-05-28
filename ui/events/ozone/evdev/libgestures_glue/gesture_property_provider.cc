@@ -22,6 +22,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringize_macros.h"
 #include "base/strings/stringprintf.h"
+#include "ui/events/ozone/evdev/libgestures_glue/gesture_feedback.h"
 #include "ui/events/ozone/evdev/libgestures_glue/gesture_interpreter_libevdev_cros.h"
 
 // Severity level for general info logging purpose.
@@ -431,31 +432,45 @@ const char* kFalse[] = {"off", "false", "no"};
 
 // Check if a device falls into one device type category.
 bool IsDeviceOfType(const ui::GesturePropertyProvider::DevicePtr device,
-                    const ui::EventDeviceType type) {
+                    const ui::EventDeviceType type,
+                    const GesturesProp* device_mouse_property,
+                    const GesturesProp* device_touchpad_property) {
+  // Get the device type info from gesture properties if they are available.
+  // Otherwise, fallback to the libevdev device info.
+  bool is_mouse = false, is_touchpad = false;
   EvdevClass evdev_class = device->info.evdev_class;
+  if (device_mouse_property) {
+    is_mouse = device_mouse_property->GetBoolValue()[0];
+  } else {
+    is_mouse = (evdev_class == EvdevClassMouse ||
+                evdev_class == EvdevClassMultitouchMouse);
+  }
+  if (device_touchpad_property) {
+    is_touchpad = device_touchpad_property->GetBoolValue()[0];
+  } else {
+    is_touchpad = (evdev_class == EvdevClassTouchpad ||
+                   evdev_class == EvdevClassTouchscreen ||
+                   evdev_class == EvdevClassMultitouchMouse);
+  }
+
   switch (type) {
     case ui::DT_KEYBOARD:
       return (evdev_class == EvdevClassKeyboard);
       break;
     case ui::DT_MOUSE:
-      return (evdev_class == EvdevClassMouse ||
-              evdev_class == EvdevClassMultitouchMouse);
+      return is_mouse;
       break;
     case ui::DT_TOUCHPAD:
-      // Note that the behavior here is different from the inputcontrol script
-      // which actually returns touchscreen devices as well.
-      return (evdev_class == EvdevClassTouchpad);
+      return (!is_mouse) && is_touchpad;
       break;
     case ui::DT_TOUCHSCREEN:
       return (evdev_class == EvdevClassTouchscreen);
       break;
     case ui::DT_MULTITOUCH:
-      return (evdev_class == EvdevClassTouchpad ||
-              evdev_class == EvdevClassTouchscreen ||
-              evdev_class == EvdevClassMultitouchMouse);
+      return is_touchpad;
       break;
     case ui::DT_MULTITOUCH_MOUSE:
-      return (evdev_class == EvdevClassMultitouchMouse);
+      return is_mouse && is_touchpad;
       break;
     case ui::DT_ALL:
       return true;
@@ -540,6 +555,12 @@ std::ostream& operator<<(std::ostream& out,
   }
 #undef TYPE_CASE
   return out << s;
+}
+
+// A relay function that dumps evdev log to a place that we have access to
+// (the default directory is inaccessible without X11).
+void DumpTouchEvdevDebugLog(void* data) {
+  Event_Dump_Debug_Log_To(data, ui::kTouchpadEvdevLogPath);
 }
 
 }  // namespace
@@ -659,7 +680,6 @@ class MatchDeviceType : public MatchCriteria {
  public:
   explicit MatchDeviceType(const std::string& arg);
   ~MatchDeviceType() override {}
-  virtual bool Match(const DevicePtr device) = 0;
 
  protected:
   bool value_;
@@ -855,7 +875,7 @@ bool GesturePropertyProvider::GetDeviceIdsByType(
   bool exists = false;
   DeviceMap::const_iterator it = device_map_.begin();
   for (; it != device_map_.end(); ++it) {
-    if (IsDeviceOfType(it->second, type)) {
+    if (IsDeviceIdOfType(it->first, type)) {
       exists = true;
       if (device_ids)
         device_ids->push_back(it->first);
@@ -869,12 +889,38 @@ bool GesturePropertyProvider::IsDeviceIdOfType(const DeviceId device_id,
   DeviceMap::const_iterator it = device_map_.find(device_id);
   if (it == device_map_.end())
     return false;
-  return IsDeviceOfType(it->second, type);
+  return IsDeviceOfType(it->second, type,
+                        GetProperty(device_id, "Device Mouse"),
+                        GetProperty(device_id, "Device Touchpad"));
 }
 
 GesturesProp* GesturePropertyProvider::GetProperty(const DeviceId device_id,
                                                    const std::string& name) {
   return FindProperty(device_id, name);
+}
+
+std::vector<std::string> GesturePropertyProvider::GetPropertyNamesById(
+    const DeviceId device_id) {
+  internal::GestureDevicePropertyData* device_data =
+      device_data_map_.get(device_id);
+  if (!device_data)
+    return std::vector<std::string>();
+
+  // Dump all property names of the device.
+  std::vector<std::string> names;
+  for (internal::ScopedPropertiesMap::const_iterator it =
+           device_data->properties.begin();
+       it != device_data->properties.end(); ++it)
+    names.push_back(it->first);
+  return names;
+}
+
+std::string GesturePropertyProvider::GetDeviceNameById(
+    const DeviceId device_id) {
+  DeviceMap::const_iterator it = device_map_.find(device_id);
+  if (it == device_map_.end())
+    return std::string();
+  return std::string(it->second->info.name);
 }
 
 void GesturePropertyProvider::RegisterDevice(const DeviceId id,
@@ -1386,8 +1432,8 @@ bool GesturesPropFunctionsWrapper::InitializeDeviceProperties(
   // set.
   GesturesProp* dump_debug_log_prop = CreateBoolSingle(
       device_data, "Dump Debug Log", &properties->dump_debug_log, false);
-  RegisterHandlers(
-      device_data, dump_debug_log_prop, device, NULL, Event_Dump_Debug_Log);
+  RegisterHandlers(device_data, dump_debug_log_prop, device, NULL,
+                   DumpTouchEvdevDebugLog);
 
   // Whether to do the gesture recognition or just passing the multi-touch data
   // to upper layers.

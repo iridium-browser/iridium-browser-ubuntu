@@ -8,13 +8,13 @@
 #include <vector>
 
 #include "android_webview/browser/aw_download_manager_delegate.h"
+#include "android_webview/browser/aw_message_port_service.h"
 #include "android_webview/browser/aw_ssl_host_state_delegate.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "components/visitedlink/browser/visitedlink_delegate.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
@@ -24,6 +24,7 @@ class GURL;
 class PrefService;
 
 namespace content {
+class PermissionManager;
 class ResourceContext;
 class SSLHostStateDelegate;
 class WebContents;
@@ -31,9 +32,9 @@ class WebContents;
 
 namespace data_reduction_proxy {
 class DataReductionProxyConfigurator;
-class DataReductionProxyEventStore;
+class DataReductionProxyIOData;
+class DataReductionProxyService;
 class DataReductionProxySettings;
-class DataReductionProxyStatisticsPrefs;
 }
 
 namespace net {
@@ -57,7 +58,7 @@ class AwBrowserContext : public content::BrowserContext,
 
   AwBrowserContext(const base::FilePath path,
                    JniDependencyFactory* native_factory);
-  virtual ~AwBrowserContext();
+  ~AwBrowserContext() override;
 
   // Currently only one instance per process is supported.
   static AwBrowserContext* GetDefault();
@@ -92,41 +93,39 @@ class AwBrowserContext : public content::BrowserContext,
   data_reduction_proxy::DataReductionProxySettings*
       GetDataReductionProxySettings();
 
-  data_reduction_proxy::DataReductionProxyEventStore*
-      GetDataReductionProxyEventStore();
-
-  data_reduction_proxy::DataReductionProxyConfigurator*
-      GetDataReductionProxyConfigurator();
+  data_reduction_proxy::DataReductionProxyIOData*
+      GetDataReductionProxyIOData();
 
   AwURLRequestContextGetter* GetAwURLRequestContext();
 
   void CreateUserPrefServiceIfNecessary();
 
+  AwMessagePortService* GetMessagePortService();
+
   // content::BrowserContext implementation.
   scoped_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
       const base::FilePath& partition_path) override;
-  virtual base::FilePath GetPath() const override;
-  virtual bool IsOffTheRecord() const override;
-  virtual net::URLRequestContextGetter* GetRequestContext() override;
-  virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
+  base::FilePath GetPath() const override;
+  bool IsOffTheRecord() const override;
+  net::URLRequestContextGetter* GetRequestContext() override;
+  net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) override;
-  virtual net::URLRequestContextGetter* GetMediaRequestContext() override;
-  virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
+  net::URLRequestContextGetter* GetMediaRequestContext() override;
+  net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
       int renderer_child_id) override;
-  virtual net::URLRequestContextGetter*
-      GetMediaRequestContextForStoragePartition(
-          const base::FilePath& partition_path, bool in_memory) override;
-  virtual content::ResourceContext* GetResourceContext() override;
-  virtual content::DownloadManagerDelegate*
-      GetDownloadManagerDelegate() override;
-  virtual content::BrowserPluginGuestManager* GetGuestManager() override;
-  virtual storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
-  virtual content::PushMessagingService* GetPushMessagingService() override;
-  virtual content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
+  net::URLRequestContextGetter* GetMediaRequestContextForStoragePartition(
+      const base::FilePath& partition_path,
+      bool in_memory) override;
+  content::ResourceContext* GetResourceContext() override;
+  content::DownloadManagerDelegate* GetDownloadManagerDelegate() override;
+  content::BrowserPluginGuestManager* GetGuestManager() override;
+  storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
+  content::PushMessagingService* GetPushMessagingService() override;
+  content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
+  content::PermissionManager* GetPermissionManager() override;
 
   // visitedlink::VisitedLinkDelegate implementation.
-  virtual void RebuildTable(
-      const scoped_refptr<URLEnumerator>& enumerator) override;
+  void RebuildTable(const scoped_refptr<URLEnumerator>& enumerator) override;
 
  private:
   void CreateDataReductionProxyStatisticsIfNecessary();
@@ -144,6 +143,7 @@ class AwBrowserContext : public content::BrowserContext,
   scoped_refptr<AwURLRequestContextGetter> url_request_context_getter_;
   scoped_refptr<AwQuotaManagerBridge> quota_manager_bridge_;
   scoped_ptr<AwFormDatabaseService> form_database_service_;
+  scoped_ptr<AwMessagePortService> message_port_service_;
 
   AwDownloadManagerDelegate download_manager_delegate_;
 
@@ -152,15 +152,14 @@ class AwBrowserContext : public content::BrowserContext,
 
   scoped_ptr<PrefService> user_pref_service_;
 
-  scoped_ptr<data_reduction_proxy::DataReductionProxyConfigurator>
-      data_reduction_proxy_configurator_;
-  base::WeakPtr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
-      data_reduction_proxy_statistics_;
   scoped_ptr<data_reduction_proxy::DataReductionProxySettings>
       data_reduction_proxy_settings_;
-  scoped_ptr<data_reduction_proxy::DataReductionProxyEventStore>
-      data_reduction_proxy_event_store_;
   scoped_ptr<AwSSLHostStateDelegate> ssl_host_state_delegate_;
+  scoped_ptr<data_reduction_proxy::DataReductionProxyIOData>
+      data_reduction_proxy_io_data_;
+  scoped_ptr<data_reduction_proxy::DataReductionProxyService>
+      data_reduction_proxy_service_;
+  scoped_ptr<content::PermissionManager> permission_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(AwBrowserContext);
 };

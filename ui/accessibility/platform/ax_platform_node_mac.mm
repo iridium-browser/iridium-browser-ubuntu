@@ -7,6 +7,7 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/strings/sys_string_conversions.h"
+#import "ui/accessibility/ax_node_data.h"
 #import "ui/accessibility/platform/ax_platform_node_delegate.h"
 #import "ui/gfx/mac/coordinate_conversion.h"
 
@@ -104,6 +105,7 @@ RoleMap BuildRoleMap() {
       {ui::AX_ROLE_RULER, NSAccessibilityRulerRole},
       {ui::AX_ROLE_SCROLL_BAR, NSAccessibilityScrollBarRole},
       {ui::AX_ROLE_SEARCH, NSAccessibilityGroupRole},
+      {ui::AX_ROLE_SEARCH_BOX, NSAccessibilityTextFieldRole},
       {ui::AX_ROLE_SLIDER, NSAccessibilitySliderRole},
       {ui::AX_ROLE_SLIDER_THUMB, NSAccessibilityValueIndicatorRole},
       {ui::AX_ROLE_SPIN_BUTTON, NSAccessibilityIncrementorRole},
@@ -111,6 +113,7 @@ RoleMap BuildRoleMap() {
       {ui::AX_ROLE_STATIC_TEXT, NSAccessibilityStaticTextRole},
       {ui::AX_ROLE_STATUS, NSAccessibilityGroupRole},
       {ui::AX_ROLE_SVG_ROOT, NSAccessibilityGroupRole},
+      {ui::AX_ROLE_SWITCH, NSAccessibilityCheckBoxRole},
       {ui::AX_ROLE_TAB, NSAccessibilityRadioButtonRole},
       {ui::AX_ROLE_TABLE, NSAccessibilityTableRole},
       {ui::AX_ROLE_TABLE_HEADER_CONTAINER, NSAccessibilityGroupRole},
@@ -144,27 +147,29 @@ RoleMap BuildSubroleMap() {
   const MapEntry subroles[] = {
       {ui::AX_ROLE_ALERT, @"AXApplicationAlert"},
       {ui::AX_ROLE_ALERT_DIALOG, @"AXApplicationAlertDialog"},
+      {ui::AX_ROLE_APPLICATION, @"AXLandmarkApplication"},
       {ui::AX_ROLE_ARTICLE, @"AXDocumentArticle"},
+      {ui::AX_ROLE_BANNER, @"AXLandmarkBanner"},
+      {ui::AX_ROLE_COMPLEMENTARY, @"AXLandmarkComplementary"},
+      {ui::AX_ROLE_CONTENT_INFO, @"AXLandmarkContentInfo"},
       {ui::AX_ROLE_DEFINITION, @"AXDefinition"},
       {ui::AX_ROLE_DESCRIPTION_LIST_DETAIL, @"AXDefinition"},
       {ui::AX_ROLE_DESCRIPTION_LIST_TERM, @"AXTerm"},
       {ui::AX_ROLE_DIALOG, @"AXApplicationDialog"},
       {ui::AX_ROLE_DOCUMENT, @"AXDocument"},
       {ui::AX_ROLE_FOOTER, @"AXLandmarkContentInfo"},
-      {ui::AX_ROLE_APPLICATION, @"AXLandmarkApplication"},
-      {ui::AX_ROLE_BANNER, @"AXLandmarkBanner"},
-      {ui::AX_ROLE_COMPLEMENTARY, @"AXLandmarkComplementary"},
-      {ui::AX_ROLE_CONTENT_INFO, @"AXLandmarkContentInfo"},
-      {ui::AX_ROLE_MAIN, @"AXLandmarkMain"},
-      {ui::AX_ROLE_NAVIGATION, @"AXLandmarkNavigation"},
-      {ui::AX_ROLE_SEARCH, @"AXLandmarkSearch"},
       {ui::AX_ROLE_FORM, @"AXLandmarkForm"},
       {ui::AX_ROLE_LOG, @"AXApplicationLog"},
+      {ui::AX_ROLE_MAIN, @"AXLandmarkMain"},
       {ui::AX_ROLE_MARQUEE, @"AXApplicationMarquee"},
       {ui::AX_ROLE_MATH, @"AXDocumentMath"},
+      {ui::AX_ROLE_NAVIGATION, @"AXLandmarkNavigation"},
       {ui::AX_ROLE_NOTE, @"AXDocumentNote"},
       {ui::AX_ROLE_REGION, @"AXDocumentRegion"},
+      {ui::AX_ROLE_SEARCH, @"AXLandmarkSearch"},
+      {ui::AX_ROLE_SEARCH_BOX, @"AXSearchField"},
       {ui::AX_ROLE_STATUS, @"AXApplicationStatus"},
+      {ui::AX_ROLE_SWITCH, @"AXSwitch"},
       {ui::AX_ROLE_TAB_PANEL, @"AXTabPanel"},
       {ui::AX_ROLE_TIMER, @"AXApplicationTimer"},
       {ui::AX_ROLE_TOGGLE_BUTTON, @"AXToggleButton"},
@@ -236,11 +241,18 @@ RoleMap BuildSubroleMap() {
 - (NSString*)AXRole {
   if (!node_)
     return nil;
-  return [[self class] nativeRoleFromAXRole:node_->GetRole()];
+  return [[self class] nativeRoleFromAXRole:node_->GetData().role];
 }
 
 - (NSValue*)AXSize {
   return [NSValue valueWithSize:self.boundsInScreen.size];
+}
+
+- (NSString*)AXTitle {
+  std::string value;
+  if (node_->GetStringAttribute(ui::AX_ATTR_NAME, &value))
+    return base::SysUTF8ToNSString(value);
+  return nil;
 }
 
 // NSAccessibility informal protocol implementation.
@@ -262,13 +274,19 @@ RoleMap BuildSubroleMap() {
 }
 
 - (NSArray*)accessibilityAttributeNames {
+  // These attributes are required on all accessibility objects.
   return @[
     NSAccessibilityChildrenAttribute,
     NSAccessibilityParentAttribute,
     NSAccessibilityPositionAttribute,
     NSAccessibilityRoleAttribute,
     NSAccessibilitySizeAttribute,
+
+    // Title is required for most elements. Cocoa asks for the value even if it
+    // is omitted here, but won't present it to accessibility APIs without this.
+    NSAccessibilityTitleAttribute,
   ];
+  // TODO(tapted): Add additional attributes based on role.
 }
 
 - (BOOL)accessibilityIsAttributeSettable:(NSString*)attribute {
@@ -302,7 +320,7 @@ AXPlatformNodeMac::~AXPlatformNodeMac() {
 void AXPlatformNodeMac::Destroy() {
   if (native_node_)
     [native_node_ detach];
-  delegate_ = NULL;
+  delegate_ = nullptr;
   delete this;
 }
 
@@ -310,6 +328,15 @@ gfx::NativeViewAccessible AXPlatformNodeMac::GetNativeViewAccessible() {
   if (!native_node_)
     native_node_.reset([[AXPlatformNodeCocoa alloc] initWithNode:this]);
   return native_node_.get();
+}
+
+void AXPlatformNodeMac::NotifyAccessibilityEvent(ui::AXEvent event_type) {
+  // TODO(dmazzoni): implement this.  http://crbug.com/396137
+}
+
+int AXPlatformNodeMac::GetIndexInParent() {
+  // TODO(dmazzoni): implement this.  http://crbug.com/396137
+  return -1;
 }
 
 }  // namespace ui

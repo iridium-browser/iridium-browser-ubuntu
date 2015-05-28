@@ -18,48 +18,11 @@ config("audio_coding_config") {
 
 source_set("audio_coding") {
   sources = [
-    "main/acm2/acm_amr.cc",
-    "main/acm2/acm_amr.h",
-    "main/acm2/acm_amrwb.cc",
-    "main/acm2/acm_amrwb.h",
-    "main/acm2/acm_cng.cc",
-    "main/acm2/acm_cng.h",
     "main/acm2/acm_codec_database.cc",
     "main/acm2/acm_codec_database.h",
     "main/acm2/acm_common_defs.h",
-    "main/acm2/acm_dtmf_playout.cc",
-    "main/acm2/acm_dtmf_playout.h",
-    "main/acm2/acm_g722.cc",
-    "main/acm2/acm_g722.h",
-    "main/acm2/acm_g7221.cc",
-    "main/acm2/acm_g7221.h",
-    "main/acm2/acm_g7221c.cc",
-    "main/acm2/acm_g7221c.h",
-    "main/acm2/acm_g729.cc",
-    "main/acm2/acm_g729.h",
-    "main/acm2/acm_g7291.cc",
-    "main/acm2/acm_g7291.h",
     "main/acm2/acm_generic_codec.cc",
     "main/acm2/acm_generic_codec.h",
-    "main/acm2/acm_gsmfr.cc",
-    "main/acm2/acm_gsmfr.h",
-    "main/acm2/acm_ilbc.cc",
-    "main/acm2/acm_ilbc.h",
-    "main/acm2/acm_isac.cc",
-    "main/acm2/acm_isac.h",
-    "main/acm2/acm_isac_macros.h",
-    "main/acm2/acm_opus.cc",
-    "main/acm2/acm_opus.h",
-    "main/acm2/acm_speex.cc",
-    "main/acm2/acm_speex.h",
-    "main/acm2/acm_pcm16b.cc",
-    "main/acm2/acm_pcm16b.h",
-    "main/acm2/acm_pcma.cc",
-    "main/acm2/acm_pcma.h",
-    "main/acm2/acm_pcmu.cc",
-    "main/acm2/acm_pcmu.h",
-    "main/acm2/acm_red.cc",
-    "main/acm2/acm_red.h",
     "main/acm2/acm_receiver.cc",
     "main/acm2/acm_receiver.h",
     "main/acm2/acm_resampler.cc",
@@ -69,6 +32,8 @@ source_set("audio_coding") {
     "main/acm2/audio_coding_module_impl.h",
     "main/acm2/call_statistics.cc",
     "main/acm2/call_statistics.h",
+    "main/acm2/codec_manager.cc",
+    "main/acm2/codec_manager.h",
     "main/acm2/initial_delay_manager.cc",
     "main/acm2/initial_delay_manager.h",
     "main/acm2/nack.cc",
@@ -109,6 +74,7 @@ source_set("audio_coding") {
     ":neteq",
     ":pcm16b",
     ":red",
+    "../..:webrtc_common",
     "../../common_audio",
     "../../system_wrappers",
   ]
@@ -126,6 +92,7 @@ source_set("audio_decoder_interface") {
   ]
   configs += [ "../..:common_config" ]
   public_configs = [ "../..:common_inherited_config" ]
+  deps = [ "../..:webrtc_common" ]
 }
 
 source_set("audio_encoder_interface") {
@@ -135,6 +102,7 @@ source_set("audio_encoder_interface") {
   ]
   configs += [ "../..:common_config" ]
   public_configs = [ "../..:common_inherited_config" ]
+  deps = [ "../..:webrtc_common" ]
 }
 
 config("cng_config") {
@@ -476,12 +444,6 @@ source_set("isac") {
     "codecs/isac/main/source/transform.c",
   ]
 
-  if (is_clang) {
-    # Suppress warnings from Chrome's Clang plugins.
-    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
-    configs -= [ "//build/config/clang:find_bad_constructs" ]
-  }
-
   if (is_linux) {
     libs = [ "m" ]
   }
@@ -555,12 +517,6 @@ source_set("isacfix") {
     "codecs/isac/fix/source/transform_tables.c",
   ]
 
-  if (is_clang) {
-    # Suppress warnings from Chrome's Clang plugins.
-    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
-    configs -= [ "//build/config/clang:find_bad_constructs" ]
-  }
-
   if (!is_win) {
     defines = [ "WEBRTC_LINUX" ]
   }
@@ -600,7 +556,7 @@ source_set("isacfix") {
     sources += [ "codecs/isac/fix/source/pitch_filter_c.c" ]
   }
 
-  if (cpu_arch == "mipsel") {
+  if (current_cpu == "mipsel") {
     sources += [
       "codecs/isac/fix/source/entropy_coding_mips.c",
       "codecs/isac/fix/source/filters_mips.c",
@@ -623,7 +579,7 @@ source_set("isacfix") {
     sources += [ "codecs/isac/fix/source/pitch_estimator_c.c" ]
   }
 
-  if (!rtc_build_armv7_neon && cpu_arch != "mipsel") {
+  if (!rtc_build_armv7_neon && current_cpu != "mipsel") {
     sources += [ "codecs/isac/fix/source/lattice_c.c" ]
   }
 }
@@ -712,13 +668,14 @@ source_set("webrtc_opus") {
 
   deps = [ ":audio_encoder_interface" ]
 
-  if (build_with_mozilla) {
-    include_dirs = [ getenv("DIST") + "/include/opus" ]
-  } else {
+  if (rtc_build_opus) {
     configs += [ "../..:common_config" ]
     public_configs = [ "../..:common_inherited_config" ]
 
-    deps += [ "//third_party/opus" ]
+    deps += [ rtc_opus_dir ]
+    forward_dependent_configs_from = [ rtc_opus_dir ]
+  } else if (build_with_mozilla) {
+    include_dirs = [ getenv("DIST") + "/include/opus" ]
   }
 }
 
@@ -806,8 +763,6 @@ source_set("neteq") {
     ":neteq_config",
   ]
 
-  forward_dependent_configs_from = [ "//third_party/opus" ]
-
   if (is_clang) {
     # Suppress warnings from Chrome's Clang plugins.
     # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
@@ -823,8 +778,15 @@ source_set("neteq") {
     ":isac",
     ":isacfix",
     ":pcm16b",
+    "../..:webrtc_common",
     "../../common_audio",
     "../../system_wrappers",
-    "//third_party/opus",
   ]
+
+  defines = []
+
+  if (rtc_include_opus) {
+    defines += [ "WEBRTC_CODEC_OPUS" ]
+    deps += [ ":webrtc_opus" ]
+  }
 }

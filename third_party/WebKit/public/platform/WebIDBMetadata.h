@@ -33,8 +33,6 @@
 
 namespace blink {
 
-struct IDBDatabaseMetadata;
-
 struct WebIDBMetadata {
     enum {
         NoIntVersion = -1
@@ -78,10 +76,6 @@ struct WebIDBMetadata {
             , multiEntry(false) { }
     };
 
-#if BLINK_IMPLEMENTATION
-    WebIDBMetadata(const IDBDatabaseMetadata&);
-    operator IDBDatabaseMetadata() const;
-#endif
 };
 
 } // namespace blink

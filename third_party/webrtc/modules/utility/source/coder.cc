@@ -21,7 +21,6 @@ AudioCoder::AudioCoder(uint32_t instanceID)
       _encodedLengthInBytes(0),
       _decodeTimestamp(0)
 {
-    _acm->InitializeSender();
     _acm->InitializeReceiver();
     _acm->RegisterTransportCallback(this);
 }
@@ -96,10 +95,6 @@ int32_t AudioCoder::Encode(const AudioFrame& audio,
         return -1;
     }
     _encodedData = encodedData;
-    if(_acm->Process() == -1)
-    {
-        return -1;
-    }
     encodedLengthInBytes = _encodedLengthInBytes;
     return 0;
 }

@@ -95,6 +95,42 @@ base::string16 GetUpgradeDialogMenuItemName() {
   }
 }
 
+#if defined(OS_WIN)
+bool GetRestartMenuItemIfRequired(const chrome::HostDesktopType& desktop_type,
+                                  int* command_id,
+                                  int* string_id) {
+  if (base::win::GetVersion() == base::win::VERSION_WIN8 ||
+      base::win::GetVersion() == base::win::VERSION_WIN8_1) {
+    if (desktop_type != chrome::HOST_DESKTOP_TYPE_ASH) {
+      *command_id = IDC_WIN8_METRO_RESTART;
+      *string_id = IDS_WIN8_METRO_RESTART;
+    } else {
+      *command_id = IDC_WIN_DESKTOP_RESTART;
+      *string_id = IDS_WIN_DESKTOP_RESTART;
+    }
+    return true;
+  }
+
+  // Windows 7 ASH mode is only supported in DEBUG for now.
+#if !defined(NDEBUG)
+  // Windows 8 can support ASH mode using WARP, but Windows 7 requires a working
+  // GPU compositor.
+  if (base::win::GetVersion() == base::win::VERSION_WIN7 &&
+      content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor()) {
+    if (desktop_type != chrome::HOST_DESKTOP_TYPE_ASH) {
+      *command_id = IDC_WIN_CHROMEOS_RESTART;
+      *string_id = IDS_WIN_CHROMEOS_RESTART;
+    } else {
+      *command_id = IDC_WIN_DESKTOP_RESTART;
+      *string_id = IDS_WIN_DESKTOP_RESTART;
+    }
+    return true;
+  }
+#endif
+  return false;
+}
+#endif
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -239,28 +275,39 @@ void ToolsMenuModel::Build(Browser* browser) {
     show_create_shortcuts = false;
 #endif
 
-  if (extensions::util::IsStreamlinedHostedAppsEnabled()) {
-    AddItemWithStringId(IDC_CREATE_HOSTED_APP, IDS_CREATE_HOSTED_APP);
-    AddSeparator(ui::NORMAL_SEPARATOR);
-  } else if (show_create_shortcuts) {
-    AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
-    AddSeparator(ui::NORMAL_SEPARATOR);
-  }
-
+  AddItemWithStringId(IDC_CLEAR_BROWSING_DATA, IDS_CLEAR_BROWSING_DATA);
   AddItemWithStringId(IDC_MANAGE_EXTENSIONS, IDS_SHOW_EXTENSIONS);
 
   if (chrome::CanOpenTaskManager())
     AddItemWithStringId(IDC_TASK_MANAGER, IDS_TASK_MANAGER);
 
-  AddItemWithStringId(IDC_CLEAR_BROWSING_DATA, IDS_CLEAR_BROWSING_DATA);
+  if (extensions::util::IsNewBookmarkAppsEnabled()) {
+#if defined(OS_MACOSX)
+    int string_id = IDS_ADD_TO_APPLICATIONS;
+#elif defined(OS_WIN)
+    int string_id = IDS_ADD_TO_TASKBAR;
+#else
+    int string_id = IDS_ADD_TO_DESKTOP;
+#endif
+#if defined(USE_ASH)
+    if (browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
+      string_id = IDS_ADD_TO_SHELF;
+#endif
+    AddItemWithStringId(IDC_CREATE_HOSTED_APP, string_id);
+  } else if (show_create_shortcuts) {
+    AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
+  }
 
-  AddSeparator(ui::NORMAL_SEPARATOR);
+#if defined(OS_CHROMEOS)
+  AddItemWithStringId(IDC_TAKE_SCREENSHOT, IDS_TAKE_SCREENSHOT);
+#endif
 
   encoding_menu_model_.reset(new EncodingMenuModel(browser));
   AddSubMenuWithStringId(IDC_ENCODING_MENU, IDS_ENCODING_MENU,
                          encoding_menu_model_.get());
-  AddItemWithStringId(IDC_VIEW_SOURCE, IDS_VIEW_SOURCE);
+  AddSeparator(ui::NORMAL_SEPARATOR);
   AddItemWithStringId(IDC_DEV_TOOLS, IDS_DEV_TOOLS);
+  AddItemWithStringId(IDC_VIEW_SOURCE, IDS_VIEW_SOURCE);
   AddItemWithStringId(IDC_DEV_TOOLS_CONSOLE, IDS_DEV_TOOLS_CONSOLE);
   AddItemWithStringId(IDC_DEV_TOOLS_DEVICES, IDS_DEV_TOOLS_DEVICES);
 
@@ -810,29 +857,42 @@ bool WrenchMenuModel::ShouldShowNewIncognitoWindowMenuItem() {
       IncognitoModePrefs::DISABLED;
 }
 
+// Note: When adding new menu items please place under an appropriate section.
+// Menu is organised as follows:
+// - Extension toolbar overflow.
+// - Global browser errors and warnings.
+// - Tabs and windows.
+// - Places previously been e.g. History, bookmarks, recent tabs.
+// - Page actions e.g. zoom, edit, find, print.
+// - Learn about the browser and global customisation e.g. settings, help.
+// - Browser relaunch, quit.
 void WrenchMenuModel::Build() {
-#if defined(OS_WIN)
-  AddItem(IDC_VIEW_INCOMPATIBILITIES,
-      l10n_util::GetStringUTF16(IDS_VIEW_INCOMPATIBILITIES));
-  EnumerateModulesModel* model =
-      EnumerateModulesModel::GetInstance();
-  if (model->modules_to_notify_about() > 0 ||
-      model->confirmed_bad_modules_detected() > 0)
-    AddSeparator(ui::NORMAL_SEPARATOR);
-#endif
-
   if (extensions::FeatureSwitch::extension_action_redesign()->IsEnabled())
     CreateExtensionToolbarOverflowMenu();
 
+  AddItem(IDC_VIEW_INCOMPATIBILITIES,
+      l10n_util::GetStringUTF16(IDS_VIEW_INCOMPATIBILITIES));
+  SetIcon(GetIndexOfCommandId(IDC_VIEW_INCOMPATIBILITIES),
+          ui::ResourceBundle::GetSharedInstance().
+              GetNativeImageNamed(IDR_INPUT_ALERT_MENU));
+
+  if (IsCommandIdVisible(browser_defaults::kShowUpgradeMenuItem))
+    AddItem(IDC_UPGRADE_DIALOG, GetUpgradeDialogMenuItemName());
+
+  if (AddGlobalErrorMenuItems() ||
+      IsCommandIdVisible(IDC_VIEW_INCOMPATIBILITIES) ||
+      IsCommandIdVisible(IDC_UPGRADE_DIALOG))
+    AddSeparator(ui::NORMAL_SEPARATOR);
+
   AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
   AddItemWithStringId(IDC_NEW_WINDOW, IDS_NEW_WINDOW);
-
   if (ShouldShowNewIncognitoWindowMenuItem())
     AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
 
-  bookmark_sub_menu_model_.reset(new BookmarkSubMenuModel(this, browser_));
-  AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
-                         bookmark_sub_menu_model_.get());
+  AddSeparator(ui::NORMAL_SEPARATOR);
+
+  AddItemWithStringId(IDC_SHOW_HISTORY, IDS_SHOW_HISTORY);
+  AddItemWithStringId(IDC_SHOW_DOWNLOADS, IDS_SHOW_DOWNLOADS);
 
   if (!browser_->profile()->IsOffTheRecord()) {
     recent_tabs_sub_menu_model_.reset(new RecentTabsSubMenuModel(provider_,
@@ -842,70 +902,45 @@ void WrenchMenuModel::Build() {
                            recent_tabs_sub_menu_model_.get());
   }
 
-#if defined(OS_WIN)
-  base::win::Version min_version_for_ash_mode = base::win::VERSION_WIN8;
-  // Windows 7 ASH mode is only supported in DEBUG for now.
-#if !defined(NDEBUG)
-  min_version_for_ash_mode = base::win::VERSION_WIN7;
-#endif
-  // Windows 8 can support ASH mode using WARP, but Windows 7 requires a working
-  // GPU compositor.
-  if ((base::win::GetVersion() >= min_version_for_ash_mode &&
-      content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor()) ||
-      (base::win::GetVersion() >= base::win::VERSION_WIN8)) {
-    if (browser_->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH) {
-      // ASH/Metro mode, add the 'Relaunch Chrome in desktop mode'.
-      AddSeparator(ui::NORMAL_SEPARATOR);
-      AddItemWithStringId(IDC_WIN_DESKTOP_RESTART, IDS_WIN_DESKTOP_RESTART);
-    } else {
-      // In Windows 8 desktop, add the 'Relaunch Chrome in Windows 8 mode'.
-      // In Windows 7 desktop, add the 'Relaunch Chrome in Windows ASH mode'
-      AddSeparator(ui::NORMAL_SEPARATOR);
-      if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
-        AddItemWithStringId(IDC_WIN8_METRO_RESTART, IDS_WIN8_METRO_RESTART);
-      } else {
-        AddItemWithStringId(IDC_WIN_CHROMEOS_RESTART, IDS_WIN_CHROMEOS_RESTART);
-      }
-    }
+  if (!browser_->profile()->IsGuestSession()) {
+    bookmark_sub_menu_model_.reset(new BookmarkSubMenuModel(this, browser_));
+    AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
+                           bookmark_sub_menu_model_.get());
   }
-#endif
+
+  CreateZoomMenu();
+
+  AddItemWithStringId(IDC_PRINT, IDS_PRINT);
+  AddItemWithStringId(IDC_SAVE_PAGE, IDS_SAVE_PAGE);
+  AddItemWithStringId(IDC_FIND, IDS_FIND);
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableDomDistiller))
+    AddItemWithStringId(IDC_DISTILL_PAGE, IDS_DISTILL_PAGE);
+  tools_menu_model_.reset(new ToolsMenuModel(this, browser_));
+  AddSubMenuWithStringId(
+      IDC_MORE_TOOLS_MENU, IDS_MORE_TOOLS_MENU, tools_menu_model_.get());
 
   // Append the full menu including separators. The final separator only gets
   // appended when this is a touch menu - otherwise it would get added twice.
   CreateCutCopyPasteMenu();
 
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableDomDistiller)) {
-    AddItemWithStringId(IDC_DISTILL_PAGE, IDS_DISTILL_PAGE);
-  }
-
-  AddItemWithStringId(IDC_SAVE_PAGE, IDS_SAVE_PAGE);
-  AddItemWithStringId(IDC_FIND, IDS_FIND);
-  AddItemWithStringId(IDC_PRINT, IDS_PRINT);
-
-  tools_menu_model_.reset(new ToolsMenuModel(this, browser_));
-  CreateZoomMenu();
-
-  AddItemWithStringId(IDC_SHOW_HISTORY, IDS_SHOW_HISTORY);
-  AddItemWithStringId(IDC_SHOW_DOWNLOADS, IDS_SHOW_DOWNLOADS);
-  AddSeparator(ui::NORMAL_SEPARATOR);
+  AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
 
 #if !defined(OS_CHROMEOS)
   if (!switches::IsNewAvatarMenu()) {
     // No "Sign in to Chromium..." menu item on ChromeOS.
     SigninManager* signin = SigninManagerFactory::GetForProfile(
         browser_->profile()->GetOriginalProfile());
-    if (signin && signin->IsSigninAllowed()) {
-      const base::string16 short_product_name =
-          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
-      AddItem(IDC_SHOW_SYNC_SETUP, l10n_util::GetStringFUTF16(
-          IDS_SYNC_MENU_PRE_SYNCED_LABEL, short_product_name));
-      AddSeparator(ui::NORMAL_SEPARATOR);
+    if (signin && signin->IsSigninAllowed() &&
+        signin_ui_util::GetSignedInServiceErrors(
+            browser_->profile()->GetOriginalProfile()).empty()) {
+      AddItem(IDC_SHOW_SYNC_SETUP,
+              l10n_util::GetStringFUTF16(
+                  IDS_SYNC_MENU_PRE_SYNCED_LABEL,
+                  l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
     }
   }
 #endif
-
-  AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
 
 // On ChromeOS we don't want the about menu option.
 #if !defined(OS_CHROMEOS)
@@ -925,20 +960,16 @@ void WrenchMenuModel::Build() {
                              IDS_TOGGLE_REQUEST_TABLET_SITE);
 #endif
 
-  if (browser_defaults::kShowUpgradeMenuItem)
-    AddItem(IDC_UPGRADE_DIALOG, GetUpgradeDialogMenuItemName());
-
 #if defined(OS_WIN)
-  SetIcon(GetIndexOfCommandId(IDC_VIEW_INCOMPATIBILITIES),
-          ui::ResourceBundle::GetSharedInstance().
-              GetNativeImageNamed(IDR_INPUT_ALERT_MENU));
+  int command_id = IDC_WIN_DESKTOP_RESTART;
+  int string_id = IDS_WIN_DESKTOP_RESTART;
+  if (GetRestartMenuItemIfRequired(browser_->host_desktop_type(),
+                                   &command_id,
+                                   &string_id)) {
+    AddSeparator(ui::NORMAL_SEPARATOR);
+    AddItemWithStringId(command_id, string_id);
+  }
 #endif
-
-  AddGlobalErrorMenuItems();
-
-  AddSeparator(ui::NORMAL_SEPARATOR);
-  AddSubMenuWithStringId(
-      IDC_ZOOM_MENU, IDS_MORE_TOOLS_MENU, tools_menu_model_.get());
 
   bool show_exit_menu = browser_defaults::kShowExitMenuItem;
 #if defined(OS_WIN)
@@ -950,12 +981,10 @@ void WrenchMenuModel::Build() {
     AddSeparator(ui::NORMAL_SEPARATOR);
     AddItemWithStringId(IDC_EXIT, IDS_EXIT);
   }
-
-  RemoveTrailingSeparators();
   uma_action_recorded_ = false;
 }
 
-void WrenchMenuModel::AddGlobalErrorMenuItems() {
+bool WrenchMenuModel::AddGlobalErrorMenuItems() {
   // TODO(sail): Currently we only build the wrench menu once per browser
   // window. This means that if a new error is added after the menu is built
   // it won't show in the existing wrench menu. To fix this we need to some
@@ -968,6 +997,7 @@ void WrenchMenuModel::AddGlobalErrorMenuItems() {
       browser_->profile()->GetOriginalProfile());
   const GlobalErrorService::GlobalErrorList& errors =
       GlobalErrorServiceFactory::GetForProfile(browser_->profile())->errors();
+  bool menu_items_added = false;
   for (GlobalErrorService::GlobalErrorList::const_iterator
        it = errors.begin(); it != errors.end(); ++it) {
     GlobalError* error = *it;
@@ -993,8 +1023,10 @@ void WrenchMenuModel::AddGlobalErrorMenuItems() {
         SetIcon(GetIndexOfCommandId(error->MenuItemCommandID()),
                 image);
       }
+      menu_items_added = true;
     }
   }
+  return menu_items_added;
 }
 
 void WrenchMenuModel::CreateExtensionToolbarOverflowMenu() {
@@ -1010,22 +1042,14 @@ void WrenchMenuModel::CreateExtensionToolbarOverflowMenu() {
 void WrenchMenuModel::CreateCutCopyPasteMenu() {
   AddSeparator(ui::LOWER_SEPARATOR);
 
-#if defined(OS_MACOSX)
   // WARNING: Mac does not use the ButtonMenuItemModel, but instead defines the
-  // layout for this menu item in Toolbar.xib. It does, however, use the
+  // layout for this menu item in WrenchMenu.xib. It does, however, use the
   // command_id value from AddButtonItem() to identify this special item.
   edit_menu_item_model_.reset(new ui::ButtonMenuItemModel(IDS_EDIT, this));
   edit_menu_item_model_->AddGroupItemWithStringId(IDC_CUT, IDS_CUT);
   edit_menu_item_model_->AddGroupItemWithStringId(IDC_COPY, IDS_COPY);
   edit_menu_item_model_->AddGroupItemWithStringId(IDC_PASTE, IDS_PASTE);
   AddButtonItem(IDC_EDIT_MENU, edit_menu_item_model_.get());
-#else
-  // WARNING: views/wrench_menu assumes these items are added in this order. If
-  // you change the order you'll need to update wrench_menu as well.
-  AddItemWithStringId(IDC_CUT, IDS_CUT);
-  AddItemWithStringId(IDC_COPY, IDS_COPY);
-  AddItemWithStringId(IDC_PASTE, IDS_PASTE);
-#endif
 
   AddSeparator(ui::UPPER_SEPARATOR);
 }
@@ -1034,29 +1058,18 @@ void WrenchMenuModel::CreateZoomMenu() {
   // This menu needs to be enclosed by separators.
   AddSeparator(ui::LOWER_SEPARATOR);
 
-#if defined(OS_MACOSX)
   // WARNING: Mac does not use the ButtonMenuItemModel, but instead defines the
-  // layout for this menu item in Toolbar.xib. It does, however, use the
+  // layout for this menu item in WrenchMenu.xib. It does, however, use the
   // command_id value from AddButtonItem() to identify this special item.
   zoom_menu_item_model_.reset(
       new ui::ButtonMenuItemModel(IDS_ZOOM_MENU, this));
-  zoom_menu_item_model_->AddGroupItemWithStringId(
-      IDC_ZOOM_MINUS, IDS_ZOOM_MINUS2);
-  zoom_menu_item_model_->AddButtonLabel(IDC_ZOOM_PERCENT_DISPLAY,
-                                        IDS_ZOOM_PLUS2);
-  zoom_menu_item_model_->AddGroupItemWithStringId(
-      IDC_ZOOM_PLUS, IDS_ZOOM_PLUS2);
-  zoom_menu_item_model_->AddSpace();
-  zoom_menu_item_model_->AddItemWithImage(
-      IDC_FULLSCREEN, IDR_FULLSCREEN_MENU_BUTTON);
+  zoom_menu_item_model_->AddGroupItemWithStringId(IDC_ZOOM_MINUS,
+                                                  IDS_ZOOM_MINUS2);
+  zoom_menu_item_model_->AddGroupItemWithStringId(IDC_ZOOM_PLUS,
+                                                  IDS_ZOOM_PLUS2);
+  zoom_menu_item_model_->AddItemWithImage(IDC_FULLSCREEN,
+                                          IDR_FULLSCREEN_MENU_BUTTON);
   AddButtonItem(IDC_ZOOM_MENU, zoom_menu_item_model_.get());
-#else
-  // WARNING: views/wrench_menu assumes these items are added in this order. If
-  // you change the order you'll need to update wrench_menu as well.
-  AddItemWithStringId(IDC_ZOOM_MINUS, IDS_ZOOM_MINUS);
-  AddItemWithStringId(IDC_ZOOM_PLUS, IDS_ZOOM_PLUS);
-  AddItemWithStringId(IDC_FULLSCREEN, IDS_FULLSCREEN);
-#endif
 
   AddSeparator(ui::UPPER_SEPARATOR);
 }

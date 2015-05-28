@@ -132,9 +132,6 @@ void PPAPITestBase::SetUp() {
 }
 
 void PPAPITestBase::SetUpCommandLine(base::CommandLine* command_line) {
-  // The test sends us the result via a cookie.
-  command_line->AppendSwitch(switches::kEnableFileCookies);
-
   // Some stuff is hung off of the testing interface which is not enabled
   // by default.
   command_line->AppendSwitch(switches::kEnablePepperTesting);
@@ -444,6 +441,9 @@ void PPAPINaClPNaClTransitionalNonSfiTest::SetUpCommandLine(
   PPAPINaClPNaClNonSfiTest::SetUpCommandLine(command_line);
 #if !defined(DISABLE_NACL)
   command_line->AppendSwitch(switches::kUseNaClHelperNonSfi);
+  // TODO(hidehiko): Remove this flag, when namespace sandbox is supported.
+  // by nacl_helper_nonsfi. (cf. crbug.com/464663)
+  command_line->AppendSwitch(switches::kDisableNamespaceSandbox);
 #endif
 }
 
@@ -458,6 +458,9 @@ void PPAPIPrivateNaClPNaClTransitionalNonSfiTest::SetUpCommandLine(
   PPAPIPrivateNaClPNaClNonSfiTest::SetUpCommandLine(command_line);
 #if !defined(DISABLE_NACL)
   command_line->AppendSwitch(switches::kUseNaClHelperNonSfi);
+  // TODO(hidehiko): Remove this flag, when namespace sandbox is supported
+  // by nacl_helper_nonsfi. (cf. crbug.com/464663)
+  command_line->AppendSwitch(switches::kDisableNamespaceSandbox);
 #endif
 }
 

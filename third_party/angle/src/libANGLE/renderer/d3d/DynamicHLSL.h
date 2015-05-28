@@ -49,7 +49,7 @@ struct PixelShaderOutputVariable
     size_t outputIndex;
 };
 
-class DynamicHLSL
+class DynamicHLSL : angle::NonCopyable
 {
   public:
     explicit DynamicHLSL(RendererD3D *const renderer);
@@ -74,15 +74,13 @@ class DynamicHLSL
     void getInputLayoutSignature(const gl::VertexFormat inputLayout[], GLenum signature[]) const;
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(DynamicHLSL);
-
     RendererD3D *const mRenderer;
 
     struct SemanticInfo;
 
     std::string getVaryingSemantic(bool pointSize) const;
-    SemanticInfo getSemanticInfo(int startRegisters, bool fragCoord, bool pointCoord, bool pointSize,
-                                        bool pixelShader) const;
+    SemanticInfo getSemanticInfo(int startRegisters, bool position, bool fragCoord, bool pointCoord,
+                                 bool pointSize, bool pixelShader) const;
     std::string generateVaryingLinkHLSL(const SemanticInfo &info, const std::string &varyingHLSL) const;
     std::string generateVaryingHLSL(const ShaderD3D *shader) const;
     void storeUserLinkedVaryings(const ShaderD3D *vertexShader, std::vector<gl::LinkedVarying> *linkedVaryings) const;

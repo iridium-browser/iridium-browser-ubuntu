@@ -34,10 +34,10 @@
             '../ui/aura/aura.gyp:aura',
           ],
         }],
-        ['toolkit_views==1 and OS!="mac"', {
+        ['toolkit_views==1', {
           'sources': [
-            'app_modal/views/javascript_app_modal_dialog_views.h',
             'app_modal/views/javascript_app_modal_dialog_views.cc',
+            'app_modal/views/javascript_app_modal_dialog_views.h',
           ],
         }],
       ],

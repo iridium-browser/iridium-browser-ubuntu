@@ -4,6 +4,9 @@
 
 #include "ash/system/chromeos/tray_display.h"
 
+#include <vector>
+
+#include "ash/content/display/screen_orientation_controller_chromeos.h"
 #include "ash/display/display_controller.h"
 #include "ash/display/display_manager.h"
 #include "ash/shell.h"
@@ -14,7 +17,6 @@
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_notification_view.h"
-#include "ash/wm/maximize_mode/maximize_mode_controller.h"
 #include "base/bind.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -153,7 +155,7 @@ class DisplayView : public ActionableView {
     Update();
   }
 
-  virtual ~DisplayView() {}
+  ~DisplayView() override {}
 
   void Update() {
     base::string16 message = GetTrayDisplayMessage(NULL);
@@ -168,8 +170,8 @@ class DisplayView : public ActionableView {
   const views::Label* label() const { return label_; }
 
   // Overridden from views::View.
-  virtual bool GetTooltipText(const gfx::Point& p,
-                              base::string16* tooltip) const override {
+  bool GetTooltipText(const gfx::Point& p,
+                      base::string16* tooltip) const override {
     base::string16 tray_message = GetTrayDisplayMessage(NULL);
     base::string16 display_message = GetAllDisplayInfo();
     if (tray_message.empty() && display_message.empty())
@@ -205,7 +207,7 @@ class DisplayView : public ActionableView {
     base::string16 name = GetDisplayName(external_id);
     const DisplayInfo& display_info =
         display_manager->GetDisplayInfo(external_id);
-    if (display_info.rotation() != gfx::Display::ROTATE_0 ||
+    if (display_info.GetActiveRotation() != gfx::Display::ROTATE_0 ||
         display_info.configured_ui_scale() != 1.0f ||
         !display_info.overscan_insets_in_dip().empty()) {
       name = l10n_util::GetStringFUTF16(
@@ -261,19 +263,19 @@ class DisplayView : public ActionableView {
   bool ShouldShowFirstDisplayInfo() const {
     const DisplayInfo& display_info = GetDisplayManager()->GetDisplayInfo(
         GetDisplayManager()->first_display_id());
-    return display_info.rotation() != gfx::Display::ROTATE_0 ||
-        display_info.configured_ui_scale() != 1.0f ||
-        !display_info.overscan_insets_in_dip().empty() ||
-        display_info.has_overscan();
+    return display_info.GetActiveRotation() != gfx::Display::ROTATE_0 ||
+           display_info.configured_ui_scale() != 1.0f ||
+           !display_info.overscan_insets_in_dip().empty() ||
+           display_info.has_overscan();
   }
 
   // Overridden from ActionableView.
-  virtual bool PerformAction(const ui::Event& event) override {
+  bool PerformAction(const ui::Event& event) override {
     OpenSettings();
     return true;
   }
 
-  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) override {
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override {
     int label_max_width = bounds().width() - kTrayPopupPaddingHorizontal * 2 -
         kTrayPopupPaddingBetweenItems - image_->GetPreferredSize().width();
     label_->SizeToFit(label_max_width);
@@ -338,9 +340,10 @@ bool TrayDisplay::GetDisplayMessageForNotification(
           GetDisplaySize(iter->first));
       return true;
     }
-    if (iter->second.rotation() != old_iter->second.rotation()) {
+    if (iter->second.GetActiveRotation() !=
+        old_iter->second.GetActiveRotation()) {
       int rotation_text_id = 0;
-      switch (iter->second.rotation()) {
+      switch (iter->second.GetActiveRotation()) {
         case gfx::Display::ROTATE_0:
           rotation_text_id = IDS_ASH_STATUS_TRAY_DISPLAY_STANDARD_ORIENTATION;
           break;
@@ -379,8 +382,9 @@ void TrayDisplay::CreateOrUpdateNotification(
 
   // Don't display notifications for accelerometer triggered screen rotations.
   // See http://crbug.com/364949
-  if (Shell::GetInstance()->maximize_mode_controller()->
-      ignore_display_configuration_updates()) {
+  if (Shell::GetInstance()
+          ->screen_orientation_controller()
+          ->ignore_display_configuration_updates()) {
     return;
   }
 

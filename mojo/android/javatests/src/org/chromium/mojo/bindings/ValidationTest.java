@@ -7,13 +7,11 @@ package org.chromium.mojo.bindings;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.util.Log;
 
-import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.mojo.HandleMock;
 import org.chromium.mojo.MojoTestCase;
 import org.chromium.mojo.bindings.test.mojom.mojo.ConformanceTestInterface;
-import org.chromium.mojo.bindings.test.mojom.mojo.IntegrationTestInterface1;
-import org.chromium.mojo.bindings.test.mojom.mojo.IntegrationTestInterface2TestHelper;
+import org.chromium.mojo.bindings.test.mojom.mojo.IntegrationTestInterface;
 import org.chromium.mojo.system.Handle;
 
 import java.io.File;
@@ -99,8 +97,8 @@ public class ValidationTest extends MojoTestCase {
             throws FileNotFoundException {
         List<TestData> testData = getTestData(prefix);
         for (TestData test : testData) {
-            assertNull("Unable to read: " + test.dataFile.getName() +
-                    ": " + test.inputData.getErrorMessage(),
+            assertNull("Unable to read: " + test.dataFile.getName()
+                    + ": " + test.inputData.getErrorMessage(),
                     test.inputData.getErrorMessage());
             List<Handle> handles = new ArrayList<Handle>();
             for (int i = 0; i < test.inputData.getHandlesCount(); ++i) {
@@ -109,50 +107,15 @@ public class ValidationTest extends MojoTestCase {
             Message message = new Message(test.inputData.getData(), handles);
             boolean passed = messageReceiver.accept(message);
             if (passed && !test.expectedResult.equals("PASS")) {
-                fail("Input: " + test.dataFile.getName() +
-                        ": The message should have been refused. Expected error: " +
-                        test.expectedResult);
+                fail("Input: " + test.dataFile.getName()
+                        + ": The message should have been refused. Expected error: "
+                        + test.expectedResult);
             }
             if (!passed && test.expectedResult.equals("PASS")) {
-                fail("Input: " + test.dataFile.getName() +
-                        ": The message should have been accepted.");
+                fail("Input: " + test.dataFile.getName()
+                        + ": The message should have been accepted.");
             }
         }
-    }
-
-    private static class RoutingMessageReceiver implements MessageReceiver {
-        private final MessageReceiver mRequest;
-        private final MessageReceiver mResponse;
-
-        private RoutingMessageReceiver(MessageReceiver request, MessageReceiver response) {
-            this.mRequest = request;
-            this.mResponse = response;
-        }
-
-        /**
-         * @see MessageReceiver#accept(Message)
-         */
-        @Override
-        public boolean accept(Message message) {
-            try {
-                MessageHeader header = message.asServiceMessage().getHeader();
-                if (header.hasFlag(MessageHeader.MESSAGE_IS_RESPONSE_FLAG)) {
-                    return mResponse.accept(message);
-                } else {
-                    return mRequest.accept(message);
-                }
-            } catch (DeserializationException e) {
-                return false;
-            }
-        }
-
-        /**
-         * @see MessageReceiver#close()
-         */
-        @Override
-        public void close() {
-        }
-
     }
 
     /**
@@ -177,9 +140,8 @@ public class ValidationTest extends MojoTestCase {
 
     /**
      * Testing the conformance suite.
-     * Disabled: http://crbug.com/426564
      */
-    @DisabledTest
+    @SmallTest
     public void testConformance() throws FileNotFoundException {
         runTest("conformance_", ConformanceTestInterface.MANAGER.buildStub(null,
                 ConformanceTestInterface.MANAGER.buildProxy(null, new SinkMessageReceiver())));
@@ -190,11 +152,7 @@ public class ValidationTest extends MojoTestCase {
      */
     @SmallTest
     public void testIntegration() throws FileNotFoundException {
-        runTest("integration_",
-                new RoutingMessageReceiver(IntegrationTestInterface1.MANAGER.buildStub(null,
-                        IntegrationTestInterface1.MANAGER.buildProxy(null,
-                                new SinkMessageReceiver())),
-                        IntegrationTestInterface2TestHelper.
-                                newIntegrationTestInterface2MethodCallback()));
+        runTest("integration_", IntegrationTestInterface.MANAGER.buildStub(null,
+                IntegrationTestInterface.MANAGER.buildProxy(null, new SinkMessageReceiver())));
     }
 }

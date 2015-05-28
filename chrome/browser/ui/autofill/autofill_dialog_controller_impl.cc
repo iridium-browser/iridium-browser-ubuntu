@@ -8,7 +8,6 @@
 #include <map>
 #include <string>
 
-#include "base/base64.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/i18n/case_conversion.h"
@@ -22,8 +21,8 @@
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/browser/apps/app_window_registry_util.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
+#include "chrome/browser/autofill/risk_util.h"
 #include "chrome/browser/autofill/validation_rules_storage_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
@@ -37,15 +36,11 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/common/chrome_content_client.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/autofill/content/browser/risk/fingerprint.h"
-#include "components/autofill/content/browser/risk/proto/fingerprint.pb.h"
 #include "components/autofill/content/browser/wallet/form_field_error.h"
 #include "components/autofill/content/browser/wallet/full_wallet.h"
 #include "components/autofill/content/browser/wallet/gaia_account.h"
@@ -59,12 +54,14 @@
 #include "components/autofill/core/browser/autofill_data_model.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/autofill_type.h"
+#include "components/autofill/core/browser/detail_input.h"
+#include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/phone_number_i18n.h"
+#include "components/autofill/core/browser/server_field_types_util.h"
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/autofill/core/common/form_data.h"
-#include "components/metrics/metrics_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/geolocation_provider.h"
@@ -76,8 +73,6 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
-#include "extensions/browser/app_window/app_window.h"
-#include "extensions/browser/app_window/native_app_window.h"
 #include "grit/components_scaled_resources.h"
 #include "grit/components_strings.h"
 #include "grit/platform_locale_settings.h"
@@ -90,11 +85,11 @@
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_field.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_problem.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/localization.h"
-#include "ui/base/base_window.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/skia_util.h"
 
@@ -193,10 +188,9 @@ bool ServerTypeMatchesShippingField(ServerFieldType type,
                                     const AutofillField& field) {
   // Equivalent billing field type is used to support UseBillingAsShipping
   // usecase.
-  return common::ServerTypeEncompassesFieldType(
-      type,
-      AutofillType(AutofillType::GetEquivalentBillingFieldType(
-          field.Type().GetStorableType())));
+  return ServerTypeEncompassesFieldType(
+      type, AutofillType(AutofillType::GetEquivalentBillingFieldType(
+                field.Type().GetStorableType())));
 }
 
 // Initializes |form_group| from user-entered data.
@@ -230,7 +224,7 @@ void GetBillingInfoFromOutputs(const FieldValueMap& output,
     if (type == CREDIT_CARD_VERIFICATION_CODE) {
       if (cvc)
         cvc->assign(trimmed);
-    } else if (common::IsCreditCardType(type)) {
+    } else if (IsCreditCardType(type)) {
       card->SetRawInfo(type, trimmed);
     } else {
       // Copy the credit card name to |profile| in addition to |card| as
@@ -247,21 +241,6 @@ void GetBillingInfoFromOutputs(const FieldValueMap& output,
   }
 }
 
-// Returns the containing window for the given |web_contents|. The containing
-// window might be a browser window for a Chrome tab, or it might be an app
-// window for a platform app.
-ui::BaseWindow* GetBaseWindowForWebContents(
-    content::WebContents* web_contents) {
-  Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
-  if (browser)
-    return browser->window();
-
-  gfx::NativeWindow native_window = web_contents->GetTopLevelNativeWindow();
-  extensions::AppWindow* app_window =
-      AppWindowRegistryUtil::GetAppWindowForNativeWindowAnyProfile(
-          native_window);
-  return app_window->GetBaseWindow();
-}
 
 // Returns a string descriptor for a DialogSection, for use with prefs (do not
 // change these values).
@@ -597,21 +576,20 @@ void BuildInputsForSection(DialogSection dialog_section,
 
   switch (dialog_section) {
     case SECTION_CC: {
-      common::BuildInputs(kCCInputs, arraysize(kCCInputs), inputs);
+      BuildInputs(kCCInputs, arraysize(kCCInputs), inputs);
       break;
     }
 
     case SECTION_BILLING: {
       i18ninput::BuildAddressInputs(common::ADDRESS_TYPE_BILLING,
                                     country_code, inputs, language_code);
-      common::BuildInputs(kBillingPhoneInputs, arraysize(kBillingPhoneInputs),
-                          inputs);
-      common::BuildInputs(kEmailInputs, arraysize(kEmailInputs), inputs);
+      BuildInputs(kBillingPhoneInputs, arraysize(kBillingPhoneInputs), inputs);
+      BuildInputs(kEmailInputs, arraysize(kEmailInputs), inputs);
       break;
     }
 
     case SECTION_CC_BILLING: {
-      common::BuildInputs(kCCInputs, arraysize(kCCInputs), inputs);
+      BuildInputs(kCCInputs, arraysize(kCCInputs), inputs);
 
       // Wallet only supports US billing addresses.
       const std::string hardcoded_country_code = "US";
@@ -626,16 +604,15 @@ void BuildInputsForSection(DialogSection dialog_section,
       inputs->back().initial_value =
           AutofillCountry(hardcoded_country_code, app_locale).name();
 
-      common::BuildInputs(kBillingPhoneInputs, arraysize(kBillingPhoneInputs),
-                          inputs);
+      BuildInputs(kBillingPhoneInputs, arraysize(kBillingPhoneInputs), inputs);
       break;
     }
 
     case SECTION_SHIPPING: {
       i18ninput::BuildAddressInputs(common::ADDRESS_TYPE_SHIPPING,
                                     country_code, inputs, language_code);
-      common::BuildInputs(kShippingPhoneInputs, arraysize(kShippingPhoneInputs),
-                          inputs);
+      BuildInputs(kShippingPhoneInputs, arraysize(kShippingPhoneInputs),
+                  inputs);
       break;
     }
   }
@@ -835,9 +812,8 @@ void AutofillDialogControllerImpl::Show() {
   // would be a no-op, don't show it.
   cares_about_shipping_ = form_structure_.FillFields(
       RequestedTypesForSection(SECTION_SHIPPING),
-      base::Bind(common::ServerTypeMatchesField, SECTION_SHIPPING),
-      base::Bind(NullGetInfo),
-      std::string(),
+      base::Bind(ServerTypeMatchesField, SECTION_SHIPPING),
+      base::Bind(NullGetInfo), std::string(),
       g_browser_process->GetApplicationLocale());
 
   transaction_amount_ = form_structure_.GetUniqueValue(
@@ -1477,7 +1453,7 @@ gfx::Image AutofillDialogControllerImpl::GetGeneratedCardImage(
   gfx::Font font(l10n_util::GetStringUTF8(IDS_FIXED_FONT_FAMILY), 18);
   gfx::FontList font_list(font);
   gfx::ShadowValues shadows;
-  shadows.push_back(gfx::ShadowValue(gfx::Point(0, 1), 1.0, SK_ColorBLACK));
+  shadows.push_back(gfx::ShadowValue(gfx::Vector2d(0, 1), 1.0, SK_ColorBLACK));
   canvas.DrawStringRectWithShadows(
       card_number,
       font_list,
@@ -2126,7 +2102,7 @@ void AutofillDialogControllerImpl::UserEditedOrActivatedInput(
 
   std::vector<autofill::Suggestion> popup_suggestions;
   popup_suggestion_ids_.clear();
-  if (common::IsCreditCardType(type)) {
+  if (IsCreditCardType(type)) {
     popup_suggestions = GetManager()->GetCreditCardSuggestions(
         AutofillType(type), field_contents);
     for (const auto& suggestion : popup_suggestions)
@@ -2415,7 +2391,7 @@ void AutofillDialogControllerImpl::DidAcceptSuggestion(
 
   if (static_cast<size_t>(identifier) < popup_suggestion_ids_.size()) {
     const SuggestionBackendID& sid = popup_suggestion_ids_[identifier];
-    if (common::IsCreditCardType(popup_input_type)) {
+    if (IsCreditCardType(popup_input_type)) {
       wrapper.reset(new AutofillCreditCardWrapper(
           GetManager()->GetCreditCardByGUID(sid.guid)));
     } else {
@@ -2874,32 +2850,16 @@ void AutofillDialogControllerImpl::LoadRiskFingerprintData() {
                                       &obfuscated_gaia_id);
   DCHECK(success);
 
-  gfx::Rect window_bounds;
-  window_bounds = GetBaseWindowForWebContents(web_contents())->GetBounds();
-
-  PrefService* user_prefs = profile_->GetPrefs();
-  std::string charset = user_prefs->GetString(::prefs::kDefaultCharset);
-  std::string accept_languages =
-      user_prefs->GetString(::prefs::kAcceptLanguages);
-  base::Time install_time = base::Time::FromTimeT(
-      g_browser_process->metrics_service()->GetInstallDate());
-
-  risk::GetFingerprint(
-      obfuscated_gaia_id, window_bounds, web_contents(),
-      chrome::VersionInfo().Version(), charset, accept_languages, install_time,
-      g_browser_process->GetApplicationLocale(), GetUserAgent(),
+  LoadRiskData(
+      obfuscated_gaia_id, web_contents(),
       base::Bind(&AutofillDialogControllerImpl::OnDidLoadRiskFingerprintData,
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
 void AutofillDialogControllerImpl::OnDidLoadRiskFingerprintData(
-    scoped_ptr<risk::Fingerprint> fingerprint) {
+    const std::string& risk_data) {
   DCHECK(AreLegalDocumentsCurrent());
-
-  std::string proto_data;
-  fingerprint->SerializeToString(&proto_data);
-  base::Base64Encode(proto_data, &risk_data_);
-
+  risk_data_ = risk_data;
   SubmitWithWallet();
 }
 
@@ -3203,7 +3163,7 @@ void AutofillDialogControllerImpl::FillOutputForSectionWithComparator(
   std::string country_code = CountryCodeForSection(section);
   BuildInputsForSection(section, country_code, &inputs,
                         MutableAddressLanguageCodeForSection(section));
-  std::vector<ServerFieldType> types = common::TypesFromInputs(inputs);
+  std::vector<ServerFieldType> types = TypesFromInputs(inputs);
 
   scoped_ptr<DataModelWrapper> wrapper = CreateWrapper(section);
   if (wrapper) {
@@ -3274,7 +3234,7 @@ void AutofillDialogControllerImpl::FillOutputForSectionWithComparator(
 
 void AutofillDialogControllerImpl::FillOutputForSection(DialogSection section) {
   FillOutputForSectionWithComparator(
-      section, base::Bind(common::ServerTypeMatchesField, section));
+      section, base::Bind(ServerTypeMatchesField, section));
 }
 
 bool AutofillDialogControllerImpl::FormStructureCaresAboutSection(
@@ -3461,7 +3421,7 @@ std::string AutofillDialogControllerImpl::AddressLanguageCodeForSection(
 
 std::vector<ServerFieldType> AutofillDialogControllerImpl::
     RequestedTypesForSection(DialogSection section) const {
-  return common::TypesFromInputs(RequestedFieldsForSection(section));
+  return TypesFromInputs(RequestedFieldsForSection(section));
 }
 
 std::string AutofillDialogControllerImpl::CountryCodeForSection(

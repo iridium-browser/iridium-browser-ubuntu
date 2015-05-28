@@ -40,6 +40,19 @@ cr.define('extensions', function() {
       this.showOverlay_ = showOverlay;
     },
 
+    setInitialFocus: function() {
+      this.getExtensionOptions_().focus();
+    },
+
+    /**
+     * @return {?Element}
+     * @private
+     */
+    getExtensionOptions_: function() {
+      return $('extension-options-overlay-guest').querySelector(
+          'extensionoptions');
+    },
+
     /**
      * Handles a click on the close button.
      * @param {Event} event The click event.
@@ -47,10 +60,7 @@ cr.define('extensions', function() {
      */
     handleDismiss_: function(event) {
       this.setVisible_(false);
-      var extensionoptions =
-          $('extension-options-overlay-guest')
-              .querySelector('extensionoptions');
-
+      var extensionoptions = this.getExtensionOptions_();
       if (extensionoptions)
         $('extension-options-overlay-guest').removeChild(extensionoptions);
 
@@ -67,6 +77,8 @@ cr.define('extensions', function() {
      * @param {string} extensionName The name of the extension, which is used
      *     as the header of the overlay.
      * @param {string} extensionIcon The URL of the extension's icon.
+     * @param {function():void} shownCallback A function called when
+     *     showing completes.
      * @suppress {checkTypes}
      * TODO(vitalyp): remove the suppression after adding
      * chrome/renderer/resources/extensions/extension_options.js
@@ -74,7 +86,8 @@ cr.define('extensions', function() {
      */
     setExtensionAndShowOverlay: function(extensionId,
                                          extensionName,
-                                         extensionIcon) {
+                                         extensionIcon,
+                                         shownCallback) {
       var overlay = $('extension-options-overlay');
       var overlayHeader = $('extension-options-overlay-header');
       var overlayGuest = $('extension-options-overlay-guest');
@@ -93,7 +106,7 @@ cr.define('extensions', function() {
       // maxHeight, but the maxHeight does not include our header height (title
       // and close button), so we need to subtract that to get the maxHeight
       // for the extension options.
-      var maxHeight = parseInt(overlay.style.maxHeight, 10) -
+      var maxHeight = parseInt(overlayStyle.maxHeight, 10) -
                       overlayHeader.offsetHeight;
       var minWidth = parseInt(overlayStyle.minWidth, 10);
 
@@ -112,25 +125,37 @@ cr.define('extensions', function() {
        * @param {{width: number, height: number}} evt
        */
       extensionoptions.onpreferredsizechanged = function(evt) {
-        var oldWidth = parseInt(overlayStyle.width, 10);
-        var oldHeight = parseInt(overlayStyle.height, 10);
-        var newWidth = Math.max(evt.width, minWidth);
-        var newHeight = Math.min(evt.height, maxHeight);
+        var oldOverlayWidth = parseInt(overlayStyle.width, 10);
+        var oldOverlayHeight = parseInt(overlayStyle.height, 10);
+        // The overlay must be slightly larger than the extension options to
+        // avoid creating scrollbars.
+        // TODO(paulmeyer): This shouldn't be necessary, but the preferred size
+        // (coming from Blink) seems to be too small for some zoom levels. The
+        // 2-pixel addition should be removed once this problem is investigated
+        // and corrected.
+        var newOverlayWidth = Math.max(evt.width + 2, minWidth);
+        // |evt.height| is just the new overlay guest height, and does not
+        // include the overlay header height, so it needs to be added.
+        var newOverlayHeight =
+            Math.min(evt.height + overlayHeader.offsetHeight + 2, maxHeight);
 
         // animationTime is the amount of time in ms that will be used to resize
         // the overlay. It is calculated by multiplying the pythagorean distance
         // between old and the new size (in px) with a constant speed of
         // 0.25 ms/px.
-        var animationTime = 0.25 * Math.sqrt(
-            Math.pow(newWidth - oldWidth, 2) +
-            Math.pow(newHeight - oldHeight, 2));
+        var loading = document.documentElement.classList.contains('loading');
+        var animationTime = loading ? 0 :
+            0.25 * Math.sqrt(Math.pow(newOverlayWidth - oldOverlayWidth, 2) +
+                             Math.pow(newOverlayHeight - oldOverlayHeight, 2));
 
-        if (animation) {
+        if (animation)
           animation.cancel();
-        }
+
+        // The header height must be added to the (old and new) preferred
+        // heights to get the full overlay heights.
         animation = overlay.animate([
-          {width: oldWidth + 'px', height: oldHeight + 'px'},
-          {width: newWidth + 'px', height: newHeight + 'px'}
+          {width: oldOverlayWidth + 'px', height: oldOverlayHeight + 'px'},
+          {width: newOverlayWidth + 'px', height: newOverlayHeight + 'px'}
         ], {
           duration: animationTime,
           delay: 0
@@ -138,13 +163,22 @@ cr.define('extensions', function() {
 
         animation.onfinish = function(e) {
           animation = null;
+
           // The <extensionoptions> element is ready to place back in the
-          // overlay. Make sure that it's sized to take up the full
-          // width/height of the overlay.
+          // overlay. Make sure that it's sized to take up the full width/height
+          // of the overlay.
           overlayGuest.style.position = '';
           overlayGuest.style.left = '';
-          overlayGuest.style.width = newWidth + 'px';
-          overlayGuest.style.height = newHeight + 'px';
+          overlayGuest.style.width = newOverlayWidth + 'px';
+          // |newOverlayHeight| includes the header height, so it needs to be
+          // subtracted to get the new guest height.
+          overlayGuest.style.height =
+              (newOverlayHeight - overlayHeader.offsetHeight) + 'px';
+
+          if (shownCallback) {
+            shownCallback();
+            shownCallback = null;
+          }
         };
       }.bind(this);
 

@@ -33,7 +33,7 @@
 
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
-#include "core/inspector/InspectorClient.h"
+#include "core/inspector/InspectorPageAgent.h"
 #include "core/page/Chrome.h"
 #include "core/page/EventHandler.h"
 #include "core/page/Page.h"
@@ -79,19 +79,20 @@ public:
     }
 };
 
-void ConvertInspectorPoint(blink::Page* page, const blink::IntPoint& point, blink::IntPoint* convertedPoint, blink::IntPoint* globalPoint)
+void ConvertInspectorPoint(blink::LocalFrame* frame, const blink::IntPoint& point, blink::IntPoint* convertedPoint, blink::IntPoint* globalPoint)
 {
-    *convertedPoint = page->deprecatedLocalMainFrame()->view()->convertToContainingWindow(point);
-    *globalPoint = page->chrome().rootViewToScreen(blink::IntRect(point, blink::IntSize(0, 0))).location();
+    *convertedPoint = frame->view()->convertToContainingWindow(point);
+    *globalPoint = frame->page()->chrome().viewportToScreen(blink::IntRect(point, blink::IntSize(0, 0))).location();
 }
 
 } // namespace
 
 namespace blink {
 
-InspectorInputAgent::InspectorInputAgent(Page* page, InspectorClient* client)
-    : InspectorBaseAgent<InspectorInputAgent>("Input")
-    , m_page(page), m_client(client)
+InspectorInputAgent::InspectorInputAgent(InspectorPageAgent* pageAgent, Client* client)
+    : InspectorBaseAgent<InspectorInputAgent, InspectorFrontend::Input>("Input")
+    , m_pageAgent(pageAgent)
+    , m_client(client)
 {
 }
 
@@ -99,7 +100,7 @@ InspectorInputAgent::~InspectorInputAgent()
 {
 }
 
-void InspectorInputAgent::dispatchKeyEvent(ErrorString* error, const String& type, const int* modifiers, const double* timestamp, const String* text, const String* unmodifiedText, const String* keyIdentifier, const int* windowsVirtualKeyCode, const int* nativeVirtualKeyCode, const bool* autoRepeat, const bool* isKeypad, const bool* isSystemKey)
+void InspectorInputAgent::dispatchKeyEvent(ErrorString* error, const String& type, const int* modifiers, const double* timestamp, const String* text, const String* unmodifiedText, const String* keyIdentifier, const String* code, const int* windowsVirtualKeyCode, const int* nativeVirtualKeyCode, const bool* autoRepeat, const bool* isKeypad, const bool* isSystemKey)
 {
     PlatformEvent::Type convertedType;
     if (type == "keyDown")
@@ -120,6 +121,7 @@ void InspectorInputAgent::dispatchKeyEvent(ErrorString* error, const String& typ
         text ? *text : "",
         unmodifiedText ? *unmodifiedText : "",
         keyIdentifier ? *keyIdentifier : "",
+        code ? *code : "",
         windowsVirtualKeyCode ? *windowsVirtualKeyCode : 0,
         nativeVirtualKeyCode ? *nativeVirtualKeyCode : 0,
         asBool(autoRepeat),
@@ -127,6 +129,11 @@ void InspectorInputAgent::dispatchKeyEvent(ErrorString* error, const String& typ
         asBool(isSystemKey),
         static_cast<PlatformEvent::Modifiers>(modifiers ? *modifiers : 0),
         timestamp ? *timestamp : currentTime());
+
+    if (!m_client) {
+        *error = "Not supported";
+        return;
+    }
     m_client->dispatchKeyEvent(event);
 }
 
@@ -163,7 +170,7 @@ void InspectorInputAgent::dispatchMouseEvent(ErrorString* error, const String& t
     // Some platforms may have flipped coordinate systems, but the given coordinates
     // assume the origin is in the top-left of the window. Convert.
     IntPoint convertedPoint, globalPoint;
-    ConvertInspectorPoint(m_page, IntPoint(x, y), &convertedPoint, &globalPoint);
+    ConvertInspectorPoint(m_pageAgent->inspectedFrame(), IntPoint(x, y), &convertedPoint, &globalPoint);
 
     PlatformMouseEvent event(
         convertedPoint,
@@ -178,6 +185,10 @@ void InspectorInputAgent::dispatchMouseEvent(ErrorString* error, const String& t
         PlatformMouseEvent::RealOrIndistinguishable,
         timestamp ? *timestamp : currentTime());
 
+    if (!m_client) {
+        *error = "Not supported";
+        return;
+    }
     m_client->dispatchMouseEvent(event);
 }
 
@@ -257,18 +268,18 @@ void InspectorInputAgent::dispatchTouchEvent(ErrorString* error, const String& t
         // Some platforms may have flipped coordinate systems, but the given coordinates
         // assume the origin is in the top-left of the window. Convert.
         IntPoint convertedPoint, globalPoint;
-        ConvertInspectorPoint(m_page, IntPoint(x, y), &convertedPoint, &globalPoint);
+        ConvertInspectorPoint(m_pageAgent->inspectedFrame(), IntPoint(x, y), &convertedPoint, &globalPoint);
 
         SyntheticInspectorTouchPoint point(id++, convertedState, globalPoint, convertedPoint, radiusX, radiusY, rotationAngle, force);
         event.append(point);
     }
 
-    m_page->deprecatedLocalMainFrame()->eventHandler().handleTouchEvent(event);
+    m_pageAgent->inspectedFrame()->eventHandler().handleTouchEvent(event);
 }
 
-void InspectorInputAgent::trace(Visitor* visitor)
+DEFINE_TRACE(InspectorInputAgent)
 {
-    visitor->trace(m_page);
+    visitor->trace(m_pageAgent);
     InspectorBaseAgent::trace(visitor);
 }
 

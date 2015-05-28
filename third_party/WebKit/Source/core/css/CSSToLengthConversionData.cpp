@@ -31,8 +31,8 @@
 #include "config.h"
 #include "core/css/CSSToLengthConversionData.h"
 
-#include "core/rendering/RenderView.h"
-#include "core/rendering/style/RenderStyle.h"
+#include "core/layout/LayoutView.h"
+#include "core/style/ComputedStyle.h"
 
 namespace blink {
 
@@ -45,7 +45,7 @@ CSSToLengthConversionData::FontSizes::FontSizes(float em, float rem, const Font*
     ASSERT(m_font);
 }
 
-CSSToLengthConversionData::FontSizes::FontSizes(const RenderStyle* style, const RenderStyle* rootStyle)
+CSSToLengthConversionData::FontSizes::FontSizes(const ComputedStyle* style, const ComputedStyle* rootStyle)
     : FontSizes(style->computedFontSize(), rootStyle ? rootStyle->computedFontSize() : 1.0f, &style->font())
 {
 }
@@ -67,24 +67,23 @@ float CSSToLengthConversionData::FontSizes::ch() const
     return m_font->fontMetrics().zeroWidth();
 }
 
-CSSToLengthConversionData::ViewportSize::ViewportSize(const RenderView* renderView)
-    : m_width(renderView ? renderView->layoutViewportWidth() : 0)
-    , m_height(renderView ? renderView->layoutViewportHeight() : 0)
+CSSToLengthConversionData::ViewportSize::ViewportSize(const LayoutView* layoutView)
+    : m_width(layoutView ? layoutView->layoutViewportWidth() : 0)
+    , m_height(layoutView ? layoutView->layoutViewportHeight() : 0)
 {
 }
 
-CSSToLengthConversionData::CSSToLengthConversionData(const RenderStyle* style, const FontSizes& fontSizes, const ViewportSize& viewportSize, float zoom)
+CSSToLengthConversionData::CSSToLengthConversionData(const ComputedStyle* style, const FontSizes& fontSizes, const ViewportSize& viewportSize, float zoom)
     : m_style(style)
     , m_fontSizes(fontSizes)
     , m_viewportSize(viewportSize)
-    , m_zoom(zoom)
+    , m_zoom(clampTo<float>(zoom, std::numeric_limits<float>::denorm_min()))
 {
     ASSERT(m_style);
-    ASSERT(zoom > 0);
 }
 
-CSSToLengthConversionData::CSSToLengthConversionData(const RenderStyle* style, const RenderStyle* rootStyle, const RenderView* renderView, float zoom)
-    : CSSToLengthConversionData(style, FontSizes(style, rootStyle), ViewportSize(renderView), zoom)
+CSSToLengthConversionData::CSSToLengthConversionData(const ComputedStyle* style, const ComputedStyle* rootStyle, const LayoutView* layoutView, float zoom)
+    : CSSToLengthConversionData(style, FontSizes(style, rootStyle), ViewportSize(layoutView), zoom)
 {
 }
 

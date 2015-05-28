@@ -30,6 +30,7 @@
 #include "config.h"
 #include "core/frame/Frame.h"
 
+#include "bindings/core/v8/WindowProxyManager.h"
 #include "core/dom/DocumentType.h"
 #include "core/events/Event.h"
 #include "core/frame/LocalDOMWindow.h"
@@ -37,6 +38,7 @@
 #include "core/frame/Settings.h"
 #include "core/html/HTMLFrameElementBase.h"
 #include "core/inspector/InspectorInstrumentation.h"
+#include "core/layout/LayoutPart.h"
 #include "core/loader/EmptyClients.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/page/Chrome.h"
@@ -44,10 +46,6 @@
 #include "core/page/EventHandler.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
-#include "core/rendering/RenderLayer.h"
-#include "core/rendering/RenderPart.h"
-#include "platform/graphics/GraphicsLayer.h"
-#include "public/platform/WebLayer.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/RefCountedLeakCounter.h"
 
@@ -65,7 +63,7 @@ Frame::~Frame()
 #endif
 }
 
-void Frame::trace(Visitor* visitor)
+DEFINE_TRACE(Frame)
 {
     visitor->trace(m_treeNode);
     visitor->trace(m_host);
@@ -75,6 +73,7 @@ void Frame::trace(Visitor* visitor)
 void Frame::detach()
 {
     ASSERT(m_client);
+    domWindow()->resetLocation();
     disconnectOwnerElement();
     // After this, we must no longer talk to the client since this clears
     // its owning reference back to our owning LocalFrame.
@@ -148,6 +147,17 @@ ChromeClient& Frame::chromeClient() const
     if (Page* page = this->page())
         return page->chrome().client();
     return emptyChromeClient();
+}
+
+void Frame::finishSwapFrom(Frame* old)
+{
+    WindowProxyManager* oldManager = old->windowProxyManager();
+    // FIXME: In the future, the Blink API layer will be calling detach() on the
+    // old frame prior to completing the swap. However, detach calls
+    // clearForClose() instead of clearForNavigation(). Make sure this doesn't
+    // become a no-op when that lands, since it's important to detach the global.
+    oldManager->clearForNavigation();
+    windowProxyManager()->takeGlobalFrom(oldManager);
 }
 
 Frame* Frame::findFrameForNavigation(const AtomicString& name, Frame& activeFrame)
@@ -248,34 +258,20 @@ Frame* Frame::findUnsafeParentScrollPropagationBoundary()
     return nullptr;
 }
 
-RenderPart* Frame::ownerRenderer() const
+LayoutPart* Frame::ownerLayoutObject() const
 {
     if (!deprecatedLocalOwner())
         return nullptr;
-    RenderObject* object = deprecatedLocalOwner()->renderer();
+    LayoutObject* object = deprecatedLocalOwner()->layoutObject();
     if (!object)
         return nullptr;
     // FIXME: If <object> is ever fixed to disassociate itself from frames
     // that it has started but canceled, then this can turn into an ASSERT
     // since ownerElement() would be 0 when the load is canceled.
     // https://bugs.webkit.org/show_bug.cgi?id=18585
-    if (!object->isRenderPart())
+    if (!object->isLayoutPart())
         return nullptr;
-    return toRenderPart(object);
-}
-
-void Frame::setRemotePlatformLayer(WebLayer* layer)
-{
-    if (m_remotePlatformLayer)
-        GraphicsLayer::unregisterContentsLayer(m_remotePlatformLayer);
-    m_remotePlatformLayer = layer;
-    if (m_remotePlatformLayer)
-        GraphicsLayer::registerContentsLayer(layer);
-
-    ASSERT(owner());
-    toHTMLFrameOwnerElement(owner())->setNeedsCompositingUpdate();
-    if (RenderPart* renderer = ownerRenderer())
-        renderer->layer()->updateSelfPaintingLayer();
+    return toLayoutPart(object);
 }
 
 Settings* Frame::settings() const
@@ -290,7 +286,7 @@ Frame::Frame(FrameClient* client, FrameHost* host, FrameOwner* owner)
     , m_host(host)
     , m_owner(owner)
     , m_client(client)
-    , m_remotePlatformLayer(nullptr)
+    , m_isLoading(false)
 {
     ASSERT(page());
 

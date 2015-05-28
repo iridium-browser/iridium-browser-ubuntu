@@ -11,14 +11,15 @@
 #ifndef LIBANGLE_SURFACE_H_
 #define LIBANGLE_SURFACE_H_
 
+#include <EGL/egl.h>
+
 #include "common/angleutils.h"
 #include "libANGLE/Error.h"
-
-#include <EGL/egl.h>
+#include "libANGLE/RefCountObject.h"
 
 namespace gl
 {
-class Texture2D;
+class Texture;
 }
 
 namespace rx
@@ -28,31 +29,31 @@ class SurfaceImpl;
 
 namespace egl
 {
+class AttributeMap;
 class Display;
-class Config;
+struct Config;
 
-class Surface final
+class Surface final : public RefCountObject
 {
   public:
-    Surface(rx::SurfaceImpl *impl);
-    ~Surface();
+    Surface(rx::SurfaceImpl *impl, EGLint surfaceType, const egl::Config *config, const AttributeMap &attributes);
 
-    rx::SurfaceImpl *getImplementation() const { return mImplementation; }
+    rx::SurfaceImpl *getImplementation() { return mImplementation; }
+    const rx::SurfaceImpl *getImplementation() const { return mImplementation; }
 
-    Error initialize();
+    EGLint getType() const;
+
     Error swap();
     Error postSubBuffer(EGLint x, EGLint y, EGLint width, EGLint height);
     Error querySurfacePointerANGLE(EGLint attribute, void **value);
-    Error bindTexImage(gl::Texture2D *texture, EGLint buffer);
+    Error bindTexImage(gl::Texture *texture, EGLint buffer);
     Error releaseTexImage(EGLint buffer);
-
-    EGLNativeWindowType getWindowHandle() const;
 
     EGLint isPostSubBufferSupported() const;
 
     void setSwapInterval(EGLint interval);
 
-    EGLint getConfigID() const;
+    const Config *getConfig() const;
 
     // width and height can change with client window resizing
     EGLint getWidth() const;
@@ -62,22 +63,34 @@ class Surface final
     EGLenum getSwapBehavior() const;
     EGLenum getTextureFormat() const;
     EGLenum getTextureTarget() const;
-    EGLenum getFormat() const;
 
-    gl::Texture2D *getBoundTexture() const { return mTexture; }
+    gl::Texture *getBoundTexture() const { return mTexture; }
 
     EGLint isFixedSize() const;
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(Surface);
+    virtual ~Surface();
 
     rx::SurfaceImpl *mImplementation;
+
+    EGLint mType;
+
+    const egl::Config *mConfig;
+
+    bool mPostSubBufferRequested;
+
+    bool mFixedSize;
+    size_t mFixedWidth;
+    size_t mFixedHeight;
+
+    EGLenum mTextureFormat;
+    EGLenum mTextureTarget;
 
     EGLint mPixelAspectRatio;      // Display aspect ratio
     EGLenum mRenderBuffer;         // Render buffer
     EGLenum mSwapBehavior;         // Buffer swap behavior
 
-    gl::Texture2D *mTexture;
+    gl::Texture *mTexture;
 };
 
 }

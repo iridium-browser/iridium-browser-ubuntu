@@ -20,16 +20,22 @@ PasswordGenerationManager::PasswordGenerationManager(
     : client_(client), driver_(driver) {
 }
 
-PasswordGenerationManager::~PasswordGenerationManager() {}
+PasswordGenerationManager::~PasswordGenerationManager() {
+}
 
 void PasswordGenerationManager::DetectAccountCreationForms(
     const std::vector<autofill::FormStructure*>& forms) {
+  if (!IsGenerationEnabled())
+    return;
+
   std::vector<autofill::FormData> account_creation_forms;
   for (std::vector<autofill::FormStructure*>::const_iterator form_it =
-           forms.begin(); form_it != forms.end(); ++form_it) {
+           forms.begin();
+       form_it != forms.end(); ++form_it) {
     autofill::FormStructure* form = *form_it;
     for (std::vector<autofill::AutofillField*>::const_iterator field_it =
-             form->begin(); field_it != form->end(); ++field_it) {
+             form->begin();
+         field_it != form->end(); ++field_it) {
       autofill::AutofillField* field = *field_it;
       if (field->server_type() == autofill::ACCOUNT_CREATION_PASSWORD) {
         account_creation_forms.push_back(form->ToFormData());
@@ -37,7 +43,7 @@ void PasswordGenerationManager::DetectAccountCreationForms(
       }
     }
   }
-  if (!account_creation_forms.empty() && IsGenerationEnabled())
+  if (!account_creation_forms.empty())
     driver_->AccountCreationFormsFound(account_creation_forms);
 }
 
@@ -46,14 +52,14 @@ void PasswordGenerationManager::DetectAccountCreationForms(
 // (2) Password saving is enabled.
 bool PasswordGenerationManager::IsGenerationEnabled() const {
   if (!driver_->GetPasswordManager()->IsSavingEnabledForCurrentPage()) {
-    DVLOG(2) << "Generation disabled because password saving is disabled";
+    VLOG(2) << "Generation disabled because password saving is disabled";
     return false;
   }
 
   // Don't consider sync enabled if the user has a custom passphrase. See
   // crbug.com/358998 for more details.
   if (!client_->IsPasswordSyncEnabled(WITHOUT_CUSTOM_PASSPHRASE)) {
-    DVLOG(2) << "Generation disabled because passwords are not being synced or"
+    VLOG(2) << "Generation disabled because passwords are not being synced or"
              << " custom passphrase is used.";
     return false;
   }

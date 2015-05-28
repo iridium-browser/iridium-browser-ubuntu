@@ -46,7 +46,7 @@ namespace blink {
 
 IDBTransaction* IDBTransaction::create(ScriptState* scriptState, int64_t id, const Vector<String>& objectStoreNames, WebIDBTransactionMode mode, IDBDatabase* db)
 {
-    IDBOpenDBRequest* openDBRequest = 0;
+    IDBOpenDBRequest* openDBRequest = nullptr;
     IDBTransaction* transaction = new IDBTransaction(scriptState, id, objectStoreNames, mode, db, openDBRequest, IDBDatabaseMetadata());
     transaction->suspendIfNeeded();
     return transaction;
@@ -111,7 +111,7 @@ IDBTransaction::~IDBTransaction()
     ASSERT(m_requestList.isEmpty() || m_contextStopped);
 }
 
-void IDBTransaction::trace(Visitor* visitor)
+DEFINE_TRACE(IDBTransaction)
 {
     visitor->trace(m_database);
     visitor->trace(m_openDBRequest);
@@ -358,7 +358,7 @@ bool IDBTransaction::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
         (*it)->transactionFinished();
     m_deletedObjectStores.clear();
 
-    WillBeHeapVector<RefPtrWillBeMember<EventTarget> > targets;
+    WillBeHeapVector<RefPtrWillBeMember<EventTarget>> targets;
     targets.append(this);
     targets.append(db());
 

@@ -117,12 +117,13 @@ class WebRtcAudioCapturer::TrackOwner
 
 // static
 scoped_refptr<WebRtcAudioCapturer> WebRtcAudioCapturer::CreateCapturer(
-    int render_view_id, const StreamDeviceInfo& device_info,
+    int render_frame_id,
+    const StreamDeviceInfo& device_info,
     const blink::WebMediaConstraints& constraints,
     WebRtcAudioDeviceImpl* audio_device,
     MediaStreamAudioSource* audio_source) {
   scoped_refptr<WebRtcAudioCapturer> capturer = new WebRtcAudioCapturer(
-      render_view_id, device_info, constraints, audio_device, audio_source);
+      render_frame_id, device_info, constraints, audio_device, audio_source);
   if (capturer->Initialize())
     return capturer;
 
@@ -133,20 +134,18 @@ bool WebRtcAudioCapturer::Initialize() {
   DCHECK(thread_checker_.CalledOnValidThread());
   DVLOG(1) << "WebRtcAudioCapturer::Initialize()";
   WebRtcLogMessage(base::StringPrintf(
-      "WAC::Initialize. render_view_id=%d"
+      "WAC::Initialize. render_frame_id=%d"
       ", channel_layout=%d, sample_rate=%d, buffer_size=%d"
       ", session_id=%d, paired_output_sample_rate=%d"
       ", paired_output_frames_per_buffer=%d, effects=%d. ",
-      render_view_id_,
-      device_info_.device.input.channel_layout,
+      render_frame_id_, device_info_.device.input.channel_layout,
       device_info_.device.input.sample_rate,
-      device_info_.device.input.frames_per_buffer,
-      device_info_.session_id,
+      device_info_.device.input.frames_per_buffer, device_info_.session_id,
       device_info_.device.matched_output.sample_rate,
       device_info_.device.matched_output.frames_per_buffer,
       device_info_.device.input.effects));
 
-  if (render_view_id_ == -1) {
+  if (render_frame_id_ == -1) {
     // Return true here to allow injecting a new source via
     // SetCapturerSourceForTesting() at a later state.
     return true;
@@ -201,9 +200,9 @@ bool WebRtcAudioCapturer::Initialize() {
   }
 
   // Create and configure the default audio capturing source.
-  SetCapturerSource(AudioDeviceFactory::NewInputDevice(render_view_id_),
-                    channel_layout,
-                    static_cast<float>(device_info_.device.input.sample_rate));
+  SetCapturerSourceInternal(
+      AudioDeviceFactory::NewInputDevice(render_frame_id_), channel_layout,
+      static_cast<float>(device_info_.device.input.sample_rate));
 
   // Add the capturer to the WebRtcAudioDeviceImpl since it needs some hardware
   // information from the capturer.
@@ -214,7 +213,7 @@ bool WebRtcAudioCapturer::Initialize() {
 }
 
 WebRtcAudioCapturer::WebRtcAudioCapturer(
-    int render_view_id,
+    int render_frame_id,
     const StreamDeviceInfo& device_info,
     const blink::WebMediaConstraints& constraints,
     WebRtcAudioDeviceImpl* audio_device,
@@ -225,7 +224,7 @@ WebRtcAudioCapturer::WebRtcAudioCapturer(
           device_info.device.input.effects,
           audio_device)),
       running_(false),
-      render_view_id_(render_view_id),
+      render_frame_id_(render_frame_id),
       device_info_(device_info),
       volume_(0),
       peer_connection_mode_(false),
@@ -285,7 +284,7 @@ void WebRtcAudioCapturer::RemoveTrack(WebRtcLocalAudioTrack* track) {
   }
 }
 
-void WebRtcAudioCapturer::SetCapturerSource(
+void WebRtcAudioCapturer::SetCapturerSourceInternal(
     const scoped_refptr<media::AudioCapturerSource>& source,
     media::ChannelLayout channel_layout,
     float sample_rate) {
@@ -343,16 +342,16 @@ void WebRtcAudioCapturer::EnablePeerConnectionMode() {
     return;
 
   peer_connection_mode_ = true;
-  int render_view_id = -1;
+  int render_frame_id = -1;
   media::AudioParameters input_params;
   {
     base::AutoLock auto_lock(lock_);
-    // Simply return if there is no existing source or the |render_view_id_| is
+    // Simply return if there is no existing source or the |render_frame_id_| is
     // not valid.
-    if (!source_.get() || render_view_id_== -1)
+    if (!source_.get() || render_frame_id_ == -1)
       return;
 
-    render_view_id = render_view_id_;
+    render_frame_id = render_frame_id_;
     input_params = audio_processor_->InputFormat();
   }
 
@@ -364,9 +363,9 @@ void WebRtcAudioCapturer::EnablePeerConnectionMode() {
 
   // Create a new audio stream as source which will open the hardware using
   // WebRtc native buffer size.
-  SetCapturerSource(AudioDeviceFactory::NewInputDevice(render_view_id),
-                    input_params.channel_layout(),
-                    static_cast<float>(input_params.sample_rate()));
+  SetCapturerSourceInternal(AudioDeviceFactory::NewInputDevice(render_frame_id),
+                            input_params.channel_layout(),
+                            static_cast<float>(input_params.sample_rate()));
 }
 
 void WebRtcAudioCapturer::Start() {
@@ -432,6 +431,11 @@ int WebRtcAudioCapturer::Volume() const {
 
 int WebRtcAudioCapturer::MaxVolume() const {
   return WebRtcAudioDeviceImpl::kMaxVolumeLevel;
+}
+
+media::AudioParameters WebRtcAudioCapturer::GetOutputFormat() const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return audio_processor_->OutputFormat();
 }
 
 void WebRtcAudioCapturer::Capture(const media::AudioBus* audio_source,
@@ -580,12 +584,12 @@ int WebRtcAudioCapturer::GetBufferSize(int sample_rate) const {
   return (sample_rate / 100);
 }
 
-void WebRtcAudioCapturer::SetCapturerSourceForTesting(
+void WebRtcAudioCapturer::SetCapturerSource(
     const scoped_refptr<media::AudioCapturerSource>& source,
     media::AudioParameters params) {
   // Create a new audio stream as source which uses the new source.
-  SetCapturerSource(source, params.channel_layout(),
-                    static_cast<float>(params.sample_rate()));
+  SetCapturerSourceInternal(source, params.channel_layout(),
+                            static_cast<float>(params.sample_rate()));
 }
 
 }  // namespace content

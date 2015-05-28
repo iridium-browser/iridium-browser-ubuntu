@@ -3,11 +3,13 @@
 <translation id="6895424601869865703"><ph name="GIVEN_NAME"/> のアカウントを追加</translation>
 <translation id="1270290102613614947">画面キーボードは無効です</translation>
 <translation id="1057289296854808272">自動回転（タップして変更）</translation>
+<translation id="5548285847212963613">拡張機能「<ph name="EXTENSION_NAME"/>」はこのネットワークへの接続をサポートします。</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">オーバーフロー ボタン</translation>
 <translation id="7904094684485781019">このアカウントの管理者がマルチ ログインを許可していません。</translation>
 <translation id="8673028979667498656">270°</translation>
 <translation id="5571066253365925590">Bluetooth オン</translation>
+<translation id="5895138241574237353">再起動</translation>
 <translation id="6310121235600822547"><ph name="DISPLAY_NAME"/> を <ph name="ROTATION"/> に回転しました</translation>
 <translation id="9074739597929991885">Bluetooth</translation>
 <translation id="2268130516524549846">Bluetooth オフ</translation>
@@ -58,7 +60,9 @@
 <translation id="8676770494376880701">低電力の充電器に接続されています</translation>
 <translation id="5238774010593222950">別のアカウントにログインできません。</translation>
 <translation id="1723752762323179280">セッションを終了</translation>
+<translation id="1484102317210609525"><ph name="DEVICE_NAME"/>（HDMI / DP）</translation>
 <translation id="1426410128494586442">はい</translation>
+<translation id="4804818685124855865">切断</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">ログアウト</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -77,7 +81,6 @@
 <translation id="5825747213122829519">入力方法を <ph name="INPUT_METHOD_ID"/> に変更しました。
 切り替えるには Shift+Alt キーを押します。</translation>
 <translation id="2562916301614567480">プライベート ネットワーク</translation>
-<translation id="2982222131142145681"><ph name="DEVICE_NAME"/>（HDMI）</translation>
 <translation id="4250680216510889253">いいえ</translation>
 <translation id="4379753398862151997">Dear Monitor, it's not working out between us.（このモニターはサポートされていません）</translation>
 <translation id="6426039856985689743">モバイル データを無効にする</translation>
@@ -159,6 +162,7 @@
 <translation id="9201131092683066720">バッテリー残量: <ph name="PERCENTAGE"/>%。</translation>
 <translation id="2983818520079887040">設定...</translation>
 <translation id="6452181791372256707">拒否</translation>
+<translation id="1330145147221172764">画面キーボードを有効にする</translation>
 <translation id="1195412055398077112">オーバースキャン</translation>
 <translation id="607652042414456612">お使いのパソコンは近くの Bluetooth デバイスで検出可能です。名前「<ph name="NAME"/>」、アドレス「<ph name="ADDRESS"/>」のデバイスとして表示されます</translation>
 <translation id="112308213915226829">シェルフを自動的に隠す</translation>
@@ -190,15 +194,18 @@
 <translation id="7097613348211027502">ChromeVox（音声フィードバック）が有効です。
 無効にするには Ctrl+Alt+Z を押してください。</translation>
 <translation id="5045002648206642691">Google ドライブの設定...</translation>
+<translation id="1510238584712386396">ランチャー</translation>
 <translation id="7209101170223508707">CapsLock がオンになっています。
 Alt+ 検索/Shift キーを押すと解除されます。</translation>
 <translation id="8940956008527784070">バッテリー残量: 少（<ph name="PERCENTAGE"/>%）</translation>
 <translation id="4918086044614829423">承諾</translation>
 <translation id="5102001756192215136">残り時間: <ph name="HOUR"/>:<ph name="MINUTE"/></translation>
 <translation id="3009178788565917040">出力</translation>
+<translation id="3147142846278915599">ランチャー（アプリを同期中...）</translation>
 <translation id="6911468394164995108">他のネットワークに接続...</translation>
 <translation id="3678715477168044796"><ph name="DISPLAY_NAME"/>: <ph name="ANNOTATION"/></translation>
 <translation id="412065659894267608">フル充電まで <ph name="HOUR"/> 時間 <ph name="MINUTE"/> 分</translation>
 <translation id="3077734595579995578">shift</translation>
 <translation id="6359806961507272919"><ph name="PHONE_NUMBER"/> の SMS</translation>
+<translation id="4053612967614057854">画面キーボードを無効にする</translation>
 </translationbundle>

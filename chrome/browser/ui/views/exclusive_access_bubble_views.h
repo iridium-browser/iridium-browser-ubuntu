@@ -12,7 +12,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "ui/views/widget/widget_observer.h"
 
-class BrowserView;
+class ExclusiveAccessBubbleViewsContext;
 class GURL;
 namespace gfx {
 class SlideAnimation;
@@ -30,7 +30,7 @@ class ExclusiveAccessBubbleViews : public ExclusiveAccessBubble,
                                    public content::NotificationObserver,
                                    public views::WidgetObserver {
  public:
-  ExclusiveAccessBubbleViews(BrowserView* browser,
+  ExclusiveAccessBubbleViews(ExclusiveAccessBubbleViewsContext* context,
                              const GURL& url,
                              ExclusiveAccessBubbleType bubble_type);
   ~ExclusiveAccessBubbleViews() override;
@@ -39,6 +39,8 @@ class ExclusiveAccessBubbleViews : public ExclusiveAccessBubble,
 
   // Repositions |popup_| if it is visible.
   void RepositionIfVisible();
+
+  views::View* GetView();
 
  private:
   class ExclusiveAccessView;
@@ -82,7 +84,7 @@ class ExclusiveAccessBubbleViews : public ExclusiveAccessBubble,
   // views::WidgetObserver override:
   void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override;
 
-  BrowserView* browser_view_;
+  ExclusiveAccessBubbleViewsContext* const bubble_view_context_;
 
   views::Widget* popup_;
 

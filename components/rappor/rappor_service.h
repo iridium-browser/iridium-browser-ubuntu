@@ -65,9 +65,9 @@ class RapporService {
 
   // Records a sample of the rappor metric specified by |metric_name|.
   // Creates and initializes the metric, if it doesn't yet exist.
-  void RecordSample(const std::string& metric_name,
-                    RapporType type,
-                    const std::string& sample);
+  virtual void RecordSample(const std::string& metric_name,
+                            RapporType type,
+                            const std::string& sample);
 
   // Registers the names of all of the preferences used by RapporService in the
   // provided PrefRegistry. This should be called before calling Start().
@@ -81,15 +81,6 @@ class RapporService {
 
   // Sets the recording level.
   void SetRecordingLevel(RecordingLevel parameters);
-
-  // Retrieves the cohort number this client was assigned to, generating it if
-  // doesn't already exist. The cohort should be persistent.
-  int32_t LoadCohort();
-
-  // Retrieves the value for secret_ from preferences, generating it if doesn't
-  // already exist. The secret should be persistent, so that additional bits
-  // from the client do not get exposed over time.
-  std::string LoadSecret();
 
   // Cancels the next call to OnLogInterval.
   virtual void CancelNextLogRotation();

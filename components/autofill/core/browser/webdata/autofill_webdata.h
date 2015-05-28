@@ -75,7 +75,7 @@ class AutofillWebData {
   // consumer owns the profiles.
   virtual WebDataServiceBase::Handle GetAutofillProfiles(
       WebDataServiceConsumer* consumer) = 0;
-  virtual WebDataServiceBase::Handle GetAutofillServerProfiles(
+  virtual WebDataServiceBase::Handle GetServerProfiles(
       WebDataServiceConsumer* consumer) = 0;
 
   // Schedules a task to update autofill entries in the web database.
@@ -106,6 +106,9 @@ class AutofillWebData {
   virtual void UnmaskServerCreditCard(const std::string& id,
                                       const base::string16& full_number) = 0;
   virtual void MaskServerCreditCard(const std::string& id) = 0;
+
+  // Updates the use count and last use date for an unmasked server card.
+  virtual void UpdateUnmaskedCardUsageStats(const CreditCard& credit_card) = 0;
 
   // Removes Autofill records from the database.
   virtual void RemoveAutofillDataModifiedBetween(

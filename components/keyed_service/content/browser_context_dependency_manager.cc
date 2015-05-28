@@ -4,8 +4,8 @@
 
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 
-#include "base/debug/trace_event.h"
 #include "base/memory/singleton.h"
+#include "base/trace_event/trace_event.h"
 #include "content/public/browser/browser_context.h"
 
 #ifndef NDEBUG
@@ -21,6 +21,9 @@ const char kDumpBrowserContextDependencyGraphFlag[] =
 void BrowserContextDependencyManager::RegisterProfilePrefsForServices(
     const content::BrowserContext* context,
     user_prefs::PrefRegistrySyncable* pref_registry) {
+  TRACE_EVENT0(
+     "browser",
+     "BrowserContextDependencyManager::RegisterProfilePrefsForServices");
   RegisterPrefsForServices(context, pref_registry);
 }
 

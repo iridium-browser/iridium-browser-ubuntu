@@ -41,7 +41,7 @@ class LayerTreePixelTest : public LayerTreeTest {
   ~LayerTreePixelTest() override;
 
   scoped_ptr<OutputSurface> CreateOutputSurface() override;
-  void CommitCompleteOnThread(LayerTreeHostImpl* impl) override;
+  void WillActivateTreeOnThread(LayerTreeHostImpl* impl) override;
 
   virtual scoped_ptr<CopyOutputRequest> CreateCopyOutputRequest();
 
@@ -91,6 +91,10 @@ class LayerTreePixelTest : public LayerTreeTest {
                              uint32 sync_point,
                              bool lost_resource);
 
+  void set_enlarge_texture_amount(const gfx::Vector2d& enlarge_texture_amount) {
+    enlarge_texture_amount_ = enlarge_texture_amount;
+  }
+
   // Common CSS colors defined for tests to use.
   static const SkColor kCSSOrange = 0xffffa500;
   static const SkColor kCSSBrown = 0xffa52a2a;
@@ -106,6 +110,7 @@ class LayerTreePixelTest : public LayerTreeTest {
   std::vector<scoped_refptr<TextureLayer>> texture_layers_;
   int pending_texture_mailbox_callbacks_;
   bool impl_side_painting_;
+  gfx::Vector2d enlarge_texture_amount_;
 };
 
 }  // namespace cc

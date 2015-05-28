@@ -185,6 +185,7 @@ const char kWhitelist[] = "whitelist";
 
 namespace manifest_values {
 
+const char kApiKey[] = "api_key";
 const char kBrowserActionCommandEvent[] = "_execute_browser_action";
 const char kIncognitoSplit[] = "split";
 const char kIncognitoSpanning[] = "spanning";
@@ -225,7 +226,6 @@ const char kRunAtDocumentIdle[] = "document_idle";
 const char kPageActionCommandEvent[] = "_execute_page_action";
 const char kPageActionTypeTab[] = "tab";
 const char kPageActionTypePermanent[] = "permanent";
-const char kProjectId[] = "project_id";
 const char kLaunchContainerPanel[] = "panel";
 const char kLaunchContainerTab[] = "tab";
 const char kLaunchContainerWindow[] = "window";
@@ -250,6 +250,9 @@ const char kBackgroundPermissionNeeded[] =
     "permission.";
 const char kBackgroundRequiredForPlatformApps[] =
     "Packaged apps must have a background page or background scripts.";
+const char kCannotAccessAboutUrl[] =
+    "Cannot access \"*\" at origin \"*\". Extension must have permission to "
+    "access the frame's origin, and matchAboutBlank must be true.";
 const char kCannotAccessChromeUrl[] = "Cannot access a chrome:// URL";
 const char kCannotAccessExtensionUrl[] =
     "Cannot access a chrome-extension:// URL of different extension";
@@ -321,8 +324,8 @@ const char kInvalidContentScriptsList[] =
 const char kInvalidContentSecurityPolicy[] =
     "Invalid value for 'content_security_policy'.";
 const char kInvalidCopresenceConfig[] = "Invalid value for 'copresence'.";
-const char kInvalidCopresenceProjectId[] =
-    "copresence.project_id must not be empty.";
+const char kInvalidCopresenceApiKey[] =
+    "copresence.api_key must not be empty.";
 const char kInvalidCSPInsecureValue[] =
     "Ignored insecure CSP value \"*\" in directive '*'.";
 const char kInvalidCSPMissingSecureSrc[] =
@@ -361,6 +364,9 @@ const char kInvalidFileAccessValue[] =
     "Invalid value for 'file_access[*]'.";
 const char kInvalidFileBrowserHandler[] =
     "Invalid value for 'file_browser_handlers'.";
+const char kInvalidFileBrowserHandlerMissingPermission[] =
+    "Declaring file browser handlers requires the fileBrowserHandler manifest "
+    "permission.";
 const char kInvalidFileFiltersList[] =
     "Invalid value for 'file_filters'.";
 const char kInvalidFileFilterValue[] =

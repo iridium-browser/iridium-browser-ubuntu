@@ -34,15 +34,14 @@ class SVGSymbolElement final : public SVGElement,
 public:
     DECLARE_NODE_FACTORY(SVGSymbolElement);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGSymbolElement(Document&);
 
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
 };
 
 } // namespace blink

@@ -22,7 +22,6 @@ import android.widget.TextView.OnEditorActionListener;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
-import org.chromium.content.browser.ContentVideoView;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
@@ -260,11 +259,6 @@ public class Shell extends LinearLayout {
         mIsFullscreen = enterFullscreen;
         LinearLayout toolBar = (LinearLayout) findViewById(R.id.toolbar);
         toolBar.setVisibility(enterFullscreen ? GONE : VISIBLE);
-
-        if (!mIsFullscreen) {
-            ContentVideoView videoView = ContentVideoView.getContentVideoView();
-            if (videoView != null) videoView.exitFullscreen(false);
-        }
     }
 
     @CalledByNative
@@ -286,15 +280,15 @@ public class Shell extends LinearLayout {
 
     /**
      * Initializes the ContentView based on the native tab contents pointer passed in.
-     * @param nativeWebContents The pointer to the native tab contents object.
+     * @param webContents A {@link WebContents} object.
      */
     @SuppressWarnings("unused")
     @CalledByNative
-    private void initFromNativeTabContents(long nativeWebContents) {
+    private void initFromNativeTabContents(WebContents webContents) {
         Context context = getContext();
         mContentViewCore = new ContentViewCore(context);
         ContentView cv = ContentView.newInstance(context, mContentViewCore);
-        mContentViewCore.initialize(cv, cv, nativeWebContents, mWindow);
+        mContentViewCore.initialize(cv, cv, webContents, mWindow);
         mContentViewCore.setContentViewClient(mContentViewClient);
         mWebContents = mContentViewCore.getWebContents();
         mNavigationController = mWebContents.getNavigationController();
@@ -318,8 +312,11 @@ public class Shell extends LinearLayout {
      */
     @CalledByNative
     private void enableUiControl(int controlId, boolean enabled) {
-        if (controlId == 0) mPrevButton.setEnabled(enabled);
-        else if (controlId == 1) mNextButton.setEnabled(enabled);
+        if (controlId == 0) {
+            mPrevButton.setEnabled(enabled);
+        } else if (controlId == 1) {
+            mNextButton.setEnabled(enabled);
+        }
     }
 
     /**

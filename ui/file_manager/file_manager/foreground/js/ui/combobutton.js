@@ -58,23 +58,7 @@ cr.define('cr.ui', function() {
     },
     set defaultItem(defaultItem) {
       this.defaultItem_ = defaultItem;
-
       this.actionNode_.textContent = defaultItem.label || '';
-
-      if (defaultItem.iconType) {
-        this.actionNode_.classList.add('with-icon');
-        this.actionNode_.style.backgroundImage = '';
-        this.actionNode_.setAttribute('file-type-icon', defaultItem.iconType);
-      } else if (defaultItem.iconUrl) {
-        this.actionNode_.classList.add('with-icon');
-        this.actionNode_.style.backgroundImage =
-            'url(' + defaultItem.iconUrl + ')';
-        this.actionNode_.removeAttribute('file-type-icon');
-      } else {
-        this.actionNode_.classList.remove('with-icon');
-        this.actionNode_.style.backgroundImage = '';
-        this.actionNode_.removeAttribute('file-type-icon');
-      }
     },
 
     /**
@@ -89,8 +73,8 @@ cr.define('cr.ui', function() {
       this.actionNode_.classList.add('action');
       this.appendChild(this.actionNode_);
 
-      var triggerIcon = this.ownerDocument.createElement('span');
-      triggerIcon.className = 'disclosureindicator';
+      var triggerIcon = this.ownerDocument.createElement('core-icon');
+      triggerIcon.setAttribute('icon', 'arrow-drop-down');
       this.trigger_ = this.ownerDocument.createElement('div');
       this.trigger_.classList.add('trigger');
       this.trigger_.appendChild(triggerIcon);
@@ -138,6 +122,7 @@ cr.define('cr.ui', function() {
     },
 
     handleButtonClick_: function() {
+      this.blur();
       this.dispatchSelectEvent(this.defaultItem_);
     },
 

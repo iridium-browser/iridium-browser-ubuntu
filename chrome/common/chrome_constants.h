@@ -59,9 +59,11 @@ extern const wchar_t kTestingInterfaceDLL[];
 extern const char    kInitialProfile[];
 extern const char    kMultiProfileDirPrefix[];
 extern const base::FilePath::CharType kGuestProfileDir[];
+extern const base::FilePath::CharType kSystemProfileDir[];
 extern const wchar_t kBrowserResourcesDll[];
 
 // filenames
+extern const base::FilePath::CharType kAffiliationDatabaseFileName[];
 extern const base::FilePath::CharType kCacheDirname[];
 extern const base::FilePath::CharType kChannelIDFilename[];
 extern const base::FilePath::CharType kCookieFilename[];
@@ -76,6 +78,7 @@ extern const base::FilePath::CharType kLocalStateFilename[];
 extern const base::FilePath::CharType kLocalStorePoolName[];
 extern const base::FilePath::CharType kLoginDataFileName[];
 extern const base::FilePath::CharType kMediaCacheDirname[];
+extern const base::FilePath::CharType kNetworkPersistentStateFilename[];
 extern const base::FilePath::CharType kNewTabThumbnailsFilename[];
 extern const base::FilePath::CharType kPreferencesFilename[];
 extern const base::FilePath::CharType kProtectedPreferencesFilenameDeprecated[];
@@ -101,11 +104,6 @@ extern const base::FilePath::CharType kPepperFlashPluginFilename[];
 // directory names
 extern const wchar_t kUserDataDirname[];
 
-extern const bool kRecordModeEnabled;
-
-// Are touch icons enabled? False by default.
-extern const bool kEnableTouchIcon;
-
 // Fraction of the total number of processes to be used for hosting
 // extensions. If we have more extensions than this percentage, we will start
 // combining extensions in existing processes. This allows web pages to have
@@ -128,11 +126,10 @@ extern const wchar_t kMetroGetCurrentTabInfoMessage[];
 // Used by Metro Chrome to store activation state.
 extern const wchar_t kMetroRegistryPath[];
 extern const wchar_t kLaunchModeValue[];
-// Used by the browser as a container in which to track unreported crash dump
-// attempts. The actual values (each representing one crash dump attempt) are
-// stored in a subkey named with the version number of the build. Each value
-// under the subkey represents an additional attempt.
+// Used to store crash report metrics using
+// content/browser_watcher/crash_reporting_metrics_win.h.
 extern const wchar_t kBrowserCrashDumpAttemptsRegistryPath[];
+extern const wchar_t kBrowserCrashDumpAttemptsRegistryPathSxS[];
 // Registry location where the browser watcher stores browser exit codes.
 // This is picked up and stored in histograms by the browser on the subsequent
 // launch.

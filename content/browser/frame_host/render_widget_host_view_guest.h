@@ -55,6 +55,8 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   void SetBounds(const gfx::Rect& rect) override;
   void Focus() override;
   bool HasFocus() const override;
+  void Show() override;
+  void Hide() override;
   gfx::NativeView GetNativeView() const override;
   gfx::NativeViewId GetNativeViewId() const override;
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
@@ -65,10 +67,8 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
 
   // RenderWidgetHostViewBase implementation.
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
-                   const gfx::Rect& pos) override;
+                   const gfx::Rect& bounds) override;
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override;
-  void WasShown() override;
-  void WasHidden() override;
   void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override;
   void UpdateCursor(const WebCursor& cursor) override;
   void SetIsLoading(bool is_loading) override;
@@ -124,8 +124,8 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
 #endif  // defined(OS_ANDROID) || defined(TOOLKIT_VIEWS)
 
 #if defined(OS_ANDROID)
-  virtual void LockCompositingSurface() override;
-  virtual void UnlockCompositingSurface() override;
+  void LockCompositingSurface() override;
+  void UnlockCompositingSurface() override;
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)

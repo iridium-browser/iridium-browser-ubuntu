@@ -19,12 +19,11 @@
 #include "webrtc/modules/audio_processing/agc/noise_gmm_tables.h"
 #include "webrtc/modules/audio_processing/agc/voice_gmm_tables.h"
 #include "webrtc/modules/interface/module_common_types.h"
-#include "webrtc/system_wrappers/interface/compile_assert.h"
 
 namespace webrtc {
 
-COMPILE_ASSERT(kNoiseGmmDim == kVoiceGmmDim,
-               noise_and_voice_gmm_dimension_not_equal);
+static_assert(kNoiseGmmDim == kVoiceGmmDim,
+              "noise and voice gmm dimension not equal");
 
 // These values should match MATLAB counterparts for unit-tests to pass.
 static const int kPosteriorHistorySize = 500;  // 5 sec of 10 ms frames.

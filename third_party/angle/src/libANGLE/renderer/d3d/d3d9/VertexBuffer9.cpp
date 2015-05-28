@@ -9,7 +9,7 @@
 #include "libANGLE/renderer/d3d/d3d9/VertexBuffer9.h"
 #include "libANGLE/renderer/d3d/d3d9/Renderer9.h"
 #include "libANGLE/renderer/d3d/d3d9/formatutils9.h"
-#include "libANGLE/renderer/vertexconversion.h"
+#include "libANGLE/renderer/d3d/d3d9/vertexconversion.h"
 #include "libANGLE/renderer/d3d/BufferD3D.h"
 #include "libANGLE/VertexAttribute.h"
 #include "libANGLE/Buffer.h"
@@ -97,9 +97,9 @@ gl::Error VertexBuffer9::storeVertexAttributes(const gl::VertexAttribute &attrib
     {
         if (buffer)
         {
-            BufferD3D *storage = BufferD3D::makeFromBuffer(buffer);
+            BufferD3D *storage = GetImplAs<BufferD3D>(buffer);
             ASSERT(storage);
-            gl::Error error = storage->getData(&input);
+            error = storage->getData(&input);
             if (error.isError())
             {
                 return error;

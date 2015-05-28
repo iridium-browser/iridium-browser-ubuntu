@@ -70,9 +70,9 @@ WebIDBCallbacksImpl::~WebIDBCallbacksImpl()
     InspectorInstrumentation::traceAsyncOperationCompleted(m_request->executionContext(), m_asyncOperationId);
 }
 
-static PassOwnPtr<Vector<WebBlobInfo> > ConvertBlobInfo(const WebVector<WebBlobInfo>& webBlobInfo)
+static PassOwnPtr<Vector<WebBlobInfo>> ConvertBlobInfo(const WebVector<WebBlobInfo>& webBlobInfo)
 {
-    OwnPtr<Vector<WebBlobInfo> > blobInfo = adoptPtr(new Vector<WebBlobInfo>(webBlobInfo.size()));
+    OwnPtr<Vector<WebBlobInfo>> blobInfo = adoptPtr(new Vector<WebBlobInfo>(webBlobInfo.size()));
     for (size_t i = 0; i < webBlobInfo.size(); ++i)
         (*blobInfo)[i] = webBlobInfo[i];
     return blobInfo.release();
@@ -81,7 +81,7 @@ static PassOwnPtr<Vector<WebBlobInfo> > ConvertBlobInfo(const WebVector<WebBlobI
 void WebIDBCallbacksImpl::onError(const WebIDBDatabaseError& error)
 {
     InspectorInstrumentationCookie cookie = InspectorInstrumentation::traceAsyncCallbackStarting(m_request->executionContext(), m_asyncOperationId);
-    m_request->onError(error);
+    m_request->onError(DOMError::create(error.code(), error.message()));
     InspectorInstrumentation::traceAsyncCallbackCompleted(cookie);
 }
 
@@ -105,7 +105,7 @@ void WebIDBCallbacksImpl::onSuccess(WebIDBCursor* cursor, const WebIDBKey& key, 
 void WebIDBCallbacksImpl::onSuccess(WebIDBDatabase* backend, const WebIDBMetadata& metadata)
 {
     InspectorInstrumentationCookie cookie = InspectorInstrumentation::traceAsyncCallbackStarting(m_request->executionContext(), m_asyncOperationId);
-    m_request->onSuccess(adoptPtr(backend), metadata);
+    m_request->onSuccess(adoptPtr(backend), IDBDatabaseMetadata(metadata));
     InspectorInstrumentation::traceAsyncCallbackCompleted(cookie);
 }
 
@@ -161,7 +161,7 @@ void WebIDBCallbacksImpl::onBlocked(long long oldVersion)
 void WebIDBCallbacksImpl::onUpgradeNeeded(long long oldVersion, WebIDBDatabase* database, const WebIDBMetadata& metadata, unsigned short dataLoss, blink::WebString dataLossMessage)
 {
     InspectorInstrumentationCookie cookie = InspectorInstrumentation::traceAsyncCallbackStarting(m_request->executionContext(), m_asyncOperationId);
-    m_request->onUpgradeNeeded(oldVersion, adoptPtr(database), metadata, static_cast<blink::WebIDBDataLoss>(dataLoss), dataLossMessage);
+    m_request->onUpgradeNeeded(oldVersion, adoptPtr(database), IDBDatabaseMetadata(metadata), static_cast<blink::WebIDBDataLoss>(dataLoss), dataLossMessage);
     InspectorInstrumentation::traceAsyncCallbackCompleted(cookie);
 }
 

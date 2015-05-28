@@ -63,8 +63,8 @@ namespace image_fetcher {
 
 ImageFetcher::ImageFetcher(const scoped_refptr<base::TaskRunner>& task_runner)
     : request_context_getter_(nullptr),
-      weak_factory_(this),
-      task_runner_(task_runner) {
+      task_runner_(task_runner),
+      weak_factory_(this) {
   DCHECK(task_runner_.get());
 }
 
@@ -89,7 +89,7 @@ void ImageFetcher::StartDownload(
   downloads_in_progress_[fetcher] = [callback copy];
   fetcher->SetLoadFlags(
       net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES |
-      net::LOAD_DO_NOT_SEND_AUTH_DATA | net::LOAD_DO_NOT_PROMPT_FOR_LOGIN);
+      net::LOAD_DO_NOT_SEND_AUTH_DATA);
   fetcher->SetRequestContext(request_context_getter_.get());
   fetcher->SetReferrer(referrer);
   fetcher->SetReferrerPolicy(referrer_policy);

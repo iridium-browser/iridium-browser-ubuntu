@@ -46,7 +46,7 @@
 /* If the options page is loading don't do the transition. */
 .loading .overlay,
 .loading .overlay .page {
-  -webkit-transition-duration: 0 !important;
+  -webkit-transition-duration: 0ms !important;
 }
 
 /* keyframes used to pulse the overlay */
@@ -178,6 +178,8 @@ html[dir='rtl'] .overlay .page .action-area {
 
 .gray-bottom-bar {
   background-color: #f5f5f5;
+  border-bottom-left-radius: inherit;
+  border-bottom-right-radius: inherit;
   border-color: #e7e7e7;
   border-top-style: solid;
   border-width: 1px;

@@ -42,7 +42,7 @@ Number::Number(double value)
 {
 }
 
-void Number::trace(Visitor* visitor)
+DEFINE_TRACE(Number)
 {
     visitor->trace(m_value);
     Expression::trace(visitor);
@@ -58,7 +58,7 @@ StringExpression::StringExpression(const String& value)
 {
 }
 
-void StringExpression::trace(Visitor* visitor)
+DEFINE_TRACE(StringExpression)
 {
     visitor->trace(m_value);
     Expression::trace(visitor);
@@ -257,7 +257,7 @@ Value Union::evaluate(EvaluationContext& context) const
     NodeSet& resultSet = lhsResult.modifiableNodeSet(context);
     const NodeSet& rhsNodes = rhs.toNodeSet(&context);
 
-    WillBeHeapHashSet<RawPtrWillBeMember<Node> > nodes;
+    WillBeHeapHashSet<RawPtrWillBeMember<Node>> nodes;
     for (size_t i = 0; i < resultSet.size(); ++i)
         nodes.add(resultSet[i]);
 
@@ -281,7 +281,7 @@ Predicate::Predicate(PassOwnPtrWillBeRawPtr<Expression> expr)
 
 DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(Predicate);
 
-void Predicate::trace(Visitor* visitor)
+DEFINE_TRACE(Predicate)
 {
     visitor->trace(m_expr);
 }

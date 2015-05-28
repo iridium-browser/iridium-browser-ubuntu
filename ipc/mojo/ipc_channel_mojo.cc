@@ -9,14 +9,16 @@
 #include "base/lazy_instance.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_logging.h"
+#include "ipc/ipc_message_attachment_set.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/mojo/client_channel.mojom.h"
 #include "ipc/mojo/ipc_mojo_bootstrap.h"
-#include "mojo/edk/embedder/embedder.h"
-#include "mojo/public/cpp/bindings/error_handler.h"
+#include "ipc/mojo/ipc_mojo_handle_attachment.h"
+#include "third_party/mojo/src/mojo/edk/embedder/embedder.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/error_handler.h"
 
 #if defined(OS_POSIX) && !defined(OS_NACL)
-#include "ipc/file_descriptor_set_posix.h"
+#include "ipc/ipc_platform_file_attachment_posix.h"
 #endif
 
 namespace IPC {
@@ -46,9 +48,9 @@ class MojoChannelFactory : public ChannelFactory {
 
 //------------------------------------------------------------------------------
 
-class ClientChannelMojo
-    : public ChannelMojo,
-      public NON_EXPORTED_BASE(mojo::InterfaceImpl<ClientChannel>) {
+class ClientChannelMojo : public ChannelMojo,
+                          public ClientChannel,
+                          public mojo::ErrorHandler {
  public:
   ClientChannelMojo(ChannelMojo::Delegate* delegate,
                     const ChannelHandle& handle,
@@ -56,7 +58,7 @@ class ClientChannelMojo
   ~ClientChannelMojo() override;
   // MojoBootstrap::Delegate implementation
   void OnPipeAvailable(mojo::embedder::ScopedPlatformHandle handle) override;
-  // InterfaceImpl implementation
+  // mojo::ErrorHandler implementation
   void OnConnectionError() override;
   // ClientChannel implementation
   void Init(
@@ -64,13 +66,17 @@ class ClientChannelMojo
       int32_t peer_pid,
       const mojo::Callback<void(int32_t)>& callback) override;
 
+ private:
+  mojo::Binding<ClientChannel> binding_;
+
   DISALLOW_COPY_AND_ASSIGN(ClientChannelMojo);
 };
 
 ClientChannelMojo::ClientChannelMojo(ChannelMojo::Delegate* delegate,
                                      const ChannelHandle& handle,
                                      Listener* listener)
-    : ChannelMojo(delegate, handle, Channel::MODE_CLIENT, listener) {
+    : ChannelMojo(delegate, handle, Channel::MODE_CLIENT, listener),
+      binding_(this) {
 }
 
 ClientChannelMojo::~ClientChannelMojo() {
@@ -78,7 +84,7 @@ ClientChannelMojo::~ClientChannelMojo() {
 
 void ClientChannelMojo::OnPipeAvailable(
     mojo::embedder::ScopedPlatformHandle handle) {
-  mojo::WeakBindToPipe(this, CreateMessagingPipe(handle.Pass()));
+  binding_.Bind(CreateMessagingPipe(handle.Pass()));
 }
 
 void ClientChannelMojo::OnConnectionError() {
@@ -104,7 +110,7 @@ class ServerChannelMojo : public ChannelMojo, public mojo::ErrorHandler {
 
   // MojoBootstrap::Delegate implementation
   void OnPipeAvailable(mojo::embedder::ScopedPlatformHandle handle) override;
-  // ErrorHandler implementation
+  // mojo::ErrorHandler implementation
   void OnConnectionError() override;
   // Channel override
   void Close() override;
@@ -135,7 +141,7 @@ void ServerChannelMojo::OnPipeAvailable(
   MojoResult create_result =
       mojo::CreateMessagePipe(nullptr, &message_pipe_, &peer);
   if (create_result != MOJO_RESULT_OK) {
-    DLOG(WARNING) << "mojo::CreateMessagePipe failed: " << create_result;
+    LOG(WARNING) << "mojo::CreateMessagePipe failed: " << create_result;
     listener()->OnChannelError();
     return;
   }
@@ -163,21 +169,30 @@ void ServerChannelMojo::Close() {
   ChannelMojo::Close();
 }
 
+#if defined(OS_POSIX) && !defined(OS_NACL)
+
+base::ScopedFD TakeOrDupFile(internal::PlatformFileAttachment* attachment) {
+  return attachment->Owns() ? base::ScopedFD(attachment->TakePlatformFile())
+                            : base::ScopedFD(dup(attachment->file()));
+}
+
+#endif
+
 } // namespace
 
 //------------------------------------------------------------------------------
 
 void ChannelMojo::ChannelInfoDeleter::operator()(
     mojo::embedder::ChannelInfo* ptr) const {
-  mojo::embedder::DestroyChannel(ptr);
+  mojo::embedder::DestroyChannelOnIOThread(ptr);
 }
 
 //------------------------------------------------------------------------------
 
 // static
 bool ChannelMojo::ShouldBeUsed() {
-  // TODO(morrita): Turn this on for a set of platforms.
-  return false;
+  // TODO(morrita): Remove this if it sticks.
+  return true;
 }
 
 // static
@@ -208,9 +223,10 @@ scoped_ptr<ChannelFactory> ChannelMojo::CreateServerFactory(
 
 // static
 scoped_ptr<ChannelFactory> ChannelMojo::CreateClientFactory(
+    ChannelMojo::Delegate* delegate,
     const ChannelHandle& channel_handle) {
   return make_scoped_ptr(
-      new MojoChannelFactory(NULL, channel_handle, Channel::MODE_CLIENT));
+      new MojoChannelFactory(delegate, channel_handle, Channel::MODE_CLIENT));
 }
 
 ChannelMojo::ChannelMojo(ChannelMojo::Delegate* delegate,
@@ -242,6 +258,8 @@ ChannelMojo::~ChannelMojo() {
 }
 
 void ChannelMojo::InitDelegate(ChannelMojo::Delegate* delegate) {
+  ipc_support_.reset(
+      new ScopedIPCSupport(base::MessageLoop::current()->task_runner()));
   delegate_ = delegate->ToWeakPtr();
   delegate_->OnChannelCreated(weak_factory_.GetWeakPtr());
 }
@@ -264,6 +282,7 @@ bool ChannelMojo::Connect() {
 void ChannelMojo::Close() {
   message_reader_.reset();
   channel_info_.reset();
+  ipc_support_.reset();
 }
 
 void ChannelMojo::OnBootstrapError() {
@@ -277,7 +296,7 @@ void ChannelMojo::InitMessageReader(mojo::ScopedMessagePipeHandle pipe,
 
   for (size_t i = 0; i < pending_messages_.size(); ++i) {
     bool sent = message_reader_->Send(make_scoped_ptr(pending_messages_[i]));
-    pending_messages_[i] = NULL;
+    pending_messages_[i] = nullptr;
     if (!sent) {
       pending_messages_.clear();
       listener_->OnChannelError();
@@ -316,7 +335,7 @@ base::ProcessId ChannelMojo::GetPeerPID() const {
 }
 
 base::ProcessId ChannelMojo::GetSelfPID() const {
-  return base::GetCurrentProcId();
+  return bootstrap_->GetSelfPID();
 }
 
 void ChannelMojo::OnClientLaunched(base::ProcessHandle handle) {
@@ -340,69 +359,81 @@ int ChannelMojo::GetClientFileDescriptor() const {
 base::ScopedFD ChannelMojo::TakeClientFileDescriptor() {
   return bootstrap_->TakeClientFileDescriptor();
 }
+#endif  // defined(OS_POSIX) && !defined(OS_NACL)
 
 // static
-MojoResult ChannelMojo::WriteToFileDescriptorSet(
-    const std::vector<MojoHandle>& handle_buffer,
-    Message* message) {
-  for (size_t i = 0; i < handle_buffer.size(); ++i) {
-    mojo::embedder::ScopedPlatformHandle platform_handle;
-    MojoResult unwrap_result = mojo::embedder::PassWrappedPlatformHandle(
-        handle_buffer[i], &platform_handle);
-    if (unwrap_result != MOJO_RESULT_OK) {
-      DLOG(WARNING) << "Pipe failed to covert handles. Closing: "
-                    << unwrap_result;
-      return unwrap_result;
-    }
-
-    bool ok = message->file_descriptor_set()->AddToOwn(
-        base::ScopedFD(platform_handle.release().fd));
-    DCHECK(ok);
-  }
-
-  return MOJO_RESULT_OK;
-}
-
-// static
-MojoResult ChannelMojo::ReadFromFileDescriptorSet(
+MojoResult ChannelMojo::ReadFromMessageAttachmentSet(
     Message* message,
     std::vector<MojoHandle>* handles) {
   // We dup() the handles in IPC::Message to transmit.
-  // IPC::FileDescriptorSet has intricate lifecycle semantics
+  // IPC::MessageAttachmentSet has intricate lifecycle semantics
   // of FDs, so just to dup()-and-own them is the safest option.
-  if (message->HasFileDescriptors()) {
-    FileDescriptorSet* fdset = message->file_descriptor_set();
-    std::vector<base::PlatformFile> fds_to_send(fdset->size());
-    fdset->PeekDescriptors(&fds_to_send[0]);
-    for (size_t i = 0; i < fds_to_send.size(); ++i) {
-      int fd_to_send = dup(fds_to_send[i]);
-      if (-1 == fd_to_send) {
-        DPLOG(WARNING) << "Failed to dup FD to transmit.";
-        fdset->CommitAll();
-        return MOJO_RESULT_UNKNOWN;
-      }
+  if (message->HasAttachments()) {
+    MessageAttachmentSet* set = message->attachment_set();
+    for (unsigned i = 0; i < set->size(); ++i) {
+      scoped_refptr<MessageAttachment> attachment = set->GetAttachmentAt(i);
+      switch (attachment->GetType()) {
+        case MessageAttachment::TYPE_PLATFORM_FILE:
+#if defined(OS_POSIX) && !defined(OS_NACL)
+        {
+          base::ScopedFD file =
+              TakeOrDupFile(static_cast<IPC::internal::PlatformFileAttachment*>(
+                  attachment.get()));
+          if (!file.is_valid()) {
+            DPLOG(WARNING) << "Failed to dup FD to transmit.";
+            set->CommitAll();
+            return MOJO_RESULT_UNKNOWN;
+          }
 
-      MojoHandle wrapped_handle;
-      MojoResult wrap_result = CreatePlatformHandleWrapper(
-          mojo::embedder::ScopedPlatformHandle(
-              mojo::embedder::PlatformHandle(fd_to_send)),
-          &wrapped_handle);
-      if (MOJO_RESULT_OK != wrap_result) {
-        DLOG(WARNING) << "Pipe failed to wrap handles. Closing: "
-                      << wrap_result;
-        fdset->CommitAll();
-        return wrap_result;
-      }
+          MojoHandle wrapped_handle;
+          MojoResult wrap_result = CreatePlatformHandleWrapper(
+              mojo::embedder::ScopedPlatformHandle(
+                  mojo::embedder::PlatformHandle(file.release())),
+              &wrapped_handle);
+          if (MOJO_RESULT_OK != wrap_result) {
+            LOG(WARNING) << "Pipe failed to wrap handles. Closing: "
+                         << wrap_result;
+            set->CommitAll();
+            return wrap_result;
+          }
 
-      handles->push_back(wrapped_handle);
+          handles->push_back(wrapped_handle);
+        }
+#else
+          NOTREACHED();
+#endif  //  defined(OS_POSIX) && !defined(OS_NACL)
+        break;
+        case MessageAttachment::TYPE_MOJO_HANDLE: {
+          mojo::ScopedHandle handle =
+              static_cast<IPC::internal::MojoHandleAttachment*>(
+                  attachment.get())->TakeHandle();
+          handles->push_back(handle.release().value());
+        } break;
+      }
     }
 
-    fdset->CommitAll();
+    set->CommitAll();
   }
 
   return MOJO_RESULT_OK;
 }
 
-#endif  // defined(OS_POSIX) && !defined(OS_NACL)
+// static
+MojoResult ChannelMojo::WriteToMessageAttachmentSet(
+    const std::vector<MojoHandle>& handle_buffer,
+    Message* message) {
+  for (size_t i = 0; i < handle_buffer.size(); ++i) {
+    bool ok = message->attachment_set()->AddAttachment(
+        new IPC::internal::MojoHandleAttachment(
+            mojo::MakeScopedHandle(mojo::Handle(handle_buffer[i]))));
+    DCHECK(ok);
+    if (!ok) {
+      LOG(ERROR) << "Failed to add new Mojo handle.";
+      return MOJO_RESULT_UNKNOWN;
+    }
+  }
+
+  return MOJO_RESULT_OK;
+}
 
 }  // namespace IPC

@@ -107,7 +107,7 @@ const IDBKey* IDBAny::key() const
 
 const IDBKeyPath& IDBAny::keyPath() const
 {
-    ASSERT(m_type == KeyPathType || m_type == BufferKeyAndKeyPathType);
+    ASSERT(m_type == BufferKeyAndKeyPathType);
     return m_idbKeyPath;
 }
 
@@ -189,20 +189,13 @@ IDBAny::IDBAny(IDBKey* key)
 {
 }
 
-IDBAny::IDBAny(const IDBKeyPath& value)
-    : m_type(KeyPathType)
-    , m_idbKeyPath(value)
-    , m_integer(0)
-{
-}
-
 IDBAny::IDBAny(int64_t value)
     : m_type(IntegerType)
     , m_integer(value)
 {
 }
 
-void IDBAny::trace(Visitor* visitor)
+DEFINE_TRACE(IDBAny)
 {
     visitor->trace(m_domStringList);
     visitor->trace(m_idbCursor);

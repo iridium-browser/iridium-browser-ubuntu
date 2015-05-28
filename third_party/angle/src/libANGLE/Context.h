@@ -34,6 +34,7 @@ class Renderer;
 namespace egl
 {
 class Surface;
+struct Config;
 }
 
 namespace gl
@@ -42,10 +43,6 @@ class Compiler;
 class Shader;
 class Program;
 class Texture;
-class Texture2D;
-class TextureCubeMap;
-class Texture3D;
-class Texture2DArray;
 class Framebuffer;
 class Renderbuffer;
 class FenceNV;
@@ -58,10 +55,10 @@ class VertexArray;
 class Sampler;
 class TransformFeedback;
 
-class Context
+class Context final : angle::NonCopyable
 {
   public:
-    Context(int clientVersion, const Context *shareContext, rx::Renderer *renderer, bool notifyResets, bool robustAccess);
+    Context(const egl::Config *config, int clientVersion, const Context *shareContext, rx::Renderer *renderer, bool notifyResets, bool robustAccess);
 
     virtual ~Context();
 
@@ -151,11 +148,6 @@ class Context
     TransformFeedback *getTransformFeedback(GLuint handle) const;
 
     Texture *getTargetTexture(GLenum target) const;
-    Texture2D *getTexture2D() const;
-    TextureCubeMap *getTextureCubeMap() const;
-    Texture3D *getTexture3D() const;
-    Texture2DArray *getTexture2DArray() const;
-
     Texture *getSamplerTexture(unsigned int sampler, GLenum type) const;
 
     Compiler *getCompiler() const;
@@ -177,7 +169,8 @@ class Context
     Error drawElements(GLenum mode, GLsizei count, GLenum type,
                        const GLvoid *indices, GLsizei instances,
                        const rx::RangeUI &indexRange);
-    Error sync(bool block);   // flush/finish
+    Error flush();
+    Error finish();
 
     void recordError(const Error &error);
 
@@ -186,6 +179,10 @@ class Context
     virtual bool isResetNotificationEnabled();
 
     virtual int getClientVersion() const;
+
+    EGLint getConfigID() const;
+    EGLenum getClientType() const;
+    EGLenum getRenderBuffer() const;
 
     const Caps &getCaps() const;
     const TextureCapsMap &getTextureCaps() const;
@@ -205,8 +202,6 @@ class Context
     Data getData() const;
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(Context);
-
     void detachBuffer(GLuint buffer);
     void detachTexture(GLuint texture);
     void detachFramebuffer(GLuint framebuffer);
@@ -232,6 +227,10 @@ class Context
     State mState;
 
     int mClientVersion;
+
+    EGLint mConfigID;
+    EGLenum mClientType;
+    EGLenum mRenderBuffer;
 
     TextureMap mZeroTextures;
 

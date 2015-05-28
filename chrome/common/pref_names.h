@@ -22,6 +22,7 @@
 namespace prefs {
 
 // Profile prefs. Please add Local State prefs below instead.
+extern const char kChildAccountStatusKnown[];
 extern const char kDefaultApps[];
 extern const char kDefaultAppsInstalled[];
 extern const char kDisableScreenshots[];
@@ -149,12 +150,9 @@ extern const char kSearchSuggestEnabled[];
 extern const char kContextualSearchEnabled[];
 #endif
 extern const char kConfirmToQuitEnabled[];
-extern const char kCookieBehavior[];  // OBSOLETE
 extern const char kPromptForDownload[];
 extern const char kAlternateErrorPagesEnabled[];
-extern const char kDnsStartupPrefetchList[];  // OBSOLETE
 extern const char kDnsPrefetchingStartupList[];
-extern const char kDnsHostReferralList[];  // OBSOLETE
 extern const char kDnsPrefetchingHostReferralList[];
 extern const char kDisableSpdy[];
 extern const char kHttpServerProperties[];
@@ -165,7 +163,6 @@ extern const char kDisabledSchemes[];
 extern const char kLastPolicyCheckTime[];
 #endif
 extern const char kInstantUIZeroSuggestUrlPrefix[];
-extern const char kMultipleProfilePrefMigration[];
 extern const char kNetworkPredictionEnabled[];
 extern const char kNetworkPredictionOptions[];
 extern const char kDefaultAppsInstallState[];
@@ -179,6 +176,7 @@ extern const char kPrimaryMouseButtonRight[];
 extern const char kMouseSensitivity[];
 extern const char kTouchpadSensitivity[];
 extern const char kUse24HourClock[];
+extern const char kResolveTimezoneByGeolocation[];
 extern const char kDisableDrive[];
 extern const char kDisableDriveOverCellular[];
 extern const char kDisableDriveHostedFiles[];
@@ -259,7 +257,6 @@ extern const char kAttestationEnabled[];
 extern const char kAttestationExtensionWhitelist[];
 extern const char kTouchHudProjectionEnabled[];
 extern const char kOpenNetworkConfiguration[];
-extern const char kRAConsentFirstTime[];
 extern const char kMultiProfileNeverShowIntro[];
 extern const char kMultiProfileWarningShowDismissed[];
 extern const char kMultiProfileUserBehavior[];
@@ -271,6 +268,7 @@ extern const char kCurrentWallpaperAppName[];
 extern const char kFileSystemProviderMounted[];
 extern const char kTouchVirtualKeyboardEnabled[];
 extern const char kWakeOnWifiSsid[];
+extern const char kCaptivePortalAuthenticationIgnoresProxy[];
 #endif  // defined(OS_CHROMEOS)
 extern const char kIpcDisabledMessages[];
 extern const char kShowHomeButton[];
@@ -313,6 +311,7 @@ extern const char kPluginsPluginsList[];
 extern const char kPluginsDisabledPlugins[];
 extern const char kPluginsDisabledPluginsExceptions[];
 extern const char kPluginsEnabledPlugins[];
+extern const char kEnableNpapi[];
 extern const char kPluginsMigratedToPepperFlash[];
 extern const char kPluginsRemovedOldComponentPepperFlashSettings[];
 #if !defined(OS_ANDROID)
@@ -401,8 +400,8 @@ extern const char kLocalDiscoveryNotificationsEnabled[];
 
 extern const char kPreferenceResetTime[];
 
-extern const char kGCMChannelEnabled[];
 extern const char kPushMessagingRegistrationCount[];
+extern const char kPushMessagingApplicationIdMap[];
 
 extern const char kEasyUnlockAllowed[];
 extern const char kEasyUnlockEnabled[];
@@ -415,6 +414,12 @@ extern const char kZeroSuggestCachedResults[];
 #if defined(ENABLE_EXTENSIONS) && !defined(OS_ANDROID) && !defined(OS_IOS)
 extern const char kCopresenceAuthenticatedDeviceId[];
 extern const char kCopresenceAnonymousDeviceId[];
+extern const char kToolbarIconSurfacingBubbleAcknowledged[];
+extern const char kToolbarIconSurfacingBubbleLastShowTime[];
+#endif
+
+#if defined(ENABLE_WEBRTC)
+extern const char kWebRTCMultipleRoutesEnabled[];
 #endif
 
 // Local state prefs. Please add Profile prefs above instead.
@@ -441,11 +446,11 @@ extern const char kMetricsReportingEnabled[];
 extern const char kCrashReportingEnabled[];
 #endif
 
+extern const char kVariationsCompressedSeed[];
 extern const char kVariationsLastFetchTime[];
 extern const char kVariationsRestrictParameter[];
 extern const char kVariationsSeed[];
 extern const char kVariationsSeedDate[];
-extern const char kVariationsSeedHash[];
 extern const char kVariationsSeedSignature[];
 
 extern const char kDeviceOpenNetworkConfiguration[];
@@ -548,7 +553,6 @@ extern const char kNtpCollapsedSyncPromo[];
 extern const char kNtpDateResourceServer[];
 extern const char kNtpMostVisitedURLsBlacklist[];
 extern const char kNtpPromoDesktopSessionFound[];
-extern const char kNtpPromoResourceCacheUpdate[];
 extern const char kNtpShownBookmarksFolder[];
 extern const char kNtpShownPage[];
 extern const char kNtpTipsResourceServer[];
@@ -590,20 +594,11 @@ extern const char kGeolocationEnabled[];
 #if defined(ENABLE_GOOGLE_NOW)
 extern const char kGoogleGeolocationAccessEnabled[];
 #endif
+extern const char kGoogleNowLauncherEnabled[];
 
 extern const char kDefaultAudioCaptureDevice[];
 extern const char kDefaultVideoCaptureDevice[];
 extern const char kMediaDeviceIdSalt[];
-
-extern const char kRemoteAccessHostFirewallTraversal[];
-extern const char kRemoteAccessHostRequireTwoFactor[];
-extern const char kRemoteAccessHostDomain[];
-extern const char kRemoteAccessHostTalkGadgetPrefix[];
-extern const char kRemoteAccessHostRequireCurtain[];
-extern const char kRemoteAccessHostAllowClientPairing[];
-extern const char kRemoteAccessHostAllowGnubbyAuth[];
-extern const char kRemoteAccessHostAllowRelayedConnection[];
-extern const char kRemoteAccessHostUdpPortRange[];
 
 extern const char kPrintPreviewStickySettings[];
 extern const char kCloudPrintRoot[];
@@ -677,6 +672,8 @@ extern const char kCustomizationDefaultWallpaperURL[];
 extern const char kLogoutStartedLast[];
 extern const char kConsumerManagementStage[];
 extern const char kNewOobe[];
+extern const char kConsumerManagementEnrollmentStage[];
+extern const char kWebviewSigninEnabled[];
 #endif  // defined(OS_CHROMEOS)
 
 extern const char kClearPluginLSODataEnabled[];
@@ -733,6 +730,10 @@ extern const char kMessageCenterShowedFirstRunBalloon[];
 extern const char kMessageCenterShowIcon[];
 extern const char kMessageCenterForcedOnTaskbar[];
 
+#if defined(OS_CHROMEOS)
+extern const char kResolveDeviceTimezoneByGeolocation[];
+#endif  // defined(OS_CHROMEOS)
+
 extern const char kAttemptedToEnableAutoupdate[];
 
 extern const char kMediaGalleriesUniqueId[];
@@ -784,7 +785,6 @@ extern const char kAppListAppLaunchCount[];
 extern const char kAppLauncherHasBeenEnabled[];
 extern const char kAppListEnableMethod[];
 extern const char kAppListEnableTime[];
-extern const char kAppLauncherIsEnabled[];
 extern const char kAppLauncherShortcutVersion[];
 extern const char kShowAppLauncherPromo[];
 extern const char kAppLauncherDriveAppMapping[];
@@ -810,14 +810,20 @@ extern const char kQuickCheckEnabled[];
 extern const char kBrowserGuestModeEnabled[];
 extern const char kBrowserAddPersonEnabled[];
 
+extern const char kEasyUnlockDeviceId[];
 extern const char kEasyUnlockHardlockState[];
 extern const char kEasyUnlockLocalStateTpmKeys[];
+extern const char kEasyUnlockLocalStateUserPrefs[];
 
-extern const char kPasswordBubbleTimeStamp[];
 extern const char kPasswordBubbleNopesCount[];
-extern const char kPasswordBubbleLastInteractions[];
 
 extern const char kRecoveryComponentNeedsElevation[];
+
+extern const char kRegisteredSupervisedUserWhitelists[];
+
+#if defined(ENABLE_EXTENSIONS)
+extern const char kAnimationPolicy[];
+#endif
 
 }  // namespace prefs
 

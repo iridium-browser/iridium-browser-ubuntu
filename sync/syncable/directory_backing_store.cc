@@ -9,11 +9,12 @@
 #include <limits>
 
 #include "base/base64.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
 #include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
@@ -26,6 +27,16 @@
 #include "sync/util/time.h"
 
 using std::string;
+
+namespace {
+
+bool IsSyncBackingDatabase32KEnabled() {
+  const std::string group_name =
+      base::FieldTrialList::FindFullName("SyncBackingDatabase32K");
+  return group_name == "Enabled";
+}
+
+}  // namespace
 
 namespace syncer {
 namespace syncable {
@@ -171,19 +182,18 @@ void AppendColumnList(std::string* output) {
 // DirectoryBackingStore implementation.
 
 DirectoryBackingStore::DirectoryBackingStore(const string& dir_name)
-  : db_(new sql::Connection()),
-    dir_name_(dir_name),
-    needs_column_refresh_(false) {
-  db_->set_histogram_tag("SyncDirectory");
-  db_->set_page_size(4096);
-  db_->set_cache_size(32);
+    : dir_name_(dir_name),
+      database_page_size_(IsSyncBackingDatabase32KEnabled() ? 32768 : 4096),
+      needs_column_refresh_(false) {
+  ResetAndCreateConnection();
 }
 
 DirectoryBackingStore::DirectoryBackingStore(const string& dir_name,
                                              sql::Connection* db)
-  : db_(db),
-    dir_name_(dir_name),
-    needs_column_refresh_(false) {
+    : db_(db),
+      dir_name_(dir_name),
+      database_page_size_(IsSyncBackingDatabase32KEnabled() ? 32768 : 4096),
+      needs_column_refresh_(false) {
 }
 
 DirectoryBackingStore::~DirectoryBackingStore() {
@@ -236,11 +246,11 @@ bool DirectoryBackingStore::SaveChanges(
   if (!transaction.Begin())
     return false;
 
-  PrepareSaveEntryStatement(METAS_TABLE, &save_meta_statment_);
+  PrepareSaveEntryStatement(METAS_TABLE, &save_meta_statement_);
   for (EntryKernelSet::const_iterator i = snapshot.dirty_metas.begin();
        i != snapshot.dirty_metas.end(); ++i) {
     DCHECK((*i)->is_dirty());
-    if (!SaveEntryToDB(&save_meta_statment_, **i))
+    if (!SaveEntryToDB(&save_meta_statement_, **i))
       return false;
   }
 
@@ -248,10 +258,10 @@ bool DirectoryBackingStore::SaveChanges(
     return false;
 
   PrepareSaveEntryStatement(DELETE_JOURNAL_TABLE,
-                            &save_delete_journal_statment_);
+                            &save_delete_journal_statement_);
   for (EntryKernelSet::const_iterator i = snapshot.delete_journals.begin();
        i != snapshot.delete_journals.end(); ++i) {
-    if (!SaveEntryToDB(&save_delete_journal_statment_, **i))
+    if (!SaveEntryToDB(&save_delete_journal_statement_, **i))
       return false;
   }
 
@@ -308,6 +318,11 @@ bool DirectoryBackingStore::SaveChanges(
 }
 
 bool DirectoryBackingStore::InitializeTables() {
+  int page_size = 0;
+  if (IsSyncBackingDatabase32KEnabled() && GetDatabasePageSize(&page_size) &&
+      page_size == 4096) {
+    IncreasePageSizeTo32K();
+  }
   sql::Transaction transaction(db_.get());
   if (!transaction.Begin())
     return false;
@@ -538,8 +553,8 @@ bool DirectoryBackingStore::RefreshColumns() {
   return true;
 }
 
-bool DirectoryBackingStore::LoadEntries(
-    Directory::MetahandlesMap* handles_map) {
+bool DirectoryBackingStore::LoadEntries(Directory::MetahandlesMap* handles_map,
+                                        MetahandleSet* metahandles_to_purge) {
   string select;
   select.reserve(kUpdateStatementBufferSize);
   select.append("SELECT ");
@@ -555,9 +570,23 @@ bool DirectoryBackingStore::LoadEntries(
       return false;
 
     int64 handle = kernel->ref(META_HANDLE);
-    (*handles_map)[handle] = kernel.release();
+    if (SafeToPurgeOnLoading(*kernel))
+      metahandles_to_purge->insert(handle);
+    else
+      (*handles_map)[handle] = kernel.release();
   }
   return s.Succeeded();
+}
+
+bool DirectoryBackingStore::SafeToPurgeOnLoading(
+    const EntryKernel& entry) const {
+  if (entry.ref(IS_DEL)) {
+    if (!entry.ref(IS_UNSYNCED) && !entry.ref(IS_UNAPPLIED_UPDATE))
+      return true;
+    else if (!entry.ref(ID).ServerKnows())
+      return true;
+  }
+  return false;
 }
 
 bool DirectoryBackingStore::LoadDeleteJournals(
@@ -641,21 +670,6 @@ bool DirectoryBackingStore::SaveEntryToDB(sql::Statement* save_statement,
   save_statement->Reset(true);
   BindFields(entry, save_statement);
   return save_statement->Run();
-}
-
-bool DirectoryBackingStore::DropDeletedEntries() {
-  if (!db_->Execute("DELETE FROM metas "
-                    "WHERE is_del > 0 "
-                    "AND is_unsynced < 1 "
-                    "AND is_unapplied_update < 1")) {
-    return false;
-  }
-  if (!db_->Execute("DELETE FROM metas "
-                    "WHERE is_del > 0 "
-                    "AND id LIKE 'c%'")) {
-    return false;
-  }
-  return true;
 }
 
 bool DirectoryBackingStore::SafeDropTable(const char* table_name) {
@@ -1591,6 +1605,42 @@ void DirectoryBackingStore::PrepareSaveEntryStatement(
   query.append(values);
   save_statement->Assign(db_->GetUniqueStatement(
       base::StringPrintf(query.c_str(), "metas").c_str()));
+}
+
+// Get page size for the database.
+bool DirectoryBackingStore::GetDatabasePageSize(int* page_size) {
+  sql::Statement s(db_->GetUniqueStatement("PRAGMA page_size"));
+  if (!s.Step())
+    return false;
+  *page_size = s.ColumnInt(0);
+  return true;
+}
+
+bool DirectoryBackingStore::IncreasePageSizeTo32K() {
+  if (!db_->Execute("PRAGMA page_size=32768;") || !Vacuum()) {
+    return false;
+  }
+  return true;
+}
+
+bool DirectoryBackingStore::Vacuum() {
+  DCHECK_EQ(db_->transaction_nesting(), 0);
+  if (!db_->Execute("VACUUM;")) {
+    return false;
+  }
+  return true;
+}
+
+bool DirectoryBackingStore::needs_column_refresh() const {
+  return needs_column_refresh_;
+}
+
+void DirectoryBackingStore::ResetAndCreateConnection() {
+  db_.reset(new sql::Connection());
+  db_->set_histogram_tag("SyncDirectory");
+  db_->set_exclusive_locking();
+  db_->set_cache_size(32);
+  db_->set_page_size(database_page_size_);
 }
 
 }  // namespace syncable

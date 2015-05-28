@@ -28,7 +28,8 @@ CronetURLRequestAdapter::CronetURLRequestAdapter(
       delegate_(delegate.Pass()),
       initial_url_(url),
       initial_priority_(priority),
-      initial_method_("GET") {
+      initial_method_("GET"),
+      load_flags_(context->default_load_flags()) {
 }
 
 CronetURLRequestAdapter::~CronetURLRequestAdapter() {
@@ -41,15 +42,27 @@ void CronetURLRequestAdapter::AddRequestHeader(const std::string& name,
   initial_request_headers_.SetHeader(name, value);
 }
 
-bool CronetURLRequestAdapter::PostTaskToNetworkThread(
+void CronetURLRequestAdapter::DisableCache() {
+  DCHECK(!IsOnNetworkThread());
+  load_flags_ |= net::LOAD_DISABLE_CACHE;
+}
+
+void CronetURLRequestAdapter::PostTaskToNetworkThread(
     const tracked_objects::Location& from_here,
     const base::Closure& task) {
   DCHECK(!IsOnNetworkThread());
-  return context_->GetNetworkTaskRunner()->PostTask(from_here, task);
+  context_->PostTaskToNetworkThread(from_here, task);
 }
 
 bool CronetURLRequestAdapter::IsOnNetworkThread() const {
-  return context_->GetNetworkTaskRunner()->BelongsToCurrentThread();
+  return context_->IsOnNetworkThread();
+}
+
+void CronetURLRequestAdapter::SetUpload(
+    scoped_ptr<net::UploadDataStream> upload) {
+  DCHECK(!IsOnNetworkThread());
+  DCHECK(!upload_);
+  upload_ = upload.Pass();
 }
 
 void CronetURLRequestAdapter::Start() {
@@ -58,13 +71,13 @@ void CronetURLRequestAdapter::Start() {
           << initial_url_.possibly_invalid_spec().c_str()
           << " priority: " << RequestPriorityToString(initial_priority_);
   url_request_ = context_->GetURLRequestContext()->CreateRequest(
-      initial_url_, net::DEFAULT_PRIORITY, this, NULL);
-  url_request_->SetLoadFlags(net::LOAD_DISABLE_CACHE |
-                             net::LOAD_DO_NOT_SAVE_COOKIES |
-                             net::LOAD_DO_NOT_SEND_COOKIES);
+      initial_url_, net::DEFAULT_PRIORITY, this);
+  url_request_->SetLoadFlags(load_flags_);
   url_request_->set_method(initial_method_);
   url_request_->SetExtraRequestHeaders(initial_request_headers_);
   url_request_->SetPriority(initial_priority_);
+  if (upload_)
+    url_request_->set_upload(upload_.Pass());
   url_request_->Start();
 }
 

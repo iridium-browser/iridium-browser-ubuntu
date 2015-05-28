@@ -35,7 +35,7 @@ class CrosSettingsTest : public testing::Test {
         settings_(DeviceSettingsService::Get()),
         weak_factory_(this) {}
 
-  virtual ~CrosSettingsTest() {}
+  ~CrosSettingsTest() override {}
 
   void TearDown() override {
     ASSERT_TRUE(expected_props_.empty());
@@ -98,9 +98,9 @@ class CrosSettingsTest : public testing::Test {
   ScopedDeviceSettingsTestHelper device_settings_test_helper_;
   CrosSettings settings_;
 
-  base::WeakPtrFactory<CrosSettingsTest> weak_factory_;
-
   std::map<std::string, base::Value*> expected_props_;
+
+  base::WeakPtrFactory<CrosSettingsTest> weak_factory_;
 };
 
 TEST_F(CrosSettingsTest, SetPref) {

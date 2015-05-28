@@ -6,18 +6,14 @@
 
 import logging
 
-from telemetry.core import platform as platform_module
-from telemetry.core import browser
-from telemetry.core import browser_finder_exceptions
-from telemetry.core import possible_browser
-from telemetry.core.platform import cros_device
-from telemetry.core.platform import cros_interface
 from telemetry.core.backends.chrome import cros_browser_backend
 from telemetry.core.backends.chrome import cros_browser_with_oobe
-
-
-def _IsRunningOnCrOS():
-  return platform_module.GetHostPlatform().GetOSName() == 'chromeos'
+from telemetry.core import browser
+from telemetry.core import browser_finder_exceptions
+from telemetry.core import platform as platform_module
+from telemetry.core.platform import cros_device
+from telemetry.core.platform import cros_interface
+from telemetry.core import possible_browser
 
 
 class PossibleCrOSBrowser(possible_browser.PossibleBrowser):
@@ -65,14 +61,14 @@ class PossibleCrOSBrowser(possible_browser.PossibleBrowser):
     pass
 
 def SelectDefaultBrowser(possible_browsers):
-  if _IsRunningOnCrOS():
+  if cros_device.IsRunningOnCrOS():
     for b in possible_browsers:
       if b.browser_type == 'system':
         return b
   return None
 
 def CanFindAvailableBrowsers(finder_options):
-  return (_IsRunningOnCrOS() or
+  return (cros_device.IsRunningOnCrOS() or
           finder_options.cros_remote or
           cros_interface.HasSSH())
 
@@ -84,9 +80,12 @@ def FindAllBrowserTypes(_):
       'system-guest',
   ]
 
-def FindAllAvailableBrowsers(finder_options):
+def FindAllAvailableBrowsers(finder_options, device):
   """Finds all available CrOS browsers, locally and remotely."""
-  if _IsRunningOnCrOS():
+  if not isinstance(device, cros_device.CrOSDevice):
+    return []
+
+  if cros_device.IsRunningOnCrOS():
     return [PossibleCrOSBrowser('system', finder_options,
                                 platform_module.GetHostPlatform(),
                                 is_guest=False),
@@ -94,18 +93,9 @@ def FindAllAvailableBrowsers(finder_options):
                                 platform_module.GetHostPlatform(),
                                 is_guest=True)]
 
-  if finder_options.cros_remote == None:
-    logging.debug('No --remote specified, will not probe for CrOS.')
-    return []
-
-  if not cros_interface.HasSSH():
-    logging.debug('ssh not found. Cannot talk to CrOS devices.')
-    return []
-  device = cros_device.CrOSDevice(
-      finder_options.cros_remote, finder_options.cros_ssh_identity)
   # Check ssh
   try:
-    platform = platform_module.GetPlatformForDevice(device)
+    platform = platform_module.GetPlatformForDevice(device, finder_options)
   except cros_interface.LoginException, ex:
     if isinstance(ex, cros_interface.KeylessLoginRequiredException):
       logging.warn('Could not ssh into %s. Your device must be configured',

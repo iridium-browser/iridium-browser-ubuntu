@@ -79,10 +79,11 @@ class BaseTestServer {
       // Special value used to indicate that any algorithm the server supports
       // is acceptable. Preferred over explicitly OR-ing all key exchange
       // algorithms.
-      KEY_EXCHANGE_ANY     = 0,
+      KEY_EXCHANGE_ANY = 0,
 
-      KEY_EXCHANGE_RSA     = (1 << 0),
+      KEY_EXCHANGE_RSA = (1 << 0),
       KEY_EXCHANGE_DHE_RSA = (1 << 1),
+      KEY_EXCHANGE_ECDHE_RSA = (1 << 2),
     };
 
     // Bitmask of bulk encryption algorithms that the test server supports
@@ -90,16 +91,18 @@ class BaseTestServer {
     enum BulkCipher {
       // Special value used to indicate that any algorithm the server supports
       // is acceptable. Preferred over explicitly OR-ing all ciphers.
-      BULK_CIPHER_ANY    = 0,
+      BULK_CIPHER_ANY = 0,
 
-      BULK_CIPHER_RC4    = (1 << 0),
+      BULK_CIPHER_RC4 = (1 << 0),
       BULK_CIPHER_AES128 = (1 << 1),
       BULK_CIPHER_AES256 = (1 << 2),
 
       // NOTE: 3DES support in the Python test server has external
       // dependencies and not be available on all machines. Clients may not
       // be able to connect if only 3DES is specified.
-      BULK_CIPHER_3DES   = (1 << 3),
+      BULK_CIPHER_3DES = (1 << 3),
+
+      BULK_CIPHER_AES128GCM = (1 << 4),
     };
 
     // NOTE: the values of these enumerators are passed to the the Python test
@@ -208,10 +211,8 @@ class BaseTestServer {
     // Whether to enable NPN support.
     bool enable_npn;
 
-    // Whether to disable TLS session caching. When session caching is
-    // disabled, the server will use an empty session ID in the
-    // ServerHello.
-    bool disable_session_cache;
+    // Whether to send a fatal alert immediately after completing the handshake.
+    bool alert_after_handshake;
   };
 
   // Pass as the 'host' parameter during construction to server on 127.0.0.1
@@ -255,6 +256,11 @@ class BaseTestServer {
   // TYPE_WSS.
   void set_websocket_basic_auth(bool ws_basic_auth) {
     ws_basic_auth_ = ws_basic_auth;
+  }
+
+  // Disable creation of anonymous FTP user.
+  void set_no_anonymous_ftp_user(bool no_anonymous_ftp_user) {
+    no_anonymous_ftp_user_ = no_anonymous_ftp_user;
   }
 
  protected:
@@ -325,6 +331,9 @@ class BaseTestServer {
 
   // Is WebSocket basic HTTP authentication enabled?
   bool ws_basic_auth_;
+
+  // Disable creation of anonymous FTP user?
+  bool no_anonymous_ftp_user_;
 
   scoped_ptr<ScopedPortException> allowed_port_;
 

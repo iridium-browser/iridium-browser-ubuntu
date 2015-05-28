@@ -10,7 +10,6 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8ArrayBuffer.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
-#include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
 #include "core/dom/ContextFeatures.h"
 #include "core/dom/Document.h"
@@ -21,13 +20,11 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8Uint8ClampedArray::wrapperTypeInfo = { gin::kEmbedderBlink, 0, V8Uint8ClampedArray::refObject, V8Uint8ClampedArray::derefObject, V8Uint8ClampedArray::trace, 0, 0, V8Uint8ClampedArray::installConditionallyEnabledMethods, V8Uint8ClampedArray::installConditionallyEnabledProperties, &V8ArrayBufferView::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8Uint8ClampedArray::wrapperTypeInfo = { gin::kEmbedderBlink, 0, V8Uint8ClampedArray::refObject, V8Uint8ClampedArray::derefObject, V8Uint8ClampedArray::trace, 0, 0, V8Uint8ClampedArray::installConditionallyEnabledMethods, V8Uint8ClampedArray::installConditionallyEnabledProperties, "Uint8ClampedArray", &V8ArrayBufferView::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestUint8ClampedArray.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
 // bindings/core/v8/ScriptWrappable.h.
-template<>
-const WrapperTypeInfo& TestUint8ClampedArray::s_wrapperTypeInfo = V8Uint8ClampedArray::wrapperTypeInfo;
 
 bool V8Uint8ClampedArray::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {

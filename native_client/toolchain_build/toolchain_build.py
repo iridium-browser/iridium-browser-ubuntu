@@ -27,23 +27,27 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 NACL_DIR = os.path.dirname(SCRIPT_DIR)
 
 
+# Used here and in toolchain_build_bionic.py
+GCC_VERSION = '4.9.2'
+
+
 # See command.GenerateGitPatches for the schema of entries in this dict.
 # Additionally, each may contain a 'repo' key whose value is the name
 # to use in place of the package name when calling GitUrl (below).
 GIT_REVISIONS = {
     'binutils': {
-        'rev': 'b08b9f0894e43f0bb966f3ad9094a4405ce6f570',
-        'upstream-branch': 'upstream/binutils-2_24-branch',
-        'upstream-name': 'binutils-2.24',
-        # This is tag binutils-2_24, but Gerrit won't let us push
+        'rev': '68b975af7ef47a9d28f21f4c93431f35777a5109',
+        'upstream-branch': 'upstream/binutils-2_25-branch',
+        'upstream-name': 'binutils-2.25',
+        # This is tag binutils-2_25, but Gerrit won't let us push
         # non-annotated tags, and the upstream tag is not annotated.
-        'upstream-base': '237df3fa4a1d939e6fd1af0c3e5029a25a137310',
+        'upstream-base': '68b975af7ef47a9d28f21f4c93431f35777a5109',
         },
     'gcc': {
         'rev': 'b23dd79950a5453d3b3b5a0030d7a1894cafcffe',
         'upstream-branch': 'upstream/gcc-4_9-branch',
-        'upstream-name': 'gcc-4.9.2',
-         # Upstream tag gcc-4_9_2-release:
+        'upstream-name': 'gcc-' + GCC_VERSION,
+         # Upstream tag gcc-<GCC_VERSION>-release:
         'upstream-base': 'c1283af40b65f1ad862cf5b27e2d9ed10b2076b6',
         },
     'newlib': {
@@ -73,14 +77,15 @@ TAR_FILES = {
     }
 
 GIT_BASE_URL = 'https://chromium.googlesource.com/native_client'
-GIT_PUSH_URL = 'ssh://gerrit.chromium.org/native_client'
+GIT_PUSH_URL = 'https://chromium.googlesource.com/native_client'
 
 ALT_GIT_BASE_URL = 'https://chromium.googlesource.com/a/native_client'
 
 KNOWN_MIRRORS = [('http://git.chromium.org/native_client', GIT_BASE_URL)]
 PUSH_MIRRORS = [('http://git.chromium.org/native_client', GIT_PUSH_URL),
                 (ALT_GIT_BASE_URL, GIT_PUSH_URL),
-                (GIT_BASE_URL, GIT_PUSH_URL)]
+                (GIT_BASE_URL, GIT_PUSH_URL),
+                ('ssh://gerrit.chromium.org/native_client', GIT_PUSH_URL)]
 
 
 def GitUrl(package, push_url=False):
@@ -634,8 +639,6 @@ def SDKLibs(host, target):
             'src_include': os.path.join(NACL_DIR, 'src', 'include'),
             'scons.py': os.path.join(NACL_DIR, 'scons.py'),
             'site_scons': os.path.join(NACL_DIR, 'site_scons'),
-            'prep_nacl_sdk':
-                os.path.join(NACL_DIR, 'build', 'prep_nacl_sdk.py'),
         },
         'commands': [
           command.Command(
@@ -719,6 +722,26 @@ def HostTools(host, target):
   def Exe(file):
     return file + WindowsAlternate('.exe', '')
 
+  # The binutils git checkout includes all the directories in the
+  # upstream binutils-gdb.git repository, but some of these
+  # directories are not included in a binutils release tarball.  The
+  # top-level Makefile will try to build whichever of the whole set
+  # exist, but we don't want these extra directories built.  So we
+  # stub them out by creating dummy <subdir>/Makefile files; having
+  # these exist before the configure-<subdir> target in the
+  # top-level Makefile runs prevents it from doing anything.
+  binutils_dummy_dirs = ['gdb', 'libdecnumber', 'readline', 'sim']
+  def DummyDirCommands(dirs):
+    dummy_makefile = """\
+.DEFAULT:;@echo Ignoring $@
+"""
+    commands = []
+    for dir in dirs:
+      commands.append(command.Mkdir(command.path.join('%(cwd)s', dir)))
+      commands.append(command.WriteData(
+        dummy_makefile, command.path.join('%(cwd)s', dir, 'Makefile')))
+    return commands
+
   tools = {
       H('binutils_' + target): {
           'type': 'build',
@@ -730,7 +753,8 @@ def HostTools(host, target):
                   ConfigureTargetArgs(target) + [
                       '--enable-deterministic-archives',
                       '--enable-gold',
-                      ] + WindowsAlternate([], ['--enable-plugins'])),
+                      ] + WindowsAlternate([], ['--enable-plugins']))
+              ] + DummyDirCommands(binutils_dummy_dirs) + [
               command.Command(MakeCommand(host)),
               command.Command(MakeCheckCommand(host)),
               command.Command(MAKE_DESTDIR_CMD + ['install-strip']),

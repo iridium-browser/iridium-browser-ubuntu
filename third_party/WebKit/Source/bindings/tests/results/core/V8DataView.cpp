@@ -10,7 +10,6 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8ArrayBuffer.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
-#include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
 #include "core/dom/ContextFeatures.h"
 #include "core/dom/Document.h"
@@ -21,7 +20,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8DataView::wrapperTypeInfo = { gin::kEmbedderBlink, 0, V8DataView::refObject, V8DataView::derefObject, V8DataView::trace, 0, 0, V8DataView::installConditionallyEnabledMethods, V8DataView::installConditionallyEnabledProperties, &V8ArrayBufferView::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8DataView::wrapperTypeInfo = { gin::kEmbedderBlink, 0, V8DataView::refObject, V8DataView::derefObject, V8DataView::trace, 0, 0, V8DataView::installConditionallyEnabledMethods, V8DataView::installConditionallyEnabledProperties, "DataView", &V8ArrayBufferView::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestDataView.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in

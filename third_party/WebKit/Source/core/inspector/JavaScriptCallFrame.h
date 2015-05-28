@@ -41,8 +41,6 @@
 
 namespace blink {
 
-class ScriptValue;
-
 class JavaScriptCallFrame : public RefCountedWillBeGarbageCollectedFinalized<JavaScriptCallFrame>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
@@ -51,7 +49,7 @@ public:
         return adoptRefWillBeNoop(new JavaScriptCallFrame(debuggerContext, callFrame));
     }
     ~JavaScriptCallFrame();
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     JavaScriptCallFrame* caller();
 
@@ -60,6 +58,8 @@ public:
     int column() const;
     String scriptName() const;
     String functionName() const;
+    int functionLine() const;
+    int functionColumn() const;
 
     v8::Local<v8::Value> scopeChain() const;
     int scopeType(int scopeIndex) const;
@@ -68,9 +68,9 @@ public:
     bool isAtReturn() const;
     v8::Local<v8::Value> returnValue() const;
 
-    ScriptValue evaluateWithExceptionDetails(ScriptState*, const String& expression, const ScriptValue& scopeExtension);
-    v8::Local<v8::Value> restart();
-    ScriptValue setVariableValue(ScriptState*, int scopeNumber, const String& variableName, const ScriptValue& newValue);
+    v8::Local<v8::Value> evaluateWithExceptionDetails(v8::Local<v8::Value> expression, v8::Local<v8::Value> scopeExtension);
+    v8::MaybeLocal<v8::Value> restart();
+    v8::MaybeLocal<v8::Value> setVariableValue(int scopeNumber, v8::Local<v8::Value> variableName, v8::Local<v8::Value> newValue);
 
     static v8::Local<v8::Object> createExceptionDetails(v8::Isolate*, v8::Local<v8::Message>);
 

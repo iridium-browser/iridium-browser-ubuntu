@@ -1,10 +1,17 @@
 {
   'variables': {
     'pdf_use_skia%': 0,
+    'conditions': [
+      ['OS=="linux"', {
+        'bundle_freetype%': 0,
+      }, {  # On Android there's no system FreeType. On Windows and Mac, only a
+            # few methods are used from it.
+        'bundle_freetype%': 1,
+      }],    
+    ],
   },
   'target_defaults': {
     'defines' : [
-      'FT2_BUILD_LIBRARY',
       '_FPDFSDK_LIB',
       '_NO_GDIPLUS_',  # workaround text rendering issues on Windows
       'OPJ_STATIC',
@@ -38,8 +45,7 @@
       'type': 'static_library',
       'dependencies': [
         'third_party/third_party.gyp:bigint',
-        'third_party/third_party.gyp:freetype',
-        'third_party/third_party.gyp:safemath',
+        'third_party/third_party.gyp:pdfium_base',
         'fdrm',
         'fpdfdoc',
         'fpdfapi',
@@ -101,6 +107,17 @@
           'sources!': [
             'fpdfsdk/src/fpdfsdkdll.rc',
           ],
+        }],
+        ['bundle_freetype==1', {
+          'dependencies': [
+            'third_party/third_party.gyp:freetype',
+          ],
+        }, {
+          'link_settings': {
+            'libraries': [
+              '-lfreetype',
+            ],
+          },
         }],
       ],
       'all_dependent_settings': {
@@ -255,7 +272,6 @@
         'core/src/fpdfapi/fpdf_font/fpdf_font.cpp',
         'core/src/fpdfapi/fpdf_font/fpdf_font_charset.cpp',
         'core/src/fpdfapi/fpdf_font/fpdf_font_cid.cpp',
-        'core/src/fpdfapi/fpdf_font/fpdf_font_utility.cpp',
         'core/src/fpdfapi/fpdf_font/ttgsubtable.cpp',
         'core/src/fpdfapi/fpdf_font/ttgsubtable.h',
         'core/src/fpdfapi/fpdf_page/fpdf_page.cpp',
@@ -347,7 +363,6 @@
         'core/src/fxcodec/fx_libopenjpeg/src/fx_pi.c',
         'core/src/fxcodec/fx_libopenjpeg/src/fx_raw.c',
         'core/src/fxcodec/fx_libopenjpeg/src/fx_t1.c',
-        'core/src/fxcodec/fx_libopenjpeg/src/fx_t1_generate_luts.c',
         'core/src/fxcodec/fx_libopenjpeg/src/fx_t2.c',
         'core/src/fxcodec/fx_libopenjpeg/src/fx_tcd.c',
         'core/src/fxcodec/fx_libopenjpeg/src/fx_tgt.c',
@@ -500,6 +515,7 @@
         'core/include/fxcrt/fx_ucd.h',
         'core/include/fxcrt/fx_xml.h',
         'core/src/fxcrt/extension.h',
+        'core/src/fxcrt/fx_safe_types.h',
         'core/src/fxcrt/fxcrt_platforms.cpp',
         'core/src/fxcrt/fxcrt_platforms.h',
         'core/src/fxcrt/fxcrt_posix.cpp',
@@ -703,13 +719,12 @@
     {
       'target_name': 'javascript',
       'type': 'static_library',
-        'include_dirs': [
-          '<(DEPTH)/v8',
-          '<(DEPTH)/v8/include',
-        ],
+      'include_dirs': [
+        '<(DEPTH)/v8',
+        '<(DEPTH)/v8/include',
+      ],
       'dependencies': [
         '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
-        '<(DEPTH)/v8/tools/gyp/v8.gyp:v8_libplatform',
       ],
       'export_dependent_settings': [
         '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
@@ -727,7 +742,6 @@
         'fpdfsdk/include/javascript/Icon.h',
         'fpdfsdk/include/javascript/IJavaScript.h',
         'fpdfsdk/include/javascript/JavaScript.h',
-        'fpdfsdk/include/javascript/JS_Console.h',
         'fpdfsdk/include/javascript/JS_Context.h',
         'fpdfsdk/include/javascript/JS_Define.h',
         'fpdfsdk/include/javascript/JS_EventHandler.h',
@@ -757,6 +771,7 @@
         'fpdfsdk/src/javascript/JS_Value.cpp',
         'fpdfsdk/src/javascript/PublicMethods.cpp',
         'fpdfsdk/src/javascript/report.cpp',
+        'fpdfsdk/src/javascript/resource.cpp',
         'fpdfsdk/src/javascript/util.cpp',
       ],
     },
@@ -821,9 +836,37 @@
         '<(DEPTH)'
       ],
       'sources': [
+        'core/src/fpdfapi/fpdf_parser/fpdf_parser_decode_unittest.cpp',
+        'core/src/fxcodec/codec/fx_codec_jpx_unittest.cpp',
+        'core/src/fxcrt/fx_basic_bstring_unittest.cpp',
+        'core/src/fxcrt/fx_basic_wstring_unittest.cpp',
         'testing/fx_string_testhelpers.h',
         'testing/fx_string_testhelpers.cpp',
-        'core/src/fxcrt/fx_basic_bstring_unittest.cpp',
+      ],
+    },
+    {
+      'target_name': 'pdfium_embeddertests',
+      'type': 'executable',
+      'dependencies': [
+        '<(DEPTH)/testing/gmock.gyp:gmock',
+        '<(DEPTH)/testing/gtest.gyp:gtest',
+        'pdfium',
+      ],
+      'include_dirs': [
+        '<(DEPTH)'
+      ],
+      'sources': [
+        'core/src/fpdfapi/fpdf_parser/fpdf_parser_parser_embeddertest.cpp',
+        'fpdfsdk/src/fpdf_dataavail_embeddertest.cpp',
+        'fpdfsdk/src/fpdfdoc_embeddertest.cpp',
+        'fpdfsdk/src/fpdfformfill_embeddertest.cpp',
+        'fpdfsdk/src/fpdftext_embeddertest.cpp',
+        'fpdfsdk/src/fpdfview_embeddertest.cpp',
+        'testing/embedder_test.cpp',
+        'testing/embedder_test.h',
+        'testing/embedder_test_mock_delegate.h',
+        'testing/fx_string_testhelpers.cpp',
+        'testing/fx_string_testhelpers.h',
       ],
     },
   ],

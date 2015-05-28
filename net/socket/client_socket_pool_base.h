@@ -42,10 +42,10 @@
 #include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_export.h"
-#include "net/base/net_log.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/priority_queue.h"
 #include "net/base/request_priority.h"
+#include "net/log/net_log.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/client_socket_pool.h"
 #include "net/socket/stream_socket.h"
@@ -383,7 +383,9 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
           static_cast<int>(idle_sockets_.size());
     }
 
-    bool IsStalledOnPoolMaxSockets(int max_sockets_per_group) const {
+    // Returns true if the group could make use of an additional socket slot, if
+    // it were given one.
+    bool CanUseAdditionalSocketSlot(int max_sockets_per_group) const {
       return HasAvailableSocketSlot(max_sockets_per_group) &&
           pending_requests_.size() > jobs_.size();
     }
@@ -700,17 +702,17 @@ class ClientSocketPoolBase {
   // long to leave an unused idle socket open before closing it.
   // |used_idle_socket_timeout| specifies how long to leave a previously used
   // idle socket open before closing it.
-  ClientSocketPoolBase(
-      HigherLayeredPool* self,
-      int max_sockets,
-      int max_sockets_per_group,
-      ClientSocketPoolHistograms* histograms,
-      base::TimeDelta unused_idle_socket_timeout,
-      base::TimeDelta used_idle_socket_timeout,
-      ConnectJobFactory* connect_job_factory)
-      : histograms_(histograms),
-        helper_(self, max_sockets, max_sockets_per_group,
-                unused_idle_socket_timeout, used_idle_socket_timeout,
+  ClientSocketPoolBase(HigherLayeredPool* self,
+                       int max_sockets,
+                       int max_sockets_per_group,
+                       base::TimeDelta unused_idle_socket_timeout,
+                       base::TimeDelta used_idle_socket_timeout,
+                       ConnectJobFactory* connect_job_factory)
+      : helper_(self,
+                max_sockets,
+                max_sockets_per_group,
+                unused_idle_socket_timeout,
+                used_idle_socket_timeout,
                 new ConnectJobFactoryAdaptor(connect_job_factory)) {}
 
   virtual ~ClientSocketPoolBase() {}
@@ -822,10 +824,6 @@ class ClientSocketPoolBase {
     return helper_.ConnectionTimeout();
   }
 
-  ClientSocketPoolHistograms* histograms() const {
-    return histograms_;
-  }
-
   void EnableConnectBackupJobs() { helper_.EnableConnectBackupJobs(); }
 
   bool CloseOneIdleSocket() { return helper_.CloseOneIdleSocket(); }
@@ -866,8 +864,6 @@ class ClientSocketPoolBase {
     const scoped_ptr<ConnectJobFactory> connect_job_factory_;
   };
 
-  // Histograms for the pool
-  ClientSocketPoolHistograms* const histograms_;
   internal::ClientSocketPoolBaseHelper helper_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientSocketPoolBase);

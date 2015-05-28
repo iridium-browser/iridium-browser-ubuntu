@@ -13,10 +13,14 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "ipc/ipc_channel_handle.h"
+#include "ipc/ipc_message_attachment.h"
+#include "ipc/ipc_message_attachment_set.h"
 
 #if defined(OS_POSIX)
-#include "ipc/file_descriptor_set_posix.h"
-#elif defined(OS_WIN)
+#include "ipc/ipc_platform_file_attachment_posix.h"
+#endif
+
+#if defined(OS_WIN)
 #include <tchar.h>
 #endif
 
@@ -339,15 +343,9 @@ void ParamTraits<std::string>::Log(const param_type& p, std::string* l) {
   l->append(p);
 }
 
-void ParamTraits<std::wstring>::Log(const param_type& p, std::string* l) {
-  l->append(base::WideToUTF8(p));
-}
-
-#if !defined(WCHAR_T_IS_UTF16)
 void ParamTraits<base::string16>::Log(const param_type& p, std::string* l) {
   l->append(base::UTF16ToUTF8(p));
 }
-#endif
 
 void ParamTraits<std::vector<char> >::Write(Message* m, const param_type& p) {
   if (p.empty()) {
@@ -466,10 +464,11 @@ void ParamTraits<base::FileDescriptor>::Write(Message* m, const param_type& p) {
     return;
 
   if (p.auto_close) {
-    if (!m->WriteFile(base::ScopedFD(p.fd)))
+    if (!m->WriteAttachment(
+            new internal::PlatformFileAttachment(base::ScopedFD(p.fd))))
       NOTREACHED();
   } else {
-    if (!m->WriteBorrowingFile(p.fd))
+    if (!m->WriteAttachment(new internal::PlatformFileAttachment(p.fd)))
       NOTREACHED();
   }
 }
@@ -487,11 +486,11 @@ bool ParamTraits<base::FileDescriptor>::Read(const Message* m,
   if (!valid)
     return true;
 
-  base::ScopedFD fd;
-  if (!m->ReadFile(iter, &fd))
+  scoped_refptr<MessageAttachment> attachment;
+  if (!m->ReadAttachment(iter, &attachment))
     return false;
 
-  *r = base::FileDescriptor(fd.release(), true);
+  *r = base::FileDescriptor(attachment->TakePlatformFile(), true);
   return true;
 }
 
@@ -727,7 +726,7 @@ void ParamTraits<Message>::Write(Message* m, const Message& p) {
 #if defined(OS_POSIX)
   // We don't serialize the file descriptors in the nested message, so there
   // better not be any.
-  DCHECK(!p.HasFileDescriptors());
+  DCHECK(!p.HasAttachments());
 #endif
 
   // Don't just write out the message. This is used to send messages between

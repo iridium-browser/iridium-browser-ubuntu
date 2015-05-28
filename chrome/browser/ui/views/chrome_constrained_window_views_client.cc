@@ -21,10 +21,8 @@ class ChromeConstrainedWindowViewsClient
   // ConstrainedWindowViewsClient:
   content::WebContents* GetEmbedderWebContents(
       content::WebContents* initiator_web_contents) override {
-    extensions::GuestViewBase* guest_view =
-        extensions::GuestViewBase::FromWebContents(initiator_web_contents);
-    return guest_view && guest_view->embedder_web_contents() ?
-        guest_view->embedder_web_contents() : initiator_web_contents;
+    return extensions::GuestViewBase::GetTopLevelWebContents(
+        initiator_web_contents);
   }
   web_modal::ModalDialogHost* GetModalDialogHost(
       gfx::NativeWindow parent) override {

@@ -66,7 +66,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
 
   // The specified RenderFrame stopped loading a page. This corresponds to
   // Blink's notion of the throbber stopping.
-  virtual void DidStopLoading(RenderFrameHost* render_frame_host) {}
+  virtual void DidStopLoading() {}
 
   // The RenderFrameHost has been swapped out.
   virtual void SwappedOut(RenderFrameHost* render_frame_host) {}
@@ -103,6 +103,10 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Another page accessed the top-level initial empty document, which means it
   // is no longer safe to display a pending URL without risking a URL spoof.
   virtual void DidAccessInitialDocument() {}
+
+  // The frame changed its window.name property.
+  virtual void DidChangeName(RenderFrameHost* render_frame_host,
+                             const std::string& name) {}
 
   // The frame set its opener to null, disowning it for the lifetime of the
   // window. Only called for the top-level frame.
@@ -148,12 +152,21 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   virtual void AccessibilityEventReceived(
       const std::vector<AXEventNotificationDetails>& details) {}
 
-  // Find a guest RenderFrameHost by its browser plugin instance id.
+  // Find a guest RenderFrameHost by its parent |render_frame_host| and
+  // |browser_plugin_instance_id|.
   virtual RenderFrameHost* GetGuestByInstanceID(
+      RenderFrameHost* render_frame_host,
       int browser_plugin_instance_id);
 
   // Gets the GeolocationServiceContext associated with this delegate.
   virtual GeolocationServiceContext* GetGeolocationServiceContext();
+
+  // Notification that the frame wants to go into fullscreen mode.
+  // |origin| represents the origin of the frame that requests fullscreen.
+  virtual void EnterFullscreenMode(const GURL& origin) {}
+
+  // Notification that the frame wants to go out of fullscreen mode.
+  virtual void ExitFullscreenMode() {}
 
 #if defined(OS_WIN)
   // Returns the frame's parent's NativeViewAccessible.

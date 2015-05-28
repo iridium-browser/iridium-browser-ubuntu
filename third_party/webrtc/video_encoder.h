@@ -29,11 +29,9 @@ class EncodedImageCallback {
   virtual ~EncodedImageCallback() {}
 
   // Callback function which is called when an image has been encoded.
-  // TODO(pbos): Remove default arguments.
-  virtual int32_t Encoded(
-      const EncodedImage& encoded_image,
-      const CodecSpecificInfo* codec_specific_info = NULL,
-      const RTPFragmentationHeader* fragmentation = NULL) = 0;
+  virtual int32_t Encoded(const EncodedImage& encoded_image,
+                          const CodecSpecificInfo* codec_specific_info,
+                          const RTPFragmentationHeader* fragmentation) = 0;
 };
 
 class VideoEncoder {
@@ -109,7 +107,7 @@ class VideoEncoder {
   //          - rtt         : Round-trip time in milliseconds
   // Return value           : WEBRTC_VIDEO_CODEC_OK if OK
   //                          <0 - Errors: WEBRTC_VIDEO_CODEC_ERROR
-  virtual int32_t SetChannelParameters(uint32_t packet_loss, int rtt) = 0;
+  virtual int32_t SetChannelParameters(uint32_t packet_loss, int64_t rtt) = 0;
 
   // Inform the encoder about the new target bit rate.
   //

@@ -91,6 +91,7 @@ class StatusCatcher {
 void SaveResponseCallback(bool* called,
                           int64* store_registration_id,
                           ServiceWorkerStatusCode status,
+                          const std::string& status_message,
                           int64 registration_id) {
   EXPECT_EQ(SERVICE_WORKER_OK, status) << ServiceWorkerStatusToString(status);
   *called = true;
@@ -122,7 +123,8 @@ class GeofencingManagerTest : public testing::Test {
   }
 
   void SetUp() override {
-    helper_.reset(new EmbeddedWorkerTestHelper(kRenderProcessId));
+    helper_.reset(
+        new EmbeddedWorkerTestHelper(base::FilePath(), kRenderProcessId));
     service_ = new TestGeofencingService();
     manager_ = new GeofencingManager(helper_->context_wrapper());
     manager_->SetServiceForTesting(service_);
@@ -156,9 +158,12 @@ class GeofencingManagerTest : public testing::Test {
     EXPECT_FALSE(called);
     base::RunLoop().RunUntilIdle();
     EXPECT_TRUE(called);
-
-    return make_scoped_refptr(new ServiceWorkerRegistration(
-        pattern, registration_id, helper_->context()->AsWeakPtr()));
+    scoped_refptr<ServiceWorkerRegistration> worker(
+        new ServiceWorkerRegistration(pattern, registration_id,
+                                      helper_->context()->AsWeakPtr()));
+    // ServiceWorkerRegistration posts a notification task on construction.
+    base::RunLoop().RunUntilIdle();
+    return worker;
   }
 
   void UnregisterServiceWorker(

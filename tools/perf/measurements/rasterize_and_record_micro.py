@@ -5,7 +5,7 @@
 import sys
 import time
 
-from telemetry.core.util import TimeoutException
+from telemetry.core import exceptions
 from telemetry.page import page_test
 from telemetry.value import scalar
 
@@ -13,7 +13,7 @@ from telemetry.value import scalar
 class RasterizeAndRecordMicro(page_test.PageTest):
   def __init__(self, start_wait_time=2, rasterize_repeat=100, record_repeat=100,
                timeout=120, report_detailed_results=False):
-    super(RasterizeAndRecordMicro, self).__init__('')
+    super(RasterizeAndRecordMicro, self).__init__()
     self._chrome_branch_number = None
     self._start_wait_time = start_wait_time
     self._rasterize_repeat = rasterize_repeat
@@ -31,7 +31,7 @@ class RasterizeAndRecordMicro(page_test.PageTest):
   def ValidateAndMeasurePage(self, page, tab, results):
     try:
       tab.WaitForDocumentReadyStateToBeComplete()
-    except TimeoutException:
+    except exceptions.TimeoutException:
       pass
     time.sleep(self._start_wait_time)
 
@@ -83,14 +83,24 @@ class RasterizeAndRecordMicro(page_test.PageTest):
         picture_memory_usage))
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'record_time', 'ms', record_time))
+
     record_time_sk_null_canvas = data['record_time_sk_null_canvas_ms']
     record_time_painting_disabled = data['record_time_painting_disabled_ms']
+    # TODO(schenney): Remove this workaround when reference builds get past
+    # the change that adds this comment.
+    if ('record_time_caching_disabled_ms' in data):
+      record_time_caching_disabled = data['record_time_caching_disabled_ms']
+    else:
+      record_time_caching_disabled = 0
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'record_time_sk_null_canvas', 'ms',
         record_time_sk_null_canvas))
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'record_time_painting_disabled', 'ms',
         record_time_painting_disabled))
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'record_time_caching_disabled', 'ms',
+        record_time_caching_disabled))
 
     if self._report_detailed_results:
       pixels_rasterized_with_non_solid_color = \

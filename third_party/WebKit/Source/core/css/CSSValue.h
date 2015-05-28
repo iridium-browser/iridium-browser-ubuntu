@@ -30,8 +30,6 @@
 
 namespace blink {
 
-enum CSSTextFormattingFlags { QuoteCSSStringIfNeeded, AlwaysQuoteCSSString };
-
 class CSSValue : public RefCountedWillBeGarbageCollectedFinalized<CSSValue> {
 public:
     // Override RefCounted's deref() to ensure operator delete is called on
@@ -76,10 +74,8 @@ public:
     bool isShadowValue() const { return m_classType == ShadowClass; }
     bool isCubicBezierTimingFunctionValue() const { return m_classType == CubicBezierTimingFunctionClass; }
     bool isStepsTimingFunctionValue() const { return m_classType == StepsTimingFunctionClass; }
-    bool isTransformValue() const { return m_classType == CSSTransformClass; }
     bool isLineBoxContainValue() const { return m_classType == LineBoxContainClass; }
     bool isCalcValue() const {return m_classType == CalculationClass; }
-    bool isFilterValue() const { return m_classType == CSSFilterClass; }
     bool isGridTemplateAreasValue() const { return m_classType == GridTemplateAreasClass; }
     bool isSVGDocumentValue() const { return m_classType == CSSSVGDocumentClass; }
     bool isContentDistributionValue() const { return m_classType == CSSContentDistributionClass; }
@@ -91,8 +87,8 @@ public:
     bool equals(const CSSValue&) const;
 
     void finalizeGarbageCollectedObject();
-    void traceAfterDispatch(Visitor*) { }
-    void trace(Visitor*);
+    DEFINE_INLINE_TRACE_AFTER_DISPATCH() { }
+    DECLARE_TRACE();
 
 protected:
 
@@ -119,7 +115,6 @@ protected:
         FontFeatureClass,
         FontClass,
         FontFaceSrcClass,
-        FunctionClass,
 
         InheritedClass,
         InitialClass,
@@ -140,9 +135,8 @@ protected:
 
         // List class types must appear after ValueListClass.
         ValueListClass,
+        FunctionClass,
         ImageSetClass,
-        CSSFilterClass,
-        CSSTransformClass,
         GridLineNamesClass,
         // Do not append non-list class types here.
     };
@@ -225,6 +219,8 @@ inline bool compareCSSValuePtr(const Member<CSSValueType>& first, const Member<C
 
 #define DEFINE_CSS_VALUE_TYPE_CASTS(thisType, predicate) \
     DEFINE_TYPE_CASTS(thisType, CSSValue, value, value->predicate, value.predicate)
+
+WILL_HAVE_ALL_INSTANCES_ON_SAME_GC_HEAP(CSSValue);
 
 } // namespace blink
 

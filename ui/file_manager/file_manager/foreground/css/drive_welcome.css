@@ -4,6 +4,7 @@
 
 /* Google Drive welcome banners.*/
 .drive-welcome-wrapper {
+  background-color: white;
   /* This image looks good in high DPI as is. */
   background-image: url(chrome://resources/images/clouds.png);
   background-repeat: repeat-x;
@@ -44,7 +45,7 @@
   border-color: #C6C6C6;
   box-shadow: 0 1px 1px rgba(0,0,0,0.1);
   color: #222;
-  transition: all 0;
+  transition: all 0ms;
 }
 
 .drive-welcome-button:active {
@@ -74,7 +75,7 @@
   height: 100px;
   overflow: hidden;
   position: relative;
-  transition: height 180ms ease, visibility 0 linear 180ms;
+  transition: height 180ms ease, visibility 0ms linear 180ms;
 }
 
 .dialog-container:not([drive-welcome='header']) .drive-welcome.header {

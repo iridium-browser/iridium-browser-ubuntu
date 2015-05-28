@@ -17,7 +17,9 @@
     '../..',
   ],
   'sources': [
+    'services/proc_util_unittest.cc',
     'services/scoped_process_unittest.cc',
+    'services/resource_limits_unittests.cc',
     'services/syscall_wrappers_unittest.cc',
     'services/thread_helpers_unittests.cc',
     'services/yama_unittests.cc',
@@ -34,28 +36,34 @@
     [ 'compile_suid_client==1', {
       'sources': [
         'suid/client/setuid_sandbox_client_unittest.cc',
+        'suid/client/setuid_sandbox_host_unittest.cc',
       ],
     }],
     [ 'use_seccomp_bpf==1', {
       'sources': [
-        'bpf_dsl/bpf_dsl_more_unittest.cc',
         'bpf_dsl/bpf_dsl_unittest.cc',
+        'bpf_dsl/codegen_unittest.cc',
         'bpf_dsl/cons_unittest.cc',
+        'bpf_dsl/syscall_set_unittest.cc',
+        'integration_tests/bpf_dsl_seccomp_unittest.cc',
+        'integration_tests/seccomp_broker_process_unittest.cc',
         'seccomp-bpf-helpers/baseline_policy_unittest.cc',
         'seccomp-bpf-helpers/syscall_parameters_restrictions_unittests.cc',
         'seccomp-bpf/bpf_tests_unittest.cc',
-        'seccomp-bpf/codegen_unittest.cc',
         'seccomp-bpf/errorcode_unittest.cc',
         'seccomp-bpf/sandbox_bpf_unittest.cc',
-        'seccomp-bpf/syscall_iterator_unittest.cc',
         'seccomp-bpf/syscall_unittest.cc',
       ],
     }],
     [ 'compile_credentials==1', {
       'sources': [
+        'integration_tests/namespace_unix_domain_socket_unittest.cc',
         'services/credentials_unittest.cc',
-        'services/proc_util_unittest.cc',
-        'services/unix_domain_socket_unittest.cc',
+        'services/namespace_sandbox_unittest.cc',
+        'services/namespace_utils_unittest.cc',
+      ],
+      'dependencies': [
+        '../build/linux/system.gyp:libcap'
       ],
     }],
   ],

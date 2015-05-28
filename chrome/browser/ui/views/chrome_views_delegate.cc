@@ -13,7 +13,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_window_state.h"
-#include "chrome/browser/ui/views/accessibility/accessibility_event_router_views.h"
+#include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/context_factory.h"
 #include "grit/chrome_unscaled_resources.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -26,6 +26,7 @@
 #if defined(OS_WIN)
 #include <dwmapi.h>
 #include <shellapi.h>
+#include "base/profiler/scoped_tracker.h"
 #include "base/task_runner_util.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/app_icon_win.h"
@@ -34,6 +35,7 @@
 #endif
 
 #if defined(USE_AURA)
+#include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #endif
@@ -51,7 +53,6 @@
 #if defined(USE_ASH)
 #include "ash/shell.h"
 #include "ash/wm/window_state.h"
-#include "chrome/browser/ui/ash/accessibility/automation_manager_ash.h"
 #include "chrome/browser/ui/ash/ash_init.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #endif
@@ -86,6 +87,12 @@ PrefService* GetPrefsForWindow(const views::Widget* window) {
 #if defined(OS_WIN)
 bool MonitorHasTopmostAutohideTaskbarForEdge(UINT edge, HMONITOR monitor) {
   APPBARDATA taskbar_data = { sizeof(APPBARDATA), NULL, 0, edge };
+
+  // TODO(robliao): Remove ScopedTracker below once crbug.com/462368 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "462368 MonitorHasTopmostAutohideTaskbarForEdge"));
+
   // MSDN documents an ABM_GETAUTOHIDEBAREX, which supposedly takes a monitor
   // rect and returns autohide bars on that monitor.  This sounds like a good
   // idea for multi-monitor systems.  Unfortunately, it appears to not work at
@@ -206,23 +213,10 @@ bool ChromeViewsDelegate::GetSavedWindowPlacement(
 
 void ChromeViewsDelegate::NotifyAccessibilityEvent(
     views::View* view, ui::AXEvent event_type) {
-  AccessibilityEventRouterViews::GetInstance()->HandleAccessibilityEvent(
-      view, event_type);
-
-#if defined(USE_ASH)
-  AutomationManagerAsh::GetInstance()->HandleEvent(
+#if defined(USE_AURA)
+  AutomationManagerAura::GetInstance()->HandleEvent(
       GetProfileForWindow(view->GetWidget()), view, event_type);
 #endif
-}
-
-void ChromeViewsDelegate::NotifyMenuItemFocused(
-    const base::string16& menu_name,
-    const base::string16& menu_item_name,
-    int item_index,
-    int item_count,
-    bool has_submenu) {
-  AccessibilityEventRouterViews::GetInstance()->HandleMenuItemFocused(
-      menu_name, menu_item_name, item_index, item_count, has_submenu);
 }
 
 #if defined(OS_WIN)
@@ -388,6 +382,10 @@ bool ChromeViewsDelegate::WindowManagerProvidesTitleBar(bool maximized) {
 
 ui::ContextFactory* ChromeViewsDelegate::GetContextFactory() {
   return content::GetContextFactory();
+}
+
+std::string ChromeViewsDelegate::GetApplicationName() {
+  return chrome::VersionInfo().Name();
 }
 
 #if defined(OS_WIN)

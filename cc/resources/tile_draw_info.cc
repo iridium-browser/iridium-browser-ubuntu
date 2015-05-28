@@ -21,14 +21,14 @@ bool TileDrawInfo::IsReadyToDraw() const {
     case RESOURCE_MODE:
       return !!resource_;
     case SOLID_COLOR_MODE:
-    case PICTURE_PILE_MODE:
+    case OOM_MODE:
       return true;
   }
   NOTREACHED();
   return false;
 }
 
-void TileDrawInfo::AsValueInto(base::debug::TracedValue* state) const {
+void TileDrawInfo::AsValueInto(base::trace_event::TracedValue* state) const {
   state->SetBoolean("is_solid_color", mode_ == SOLID_COLOR_MODE);
   state->SetBoolean("is_transparent",
                     mode_ == SOLID_COLOR_MODE && !SkColorGetA(solid_color_));

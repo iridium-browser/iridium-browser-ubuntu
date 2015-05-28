@@ -10,8 +10,9 @@
 #include "content/public/renderer/render_frame_observer_tracker.h"
 #include "content/public/renderer/render_thread.h"
 #include "extensions/common/extensions_client.h"
-#include "extensions/renderer/default_dispatcher_delegate.h"
 #include "extensions/renderer/dispatcher.h"
+#include "extensions/renderer/dispatcher_delegate.h"
+#include "extensions/renderer/extension_frame_helper.h"
 #include "extensions/renderer/extension_helper.h"
 #include "extensions/renderer/guest_view/extensions_guest_view_container.h"
 #include "extensions/renderer/guest_view/guest_view_container.h"
@@ -23,8 +24,8 @@
 #if !defined(DISABLE_NACL)
 #include "components/nacl/common/nacl_constants.h"
 #include "components/nacl/renderer/nacl_helper.h"
+#include "components/nacl/renderer/ppb_nacl_private.h"
 #include "components/nacl/renderer/ppb_nacl_private_impl.h"
-#include "ppapi/c/private/ppb_nacl_private.h"
 #endif
 
 using blink::WebFrame;
@@ -32,44 +33,6 @@ using blink::WebString;
 using content::RenderThread;
 
 namespace extensions {
-
-namespace {
-
-// TODO: promote ExtensionFrameHelper to a common place and share with this.
-class ShellFrameHelper
-    : public content::RenderFrameObserver,
-      public content::RenderFrameObserverTracker<ShellFrameHelper> {
- public:
-  ShellFrameHelper(content::RenderFrame* render_frame,
-                   Dispatcher* extension_dispatcher);
-  ~ShellFrameHelper() override;
-
-  // RenderFrameObserver implementation.
-  void WillReleaseScriptContext(v8::Handle<v8::Context>, int world_id) override;
-
- private:
-  Dispatcher* extension_dispatcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShellFrameHelper);
-};
-
-ShellFrameHelper::ShellFrameHelper(content::RenderFrame* render_frame,
-                                   Dispatcher* extension_dispatcher)
-    : content::RenderFrameObserver(render_frame),
-      content::RenderFrameObserverTracker<ShellFrameHelper>(render_frame),
-      extension_dispatcher_(extension_dispatcher) {
-}
-
-ShellFrameHelper::~ShellFrameHelper() {
-}
-
-void ShellFrameHelper::WillReleaseScriptContext(v8::Handle<v8::Context> context,
-                                                int world_id) {
-  extension_dispatcher_->WillReleaseScriptContext(
-      render_frame()->GetWebFrame(), context, world_id);
-}
-
-}  // namespace
 
 ShellContentRendererClient::ShellContentRendererClient() {
 }
@@ -86,7 +49,7 @@ void ShellContentRendererClient::RenderThreadStarted() {
   extensions_renderer_client_.reset(new ShellExtensionsRendererClient);
   ExtensionsRendererClient::Set(extensions_renderer_client_.get());
 
-  extension_dispatcher_delegate_.reset(new DefaultDispatcherDelegate());
+  extension_dispatcher_delegate_.reset(new DispatcherDelegate());
 
   // Must be initialized after ExtensionsRendererClient.
   extension_dispatcher_.reset(
@@ -99,8 +62,8 @@ void ShellContentRendererClient::RenderThreadStarted() {
 
 void ShellContentRendererClient::RenderFrameCreated(
     content::RenderFrame* render_frame) {
-  // ShellFrameHelper destroys itself when the RenderFrame is destroyed.
-  new ShellFrameHelper(render_frame, extension_dispatcher_.get());
+  // ExtensionFrameHelper destroys itself when the RenderFrame is destroyed.
+  new ExtensionFrameHelper(render_frame, extension_dispatcher_.get());
 
   // TODO(jamescook): Do we need to add a new PepperHelper(render_frame) here?
   // It doesn't seem necessary for either Pepper or NaCl.
@@ -145,15 +108,6 @@ bool ShellContentRendererClient::WillSendRequest(
     GURL* new_url) {
   // TODO(jamescook): Cause an error for bad extension scheme requests?
   return false;
-}
-
-void ShellContentRendererClient::DidCreateScriptContext(
-    WebFrame* frame,
-    v8::Handle<v8::Context> context,
-    int extension_group,
-    int world_id) {
-  extension_dispatcher_->DidCreateScriptContext(
-      frame, context, extension_group, world_id);
 }
 
 const void* ShellContentRendererClient::CreatePPAPIInterface(

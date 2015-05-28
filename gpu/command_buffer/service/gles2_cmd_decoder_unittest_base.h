@@ -142,6 +142,10 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
     return group_->GetTransformFeedbackServiceId(client_id, service_id);
   }
 
+  bool GetSyncServiceId(GLuint client_id, GLsync* service_id) const {
+    return group_->GetSyncServiceId(client_id, service_id);
+  }
+
   // This name doesn't match the underlying function, but doing it this way
   // prevents the need to special-case the unit test generation
   VertexAttribManager* GetVertexArrayInfo(GLuint client_id) {
@@ -160,12 +164,22 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
     return group_->pending_valuebuffer_state();
   }
 
+  FeatureInfo* feature_info() {
+    return group_->feature_info();
+  }
+
   ImageManager* GetImageManager() { return decoder_->GetImageManager(); }
 
   void DoCreateProgram(GLuint client_id, GLuint service_id);
   void DoCreateShader(GLenum shader_type, GLuint client_id, GLuint service_id);
+  void DoFenceSync(GLuint client_id, GLuint service_id);
 
+  void SetBucketData(uint32_t bucket_id, const void* data, uint32_t data_size);
   void SetBucketAsCString(uint32 bucket_id, const char* str);
+  // If we want a valid bucket, just set |count_in_header| as |count|,
+  // and set |str_end| as 0.
+  void SetBucketAsCStrings(uint32 bucket_id, GLsizei count, const char** str,
+                           GLsizei count_in_header, char str_end);
 
   void set_memory_tracker(MemoryTracker* memory_tracker) {
     memory_tracker_ = memory_tracker;
@@ -215,7 +229,7 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
       GLuint vertex_shader_client_id, GLuint vertex_shader_service_id,
       GLuint fragment_shader_client_id, GLuint fragment_shader_service_id);
 
-  void SetupInitCapabilitiesExpectations();
+  void SetupInitCapabilitiesExpectations(bool es3_capable);
   void SetupInitStateExpectations();
   void ExpectEnableDisable(GLenum cap, bool enable);
 
@@ -269,6 +283,7 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
       GLenum target, GLint level, GLenum format,
       GLsizei width, GLsizei height, GLint border,
       GLsizei size, uint32 bucket_id);
+  void DoBindTexImage2DCHROMIUM(GLenum target, GLint image_id);
   void DoTexImage2D(
       GLenum target, GLint level, GLenum internal_format,
       GLsizei width, GLsizei height, GLint border,
@@ -444,6 +459,7 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   static const GLuint kServiceQueryId = 309;
   static const GLuint kServiceVertexArrayId = 310;
   static const GLuint kServiceTransformFeedbackId = 311;
+  static const GLuint kServiceSyncId = 312;
 
   static const int32 kSharedMemoryId = 401;
   static const size_t kSharedBufferSize = 2048;
@@ -543,6 +559,7 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   GLuint client_vertexarray_id_;
   GLuint client_valuebuffer_id_;
   GLuint client_transformfeedback_id_;
+  GLuint client_sync_id_;
 
   uint32 shared_memory_id_;
   uint32 shared_memory_offset_;

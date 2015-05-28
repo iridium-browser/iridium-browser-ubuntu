@@ -5,21 +5,22 @@
 #ifndef FloatClipRecorder_h
 #define FloatClipRecorder_h
 
-#include "core/rendering/RenderObject.h"
+#include "core/layout/LayoutObject.h"
 #include "platform/geometry/FloatRect.h"
+#include "platform/graphics/paint/DisplayItem.h"
 
 namespace blink {
 
 class FloatClipRecorder {
 public:
-    FloatClipRecorder(GraphicsContext&, DisplayItemClient, const PaintPhase&, const FloatRect&);
+    FloatClipRecorder(GraphicsContext&, const DisplayItemClientWrapper&, PaintPhase, const FloatRect&);
+
     ~FloatClipRecorder();
 
 private:
-    static DisplayItem::Type paintPhaseToFloatClipType(PaintPhase);
-
     GraphicsContext& m_context;
-    DisplayItemClient m_client;
+    DisplayItemClientWrapper m_client;
+    DisplayItem::Type m_clipType;
 };
 
 } // namespace blink

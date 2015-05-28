@@ -31,7 +31,7 @@
 namespace blink {
 
 class Image;
-class RenderObject;
+class LayoutObject;
 
 class FEImage final : public FilterEffect {
 public:
@@ -42,18 +42,22 @@ public:
 
     virtual FilterEffectType filterEffectType() const override { return FilterEffectTypeImage; }
 
+    // feImage does not perform color interpolation of any kind, so doesn't
+    // depend on the value of color-interpolation-filters.
+    virtual void setOperatingColorSpace(ColorSpace) override { }
+
     virtual TextStream& externalRepresentation(TextStream&, int indention) const override;
     virtual PassRefPtr<SkImageFilter> createImageFilter(SkiaImageFilterBuilder*) override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     virtual ~FEImage() { }
     FEImage(Filter*, PassRefPtr<Image>, PassRefPtrWillBeRawPtr<SVGPreserveAspectRatio>);
     FEImage(Filter*, TreeScope&, const String&, PassRefPtrWillBeRawPtr<SVGPreserveAspectRatio>);
-    RenderObject* referencedRenderer() const;
+    LayoutObject* referencedLayoutObject() const;
 
-    PassRefPtr<SkImageFilter> createImageFilterForRenderer(RenderObject* rendererer, SkiaImageFilterBuilder*);
+    PassRefPtr<SkImageFilter> createImageFilterForLayoutObject(LayoutObject&, SkiaImageFilterBuilder*);
 
     RefPtr<Image> m_image;
 

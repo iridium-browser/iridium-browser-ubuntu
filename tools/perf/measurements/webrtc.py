@@ -2,19 +2,20 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from telemetry.page import page_test
+
 from metrics import cpu
 from metrics import media
 from metrics import memory
 from metrics import power
 from metrics import webrtc_stats
-from telemetry.page import page_test
 
 
 class WebRTC(page_test.PageTest):
   """Gathers WebRTC-related metrics on a page set."""
 
   def __init__(self):
-    super(WebRTC, self).__init__('RunPageInteractions')
+    super(WebRTC, self).__init__()
     self._cpu_metric = None
     self._media_metric = None
     self._memory_metric = None

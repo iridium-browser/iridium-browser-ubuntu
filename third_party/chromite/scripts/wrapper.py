@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -73,6 +73,7 @@ class ChromiteImporter(object):
 sys.meta_path.insert(0, ChromiteImporter())
 
 from chromite.lib import commandline
+from chromite.lib import cros_import
 
 
 def FindTarget(target):
@@ -120,12 +121,17 @@ def FindTarget(target):
   if target[1] == 'bin':
     target[1] = 'scripts'
 
-  module = __import__('.'.join(target))
-  # __import__ gets us the root of the namespace import; walk our way up.
-  for attr in target[1:]:
-    module = getattr(module, attr)
+  module = cros_import.ImportModule(target)
 
-  return getattr(module, 'main', None)
+  # Run the module's main func if it has one.
+  main = getattr(module, 'main', None)
+  if main:
+    return main
+
+  # Is this a unittest?
+  if target[-1].rsplit('_', 1)[-1] in ('test', 'unittest'):
+    from chromite.lib import cros_test_lib
+    return lambda _argv: cros_test_lib.main(module=module)
 
 
 if __name__ == '__main__':

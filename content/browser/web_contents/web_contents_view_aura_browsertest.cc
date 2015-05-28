@@ -425,7 +425,8 @@ class WebContentsViewAuraTest : public ContentBrowserTest {
 };
 
 // Flaky on Windows: http://crbug.com/305722
-#if defined(OS_WIN)
+// The test frequently times out on Linux, too. See crbug.com/440043.
+#if defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_OverscrollNavigation DISABLED_OverscrollNavigation
 #else
 #define MAYBE_OverscrollNavigation OverscrollNavigation
@@ -576,27 +577,22 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest, MAYBE_OverscrollScreenshot) {
   EXPECT_EQ(2, GetCurrentIndex());
   screenshot_manager()->WaitUntilScreenshotIsReady();
 
-  NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
-      web_contents->GetController().GetEntryAtIndex(2));
+  NavigationEntryImpl* entry = web_contents->GetController().GetEntryAtIndex(2);
   EXPECT_FALSE(entry->screenshot().get());
 
-  entry = NavigationEntryImpl::FromNavigationEntry(
-      web_contents->GetController().GetEntryAtIndex(1));
+  entry = web_contents->GetController().GetEntryAtIndex(1);
   EXPECT_FALSE(screenshot_manager()->ScreenshotSetForEntry(entry));
 
-  entry = NavigationEntryImpl::FromNavigationEntry(
-      web_contents->GetController().GetEntryAtIndex(0));
+  entry = web_contents->GetController().GetEntryAtIndex(0);
   EXPECT_FALSE(screenshot_manager()->ScreenshotSetForEntry(entry));
 
   ExecuteSyncJSFunction(main_frame, "navigate_next()");
   screenshot_manager()->WaitUntilScreenshotIsReady();
 
-  entry = NavigationEntryImpl::FromNavigationEntry(
-      web_contents->GetController().GetEntryAtIndex(2));
+  entry = web_contents->GetController().GetEntryAtIndex(2);
   EXPECT_FALSE(screenshot_manager()->ScreenshotSetForEntry(entry));
 
-  entry = NavigationEntryImpl::FromNavigationEntry(
-      web_contents->GetController().GetEntryAtIndex(3));
+  entry = web_contents->GetController().GetEntryAtIndex(3);
   EXPECT_FALSE(entry->screenshot().get());
   {
     // Now, swipe right to navigate backwards. This should navigate away from
@@ -615,8 +611,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest, MAYBE_OverscrollScreenshot) {
     EXPECT_EQ(expected_title, actual_title);
     EXPECT_EQ(2, GetCurrentIndex());
     screenshot_manager()->WaitUntilScreenshotIsReady();
-    entry = NavigationEntryImpl::FromNavigationEntry(
-        web_contents->GetController().GetEntryAtIndex(3));
+    entry = web_contents->GetController().GetEntryAtIndex(3);
     EXPECT_FALSE(screenshot_manager()->ScreenshotSetForEntry(entry));
   }
 
@@ -626,8 +621,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest, MAYBE_OverscrollScreenshot) {
   ExecuteSyncJSFunction(main_frame, "navigate_next()");
   EXPECT_EQ(4, GetCurrentIndex());
   screenshot_manager()->WaitUntilScreenshotIsReady();
-  entry = NavigationEntryImpl::FromNavigationEntry(
-      web_contents->GetController().GetEntryAtIndex(4));
+  entry = web_contents->GetController().GetEntryAtIndex(4);
   EXPECT_FALSE(entry->screenshot().get());
 
   {
@@ -639,8 +633,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest, MAYBE_OverscrollScreenshot) {
     EXPECT_EQ(expected_title, actual_title);
     EXPECT_EQ(3, GetCurrentIndex());
     screenshot_manager()->WaitUntilScreenshotIsReady();
-    entry = NavigationEntryImpl::FromNavigationEntry(
-        web_contents->GetController().GetEntryAtIndex(4));
+    entry = web_contents->GetController().GetEntryAtIndex(4);
     EXPECT_FALSE(screenshot_manager()->ScreenshotSetForEntry(entry));
   }
 }
@@ -699,12 +692,11 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
         << navigations[i].url.spec();
     EXPECT_EQ(old_host, screenshot_manager()->screenshot_taken_for());
 
-    NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
-        web_contents->GetController().GetEntryAtOffset(-1));
+    NavigationEntryImpl* entry =
+        web_contents->GetController().GetEntryAtOffset(-1);
     EXPECT_TRUE(screenshot_manager()->ScreenshotSetForEntry(entry));
 
-    entry = NavigationEntryImpl::FromNavigationEntry(
-        web_contents->GetController().GetLastCommittedEntry());
+    entry = web_contents->GetController().GetLastCommittedEntry();
     EXPECT_FALSE(screenshot_manager()->ScreenshotSetForEntry(entry));
     EXPECT_FALSE(entry->screenshot().get());
     screenshot_manager()->Reset();
@@ -770,7 +762,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
       StartTestWithPage("files/overscroll_navigation.html"));
 
   scoped_ptr<aura::Window> window(new aura::Window(NULL));
-  window->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+  window->Init(ui::LAYER_NOT_DRAWN);
 
   WebContentsImpl* web_contents =
       static_cast<WebContentsImpl*>(shell()->web_contents());
@@ -896,7 +888,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest, WebContentsViewReparent) {
       StartTestWithPage("files/overscroll_navigation.html"));
 
   scoped_ptr<aura::Window> window(new aura::Window(NULL));
-  window->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+  window->Init(ui::LAYER_NOT_DRAWN);
 
   RenderWidgetHostViewAura* rwhva =
       static_cast<RenderWidgetHostViewAura*>(

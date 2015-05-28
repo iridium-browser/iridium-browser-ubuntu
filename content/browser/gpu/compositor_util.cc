@@ -34,6 +34,8 @@ const char* kMultipleRasterThreadsFeatureName = "multiple_raster_threads";
 const int kMinRasterThreads = 1;
 const int kMaxRasterThreads = 64;
 
+const int kMinMSAASampleCount = 0;
+
 struct GpuFeatureInfo {
   std::string name;
   bool blocked;
@@ -177,6 +179,12 @@ bool IsPinchVirtualViewportEnabled() {
   return true;
 }
 
+bool IsPropertyTreeVerificationEnabled() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  return command_line.HasSwitch(cc::switches::kEnablePropertyTreeVerification);
+}
+
 bool IsDelegatedRendererEnabled() {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
@@ -202,21 +210,12 @@ bool IsImplSidePaintingEnabled() {
 }
 
 int NumberOfRendererRasterThreads() {
-  const base::CommandLine& command_line =
-      *base::CommandLine::ForCurrentProcess();
-
   int num_raster_threads = 1;
 
-  // TODO(danakj): Don't do this when using async uploads. Add methods to this
-  // file for enabling zero/one copy and use those to tell if we want an extra
-  // raster thread.
-  bool is_zero_copy_enabled = command_line.HasSwitch(switches::kEnableZeroCopy);
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
-  bool is_one_copy_enabled = command_line.HasSwitch(switches::kEnableOneCopy);
-#else
-  bool is_one_copy_enabled = !command_line.HasSwitch(switches::kDisableOneCopy);
-#endif
-  bool allow_extra_thread = is_zero_copy_enabled || is_one_copy_enabled;
+  // Async uploads uses its own thread, so allow an extra thread when async
+  // uploads is not in use.
+  bool allow_extra_thread =
+      IsZeroCopyUploadEnabled() || IsOneCopyUploadEnabled();
   if (base::SysInfo::NumberOfProcessors() >= 4 && allow_extra_thread)
     num_raster_threads = 2;
 
@@ -225,6 +224,29 @@ int NumberOfRendererRasterThreads() {
     num_raster_threads = force_num_raster_threads;
 
   return num_raster_threads;
+}
+
+bool IsOneCopyUploadEnabled() {
+  if (IsZeroCopyUploadEnabled())
+    return false;
+
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kEnableOneCopy))
+    return true;
+  if (command_line.HasSwitch(switches::kDisableOneCopy))
+    return false;
+
+#if defined(OS_ANDROID)
+  return false;
+#endif
+  return true;
+}
+
+bool IsZeroCopyUploadEnabled() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  return command_line.HasSwitch(switches::kEnableZeroCopy);
 }
 
 int ForceNumberOfRendererRasterThreads() {
@@ -241,7 +263,7 @@ int ForceNumberOfRendererRasterThreads() {
       force_num_raster_threads <= kMaxRasterThreads) {
     return force_num_raster_threads;
   } else {
-    LOG(WARNING) << "Failed to parse switch " <<
+    DLOG(WARNING) << "Failed to parse switch " <<
         switches::kNumRasterThreads  << ": " << string_value;
     return 0;
   }
@@ -279,12 +301,39 @@ bool IsForceGpuRasterizationEnabled() {
 bool UseSurfacesEnabled() {
 #if defined(OS_ANDROID)
   return false;
-#else
+#endif
+  bool enabled = false;
+#if defined(USE_AURA) || defined(OS_MACOSX)
+  enabled = true;
+#endif
+
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
 
-  return command_line.HasSwitch(switches::kUseSurfaces);
-#endif
+  // Flags override.
+  enabled |= command_line.HasSwitch(switches::kUseSurfaces);
+  enabled &= !command_line.HasSwitch(switches::kDisableSurfaces);
+  return enabled;
+}
+
+int GpuRasterizationMSAASampleCount() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+
+  if (!command_line.HasSwitch(switches::kGpuRasterizationMSAASampleCount))
+    return 0;
+  std::string string_value = command_line.GetSwitchValueASCII(
+      switches::kGpuRasterizationMSAASampleCount);
+  int msaa_sample_count = 0;
+  if (base::StringToInt(string_value, &msaa_sample_count) &&
+      msaa_sample_count >= kMinMSAASampleCount) {
+    return msaa_sample_count;
+  } else {
+    DLOG(WARNING) << "Failed to parse switch "
+                  << switches::kGpuRasterizationMSAASampleCount << ": "
+                  << string_value;
+    return 0;
+  }
 }
 
 base::DictionaryValue* GetFeatureStatus() {

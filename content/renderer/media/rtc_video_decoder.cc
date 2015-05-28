@@ -13,13 +13,12 @@
 #include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task_runner_util.h"
-#include "content/child/child_thread.h"
 #include "content/renderer/media/native_handle_impl.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "media/base/bind_to_current_loop.h"
-#include "media/filters/gpu_video_accelerator_factories.h"
+#include "media/renderers/gpu_video_accelerator_factories.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/webrtc/common_video/interface/texture_video_frame.h"
+#include "third_party/webrtc/common_video/interface/i420_video_frame.h"
 #include "third_party/webrtc/system_wrappers/interface/ref_count.h"
 
 namespace content {
@@ -391,11 +390,11 @@ void RTCVideoDecoder::PictureReady(const media::Picture& picture) {
   // Create a WebRTC video frame.
   webrtc::RefCountImpl<NativeHandleImpl>* handle =
       new webrtc::RefCountImpl<NativeHandleImpl>(frame);
-  webrtc::TextureVideoFrame decoded_image(handle,
-                                          picture.visible_rect().width(),
-                                          picture.visible_rect().height(),
-                                          timestamp,
-                                          0);
+  webrtc::I420VideoFrame decoded_image(handle,
+                                       picture.visible_rect().width(),
+                                       picture.visible_rect().height(),
+                                       timestamp,
+                                       0);
 
   // Invoke decode callback. WebRTC expects no callback after Reset or Release.
   {
@@ -408,33 +407,6 @@ void RTCVideoDecoder::PictureReady(const media::Picture& picture) {
   }
 }
 
-static void ReadPixelsSyncInner(
-    const scoped_refptr<media::GpuVideoAcceleratorFactories>& factories,
-    uint32 texture_id,
-    const gfx::Rect& visible_rect,
-    const SkBitmap& pixels,
-    base::WaitableEvent* event) {
-  factories->ReadPixels(texture_id, visible_rect, pixels);
-  event->Signal();
-}
-
-static void ReadPixelsSync(
-    const scoped_refptr<media::GpuVideoAcceleratorFactories>& factories,
-    uint32 texture_id,
-    const gfx::Rect& visible_rect,
-    const SkBitmap& pixels) {
-  base::WaitableEvent event(true, false);
-  if (!factories->GetTaskRunner()->PostTask(FROM_HERE,
-                                            base::Bind(&ReadPixelsSyncInner,
-                                                       factories,
-                                                       texture_id,
-                                                       visible_rect,
-                                                       pixels,
-                                                       &event)))
-    return;
-  event.Wait();
-}
-
 scoped_refptr<media::VideoFrame> RTCVideoDecoder::CreateVideoFrame(
     const media::Picture& picture,
     const media::PictureBuffer& pb,
@@ -445,18 +417,13 @@ scoped_refptr<media::VideoFrame> RTCVideoDecoder::CreateVideoFrame(
   base::TimeDelta timestamp_ms = base::TimeDelta::FromInternalValue(
       base::checked_cast<uint64_t>(timestamp) * 1000 / 90);
   return media::VideoFrame::WrapNativeTexture(
-      make_scoped_ptr(new gpu::MailboxHolder(
-          pb.texture_mailbox(), decoder_texture_target_, 0)),
-      media::BindToCurrentLoop(base::Bind(&RTCVideoDecoder::ReleaseMailbox,
-                                          weak_factory_.GetWeakPtr(),
-                                          factories_,
-                                          picture.picture_buffer_id(),
-                                          pb.texture_id())),
-      pb.size(),
-      visible_rect,
-      visible_rect.size(),
-      timestamp_ms,
-      base::Bind(&ReadPixelsSync, factories_, pb.texture_id(), visible_rect));
+      make_scoped_ptr(new gpu::MailboxHolder(pb.texture_mailbox(),
+                                             decoder_texture_target_, 0)),
+      media::BindToCurrentLoop(base::Bind(
+          &RTCVideoDecoder::ReleaseMailbox, weak_factory_.GetWeakPtr(),
+          factories_, picture.picture_buffer_id(), pb.texture_id())),
+      pb.size(), visible_rect, visible_rect.size(), timestamp_ms,
+      picture.allow_overlay());
 }
 
 void RTCVideoDecoder::NotifyEndOfBitstreamBuffer(int32 id) {

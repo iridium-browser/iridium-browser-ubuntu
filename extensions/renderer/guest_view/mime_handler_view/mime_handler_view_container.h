@@ -2,15 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef EXTENSIONS_RENDERER_GUEST_VIEW_MIME_HANDLER_VIEW_CONTAINER_H_
-#define EXTENSIONS_RENDERER_GUEST_VIEW_MIME_HANDLER_VIEW_CONTAINER_H_
+#ifndef EXTENSIONS_RENDERER_GUEST_VIEW_MIME_HANDLER_VIEW_MIME_HANDLER_VIEW_CONTAINER_H_
+#define EXTENSIONS_RENDERER_GUEST_VIEW_MIME_HANDLER_VIEW_MIME_HANDLER_VIEW_CONTAINER_H_
+
+#include <string>
+#include <vector>
 
 #include "base/memory/linked_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "extensions/renderer/guest_view/guest_view_container.h"
-#include "extensions/renderer/scoped_persistent.h"
 #include "third_party/WebKit/public/platform/WebURLLoader.h"
 #include "third_party/WebKit/public/platform/WebURLLoaderClient.h"
+#include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
 #include "v8/include/v8.h"
 
@@ -40,10 +43,15 @@ class MimeHandlerViewContainer : public GuestViewContainer,
                            const GURL& original_url);
   ~MimeHandlerViewContainer() override;
 
+  static std::vector<MimeHandlerViewContainer*> FromRenderFrame(
+      content::RenderFrame* render_frame);
+
   // BrowserPluginDelegate implementation.
   void Ready() override;
   void DidFinishLoading() override;
   void DidReceiveData(const char* data, int data_length) override;
+  void DidResizeElement(const gfx::Size& old_size,
+                        const gfx::Size& new_size) override;
   bool OnMessageReceived(const IPC::Message& message) override;
   v8::Local<v8::Object> V8ScriptableObject(v8::Isolate*) override;
 
@@ -56,9 +64,15 @@ class MimeHandlerViewContainer : public GuestViewContainer,
                         double finish_time,
                         int64_t total_encoded_data_length) override;
 
+  // GuestViewContainer overrides.
+  void OnRenderFrameDestroyed() override;
+
   // Post a JavaScript message to the guest.
   void PostMessage(v8::Isolate* isolate,
                    v8::Handle<v8::Value> message);
+
+  // Post |message| to the guest.
+  void PostMessageFromValue(const base::Value& message);
 
  private:
   // Message handlers.
@@ -73,7 +87,7 @@ class MimeHandlerViewContainer : public GuestViewContainer,
   const std::string mime_type_;
 
   // The URL of the extension to navigate to.
-  std::string html_string_;
+  std::string view_id_;
 
   // Whether the plugin is embedded or not.
   bool is_embedded_;
@@ -89,16 +103,19 @@ class MimeHandlerViewContainer : public GuestViewContainer,
   scoped_ptr<blink::WebURLLoader> loader_;
 
   // The scriptable object that backs the plugin.
-  ScopedPersistent<v8::Object> scriptable_object_;
+  v8::Global<v8::Object> scriptable_object_;
 
   // Pending postMessage messages that need to be sent to the guest. These are
   // queued while the guest is loading and once it is fully loaded they are
   // delivered so that messages aren't lost.
-  std::vector<linked_ptr<ScopedPersistent<v8::Value>>> pending_messages_;
+  std::vector<linked_ptr<v8::Global<v8::Value>>> pending_messages_;
 
   // True if the guest page has fully loaded and its JavaScript onload function
   // has been called.
   bool guest_loaded_;
+
+  // The size of the element.
+  gfx::Size element_size_;
 
   base::WeakPtrFactory<MimeHandlerViewContainer> weak_factory_;
 
@@ -107,4 +124,4 @@ class MimeHandlerViewContainer : public GuestViewContainer,
 
 }  // namespace extensions
 
-#endif  // EXTENSIONS_RENDERER_GUEST_VIEW_MIME_HANDLER_VIEW_CONTAINER_H_
+#endif  // EXTENSIONS_RENDERER_GUEST_VIEW_MIME_HANDLER_VIEW_MIME_HANDLER_VIEW_CONTAINER_H_

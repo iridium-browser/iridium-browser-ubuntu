@@ -22,6 +22,7 @@ class ListValue;
 
 namespace content {
 class BrowserContext;
+class RenderFrameHost;
 class WebContents;
 }
 
@@ -87,6 +88,13 @@ class ExtensionsBrowserClient {
   // |context| is not incognito.
   virtual content::BrowserContext* GetOriginalContext(
       content::BrowserContext* context) = 0;
+
+#if defined(OS_CHROMEOS)
+  // Returns a user id hash from |context| or an empty string if no hash could
+  // be extracted.
+  virtual std::string GetUserIdHashFromContext(
+      content::BrowserContext* context) = 0;
+#endif
 
   // Returns true if |context| corresponds to a guest session.
   virtual bool IsGuestSession(content::BrowserContext* context) const = 0;
@@ -168,6 +176,10 @@ class ExtensionsBrowserClient {
   // Registers extension functions not belonging to the core extensions APIs.
   virtual void RegisterExtensionFunctions(
       ExtensionFunctionRegistry* registry) const = 0;
+
+  // Registers Mojo services for a RenderFrame.
+  virtual void RegisterMojoServices(content::RenderFrameHost* render_frame_host,
+                                    const Extension* extension) const = 0;
 
   // Creates a RuntimeAPIDelegate responsible for handling extensions
   // management-related events such as update and installation on behalf of the

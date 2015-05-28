@@ -65,13 +65,11 @@ public:
         V8CacheOptionsNone,
         V8CacheOptionsParseMemory,
         V8CacheOptionsHeuristics,
-        V8CacheOptionsHeuristicsMobile
-    };
-
-    enum V8ScriptStreamingMode {
-        V8ScriptStreamingModeAll,
-        V8ScriptStreamingModeOnlyAsyncAndDefer,
-        V8ScriptStreamingModeAllPlusBlockParsingBlocking,
+        V8CacheOptionsHeuristicsMobile,
+        V8CacheOptionsHeuristicsDefault,
+        V8CacheOptionsHeuristicsDefaultMobile,
+        V8CacheOptionsRecent,
+        V8CacheOptionsRecentSmall
     };
 
     // Bit field values indicating available pointer types. Identical to
@@ -90,7 +88,7 @@ public:
     enum HoverType {
         HoverTypeNone = 1 << 0,
         // Indicates that the primary pointing system can hover, but it requires
-        // a significant action on the user’s part. e.g. hover on “long press”.
+        // a significant action on the user's part. e.g. hover on "long press".
         HoverTypeOnDemand = 1 << 1,
         HoverTypeHover = 1 << 2
     };
@@ -122,12 +120,6 @@ public:
     // disallows it. The FrameLoaderClient set to the frame may override the
     // value set by this method.
     virtual void setAllowRunningOfInsecureContent(bool) = 0;
-    // If set to true, allows frames with an https origin to connect WebSockets
-    // with an insecure URL (ws://). Otherwise, disallows it. Only when this is
-    // set to true, this value overrides the value set by
-    // setAllowRunningOfInsecureContent() for WebSockets. The FrameLoaderClient
-    // set to the frame may override the value set by this method.
-    virtual void setAllowConnectingInsecureWebSocket(bool) = 0;
     virtual void setAllowScriptsToCloseWindows(bool) = 0;
     virtual void setAllowUniversalAccessFromFileURLs(bool) = 0;
     virtual void setAntialiased2dCanvasEnabled(bool) = 0;
@@ -150,6 +142,7 @@ public:
     virtual void setDeviceScaleAdjustment(float) = 0;
     virtual void setDeviceSupportsMouse(bool) = 0;
     virtual void setDeviceSupportsTouch(bool) = 0;
+    virtual void setDisableReadingFromCanvas(bool) = 0;
     virtual void setDoubleTapToZoomEnabled(bool) = 0;
     virtual void setDownloadableBinaryFontsEnabled(bool) = 0;
     virtual void setEditingBehavior(EditingBehavior) = 0;
@@ -190,7 +183,10 @@ public:
     virtual void setPerTilePaintingEnabled(bool) = 0;
     virtual void setPictographFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) = 0;
     virtual void setPinchOverlayScrollbarThickness(int) = 0;
-    virtual void setPinchVirtualViewportEnabled(bool) = 0;
+
+    // TODO(bokan): Temporary, need to remove Chromium side users.
+    virtual void setPinchVirtualViewportEnabled(bool) { }
+
     virtual void setPluginsEnabled(bool) = 0;
     virtual void setAvailablePointerTypes(int) = 0;
     virtual void setPrimaryPointerType(PointerType) = 0;
@@ -230,18 +226,24 @@ public:
     virtual void setTextAreasAreResizable(bool) = 0;
     virtual void setTextAutosizingEnabled(bool) = 0;
     virtual void setAccessibilityFontScaleFactor(float) = 0;
+    virtual void setTextTrackBackgroundColor(const WebString&) = 0;
+    virtual void setTextTrackFontFamily(const WebString&) = 0;
+    virtual void setTextTrackFontStyle(const WebString&) = 0;
+    virtual void setTextTrackFontVariant(const WebString&) = 0;
+    virtual void setTextTrackTextColor(const WebString&) = 0;
+    virtual void setTextTrackTextShadow(const WebString&) = 0;
+    virtual void setTextTrackTextSize(const WebString&) = 0;
     virtual void setThreadedScrollingEnabled(bool) = 0;
     virtual void setTouchDragDropEnabled(bool) = 0;
     virtual void setTouchEditingEnabled(bool) = 0;
     virtual void setUnifiedTextCheckerEnabled(bool) = 0;
     virtual void setUnsafePluginPastingEnabled(bool) = 0;
     virtual void setUseLegacyBackgroundSizeShorthandBehavior(bool) = 0;
+    virtual void setUseMobileViewportStyle(bool) = 0;
     virtual void setUseSolidColorScrollbars(bool) = 0;
     virtual void setUseWideViewport(bool) = 0;
     virtual void setUsesEncodingDetector(bool) = 0;
     virtual void setV8CacheOptions(V8CacheOptions) = 0;
-    virtual void setV8ScriptStreamingEnabled(bool) = 0;
-    virtual void setV8ScriptStreamingMode(V8ScriptStreamingMode) = 0;
     virtual void setValidationMessageTimerMagnification(int) = 0;
     virtual void setViewportEnabled(bool) = 0;
     virtual void setViewportMetaEnabled(bool) = 0;

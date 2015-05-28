@@ -9,10 +9,10 @@
 #include <vector>
 
 #include "base/base_paths.h"
+#include "base/command_line.h"
 #include "base/debug/alias.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/debug/stack_trace.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
@@ -22,16 +22,15 @@
 #include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/net/chrome_extensions_network_delegate.h"
-#include "chrome/browser/net/client_hints.h"
 #include "chrome/browser/net/connect_interceptor.h"
 #include "chrome/browser/net/safe_search_util.h"
-#include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/pref_names.h"
@@ -40,16 +39,18 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/resource_request_info.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/common/process_type.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
+#include "net/http/http_status_code.h"
+#include "net/log/net_log.h"
 #include "net/url_request/url_request.h"
-#include "net/url_request/url_request_context.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/io_thread.h"
@@ -58,7 +59,6 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "base/command_line.h"
 #include "base/sys_info.h"
 #include "chrome/common/chrome_switches.h"
 #endif
@@ -130,26 +130,21 @@ void RecordPrecacheStatsOnUIThread(const GURL& url,
 }
 #endif  // defined(OS_ANDROID)
 
-void ReportInvalidReferrerSend(const GURL& target_url,
-                               const GURL& referrer_url,
-                               const base::debug::StackTrace& callstack) {
-  // Record information to help debug http://crbug.com/422871
-  base::debug::StackTrace trace = callstack;
-  base::debug::Alias(&trace);
-  enum { INVALID_URL, FILE_URL, DATA_URL, HTTP_URL, OTHER } reason = OTHER;
-  if (!target_url.is_valid())
-    reason = INVALID_URL;
-  else if (target_url.SchemeIsFile())
-    reason = FILE_URL;
-  else if (target_url.SchemeIs(url::kDataScheme))
-    reason = DATA_URL;
-  else if (target_url.SchemeIs(url::kHttpScheme))
-    reason = HTTP_URL;
-  base::debug::Alias(&reason);
+void ReportInvalidReferrerSendOnUI() {
   base::RecordAction(
       base::UserMetricsAction("Net.URLRequest_StartJob_InvalidReferrer"));
+}
+
+void ReportInvalidReferrerSend(const GURL& target_url,
+                               const GURL& referrer_url) {
+  // Record information to help debug http://crbug.com/422871
+  if (!target_url.SchemeIsHTTPOrHTTPS())
+    return;
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::Bind(&ReportInvalidReferrerSendOnUI));
   base::debug::DumpWithoutCrashing();
-  NOTREACHED();
+  NOTREACHED() << "Sending request to " << target_url
+               << " with invalid referrer " << referrer_url;
 }
 
 // Record network errors that HTTP requests complete with, including OK and
@@ -163,6 +158,121 @@ void RecordNetworkErrorHistograms(const net::URLRequest* request) {
       UMA_HISTOGRAM_SPARSE_SLOWLY(
           "Net.HttpRequestCompletionErrorCodes.MainFrame",
           std::abs(request->status().error()));
+    }
+  }
+}
+
+// Returns whether |request| is likely to be eligible for delta-encoding.
+// This is only a rough approximation right now, based on MIME type.
+bool CanRequestBeDeltaEncoded(const net::URLRequest* request) {
+  struct {
+    const char *prefix;
+    const char *suffix;
+  } kEligibleMasks[] = {
+    // All text/ types are eligible, even if not displayable.
+    { "text/", NULL },
+    // JSON (application/json and application/*+json) is eligible.
+    { "application/", "json" },
+    // Javascript is eligible.
+    { "application/", "javascript" },
+    // XML (application/xml and application/*+xml) is eligible.
+    { "application/", "xml" },
+  };
+  const bool kCaseSensitive = true;
+
+  std::string mime_type;
+  request->GetMimeType(&mime_type);
+
+  for (size_t i = 0; i < arraysize(kEligibleMasks); i++) {
+    const char *prefix = kEligibleMasks[i].prefix;
+    const char *suffix = kEligibleMasks[i].suffix;
+    if (prefix && !StartsWithASCII(mime_type, prefix, kCaseSensitive))
+      continue;
+    if (suffix && !EndsWith(mime_type, suffix, kCaseSensitive))
+      continue;
+    return true;
+  }
+  return false;
+}
+
+// Returns whether |request| was issued by a renderer process, as opposed to
+// the browser process or a plugin process.
+bool IsRendererInitiatedRequest(const net::URLRequest* request) {
+  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
+  return info && info->GetProcessType() == content::PROCESS_TYPE_RENDERER;
+}
+
+// Uploads UMA histograms for delta encoding eligibility. This method can only
+// be safely called after the network stack has called both OnStarted and
+// OnCompleted, since it needs the received response content length and the
+// response headers.
+void RecordCacheStateStats(const net::URLRequest* request) {
+  net::HttpRequestHeaders request_headers;
+  if (!request->GetFullRequestHeaders(&request_headers)) {
+    // GetFullRequestHeaders is guaranteed to succeed if OnResponseStarted() has
+    // been called on |request|, so if GetFullRequestHeaders() fails,
+    // RecordCacheStateStats must have been called before
+    // OnResponseStarted().
+    return;
+  }
+
+  if (!IsRendererInitiatedRequest(request)) {
+    // Ignore browser-initiated requests. These are internal requests like safe
+    // browsing and sync, and so on. Some of these could be eligible for
+    // delta-encoding, but to be conservative this function ignores all of them.
+    return;
+  }
+
+  const int kCacheAffectingFlags = net::LOAD_BYPASS_CACHE |
+                                   net::LOAD_DISABLE_CACHE |
+                                   net::LOAD_PREFERRING_CACHE;
+
+  if (request->load_flags() & kCacheAffectingFlags) {
+    // Ignore requests with cache-affecting flags, which would otherwise mess up
+    // these stats.
+    return;
+  }
+
+  enum {
+    CACHE_STATE_FROM_CACHE,
+    CACHE_STATE_STILL_VALID,
+    CACHE_STATE_NO_LONGER_VALID,
+    CACHE_STATE_NO_ENTRY,
+    CACHE_STATE_MAX,
+  } state = CACHE_STATE_NO_ENTRY;
+  bool had_cache_headers =
+      request_headers.HasHeader(net::HttpRequestHeaders::kIfModifiedSince) ||
+      request_headers.HasHeader(net::HttpRequestHeaders::kIfNoneMatch) ||
+      request_headers.HasHeader(net::HttpRequestHeaders::kIfRange);
+  if (request->was_cached() && !had_cache_headers) {
+    // Entry was served directly from cache.
+    state = CACHE_STATE_FROM_CACHE;
+  } else if (request->was_cached() && had_cache_headers) {
+    // Expired entry was present in cache, and server responded with NOT
+    // MODIFIED, indicating the expired entry is still valid.
+    state = CACHE_STATE_STILL_VALID;
+  } else if (!request->was_cached() && had_cache_headers) {
+    // Expired entry was present in cache, and server responded with something
+    // other than NOT MODIFIED, indicating the entry is no longer valid.
+    state = CACHE_STATE_NO_LONGER_VALID;
+  } else if (!request->was_cached() && !had_cache_headers) {
+    // Neither |was_cached| nor |had_cache_headers|, so there's no local cache
+    // entry for this content at all.
+    state = CACHE_STATE_NO_ENTRY;
+  }
+
+  UMA_HISTOGRAM_ENUMERATION("Net.CacheState.AllRequests", state,
+                            CACHE_STATE_MAX);
+  if (CanRequestBeDeltaEncoded(request)) {
+    UMA_HISTOGRAM_ENUMERATION("Net.CacheState.EncodeableRequests", state,
+                              CACHE_STATE_MAX);
+  }
+
+  int64 size = request->received_response_content_length();
+  if (size >= 0 && state == CACHE_STATE_NO_LONGER_VALID) {
+    UMA_HISTOGRAM_COUNTS("Net.CacheState.AllBytes", size);
+    if (CanRequestBeDeltaEncoded(request)) {
+      UMA_HISTOGRAM_COUNTS("Net.CacheState.EncodeableBytes", size);
     }
   }
 }
@@ -182,8 +292,9 @@ ChromeNetworkDelegate::ChromeNetworkDelegate(
       url_blacklist_manager_(NULL),
 #endif
       domain_reliability_monitor_(NULL),
-      first_request_(true),
-      prerender_tracker_(NULL) {
+      experimental_web_platform_features_enabled_(
+          base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kEnableExperimentalWebPlatformFeatures)) {
   DCHECK(enable_referrers);
   extensions_delegate_.reset(
       ChromeExtensionsNetworkDelegate::Create(event_router));
@@ -210,11 +321,6 @@ void ChromeNetworkDelegate::set_predictor(
     chrome_browser_net::Predictor* predictor) {
   connect_interceptor_.reset(
       new chrome_browser_net::ConnectInterceptor(predictor));
-}
-
-void ChromeNetworkDelegate::SetEnableClientHints() {
-  client_hints_.reset(new ClientHints());
-  client_hints_->Init();
 }
 
 // static
@@ -291,12 +397,6 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   if (enable_do_not_track_ && enable_do_not_track_->GetValue())
     request->SetExtraRequestHeaderByName(kDNTHeader, "1", true /* override */);
 
-  if (client_hints_) {
-    request->SetExtraRequestHeaderByName(
-        ClientHints::kDevicePixelRatioHeader,
-        client_hints_->GetDevicePixelRatioHeader(), true);
-  }
-
   bool force_safe_search =
       (force_safe_search_ && force_safe_search_->GetValue()) ||
       (force_google_safe_search_ && force_google_safe_search_->GetValue());
@@ -331,7 +431,6 @@ int ChromeNetworkDelegate::OnBeforeSendHeaders(
   if (force_safety_mode)
     safe_search_util::ForceYouTubeSafetyMode(request, headers);
 
-  TRACE_EVENT_ASYNC_STEP_PAST0("net", "URLRequest", request, "SendRequest");
   return extensions_delegate_->OnBeforeSendHeaders(request, callback, headers);
 }
 
@@ -364,7 +463,6 @@ void ChromeNetworkDelegate::OnBeforeRedirect(net::URLRequest* request,
 
 
 void ChromeNetworkDelegate::OnResponseStarted(net::URLRequest* request) {
-  TRACE_EVENT_ASYNC_STEP_PAST0("net", "URLRequest", request, "ResponseStarted");
   extensions_delegate_->OnResponseStarted(request);
 }
 
@@ -375,8 +473,6 @@ void ChromeNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "423948 ChromeNetworkDelegate::OnRawBytesRead"));
 
-  TRACE_EVENT_ASYNC_STEP_PAST1("net", "URLRequest", &request, "DidRead",
-                               "bytes_read", bytes_read);
 #if defined(ENABLE_TASK_MANAGER)
   // This is not completely accurate, but as a first approximation ignore
   // requests that are served from the cache. See bug 330931 for more info.
@@ -403,8 +499,13 @@ void ChromeNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
 void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
                                         bool started) {
   RecordNetworkErrorHistograms(request);
+  if (started) {
+    // Only call in for requests that were started, to obey the precondition
+    // that RecordCacheStateStats can only be called on requests for which
+    // OnResponseStarted was called.
+    RecordCacheStateStats(request);
+  }
 
-  TRACE_EVENT_ASYNC_END0("net", "URLRequest", request);
   if (request->status().status() == net::URLRequestStatus::SUCCESS) {
 #if defined(OS_ANDROID)
     // For better accuracy, we use the actual bytes read instead of the length
@@ -466,19 +567,6 @@ bool ChromeNetworkDelegate::OnCanGetCookies(
 
   int render_process_id = -1;
   int render_frame_id = -1;
-
-  // |is_for_blocking_resource| indicates whether the cookies read were for a
-  // blocking resource (eg script, css). It is only temporarily added for
-  // diagnostic purposes, per bug 353678. Will be removed again once data
-  // collection is finished.
-  bool is_for_blocking_resource = false;
-  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(&request);
-  if (info && ((!info->IsAsync()) ||
-               info->GetResourceType() == content::RESOURCE_TYPE_STYLESHEET ||
-               info->GetResourceType() == content::RESOURCE_TYPE_SCRIPT)) {
-    is_for_blocking_resource = true;
-  }
-
   if (content::ResourceRequestInfo::GetRenderFrameForRequest(
           &request, &render_process_id, &render_frame_id)) {
     BrowserThread::PostTask(
@@ -486,7 +574,7 @@ bool ChromeNetworkDelegate::OnCanGetCookies(
         base::Bind(&TabSpecificContentSettings::CookiesRead,
                    render_process_id, render_frame_id,
                    request.url(), request.first_party_for_cookies(),
-                   cookie_list, !allow, is_for_blocking_resource));
+                   cookie_list, !allow));
   }
 
   return allow;
@@ -512,13 +600,6 @@ bool ChromeNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
                    render_process_id, render_frame_id,
                    request.url(), request.first_party_for_cookies(),
                    cookie_line, *options, !allow));
-  }
-
-  if (prerender_tracker_) {
-    prerender_tracker_->OnCookieChangedForURL(
-        render_process_id,
-        request.context()->cookie_store()->GetCookieMonster(),
-        request.url());
   }
 
   return allow;
@@ -623,13 +704,14 @@ bool ChromeNetworkDelegate::OnCanEnablePrivacyMode(
   return privacy_mode;
 }
 
+bool ChromeNetworkDelegate::OnFirstPartyOnlyCookieExperimentEnabled() const {
+  return experimental_web_platform_features_enabled_;
+}
+
 bool ChromeNetworkDelegate::OnCancelURLRequestWithPolicyViolatingReferrerHeader(
     const net::URLRequest& request,
     const GURL& target_url,
     const GURL& referrer_url) const {
-  base::debug::StackTrace callstack;
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(&ReportInvalidReferrerSend, target_url,
-                                     referrer_url, callstack));
+  ReportInvalidReferrerSend(target_url, referrer_url);
   return true;
 }

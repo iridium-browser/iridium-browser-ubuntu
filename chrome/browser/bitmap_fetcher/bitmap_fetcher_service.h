@@ -37,6 +37,7 @@ class BitmapFetcherService : public KeyedService,
 
     // Called whenever the image changes. Called with an empty image if the
     // fetch failed or the request ended for any reason.
+    // TODO(dschuyler) The comment differs from what the code does, follow-up.
     virtual void OnImageChanged(RequestId request_id,
                                 const SkBitmap& answers_image) = 0;
   };
@@ -81,7 +82,7 @@ class BitmapFetcherService : public KeyedService,
   void RemoveFetcher(const chrome::BitmapFetcher* fetcher);
 
   // BitmapFetcherDelegate implementation.
-  void OnFetchComplete(const GURL url, const SkBitmap* bitmap) override;
+  void OnFetchComplete(const GURL& url, const SkBitmap* bitmap) override;
 
   // Currently active image fetchers.
   BitmapFetchers active_fetchers_;

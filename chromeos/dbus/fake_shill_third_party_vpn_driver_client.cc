@@ -42,9 +42,10 @@ void FakeShillThirdPartyVpnDriverClient::RemoveShillThirdPartyVpnObserver(
 void FakeShillThirdPartyVpnDriverClient::SetParameters(
     const std::string& object_path_value,
     const base::DictionaryValue& parameters,
-    const base::Closure& callback,
+    const ShillClientHelper::StringCallback& callback,
     const ShillClientHelper::ErrorCallback& error_callback) {
-  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::MessageLoop::current()->PostTask(FROM_HERE,
+                                         base::Bind(callback, std::string()));
 }
 
 void FakeShillThirdPartyVpnDriverClient::UpdateConnectionState(
@@ -57,7 +58,7 @@ void FakeShillThirdPartyVpnDriverClient::UpdateConnectionState(
 
 void FakeShillThirdPartyVpnDriverClient::SendPacket(
     const std::string& object_path_value,
-    const std::string& ip_packet,
+    const std::vector<char>& ip_packet,
     const base::Closure& callback,
     const ShillClientHelper::ErrorCallback& error_callback) {
   base::MessageLoop::current()->PostTask(FROM_HERE, callback);
@@ -65,7 +66,7 @@ void FakeShillThirdPartyVpnDriverClient::SendPacket(
 
 void FakeShillThirdPartyVpnDriverClient::OnPacketReceived(
     const std::string& object_path_value,
-    const std::string& packet) {
+    const std::vector<char>& packet) {
   ObserverMap::iterator it = observer_map_.find(object_path_value);
   if (it == observer_map_.end()) {
     LOG(ERROR) << "Unexpected OnPacketReceived for " << object_path_value;

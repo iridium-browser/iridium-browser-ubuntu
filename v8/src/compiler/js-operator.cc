@@ -182,7 +182,7 @@ const LoadNamedParameters& LoadNamedParametersOf(const Operator* op) {
 
 bool operator==(StoreNamedParameters const& lhs,
                 StoreNamedParameters const& rhs) {
-  return lhs.strict_mode() == rhs.strict_mode() && lhs.name() == rhs.name();
+  return lhs.language_mode() == rhs.language_mode() && lhs.name() == rhs.name();
 }
 
 
@@ -193,12 +193,12 @@ bool operator!=(StoreNamedParameters const& lhs,
 
 
 size_t hash_value(StoreNamedParameters const& p) {
-  return base::hash_combine(p.strict_mode(), p.name());
+  return base::hash_combine(p.language_mode(), p.name());
 }
 
 
 std::ostream& operator<<(std::ostream& os, StoreNamedParameters const& p) {
-  return os << p.strict_mode() << ", " << Brief(*p.name().handle());
+  return os << p.language_mode() << ", " << Brief(*p.name().handle());
 }
 
 
@@ -239,7 +239,7 @@ const StoreNamedParameters& StoreNamedParametersOf(const Operator* op) {
   V(HasProperty, Operator::kNoProperties, 2, 1)           \
   V(TypeOf, Operator::kPure, 1, 1)                        \
   V(InstanceOf, Operator::kNoProperties, 2, 1)            \
-  V(Debugger, Operator::kNoProperties, 0, 0)              \
+  V(StackCheck, Operator::kNoProperties, 0, 0)            \
   V(CreateFunctionContext, Operator::kNoProperties, 1, 1) \
   V(CreateWithContext, Operator::kNoProperties, 2, 1)     \
   V(CreateBlockContext, Operator::kNoProperties, 2, 1)    \
@@ -253,19 +253,20 @@ struct JSOperatorGlobalCache FINAL {
     Name##Operator()                                                     \
         : Operator(IrOpcode::kJS##Name, properties, "JS" #Name,          \
                    value_input_count, Operator::ZeroIfPure(properties),  \
-                   Operator::ZeroIfPure(properties), value_output_count, \
-                   Operator::ZeroIfPure(properties), 0) {}               \
+                   Operator::ZeroIfEliminatable(properties),             \
+                   value_output_count, Operator::ZeroIfPure(properties), \
+                   Operator::ZeroIfNoThrow(properties)) {}               \
   };                                                                     \
   Name##Operator k##Name##Operator;
   CACHED_OP_LIST(CACHED)
 #undef CACHED
 
-  template <StrictMode kStrictMode>
-  struct StorePropertyOperator FINAL : public Operator1<StrictMode> {
+  template <LanguageMode kLanguageMode>
+  struct StorePropertyOperator FINAL : public Operator1<LanguageMode> {
     StorePropertyOperator()
-        : Operator1<StrictMode>(IrOpcode::kJSStoreProperty,
-                                Operator::kNoProperties, "JSStoreProperty", 3,
-                                1, 1, 0, 1, 0, kStrictMode) {}
+        : Operator1<LanguageMode>(IrOpcode::kJSStoreProperty,
+                                  Operator::kNoProperties, "JSStoreProperty", 3,
+                                  1, 1, 0, 1, 2, kLanguageMode) {}
   };
   StorePropertyOperator<SLOPPY> kStorePropertySloppyOperator;
   StorePropertyOperator<STRICT> kStorePropertyStrictOperator;
@@ -294,7 +295,7 @@ const Operator* JSOperatorBuilder::CallFunction(size_t arity,
   return new (zone()) Operator1<CallFunctionParameters>(   // --
       IrOpcode::kJSCallFunction, Operator::kNoProperties,  // opcode
       "JSCallFunction",                                    // name
-      parameters.arity(), 1, 1, 1, 1, 0,                   // inputs/outputs
+      parameters.arity(), 1, 1, 1, 1, 2,                   // inputs/outputs
       parameters);                                         // parameter
 }
 
@@ -307,7 +308,7 @@ const Operator* JSOperatorBuilder::CallRuntime(Runtime::FunctionId id,
   return new (zone()) Operator1<CallRuntimeParameters>(   // --
       IrOpcode::kJSCallRuntime, Operator::kNoProperties,  // opcode
       "JSCallRuntime",                                    // name
-      parameters.arity(), 1, 1, f->result_size, 1, 0,     // inputs/outputs
+      parameters.arity(), 1, 1, f->result_size, 1, 2,     // inputs/outputs
       parameters);                                        // parameter
 }
 
@@ -316,7 +317,7 @@ const Operator* JSOperatorBuilder::CallConstruct(int arguments) {
   return new (zone()) Operator1<int>(                       // --
       IrOpcode::kJSCallConstruct, Operator::kNoProperties,  // opcode
       "JSCallConstruct",                                    // name
-      arguments, 1, 1, 1, 1, 0,                             // counts
+      arguments, 1, 1, 1, 1, 2,                             // counts
       arguments);                                           // parameter
 }
 
@@ -328,7 +329,7 @@ const Operator* JSOperatorBuilder::LoadNamed(const Unique<Name>& name,
   return new (zone()) Operator1<LoadNamedParameters>(   // --
       IrOpcode::kJSLoadNamed, Operator::kNoProperties,  // opcode
       "JSLoadNamed",                                    // name
-      1, 1, 1, 1, 1, 0,                                 // counts
+      1, 1, 1, 1, 1, 2,                                 // counts
       parameters);                                      // parameter
 }
 
@@ -339,61 +340,62 @@ const Operator* JSOperatorBuilder::LoadProperty(
   return new (zone()) Operator1<LoadPropertyParameters>(   // --
       IrOpcode::kJSLoadProperty, Operator::kNoProperties,  // opcode
       "JSLoadProperty",                                    // name
-      2, 1, 1, 1, 1, 0,                                    // counts
+      2, 1, 1, 1, 1, 2,                                    // counts
       parameters);                                         // parameter
 }
 
 
-const Operator* JSOperatorBuilder::StoreProperty(StrictMode strict_mode) {
-  switch (strict_mode) {
-    case SLOPPY:
-      return &cache_.kStorePropertySloppyOperator;
-    case STRICT:
-      return &cache_.kStorePropertyStrictOperator;
+const Operator* JSOperatorBuilder::StoreProperty(LanguageMode language_mode) {
+  if (is_strict(language_mode)) {
+    return &cache_.kStorePropertyStrictOperator;
+  } else {
+    return &cache_.kStorePropertySloppyOperator;
   }
   UNREACHABLE();
   return nullptr;
 }
 
 
-const Operator* JSOperatorBuilder::StoreNamed(StrictMode strict_mode,
+const Operator* JSOperatorBuilder::StoreNamed(LanguageMode language_mode,
                                               const Unique<Name>& name) {
-  StoreNamedParameters parameters(strict_mode, name);
+  StoreNamedParameters parameters(language_mode, name);
   return new (zone()) Operator1<StoreNamedParameters>(   // --
       IrOpcode::kJSStoreNamed, Operator::kNoProperties,  // opcode
       "JSStoreNamed",                                    // name
-      2, 1, 1, 0, 1, 0,                                  // counts
+      2, 1, 1, 0, 1, 2,                                  // counts
       parameters);                                       // parameter
 }
 
 
-const Operator* JSOperatorBuilder::DeleteProperty(StrictMode strict_mode) {
-  return new (zone()) Operator1<StrictMode>(                 // --
+const Operator* JSOperatorBuilder::DeleteProperty(LanguageMode language_mode) {
+  return new (zone()) Operator1<LanguageMode>(               // --
       IrOpcode::kJSDeleteProperty, Operator::kNoProperties,  // opcode
       "JSDeleteProperty",                                    // name
-      2, 1, 1, 1, 1, 0,                                      // counts
-      strict_mode);                                          // parameter
+      2, 1, 1, 1, 1, 2,                                      // counts
+      language_mode);                                        // parameter
 }
 
 
 const Operator* JSOperatorBuilder::LoadContext(size_t depth, size_t index,
                                                bool immutable) {
   ContextAccess access(depth, index, immutable);
-  return new (zone()) Operator1<ContextAccess>(      // --
-      IrOpcode::kJSLoadContext, Operator::kNoWrite,  // opcode
-      "JSLoadContext",                               // name
-      1, 1, 0, 1, 1, 0,                              // counts
-      access);                                       // parameter
+  return new (zone()) Operator1<ContextAccess>(  // --
+      IrOpcode::kJSLoadContext,                  // opcode
+      Operator::kNoWrite | Operator::kNoThrow,   // flags
+      "JSLoadContext",                           // name
+      1, 1, 0, 1, 1, 0,                          // counts
+      access);                                   // parameter
 }
 
 
 const Operator* JSOperatorBuilder::StoreContext(size_t depth, size_t index) {
   ContextAccess access(depth, index, false);
-  return new (zone()) Operator1<ContextAccess>(      // --
-      IrOpcode::kJSStoreContext, Operator::kNoRead,  // opcode
-      "JSStoreContext",                              // name
-      2, 1, 1, 0, 1, 0,                              // counts
-      access);                                       // parameter
+  return new (zone()) Operator1<ContextAccess>(  // --
+      IrOpcode::kJSStoreContext,                 // opcode
+      Operator::kNoRead | Operator::kNoThrow,    // flags
+      "JSStoreContext",                          // name
+      2, 1, 1, 0, 1, 0,                          // counts
+      access);                                   // parameter
 }
 
 
@@ -402,7 +404,7 @@ const Operator* JSOperatorBuilder::CreateCatchContext(
   return new (zone()) Operator1<Unique<String>>(                 // --
       IrOpcode::kJSCreateCatchContext, Operator::kNoProperties,  // opcode
       "JSCreateCatchContext",                                    // name
-      1, 1, 1, 1, 1, 0,                                          // counts
+      2, 1, 1, 1, 1, 2,                                          // counts
       name);                                                     // parameter
 }
 

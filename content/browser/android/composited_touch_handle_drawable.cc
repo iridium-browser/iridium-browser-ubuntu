@@ -4,9 +4,9 @@
 
 #include "content/browser/android/composited_touch_handle_drawable.h"
 
-#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/layers/ui_resource_layer.h"
 #include "jni/HandleViewResources_jni.h"
 #include "ui/gfx/android/java_bitmap.h"
@@ -53,13 +53,13 @@ class HandleResources {
   const SkBitmap& GetBitmap(ui::TouchHandleOrientation orientation) {
     DCHECK(loaded_);
     switch (orientation) {
-      case ui::TOUCH_HANDLE_LEFT:
+      case ui::TouchHandleOrientation::LEFT:
         return left_bitmap_;
-      case ui::TOUCH_HANDLE_RIGHT:
+      case ui::TouchHandleOrientation::RIGHT:
         return right_bitmap_;
-      case ui::TOUCH_HANDLE_CENTER:
+      case ui::TouchHandleOrientation::CENTER:
         return center_bitmap_;
-      case ui::TOUCH_HANDLE_ORIENTATION_UNDEFINED:
+      case ui::TouchHandleOrientation::UNDEFINED:
         NOTREACHED() << "Invalid touch handle orientation.";
     };
     return center_bitmap_;
@@ -83,7 +83,7 @@ CompositedTouchHandleDrawable::CompositedTouchHandleDrawable(
     float dpi_scale,
     jobject context)
     : dpi_scale_(dpi_scale),
-      orientation_(ui::TOUCH_HANDLE_ORIENTATION_UNDEFINED),
+      orientation_(ui::TouchHandleOrientation::UNDEFINED),
       layer_(cc::UIResourceLayer::Create()) {
   g_selection_resources.Get().LoadIfNecessary(context);
   DCHECK(root_layer);
@@ -91,11 +91,14 @@ CompositedTouchHandleDrawable::CompositedTouchHandleDrawable(
 }
 
 CompositedTouchHandleDrawable::~CompositedTouchHandleDrawable() {
-  Detach();
+  DetachLayer();
 }
 
 void CompositedTouchHandleDrawable::SetEnabled(bool enabled) {
   layer_->SetIsDrawable(enabled);
+  // Force a position update in case the disabled layer's properties are stale.
+  if (enabled)
+    UpdateLayerPosition();
 }
 
 void CompositedTouchHandleDrawable::SetOrientation(
@@ -108,21 +111,21 @@ void CompositedTouchHandleDrawable::SetOrientation(
   layer_->SetBounds(gfx::Size(bitmap.width(), bitmap.height()));
 
   switch (orientation_) {
-    case ui::TOUCH_HANDLE_LEFT:
+    case ui::TouchHandleOrientation::LEFT:
       focal_offset_from_origin_ = gfx::Vector2dF(bitmap.width() * 0.75f, 0);
       break;
-    case ui::TOUCH_HANDLE_RIGHT:
+    case ui::TouchHandleOrientation::RIGHT:
       focal_offset_from_origin_ = gfx::Vector2dF(bitmap.width() * 0.25f, 0);
       break;
-    case ui::TOUCH_HANDLE_CENTER:
+    case ui::TouchHandleOrientation::CENTER:
       focal_offset_from_origin_ = gfx::Vector2dF(bitmap.width() * 0.5f, 0);
       break;
-    case ui::TOUCH_HANDLE_ORIENTATION_UNDEFINED:
+    case ui::TouchHandleOrientation::UNDEFINED:
       NOTREACHED() << "Invalid touch handle orientation.";
       break;
   };
 
-  layer_->SetPosition(focal_position_ - focal_offset_from_origin_);
+  UpdateLayerPosition();
 }
 
 void CompositedTouchHandleDrawable::SetAlpha(float alpha) {
@@ -136,7 +139,7 @@ void CompositedTouchHandleDrawable::SetAlpha(float alpha) {
 void CompositedTouchHandleDrawable::SetFocus(const gfx::PointF& position) {
   DCHECK(layer_->parent());
   focal_position_ = gfx::ScalePoint(position, dpi_scale_);
-  layer_->SetPosition(focal_position_ - focal_offset_from_origin_);
+  UpdateLayerPosition();
 }
 
 gfx::RectF CompositedTouchHandleDrawable::GetVisibleBounds() const {
@@ -147,8 +150,12 @@ gfx::RectF CompositedTouchHandleDrawable::GetVisibleBounds() const {
                         1.f / dpi_scale_);
 }
 
-void CompositedTouchHandleDrawable::Detach() {
+void CompositedTouchHandleDrawable::DetachLayer() {
   layer_->RemoveFromParent();
+}
+
+void CompositedTouchHandleDrawable::UpdateLayerPosition() {
+  layer_->SetPosition(focal_position_ - focal_offset_from_origin_);
 }
 
 // static

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <string>
 
 #include "base/metrics/histogram.h"
@@ -342,7 +343,7 @@ WebContents* TabStripModel::ReplaceWebContentsAt(int index,
   DCHECK(ContainsIndex(index));
   WebContents* old_contents = GetWebContentsAtImpl(index);
 
-  ForgetOpenersAndGroupsReferencing(old_contents);
+  FixOpenersAndGroupsReferencing(index);
 
   contents_data_[index]->SetWebContents(new_contents);
 
@@ -392,15 +393,15 @@ WebContents* TabStripModel::DetachWebContentsAt(int index) {
   CHECK(!in_notify_);
   if (contents_data_.empty())
     return NULL;
-
   DCHECK(ContainsIndex(index));
+
+  FixOpenersAndGroupsReferencing(index);
 
   WebContents* removed_contents = GetWebContentsAtImpl(index);
   bool was_selected = IsTabSelected(index);
   int next_selected_index = order_controller_->DetermineNewSelectedIndex(index);
   delete contents_data_[index];
   contents_data_.erase(contents_data_.begin() + index);
-  ForgetOpenersAndGroupsReferencing(removed_contents);
   if (empty())
     closing_all_ = true;
   FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
@@ -598,11 +599,19 @@ int TabStripModel::GetIndexOfLastWebContentsOpenedBy(const WebContents* opener,
   DCHECK(opener);
   DCHECK(ContainsIndex(start_index));
 
-  for (int i = contents_data_.size() - 1; i > start_index; --i) {
-    if (contents_data_[i]->opener() == opener)
-      return i;
+  std::set<const WebContents*> opener_and_descendants;
+  opener_and_descendants.insert(opener);
+  int last_index = kNoTab;
+
+  for (int i = start_index + 1; i < count(); ++i) {
+    // Test opened by transitively, i.e. include tabs opened by tabs opened by
+    // opener, etc. Stop when we find the first non-descendant.
+    if (!opener_and_descendants.count(contents_data_[i]->opener()))
+      break;
+    opener_and_descendants.insert(contents_data_[i]->web_contents());
+    last_index = i;
   }
-  return kNoTab;
+  return last_index;
 }
 
 void TabStripModel::TabNavigating(WebContents* contents,
@@ -1045,7 +1054,8 @@ void TabStripModel::ExecuteContextMenuCommand(
         content::RecordAction(UserMetricsAction("TabContextMenu_UnmuteTabs"));
       for (std::vector<int>::const_iterator i = indices.begin();
            i != indices.end(); ++i) {
-        chrome::SetTabAudioMuted(GetWebContentsAt(*i), mute);
+        chrome::SetTabAudioMuted(GetWebContentsAt(*i), mute,
+                                 chrome::kMutedToggleCauseUser);
       }
       break;
     }
@@ -1367,6 +1377,8 @@ void TabStripModel::SelectRelativeTab(bool next) {
 void TabStripModel::MoveWebContentsAtImpl(int index,
                                           int to_position,
                                           bool select_after_move) {
+  FixOpenersAndGroupsReferencing(index);
+
   WebContentsData* moved_data = contents_data_[index];
   contents_data_.erase(contents_data_.begin() + index);
   contents_data_.insert(contents_data_.begin() + to_position, moved_data);
@@ -1376,8 +1388,6 @@ void TabStripModel::MoveWebContentsAtImpl(int index,
     // TODO(sky): why doesn't this code notify observers?
     selection_model_.SetSelectedIndex(to_position);
   }
-
-  ForgetOpenersAndGroupsReferencing(moved_data->web_contents());
 
   FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
                     TabMoved(moved_data->web_contents(), index, to_position));
@@ -1426,13 +1436,12 @@ bool TabStripModel::OpenerMatches(const WebContentsData* data,
   return data->opener() == opener || (use_group && data->group() == opener);
 }
 
-void TabStripModel::ForgetOpenersAndGroupsReferencing(
-    const WebContents* tab) {
-  for (WebContentsDataVector::const_iterator i = contents_data_.begin();
-       i != contents_data_.end(); ++i) {
-    if ((*i)->group() == tab)
-      (*i)->set_group(NULL);
-    if ((*i)->opener() == tab)
-      (*i)->set_opener(NULL);
+void TabStripModel::FixOpenersAndGroupsReferencing(int index) {
+  WebContents* old_contents = GetWebContentsAtImpl(index);
+  for (WebContentsData* data : contents_data_) {
+    if (data->group() == old_contents)
+      data->set_group(contents_data_[index]->group());
+    if (data->opener() == old_contents)
+      data->set_opener(contents_data_[index]->opener());
   }
 }

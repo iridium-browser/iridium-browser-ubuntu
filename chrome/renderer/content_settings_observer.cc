@@ -9,7 +9,6 @@
 #include "chrome/common/render_messages.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/document_state.h"
-#include "content/public/renderer/navigation_state.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/public/platform/WebPermissionCallbacks.h"
@@ -169,7 +168,7 @@ ContentSettingsObserver::ContentSettingsObserver(
       current_request_id_(0),
       should_whitelist_(should_whitelist) {
   ClearBlockedContentSettings();
-  render_frame->GetWebFrame()->setPermissionClient(this);
+  render_frame->GetWebFrame()->setContentSettingsClient(this);
 
   if (render_frame->GetRenderView()->GetMainRenderFrame() != render_frame) {
     // Copy all the settings from the main render frame to avoid race conditions
@@ -195,7 +194,7 @@ void ContentSettingsObserver::SetContentSettingRules(
 
 bool ContentSettingsObserver::IsPluginTemporarilyAllowed(
     const std::string& identifier) {
-  // If the empty string is in here, it means all plug-ins are allowed.
+  // If the empty string is in here, it means all plugins are allowed.
   // TODO(bauerb): Remove this once we only pass in explicit identifiers.
   return (temporarily_allowed_plugins_.find(identifier) !=
           temporarily_allowed_plugins_.end()) ||
@@ -245,15 +244,14 @@ bool ContentSettingsObserver::OnMessageReceived(const IPC::Message& message) {
   return false;
 }
 
-void ContentSettingsObserver::DidCommitProvisionalLoad(bool is_new_navigation) {
+void ContentSettingsObserver::DidCommitProvisionalLoad(
+    bool is_new_navigation,
+    bool is_same_page_navigation) {
   WebFrame* frame = render_frame()->GetWebFrame();
   if (frame->parent())
     return;  // Not a top-level navigation.
 
-  DocumentState* document_state = DocumentState::FromDataSource(
-      frame->dataSource());
-  NavigationState* navigation_state = document_state->navigation_state();
-  if (!navigation_state->was_within_same_page()) {
+  if (!is_same_page_navigation) {
     // Clear "block" flags for the new page. This needs to happen before any of
     // |allowScript()|, |allowScriptFromSource()|, |allowImage()|, or
     // |allowPlugins()| is called for the new page so that these functions can
@@ -420,12 +418,12 @@ bool ContentSettingsObserver::allowStorage(bool local) {
 }
 
 bool ContentSettingsObserver::allowReadFromClipboard(bool default_value) {
-  bool allowed = false;
+  bool allowed = default_value;
 #if defined(ENABLE_EXTENSIONS)
   extensions::ScriptContext* calling_context =
       extension_dispatcher_->script_context_set().GetCalling();
   if (calling_context) {
-    allowed = calling_context->HasAPIPermission(
+    allowed |= calling_context->HasAPIPermission(
         extensions::APIPermission::kClipboardRead);
   }
 #endif
@@ -433,7 +431,7 @@ bool ContentSettingsObserver::allowReadFromClipboard(bool default_value) {
 }
 
 bool ContentSettingsObserver::allowWriteToClipboard(bool default_value) {
-  bool allowed = false;
+  bool allowed = default_value;
 #if defined(ENABLE_EXTENSIONS)
   // All blessed extension pages could historically write to the clipboard, so
   // preserve that for compatibility.
@@ -444,7 +442,7 @@ bool ContentSettingsObserver::allowWriteToClipboard(bool default_value) {
         extensions::Feature::BLESSED_EXTENSION_CONTEXT) {
       allowed = true;
     } else {
-      allowed = calling_context->HasAPIPermission(
+      allowed |= calling_context->HasAPIPermission(
           extensions::APIPermission::kClipboardWrite);
     }
   }
@@ -454,10 +452,6 @@ bool ContentSettingsObserver::allowWriteToClipboard(bool default_value) {
 
 bool ContentSettingsObserver::allowMutationEvents(bool default_value) {
   return IsPlatformApp() ? false : default_value;
-}
-
-bool ContentSettingsObserver::allowPushState() {
-  return !IsPlatformApp();
 }
 
 static void SendInsecureContentSignal(int signal) {

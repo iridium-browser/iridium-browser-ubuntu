@@ -12,15 +12,15 @@
 class ConicPathsGM : public skiagm::GM {
 protected:
 
-    SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("conicpaths");
     }
 
-    SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(920, 960);
     }
 
-    void onOnceBeforeDraw() SK_OVERRIDE {
+    void onOnceBeforeDraw() override {
         {
             const SkScalar w = SkScalarSqrt(2)/2;
             SkPath* conicCirlce = &fPaths.push_back();
@@ -72,9 +72,23 @@ protected:
             closedEllipse->moveTo(0,  0);
             closedEllipse->conicTo(100, 100, 0, 0, SK_ScalarHalf);
         }
+        {
+            const SkScalar w = SkScalarSqrt(2)/2;
+            fGiantCircle.moveTo(2.1e+11f, -1.05e+11f);
+            fGiantCircle.conicTo(2.1e+11f, 0, 1.05e+11f, 0, w);
+            fGiantCircle.conicTo(0, 0, 0, -1.05e+11f, w);
+            fGiantCircle.conicTo(0, -2.1e+11f, 1.05e+11f, -2.1e+11f, w);
+            fGiantCircle.conicTo(2.1e+11f, -2.1e+11f, 2.1e+11f, -1.05e+11f, w);
+
+        }
     }
 
-    void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void drawGiantCircle(SkCanvas* canvas) {
+        SkPaint paint;
+        canvas->drawPath(fGiantCircle, paint);
+    }
+
+    void onDraw(SkCanvas* canvas) override {
         const SkAlpha kAlphaValue[] = { 0xFF, 0x40 };
 
         const SkScalar margin = 15;
@@ -104,16 +118,13 @@ protected:
             canvas->translate(0, 110);
         }
         canvas->restore();
-    }
 
-    uint32_t onGetFlags() const SK_OVERRIDE {
-        // tiling w/ non-antialias paths can cause off-by-1-pixels differences which are
-        // unavoidable (chopping in floats -vs- stepping in scan-converter).
-        return kSkipTiled_Flag;
+        this->drawGiantCircle(canvas);  
     }
 
 private:
     SkTArray<SkPath> fPaths;
+    SkPath           fGiantCircle;
     typedef skiagm::GM INHERITED;
 };
 DEF_GM( return SkNEW(ConicPathsGM); )

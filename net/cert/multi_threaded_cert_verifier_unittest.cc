@@ -5,17 +5,18 @@
 #include "net/cert/multi_threaded_cert_verifier.h"
 
 #include "base/bind.h"
+#include "base/debug/leak_annotations.h"
 #include "base/files/file_path.h"
 #include "base/format_macros.h"
 #include "base/strings/stringprintf.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/base/test_completion_callback.h"
 #include "net/base/test_data_directory.h"
 #include "net/cert/cert_trust_anchor_provider.h"
 #include "net/cert/cert_verify_proc.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/x509_certificate.h"
+#include "net/log/net_log.h"
 #include "net/test/cert_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -277,13 +278,7 @@ TEST_F(MultiThreadedCertVerifierTest, CancelRequest) {
 }
 
 // Tests that a canceled request is not leaked.
-#if !defined(LEAK_SANITIZER)
-#define MAYBE_CancelRequestThenQuit CancelRequestThenQuit
-#else
-// See PR303886. LeakSanitizer flags a leak here.
-#define MAYBE_CancelRequestThenQuit DISABLED_CancelRequestThenQuit
-#endif
-TEST_F(MultiThreadedCertVerifierTest, MAYBE_CancelRequestThenQuit) {
+TEST_F(MultiThreadedCertVerifierTest, CancelRequestThenQuit) {
   base::FilePath certs_dir = GetTestCertsDirectory();
   scoped_refptr<X509Certificate> test_cert(
       ImportCertFromFile(certs_dir, "ok_cert.pem"));
@@ -294,14 +289,15 @@ TEST_F(MultiThreadedCertVerifierTest, MAYBE_CancelRequestThenQuit) {
   TestCompletionCallback callback;
   CertVerifier::RequestHandle request_handle;
 
-  error = verifier_.Verify(test_cert.get(),
-                           "www.example.com",
-                           0,
-                           NULL,
-                           &verify_result,
-                           callback.callback(),
-                           &request_handle,
-                           BoundNetLog());
+  {
+    // Because shutdown intentionally doesn't join worker threads, a
+    // CertVerifyWorker may be leaked if the main thread shuts down before the
+    // worker thread.
+    ANNOTATE_SCOPED_MEMORY_LEAK;
+    error = verifier_.Verify(test_cert.get(), "www.example.com", 0, NULL,
+                             &verify_result, callback.callback(),
+                             &request_handle, BoundNetLog());
+  }
   ASSERT_EQ(ERR_IO_PENDING, error);
   EXPECT_TRUE(request_handle);
   verifier_.CancelRequest(request_handle);

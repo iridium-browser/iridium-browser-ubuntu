@@ -13,198 +13,93 @@
 var remoting = remoting || {};
 
 /**
+ * @type {remoting.ClientSession} The client session object, set once the
+ *     connector has invoked its onOk callback.
+ * TODO(garykac): Have this owned by someone instead of being global.
+ */
+remoting.clientSession = null;
+
+/**
  * @param {HTMLElement} clientContainer Container element for the client view.
- * @param {function(remoting.ClientSession):void} onConnected Callback on
+ * @param {function(remoting.ConnectionInfo):void} onConnected Callback on
  *     success.
- * @param {function(remoting.Error):void} onError Callback on error.
- * @param {function(string, string):boolean} onExtensionMessage The handler for
- *     protocol extension messages. Returns true if a message is recognized;
- *     false otherwise.
- * @param {function(string):void} onConnectionFailed Callback for when the
- *     connection fails.
- * @param {Array.<string>} requiredCapabilities Connector capabilities
+ * @param {function(!remoting.Error):void} onError Callback on error.
+ * @param {function(!remoting.Error):void} onConnectionFailed Callback for when
+ *     the connection fails.
+ * @param {Array<string>} requiredCapabilities Connector capabilities
  *     required by this application.
- * @param {string} defaultRemapKeys The default set of key mappings for the
- *     client session to use.
  * @constructor
  * @implements {remoting.SessionConnector}
  */
 remoting.SessionConnectorImpl = function(clientContainer, onConnected, onError,
-                                         onExtensionMessage,
                                          onConnectionFailed,
-                                         requiredCapabilities,
-                                         defaultRemapKeys) {
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+                                         requiredCapabilities) {
+  /** @private {HTMLElement} */
   this.clientContainer_ = clientContainer;
 
-  /**
-   * @type {function(remoting.ClientSession):void}
-   * @private
-   */
+  /** @private {function(remoting.ConnectionInfo):void} */
   this.onConnected_ = onConnected;
 
-  /**
-   * @type {function(remoting.Error):void}
-   * @private
-   */
+  /** @private {function(!remoting.Error):void} */
   this.onError_ = onError;
 
-  /**
-   * @type {function(string, string):boolean}
-   * @private
-   */
-  this.onExtensionMessage_ = onExtensionMessage;
-
-  /**
-   * @type {function(string):void}
-   * @private
-   */
+  /** @private {function(!remoting.Error):void} */
   this.onConnectionFailed_ = onConnectionFailed;
 
-  /**
-   * @type {Array.<string>}
-   * @private
-   */
+  /** @private {Array<string>} */
   this.requiredCapabilities_ = requiredCapabilities;
 
-  /**
-   * @type {string}
-   * @private
-   */
-  this.defaultRemapKeys_ = defaultRemapKeys;
-
-  /**
-   * @type {string}
-   * @private
-   */
-  this.clientJid_ = '';
-
-  /**
-   * @type {remoting.ClientSession.Mode}
-   * @private
-   */
-  this.connectionMode_ = remoting.ClientSession.Mode.ME2ME;
-
-  /**
-   * @type {remoting.SignalStrategy}
-   * @private
-   */
+  /** @private {remoting.SignalStrategy} */
   this.signalStrategy_ = null;
 
-  /**
-   * @type {remoting.SmartReconnector}
-   * @private
-   */
+  /** @private {remoting.SmartReconnector} */
   this.reconnector_ = null;
 
-  /**
-   * @private
-   */
+  /** @private */
   this.bound_ = {
     onStateChange : this.onStateChange_.bind(this)
   };
 
   // Initialize/declare per-connection state.
-  this.reset();
+  this.resetConnection_();
 };
 
 /**
  * Reset the per-connection state so that the object can be re-used for a
  * second connection. Note the none of the shared WCS state is reset.
+ * @private
  */
-remoting.SessionConnectorImpl.prototype.reset = function() {
-  /**
-   * String used to identify the host to which to connect. For IT2Me, this is
-   * the first 7 digits of the access code; for Me2Me it is the host identifier.
-   *
-   * @type {string}
-   * @private
-   */
-  this.hostId_ = '';
+remoting.SessionConnectorImpl.prototype.resetConnection_ = function() {
+  this.closeSession();
 
-  /**
-   * For paired connections, the client id of this device, issued by the host.
-   *
-   * @type {string}
-   * @private
-   */
-  this.clientPairingId_ = '';
+  // It's OK to initialize these member variables here because the
+  // constructor calls this method.
 
-  /**
-   * For paired connections, the paired secret for this device, issued by the
-   * host.
-   *
-   * @type {string}
-   * @private
-   */
-  this.clientPairedSecret_ = '';
+  /** @private {remoting.Host} */
+  this.host_ = null;
 
-  /**
-   * String used to authenticate to the host on connection. For IT2Me, this is
-   * the access code; for Me2Me it is the PIN.
-   *
-   * @type {string}
-   * @private
-   */
-  this.passPhrase_ = '';
-
-  /**
-   * @type {string}
-   * @private
-   */
-  this.hostJid_ = '';
-
-  /**
-   * @type {string}
-   * @private
-   */
-  this.hostPublicKey_ = '';
-
-  /**
-   * @type {boolean}
-   * @private
-   */
+  /** @private {boolean} */
   this.logHostOfflineErrors_ = false;
 
-  /**
-   * @type {remoting.ClientSession}
-   * @private
-   */
+  /** @private {remoting.ClientPlugin} */
+  this.plugin_ = null;
+
+  /** @private {remoting.ClientSession} */
   this.clientSession_ = null;
 
-  /**
-   * @type {XMLHttpRequest}
-   * @private
-   */
-  this.pendingXhr_ = null;
+  /** @private {remoting.CredentialsProvider} */
+  this.credentialsProvider_ = null;
+
+  /** @private {Object<string,remoting.ProtocolExtension>} */
+  this.protocolExtensions_ = {};
 
   /**
-   * Function to interactively obtain the PIN from the user.
-   * @type {function(boolean, function(string):void):void}
-   * @private
+   * True once a session has been created and we've started the extensions.
+   * This is used to immediately start any extensions that are registered
+   * after the CONNECTED state change.
+   * @private {boolean}
    */
-  this.fetchPin_ = function(onPinFetched) {};
-
-  /**
-   * @type {function(string, string, string,
-   *                 function(string, string):void): void}
-   * @private
-   */
-  this.fetchThirdPartyToken_ = function(
-      tokenUrl, scope, onThirdPartyTokenFetched) {};
-
-  /**
-   * Host 'name', as displayed in the client tool-bar. For a Me2Me connection,
-   * this is the name of the host; for an IT2Me connection, it is the email
-   * address of the person sharing their computer.
-   *
-   * @type {string}
-   * @private
-   */
-  this.hostDisplayName_ = '';
+  this.protocolExtensionsStarted_ = false;
 };
 
 /**
@@ -216,10 +111,6 @@ remoting.SessionConnectorImpl.prototype.reset = function() {
  * @param {remoting.Host} host The Me2Me host to which to connect.
  * @param {function(boolean, function(string):void):void} fetchPin Function to
  *     interactively obtain the PIN from the user.
- * @param {function(string, string, string,
- *                  function(string, string): void): void}
- *     fetchThirdPartyToken Function to obtain a token from a third party
- *     authenticaiton server.
  * @param {string} clientPairingId The client id issued by the host when
  *     this device was paired, if it is already paired.
  * @param {string} clientPairedSecret The shared secret issued by the host when
@@ -229,12 +120,13 @@ remoting.SessionConnectorImpl.prototype.reset = function() {
 remoting.SessionConnectorImpl.prototype.connectMe2Me =
     function(host, fetchPin, fetchThirdPartyToken,
              clientPairingId, clientPairedSecret) {
-  this.connectionMode_ = remoting.ClientSession.Mode.ME2ME;
   this.logHostOfflineErrors_ = false;
-  this.connectMe2MeInternal_(
-      host.hostId, host.jabberId, host.publicKey, host.hostName,
-      fetchPin, fetchThirdPartyToken,
-      clientPairingId, clientPairedSecret);
+  var credentialsProvider = new remoting.CredentialsProvider({
+    fetchPin: fetchPin,
+    pairingInfo: {clientId: clientPairingId, sharedSecret: clientPairedSecret},
+    fetchThirdPartyToken: fetchThirdPartyToken
+  });
+  this.connect(remoting.Application.Mode.ME2ME, host, credentialsProvider);
 };
 
 /**
@@ -247,12 +139,9 @@ remoting.SessionConnectorImpl.prototype.connectMe2Me =
  * @return {void} Nothing.
  */
 remoting.SessionConnectorImpl.prototype.retryConnectMe2Me = function(host) {
-  this.connectionMode_ = remoting.ClientSession.Mode.ME2ME;
   this.logHostOfflineErrors_ = true;
-  this.connectMe2MeInternal_(
-      host.hostId, host.jabberId, host.publicKey, host.hostName,
-      this.fetchPin_, this.fetchThirdPartyToken_,
-      this.clientPairingId_, this.clientPairedSecret_);
+  this.connect(remoting.Application.Mode.ME2ME, host,
+               this.credentialsProvider_);
 };
 
 /**
@@ -267,11 +156,12 @@ remoting.SessionConnectorImpl.prototype.retryConnectMe2Me = function(host) {
  */
 remoting.SessionConnectorImpl.prototype.connectMe2App =
     function(host, fetchThirdPartyToken) {
-  this.connectionMode_ = remoting.ClientSession.Mode.APP_REMOTING;
   this.logHostOfflineErrors_ = true;
-  this.connectMe2MeInternal_(
-      host.hostId, host.jabberId, host.publicKey, host.hostName,
-      function() {}, fetchThirdPartyToken, '', '');
+  var credentialsProvider = new remoting.CredentialsProvider({
+    fetchThirdPartyToken : fetchThirdPartyToken
+  });
+  this.connect(remoting.Application.Mode.APP_REMOTING, host,
+               credentialsProvider);
 };
 
 /**
@@ -282,73 +172,28 @@ remoting.SessionConnectorImpl.prototype.connectMe2App =
  */
 remoting.SessionConnectorImpl.prototype.updatePairingInfo =
     function(clientId, sharedSecret) {
-  this.clientPairingId_ = clientId;
-  this.clientPairedSecret_ = sharedSecret;
+  var pairingInfo = this.credentialsProvider_.getPairingInfo();
+  pairingInfo.clientId = clientId;
+  pairingInfo.sharedSecret = sharedSecret;
 };
 
 /**
- * Initiate a Me2Me connection.
+ * Initiates a connection.
  *
- * @param {string} hostId ID of the Me2Me host.
- * @param {string} hostJid XMPP JID of the host.
- * @param {string} hostPublicKey Public Key of the host.
- * @param {string} hostDisplayName Display name (friendly name) of the host.
- * @param {function(boolean, function(string):void):void} fetchPin Function to
- *     interactively obtain the PIN from the user.
- * @param {function(string, string, string,
- *                  function(string, string): void): void}
- *     fetchThirdPartyToken Function to obtain a token from a third party
- *     authenticaiton server.
- * @param {string} clientPairingId The client id issued by the host when
- *     this device was paired, if it is already paired.
- * @param {string} clientPairedSecret The shared secret issued by the host when
- *     this device was paired, if it is already paired.
+ * @param {remoting.Application.Mode} mode
+ * @param {remoting.Host} host the Host to connect to.
+ * @param {remoting.CredentialsProvider} credentialsProvider
  * @return {void} Nothing.
  * @private
  */
-remoting.SessionConnectorImpl.prototype.connectMe2MeInternal_ =
-    function(hostId, hostJid, hostPublicKey, hostDisplayName,
-             fetchPin, fetchThirdPartyToken,
-             clientPairingId, clientPairedSecret) {
+remoting.SessionConnectorImpl.prototype.connect =
+    function(mode, host, credentialsProvider) {
   // Cancel any existing connect operation.
   this.cancel();
-
-  this.hostId_ = hostId;
-  this.hostJid_ = hostJid;
-  this.hostPublicKey_ = hostPublicKey;
-  this.fetchPin_ = fetchPin;
-  this.fetchThirdPartyToken_ = fetchThirdPartyToken;
-  this.hostDisplayName_ = hostDisplayName;
-  this.updatePairingInfo(clientPairingId, clientPairedSecret);
-
+  remoting.app.setConnectionMode(mode);
+  this.host_ = host;
+  this.credentialsProvider_ = credentialsProvider;
   this.connectSignaling_();
-}
-
-/**
- * Initiate an IT2Me connection.
- *
- * @param {string} accessCode The access code as entered by the user.
- * @return {void} Nothing.
- */
-remoting.SessionConnectorImpl.prototype.connectIT2Me = function(accessCode) {
-  var kSupportIdLen = 7;
-  var kHostSecretLen = 5;
-  var kAccessCodeLen = kSupportIdLen + kHostSecretLen;
-
-  // Cancel any existing connect operation.
-  this.cancel();
-
-  var normalizedAccessCode = this.normalizeAccessCode_(accessCode);
-  if (normalizedAccessCode.length != kAccessCodeLen) {
-    this.onError_(remoting.Error.INVALID_ACCESS_CODE);
-    return;
-  }
-
-  this.hostId_ = normalizedAccessCode.substring(0, kSupportIdLen);
-  this.passPhrase_ = normalizedAccessCode;
-  this.connectionMode_ = remoting.ClientSession.Mode.IT2ME;
-  remoting.identity.callWithToken(this.connectIT2MeWithToken_.bind(this),
-                                  this.onError_);
 };
 
 /**
@@ -357,39 +202,20 @@ remoting.SessionConnectorImpl.prototype.connectIT2Me = function(accessCode) {
  * @return {void} Nothing.
  */
 remoting.SessionConnectorImpl.prototype.reconnect = function() {
-  if (this.connectionMode_ == remoting.ClientSession.Mode.IT2ME) {
+  if (remoting.app.getConnectionMode() === remoting.Application.Mode.IT2ME) {
     console.error('reconnect not supported for IT2Me.');
     return;
   }
   this.logHostOfflineErrors_ = false;
-  this.connectMe2MeInternal_(
-      this.hostId_, this.hostJid_, this.hostPublicKey_, this.hostDisplayName_,
-      this.fetchPin_, this.fetchThirdPartyToken_,
-      this.clientPairingId_, this.clientPairedSecret_);
+  this.connect(remoting.app.getConnectionMode(), this.host_,
+               this.credentialsProvider_);
 };
 
 /**
  * Cancel a connection-in-progress.
  */
 remoting.SessionConnectorImpl.prototype.cancel = function() {
-  if (this.clientSession_) {
-    this.clientSession_.removePlugin();
-    this.clientSession_ = null;
-  }
-  if (this.pendingXhr_) {
-    this.pendingXhr_.abort();
-    this.pendingXhr_ = null;
-  }
-  this.reset();
-};
-
-/**
- * Get the connection mode (Me2Me or IT2Me)
- *
- * @return {remoting.ClientSession.Mode}
- */
-remoting.SessionConnectorImpl.prototype.getConnectionMode = function() {
-  return this.connectionMode_;
+  this.resetConnection_();
 };
 
 /**
@@ -398,7 +224,7 @@ remoting.SessionConnectorImpl.prototype.getConnectionMode = function() {
  * @return {string}
  */
 remoting.SessionConnectorImpl.prototype.getHostId = function() {
-  return this.hostId_;
+  return this.host_.hostId;
 };
 
 /**
@@ -413,8 +239,9 @@ remoting.SessionConnectorImpl.prototype.connectSignaling_ = function() {
 
   /** @param {string} token */
   function connectSignalingWithToken(token) {
-    remoting.identity.getUserInfo(
-        connectSignalingWithTokenAndUserInfo.bind(null, token), that.onError_);
+    remoting.identity.getUserInfo().then(
+        connectSignalingWithTokenAndUserInfo.bind(null, token),
+        remoting.Error.handler(that.onError_));
   }
 
   /**
@@ -424,18 +251,20 @@ remoting.SessionConnectorImpl.prototype.connectSignaling_ = function() {
    * and been granted the userinfo.profile permission.
    *
    * @param {string} token
-   * @param {string} email
-   * @param {string} fullName
+   * @param {{email: string, name: string}} userInfo
    */
-  function connectSignalingWithTokenAndUserInfo(token, email, fullName) {
-    that.signalStrategy_.connect(
-        remoting.settings.XMPP_SERVER_FOR_CLIENT, email, token);
+  function connectSignalingWithTokenAndUserInfo(token, userInfo) {
+    that.signalStrategy_.connect(remoting.settings.XMPP_SERVER, userInfo.email,
+                                 token);
   }
 
-  this.signalStrategy_ =
-      remoting.SignalStrategy.create(this.onSignalingState_.bind(this));
+  this.signalStrategy_ = remoting.SignalStrategy.create();
+  this.signalStrategy_.setStateChangedCallback(
+      this.onSignalingState_.bind(this));
 
-  remoting.identity.callWithToken(connectSignalingWithToken, this.onError_);
+  remoting.identity.getToken().then(
+      connectSignalingWithToken,
+      remoting.Error.handler(this.onError_));
 };
 
 /**
@@ -446,7 +275,7 @@ remoting.SessionConnectorImpl.prototype.onSignalingState_ = function(state) {
   switch (state) {
     case remoting.SignalStrategy.State.CONNECTED:
       // Proceed only if the connection hasn't been canceled.
-      if (this.hostJid_) {
+      if (this.host_.jabberId) {
         this.createSession_();
       }
       break;
@@ -458,75 +287,159 @@ remoting.SessionConnectorImpl.prototype.onSignalingState_ = function(state) {
 };
 
 /**
- * Continue an IT2Me connection once an access token has been obtained.
- *
- * @param {string} token An OAuth2 access token.
- * @return {void} Nothing.
- * @private
- */
-remoting.SessionConnectorImpl.prototype.connectIT2MeWithToken_ =
-    function(token) {
-  // Resolve the host id to get the host JID.
-  this.pendingXhr_ = remoting.xhr.get(
-      remoting.settings.DIRECTORY_API_BASE_URL + '/support-hosts/' +
-          encodeURIComponent(this.hostId_),
-      this.onIT2MeHostInfo_.bind(this),
-      '',
-      { 'Authorization': 'OAuth ' + token });
-};
-
-/**
- * Continue an IT2Me connection once the host JID has been looked up.
- *
- * @param {XMLHttpRequest} xhr The server response to the support-hosts query.
- * @return {void} Nothing.
- * @private
- */
-remoting.SessionConnectorImpl.prototype.onIT2MeHostInfo_ = function(xhr) {
-  this.pendingXhr_ = null;
-  if (xhr.status == 200) {
-    var host = /** @type {{data: {jabberId: string, publicKey: string}}} */
-        base.jsonParseSafe(xhr.responseText);
-    if (host && host.data && host.data.jabberId && host.data.publicKey) {
-      this.hostJid_ = host.data.jabberId;
-      this.hostPublicKey_ = host.data.publicKey;
-      this.hostDisplayName_ = this.hostJid_.split('/')[0];
-      this.connectSignaling_();
-      return;
-    } else {
-      console.error('Invalid "support-hosts" response from server.');
-    }
-  } else {
-    this.onError_(this.translateSupportHostsError_(xhr.status));
-  }
-};
-
-/**
  * Creates ClientSession object.
  */
 remoting.SessionConnectorImpl.prototype.createSession_ = function() {
   // In some circumstances, the WCS <iframe> can get reloaded, which results
   // in a new clientJid and a new callback. In this case, remove the old
   // client plugin before instantiating a new one.
-  if (this.clientSession_) {
-    this.clientSession_.removePlugin();
-    this.clientSession_ = null;
+  this.closeSession();
+
+  var pluginContainer = this.clientContainer_.querySelector(
+      '.client-plugin-container');
+
+  this.plugin_ = remoting.ClientPlugin.factory.createPlugin(
+      pluginContainer, this.requiredCapabilities_);
+
+  var that = this;
+  this.host_.options.load().then(function(){
+    that.plugin_.initialize(that.onPluginInitialized_.bind(that));
+  });
+};
+
+/**
+ * @param {boolean} initialized
+ * @private
+ */
+remoting.SessionConnectorImpl.prototype.onPluginInitialized_ = function(
+    initialized) {
+  if (!initialized) {
+    console.error('ERROR: remoting plugin not loaded');
+    this.pluginError_(new remoting.Error(remoting.Error.Tag.MISSING_PLUGIN));
+    return;
   }
 
-  var authenticationMethods =
-     'third_party,spake2_pair,spake2_hmac,spake2_plain';
+  if (!this.plugin_.isSupportedVersion()) {
+    console.error('ERROR: bad plugin version');
+    this.pluginError_(new remoting.Error(
+        remoting.Error.Tag.BAD_PLUGIN_VERSION));
+    return;
+  }
+
   this.clientSession_ = new remoting.ClientSession(
-      this.signalStrategy_, this.clientContainer_, this.hostDisplayName_,
-      this.passPhrase_, this.fetchPin_, this.fetchThirdPartyToken_,
-      authenticationMethods, this.hostId_, this.hostJid_, this.hostPublicKey_,
-      this.connectionMode_, this.clientPairingId_, this.clientPairedSecret_,
-      this.defaultRemapKeys_);
+      this.plugin_, this.host_, this.signalStrategy_,
+      this.onProtocolExtensionMessage_.bind(this));
+  remoting.clientSession = this.clientSession_;
+
   this.clientSession_.logHostOfflineErrors(this.logHostOfflineErrors_);
   this.clientSession_.addEventListener(
       remoting.ClientSession.Events.stateChanged,
       this.bound_.onStateChange);
-  this.clientSession_.createPluginAndConnect(this.onExtensionMessage_,
-                                             this.requiredCapabilities_);
+
+  this.plugin_.connect(
+      this.host_, this.signalStrategy_.getJid(), this.credentialsProvider_);
+};
+
+/**
+ * @param {!remoting.Error} error
+ * @private
+ */
+remoting.SessionConnectorImpl.prototype.pluginError_ = function(error) {
+  this.signalStrategy_.setIncomingStanzaCallback(null);
+  this.clientSession_.disconnect(error);
+  this.closeSession();
+};
+
+remoting.SessionConnectorImpl.prototype.closeSession = function() {
+  base.dispose(this.clientSession_);
+  this.clientSession_ = null;
+  remoting.clientSession = null;
+
+  base.dispose(this.plugin_);
+  this.plugin_ = null;
+};
+
+/**
+ * @param {remoting.ProtocolExtension} extension
+ */
+remoting.SessionConnectorImpl.prototype.registerProtocolExtension =
+    function(extension) {
+  var types = extension.getExtensionTypes();
+
+  // Make sure we don't have an extension of that type already registered.
+  for (var i=0, len=types.length; i < len; i++) {
+    if (types[i] in this.protocolExtensions_) {
+      console.error(
+          'Attempt to register multiple extensions of the same type: ', type);
+      return;
+    }
+  }
+
+  for (var i=0, len=types.length; i < len; i++) {
+    var type = types[i];
+    this.protocolExtensions_[type] = extension;
+    if (this.protocolExtensionsStarted_) {
+      this.startProtocolExtension_(type);
+    }
+  }
+};
+
+/** @private */
+remoting.SessionConnectorImpl.prototype.initProtocolExtensions_ = function() {
+  base.debug.assert(!this.protocolExtensionsStarted_);
+  for (var type in this.protocolExtensions_) {
+    this.startProtocolExtension_(type);
+  }
+  this.protocolExtensionsStarted_ = true;
+};
+
+/**
+ * @param {string} type
+ * @private
+ */
+remoting.SessionConnectorImpl.prototype.startProtocolExtension_ =
+    function(type) {
+  var extension = this.protocolExtensions_[type];
+  extension.startExtension(this.plugin_.sendClientMessage.bind(this.plugin_));
+};
+
+/**
+ * Called when an extension message needs to be handled.
+ *
+ * @param {string} type The type of the extension message.
+ * @param {string} data The payload of the extension message.
+ * @return {boolean} Return true if the extension message was recognized.
+ * @private
+ */
+remoting.SessionConnectorImpl.prototype.onProtocolExtensionMessage_ =
+    function(type, data) {
+  if (type == 'test-echo-reply') {
+    console.log('Got echo reply: ' + data);
+    return true;
+  }
+
+  var message = base.jsonParseSafe(data);
+  if (typeof message != 'object') {
+    console.error('Error parsing extension json data: ' + data);
+    return false;
+  }
+
+  if (type in this.protocolExtensions_) {
+    /** @type {remoting.ProtocolExtension} */
+    var extension = this.protocolExtensions_[type];
+    var handled = false;
+    try {
+      handled = extension.onExtensionMessage(type, message);
+    } catch (/** @type {*} */ err) {
+      console.error('Failed to process protocol extension ' + type +
+                    ' message: ' + err);
+    }
+    if (handled) {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 /**
@@ -535,7 +448,7 @@ remoting.SessionConnectorImpl.prototype.createSession_ = function() {
  * events). Errors that occur while connecting either trigger a reconnect
  * or notify the onError handler.
  *
- * @param  {remoting.ClientSession.StateEvent} event
+ * @param {remoting.ClientSession.StateEvent=} event
  * @return {void} Nothing.
  * @private
  */
@@ -551,19 +464,27 @@ remoting.SessionConnectorImpl.prototype.onStateChange_ = function(event) {
           this.bound_.onStateChange);
 
       base.dispose(this.reconnector_);
-      if (this.connectionMode_ != remoting.ClientSession.Mode.IT2ME) {
+      if (remoting.app.getConnectionMode() != remoting.Application.Mode.IT2ME) {
         this.reconnector_ =
             new remoting.SmartReconnector(this, this.clientSession_);
       }
-      this.onConnected_(this.clientSession_);
-      break;
-
-    case remoting.ClientSession.State.CREATED:
-      console.log('Created plugin');
+      var connectionInfo = new remoting.ConnectionInfo(
+          this.host_, this.credentialsProvider_, this.clientSession_,
+          this.plugin_);
+      this.onConnected_(connectionInfo);
+      // Initialize any protocol extensions that may have been added by the app.
+      this.initProtocolExtensions_();
       break;
 
     case remoting.ClientSession.State.CONNECTING:
-      console.log('Connecting as ' + remoting.identity.getCachedEmail());
+      remoting.identity.getEmail().then(
+          function(/** string */ email) {
+            console.log('Connecting as ' + email);
+          });
+      break;
+
+    case remoting.ClientSession.State.AUTHENTICATED:
+      console.log('Connection authenticated');
       break;
 
     case remoting.ClientSession.State.INITIALIZING:
@@ -578,14 +499,15 @@ remoting.SessionConnectorImpl.prototype.onStateChange_ = function(event) {
       // accepting it. Since there's no way of knowing exactly what went wrong,
       // we rely on server-side logs in this case and report a generic error
       // message.
-      this.onError_(remoting.Error.UNEXPECTED);
+      this.onError_(remoting.Error.unexpected());
       break;
 
     case remoting.ClientSession.State.FAILED:
       var error = this.clientSession_.getError();
-      console.error('Client plugin reported connection failed: ' + error);
+      console.error('Client plugin reported connection failed: ' +
+                    error.toString());
       if (error == null) {
-        error = remoting.Error.UNEXPECTED;
+        error = remoting.Error.unexpected();
       }
       this.onConnectionFailed_(error);
       break;
@@ -594,70 +516,32 @@ remoting.SessionConnectorImpl.prototype.onStateChange_ = function(event) {
       console.error('Unexpected client plugin state: ' + event.current);
       // This should only happen if the web-app and client plugin get out of
       // sync, and even then the version check should ensure compatibility.
-      this.onError_(remoting.Error.MISSING_PLUGIN);
+      this.onError_(new remoting.Error(remoting.Error.Tag.MISSING_PLUGIN));
   }
 };
-
-/**
- * @param {number} error An HTTP error code returned by the support-hosts
- *     endpoint.
- * @return {remoting.Error} The equivalent remoting.Error code.
- * @private
- */
-remoting.SessionConnectorImpl.prototype.translateSupportHostsError_ =
-    function(error) {
-  switch (error) {
-    case 0: return remoting.Error.NETWORK_FAILURE;
-    case 404: return remoting.Error.INVALID_ACCESS_CODE;
-    case 502: // No break
-    case 503: return remoting.Error.SERVICE_UNAVAILABLE;
-    default: return remoting.Error.UNEXPECTED;
-  }
-};
-
-/**
- * Normalize the access code entered by the user.
- *
- * @param {string} accessCode The access code, as entered by the user.
- * @return {string} The normalized form of the code (whitespace removed).
- * @private
- */
-remoting.SessionConnectorImpl.prototype.normalizeAccessCode_ =
-    function(accessCode) {
-  // Trim whitespace.
-  return accessCode.replace(/\s/g, '');
-};
-
 
 /**
  * @constructor
  * @implements {remoting.SessionConnectorFactory}
  */
-remoting.DefaultSessionConnectorFactory = function() {
-};
+remoting.DefaultSessionConnectorFactory = function() {};
 
 /**
  * @param {HTMLElement} clientContainer Container element for the client view.
- * @param {function(remoting.ClientSession):void} onConnected Callback on
+ * @param {function(remoting.ConnectionInfo):void} onConnected Callback on
  *     success.
- * @param {function(remoting.Error):void} onError Callback on error.
- * @param {function(string, string):boolean} onExtensionMessage The handler for
- *     protocol extension messages. Returns true if a message is recognized;
- *     false otherwise.
- * @param {function(string):void} onConnectionFailed Callback for when the
- *     connection fails.
- * @param {Array.<string>} requiredCapabilities Connector capabilities
+ * @param {function(!remoting.Error):void} onError Callback on error.
+ * @param {function(!remoting.Error):void} onConnectionFailed Callback for when
+ *     the connection fails.
+ * @param {Array<string>} requiredCapabilities Connector capabilities
  *     required by this application.
- * @param {string} defaultRemapKeys The default set of key mappings to use
- *     in the client session.
  * @return {remoting.SessionConnector}
  */
 remoting.DefaultSessionConnectorFactory.prototype.createConnector =
-    function(clientContainer, onConnected, onError, onExtensionMessage,
-             onConnectionFailed, requiredCapabilities, defaultRemapKeys) {
+    function(clientContainer, onConnected, onError,
+             onConnectionFailed, requiredCapabilities) {
   return new remoting.SessionConnectorImpl(clientContainer, onConnected,
-                                           onError, onExtensionMessage,
+                                           onError,
                                            onConnectionFailed,
-                                           requiredCapabilities,
-                                           defaultRemapKeys);
+                                           requiredCapabilities);
 };

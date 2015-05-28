@@ -12,7 +12,6 @@ with the prefix "UserAct".
 from __future__ import print_function
 
 import inspect
-import os
 import pprint
 import re
 
@@ -20,6 +19,7 @@ from chromite.cbuildbot import constants
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import gerrit
+from chromite.lib import git
 from chromite.lib import gob_util
 from chromite.lib import terminal
 
@@ -154,9 +154,13 @@ def PrintCl(opts, cls, lims, show_approvals=True):
 
 
 def _MyUserInfo():
-  username = os.environ['USER']
-  emails = ['%s@%s' % (username, domain)
-            for domain in ('google.com', 'chromium.org')]
+  email = git.GetProjectUserEmail(constants.CHROMITE_DIR)
+  [username, _, domain] = email.partition('@')
+  if domain in ('google.com', 'chromium.org'):
+    emails = ['%s@%s' % (username, domain)
+              for domain in ('google.com', 'chromium.org')]
+  else:
+    emails = [email]
   reviewers = ['reviewer:%s' % x for x in emails]
   owners = ['owner:%s' % x for x in emails]
   return emails, reviewers, owners
@@ -168,6 +172,10 @@ def FilteredQuery(opts, query):
 
   if opts.branch is not None:
     query += ' branch:%s' % opts.branch
+  if opts.project is not None:
+    query += ' project: %s' % opts.project
+  if opts.topic is not None:
+    query += ' topic: %s' % opts.topic
 
   helper, _ = GetGerrit(opts)
   for cl in helper.Query(query, raw=True, bypass_cache=False):
@@ -335,6 +343,13 @@ def UserActMessage(opts, cl, message):
   helper.SetReview(cl, msg=message, dryrun=opts.dryrun)
 
 
+def UserActTopic(opts, topic, *args):
+  """Set |topic| for CL number <n> [n ...]"""
+  for arg in args:
+    helper, arg = GetGerrit(opts, arg)
+    helper.SetTopic(arg, topic, dryrun=opts.dryrun)
+
+
 def UserActDeletedraft(opts, *args):
   """Delete draft patch set <n> [n ...]"""
   for arg in args:
@@ -406,6 +421,10 @@ Actions:"""
                       help='Be more verbose in output')
   parser.add_argument('-b', '--branch',
                       help='Limit output to the specific branch')
+  parser.add_argument('-p', '--project',
+                      help='Limit output to the specific project')
+  parser.add_argument('-t', '--topic',
+                      help='Limit output to the specific topic')
   parser.add_argument('args', nargs='+')
   opts = parser.parse_args(argv)
 

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/common.h"
 #include "webrtc/experiments.h"
 #include "webrtc/common_video/interface/i420_video_frame.h"
@@ -21,7 +22,6 @@
 #include "webrtc/modules/video_coding/codecs/interface/mock/mock_video_codec_interface.h"
 #include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
 #include "webrtc/modules/video_coding/codecs/vp8/temporal_layers.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 #include "gtest/gtest.h"
 
@@ -125,7 +125,6 @@ class Vp8TestDecodedImageCallback : public DecodedImageCallback {
       : decoded_frames_(0) {
   }
   virtual int32_t Decoded(I420VideoFrame& decoded_image) {
-    last_decoded_frame_.CopyFrame(decoded_image);
     for (int i = 0; i < decoded_image.width(); ++i) {
       EXPECT_NEAR(kColorY, decoded_image.buffer(kYPlane)[i], 1);
     }
@@ -141,13 +140,9 @@ class Vp8TestDecodedImageCallback : public DecodedImageCallback {
   int DecodedFrames() {
     return decoded_frames_;
   }
-  void GetLastDecodedFrame(I420VideoFrame* decoded_frame) {
-    decoded_frame->SwapFrame(&last_decoded_frame_);
-  }
 
  private:
   int decoded_frames_;
-  I420VideoFrame last_decoded_frame_;
 };
 
 class SkipEncodingUnusedStreamsTest {
@@ -186,28 +181,26 @@ class SkipEncodingUnusedStreamsTest {
       return layers_->EncodeFlags(timestamp);
     }
 
-    virtual bool ConfigureBitrates(int bitrate_kbit,
-                                   int max_bitrate_kbit,
-                                   int framerate,
-                                   vpx_codec_enc_cfg_t* cfg) OVERRIDE {
+    bool ConfigureBitrates(int bitrate_kbit,
+                           int max_bitrate_kbit,
+                           int framerate,
+                           vpx_codec_enc_cfg_t* cfg) override {
       configured_bitrate_ = bitrate_kbit;
       return layers_->ConfigureBitrates(
           bitrate_kbit, max_bitrate_kbit, framerate, cfg);
     }
 
-    virtual void PopulateCodecSpecific(bool base_layer_sync,
-                                       CodecSpecificInfoVP8* vp8_info,
-                                       uint32_t timestamp) OVERRIDE {
+    void PopulateCodecSpecific(bool base_layer_sync,
+                               CodecSpecificInfoVP8* vp8_info,
+                               uint32_t timestamp) override {
       layers_->PopulateCodecSpecific(base_layer_sync, vp8_info, timestamp);
     }
 
-    virtual void FrameEncoded(unsigned int size, uint32_t timestamp) OVERRIDE {
+    void FrameEncoded(unsigned int size, uint32_t timestamp) override {
       layers_->FrameEncoded(size, timestamp);
     }
 
-    virtual int CurrentLayerId() const OVERRIDE {
-      return layers_->CurrentLayerId();
-    }
+    int CurrentLayerId() const override { return layers_->CurrentLayerId(); }
 
     int configured_bitrate_;
     TemporalLayers* layers_;
@@ -216,8 +209,8 @@ class SkipEncodingUnusedStreamsTest {
   class SpyingTemporalLayersFactory : public TemporalLayers::Factory {
    public:
     virtual ~SpyingTemporalLayersFactory() {}
-    virtual TemporalLayers* Create(int temporal_layers,
-                                   uint8_t initial_tl0_pic_idx) const OVERRIDE {
+    TemporalLayers* Create(int temporal_layers,
+                           uint8_t initial_tl0_pic_idx) const override {
       SpyingTemporalLayers* layers =
           new SpyingTemporalLayers(TemporalLayers::Factory::Create(
               temporal_layers, initial_tl0_pic_idx));
@@ -618,6 +611,16 @@ class TestVp8Simulcast : public ::testing::Test {
     EXPECT_EQ(0, encoder_->InitEncode(&settings_, 1, 1200));
     encoder_->SetRates(settings_.startBitrate, 30);
     ExpectStreams(kKeyFrame, 1);
+    // Resize |input_frame_| to the new resolution.
+    half_width = (settings_.width + 1) / 2;
+    input_frame_.CreateEmptyFrame(settings_.width, settings_.height,
+                                  settings_.width, half_width, half_width);
+    memset(input_frame_.buffer(kYPlane), 0,
+        input_frame_.allocated_size(kYPlane));
+    memset(input_frame_.buffer(kUPlane), 0,
+        input_frame_.allocated_size(kUPlane));
+    memset(input_frame_.buffer(kVPlane), 0,
+        input_frame_.allocated_size(kVPlane));
     EXPECT_EQ(0, encoder_->Encode(input_frame_, NULL, &frame_types));
   }
 
@@ -987,9 +990,9 @@ class TestVp8Simulcast : public ::testing::Test {
     }
   }
 
-  scoped_ptr<VP8Encoder> encoder_;
+  rtc::scoped_ptr<VP8Encoder> encoder_;
   MockEncodedImageCallback encoder_callback_;
-  scoped_ptr<VP8Decoder> decoder_;
+  rtc::scoped_ptr<VP8Decoder> decoder_;
   MockDecodedImageCallback decoder_callback_;
   VideoCodec settings_;
   I420VideoFrame input_frame_;

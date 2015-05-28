@@ -30,17 +30,21 @@ extern "C" {
 
 static jint Init(JNIEnv* env, jobject jcaller);
 
-__attribute__((visibility("default"), alias("Init")))
+__attribute__((visibility("default")))
 jint
     Java_org_chromium_example_jni_1generator_SampleForTests_00024MyInnerClass_nativeInit(JNIEnv*
-    env, jobject jcaller);
+    env, jobject jcaller) {
+  return Init(env, jcaller);
+}
 
 static jint Init(JNIEnv* env, jobject jcaller);
 
-__attribute__((visibility("default"), alias("Init")))
+__attribute__((visibility("default")))
 jint
     Java_org_chromium_example_jni_1generator_SampleForTests_00024MyOtherInnerClass_nativeInit(JNIEnv*
-    env, jobject jcaller);
+    env, jobject jcaller) {
+  return Init(env, jcaller);
+}
 
 };  // extern "C"
 
@@ -199,7 +203,8 @@ static_cast<jstring>(env->CallStaticObjectMethod(SampleForTests_clazz(env),
 // Step 3: RegisterNatives.
 
 static bool RegisterNativesImpl(JNIEnv* env, jclass clazz) {
-    base::subtle::Release_Store(&g_SampleForTests_clazz,
+
+  base::subtle::Release_Store(&g_SampleForTests_clazz,
       static_cast<base::subtle::AtomicWord>(env->NewWeakGlobalRef(clazz));
 
   return true;

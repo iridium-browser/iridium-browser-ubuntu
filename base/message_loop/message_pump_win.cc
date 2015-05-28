@@ -4,14 +4,15 @@
 
 #include "base/message_loop/message_pump_win.h"
 
+#include <limits>
 #include <math.h>
 
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/process/memory.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 #include "base/win/wrapped_window_proc.h"
 
 namespace base {
@@ -70,12 +71,13 @@ int MessagePumpWin::GetCurrentDelay() const {
   double timeout =
       ceil((delayed_work_time_ - TimeTicks::Now()).InMillisecondsF());
 
-  // If this value is negative, then we need to run delayed work soon.
-  int delay = static_cast<int>(timeout);
-  if (delay < 0)
-    delay = 0;
-
-  return delay;
+  // Range check the |timeout| while converting to an integer.  If the |timeout|
+  // is negative, then we need to run delayed work soon.  If the |timeout| is
+  // "overflowingly" large, that means a delayed task was posted with a
+  // super-long delay.
+  return timeout < 0 ? 0 :
+      (timeout > std::numeric_limits<int>::max() ?
+       std::numeric_limits<int>::max() : static_cast<int>(timeout));
 }
 
 //-----------------------------------------------------------------------------
@@ -162,6 +164,11 @@ void MessagePumpForUI::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
 // static
 LRESULT CALLBACK MessagePumpForUI::WndProcThunk(
     HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "440919 MessagePumpForUI::WndProcThunk1"));
+
   switch (message) {
     case kMsgHaveWork:
       reinterpret_cast<MessagePumpForUI*>(wparam)->HandleWorkMessage();
@@ -170,6 +177,12 @@ LRESULT CALLBACK MessagePumpForUI::WndProcThunk(
       reinterpret_cast<MessagePumpForUI*>(wparam)->HandleTimerMessage();
       break;
   }
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "440919 MessagePumpForUI::WndProcThunk2"));
+
   return DefWindowProc(hwnd, message, wparam, lparam);
 }
 
@@ -380,12 +393,29 @@ bool MessagePumpForUI::ProcessMessageHelper(const MSG& msg) {
           "440919 MessagePumpForUI::ProcessMessageHelper3"));
 
   uint32_t action = MessagePumpDispatcher::POST_DISPATCH_PERFORM_DEFAULT;
-  if (state_->dispatcher)
+  if (state_->dispatcher) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
+    tracked_objects::ScopedTracker tracking_profile4(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "440919 MessagePumpForUI::ProcessMessageHelper4"));
+
     action = state_->dispatcher->Dispatch(msg);
+  }
   if (action & MessagePumpDispatcher::POST_DISPATCH_QUIT_LOOP)
     state_->should_quit = true;
   if (action & MessagePumpDispatcher::POST_DISPATCH_PERFORM_DEFAULT) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
+    tracked_objects::ScopedTracker tracking_profile5(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "440919 MessagePumpForUI::ProcessMessageHelper5"));
+
     TranslateMessage(&msg);
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
+    tracked_objects::ScopedTracker tracking_profile6(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "440919 MessagePumpForUI::ProcessMessageHelper6"));
+
     DispatchMessage(&msg);
   }
 
@@ -393,11 +423,6 @@ bool MessagePumpForUI::ProcessMessageHelper(const MSG& msg) {
 }
 
 bool MessagePumpForUI::ProcessPumpReplacementMessage() {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "440919 MessagePumpForUI::ProcessPumpReplacementMessage"));
-
   // When we encounter a kMsgHaveWork message, this method is called to peek
   // and process a replacement message, such as a WM_PAINT or WM_TIMER.  The
   // goal is to make the kMsgHaveWork as non-intrusive as possible, even though
@@ -648,7 +673,7 @@ ULONG_PTR MessagePumpForIO::HandlerToKey(IOHandler* handler,
   // |IOHandler| is at least pointer-size aligned, so the lowest two bits are
   // always cleared. We use the lowest bit to distinguish completion keys with
   // and without the associated |IOContext|.
-  DCHECK((key & 1) == 0);
+  DCHECK_EQ(key & 1, 0u);
 
   // Mark the completion key as context-less.
   if (!has_valid_io_context)

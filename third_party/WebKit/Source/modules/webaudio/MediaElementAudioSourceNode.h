@@ -27,9 +27,9 @@
 
 #if ENABLE(WEB_AUDIO)
 
+#include "modules/webaudio/AudioSourceNode.h"
 #include "platform/audio/AudioSourceProviderClient.h"
 #include "platform/audio/MultiChannelResampler.h"
-#include "modules/webaudio/AudioSourceNode.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/ThreadingPrimitives.h"
@@ -39,41 +39,77 @@ namespace blink {
 class AudioContext;
 class HTMLMediaElement;
 
-class MediaElementAudioSourceNode final : public AudioSourceNode, public AudioSourceProviderClient {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(MediaElementAudioSourceNode);
+class MediaElementAudioSourceHandler final : public AudioHandler, public AudioSourceProviderClient {
+    USING_GARBAGE_COLLECTED_MIXIN(MediaElementAudioSourceHandler);
 public:
-    static MediaElementAudioSourceNode* create(AudioContext*, HTMLMediaElement*);
-
-    virtual ~MediaElementAudioSourceNode();
+    MediaElementAudioSourceHandler(AudioNode&, HTMLMediaElement*);
+    virtual ~MediaElementAudioSourceHandler();
 
     HTMLMediaElement* mediaElement() { return m_mediaElement.get(); }
 
-    // AudioNode
+    // AudioHandler
     virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
 
     // AudioSourceProviderClient
     virtual void setFormat(size_t numberOfChannels, float sampleRate) override;
+    virtual void onCurrentSrcChanged(const KURL& currentSrc) override;
 
     virtual void lock() override;
     virtual void unlock() override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
-    MediaElementAudioSourceNode(AudioContext*, HTMLMediaElement*);
-
     // As an audio source, we will never propagate silence.
     virtual bool propagatesSilence() const override { return false; }
 
-    RefPtrWillBeMember<HTMLMediaElement> m_mediaElement;
+    // Must be called only on the audio thread.
+    bool passesCORSAccessCheck();
+
+    // Must be called only on the main thread.
+    bool passesCurrentSrcCORSAccessCheck(const KURL& currentSrc);
+
+    // Print warning if CORS restrictions cause MediaElementAudioSource to output zeroes.
+    void printCORSMessage();
+
+    // This Persistent doesn't make a reference cycle. The reference from
+    // HTMLMediaElement to AudioSourceProvideClient, which
+    // MediaElementAudioSourceNode implements, is weak.
+    RefPtrWillBePersistent<HTMLMediaElement> m_mediaElement;
     Mutex m_processLock;
 
     unsigned m_sourceNumberOfChannels;
     double m_sourceSampleRate;
 
     OwnPtr<MultiChannelResampler> m_multiChannelResampler;
+
+    // |m_passesCurrentSrcCORSAccessCheck| holds the value of
+    // context()->securityOrigin() && context()->securityOrigin()->canRequest(mediaElement()->currentSrc()),
+    // updated in the ctor and onCurrentSrcChanged() on the main thread and
+    // used in passesCORSAccessCheck() on the audio thread,
+    // protected by |m_processLock|.
+    bool m_passesCurrentSrcCORSAccessCheck;
+
+    // Indicates if we need to print a CORS message if the current source has changed and we have no
+    // access to it. Must be protected by |m_processLock|.
+    bool m_maybePrintCORSMessage;
+
+    // The value of mediaElement()->currentSrc() in the ctor and onCurrentSrcChanged().  Protected
+    // by |m_processLock|.
+    KURL m_currentSrc;
+};
+
+class MediaElementAudioSourceNode final : public AudioSourceNode {
+    DEFINE_WRAPPERTYPEINFO();
+public:
+    static MediaElementAudioSourceNode* create(AudioContext*, HTMLMediaElement*);
+    MediaElementAudioSourceHandler& mediaElementAudioSourceHandler() const;
+
+    HTMLMediaElement* mediaElement() const;
+
+private:
+    MediaElementAudioSourceNode(AudioContext&, HTMLMediaElement*);
 };
 
 } // namespace blink

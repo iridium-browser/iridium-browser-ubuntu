@@ -23,6 +23,7 @@ tv.exportTo('tv.c.analysis', function() {
         className: className,
         rows: []
       };
+      table.tHead = undefined;
       table.className = className;
       table.classList = [];
       table.classList.push(className);
@@ -86,7 +87,7 @@ tv.exportTo('tv.c.analysis', function() {
     },
 
     appendDataRow: function(table, label, duration, cpuDuration, selfTime,
-                            cpuSelfTime, occurences, percentage, details,
+                            cpuSelfTime, occurrences, percentage, details,
                             selectionGenerator) {
       var row = {
         label: label,
@@ -94,7 +95,7 @@ tv.exportTo('tv.c.analysis', function() {
         cpuDuration: cpuDuration,
         selfTime: selfTime,
         cpuSelfTime: cpuSelfTime,
-        occurences: occurences,
+        occurrences: occurrences,
         percentage: percentage,
         details: details,
         selectionGenerator: selectionGenerator

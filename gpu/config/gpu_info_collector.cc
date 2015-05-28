@@ -7,12 +7,12 @@
 #include <string>
 #include <vector>
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
@@ -112,6 +112,7 @@ CollectInfoResult CollectGraphicsInfoGL(GPUInfo* gpu_info) {
 
   bool supports_robustness =
       gpu_info->gl_extensions.find("GL_EXT_robustness") != std::string::npos ||
+      gpu_info->gl_extensions.find("GL_KHR_robustness") != std::string::npos ||
       gpu_info->gl_extensions.find("GL_ARB_robustness") != std::string::npos;
   if (supports_robustness) {
     glGetIntegerv(GL_RESET_NOTIFICATION_STRATEGY_ARB,

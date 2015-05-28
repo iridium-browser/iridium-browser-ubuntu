@@ -80,9 +80,9 @@ using testing::Return;
 using testing::StrictMock;
 using testing::_;
 
-class TestProfileSyncServiceObserver : public ProfileSyncServiceObserver {
+class TestSyncServiceObserver : public sync_driver::SyncServiceObserver {
  public:
-  explicit TestProfileSyncServiceObserver(ProfileSyncService* service)
+  explicit TestSyncServiceObserver(ProfileSyncService* service)
       : service_(service), first_setup_in_progress_(false) {}
   void OnStateChanged() override {
     first_setup_in_progress_ = service_->FirstSetupInProgress();
@@ -349,7 +349,7 @@ TEST_F(ProfileSyncServiceTest, SetupInProgress) {
   CreateService(browser_sync::AUTO_START);
   InitializeForNthSync();
 
-  TestProfileSyncServiceObserver observer(service());
+  TestSyncServiceObserver observer(service());
   service()->AddObserver(&observer);
 
   service()->SetSetupInProgress(true);
@@ -637,6 +637,17 @@ TEST_F(ProfileSyncServiceTest, ClearLastSyncedTimeOnSignOut) {
 
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_SYNC_TIME_NEVER),
             service()->GetLastSyncedTimeString());
+}
+
+// Verify that the disable sync flag disables sync.
+TEST_F(ProfileSyncServiceTest, DisableSyncFlag) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(switches::kDisableSync);
+  EXPECT_FALSE(ProfileSyncService::IsSyncEnabled());
+}
+
+// Verify that no disable sync flag enables sync.
+TEST_F(ProfileSyncServiceTest, NoDisableSyncFlag) {
+  EXPECT_TRUE(ProfileSyncService::IsSyncEnabled());
 }
 
 }  // namespace

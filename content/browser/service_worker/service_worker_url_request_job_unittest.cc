@@ -31,15 +31,18 @@
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/io_buffer.h"
+#include "net/base/test_data_directory.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
+#include "net/ssl/ssl_info.h"
+#include "net/test/cert_test_util.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory_impl.h"
+#include "storage/browser/blob/blob_data_builder.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/blob/blob_url_request_job.h"
 #include "storage/browser/blob/blob_url_request_job_factory.h"
-#include "storage/common/blob/blob_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
@@ -104,16 +107,17 @@ class ServiceWorkerURLRequestJobTest : public testing::Test {
  protected:
   ServiceWorkerURLRequestJobTest()
       : thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP),
-        blob_data_(new storage::BlobData("blob-id:myblob")) {}
+        blob_data_(new storage::BlobDataBuilder("blob-id:myblob")) {}
   ~ServiceWorkerURLRequestJobTest() override {}
 
   void SetUp() override {
     browser_context_.reset(new TestBrowserContext);
     InitializeResourceContext(browser_context_.get());
-    SetUpWithHelper(new EmbeddedWorkerTestHelper(kProcessID));
+    SetUpWithHelper(new EmbeddedWorkerTestHelper(base::FilePath(), kProcessID));
   }
 
-  void SetUpWithHelper(EmbeddedWorkerTestHelper* helper) {
+  void SetUpWithHelper(EmbeddedWorkerTestHelper* helper,
+                       bool set_main_script_http_response_info = true) {
     helper_.reset(helper);
 
     registration_ = new ServiceWorkerRegistration(
@@ -126,14 +130,36 @@ class ServiceWorkerURLRequestJobTest : public testing::Test {
         1L,
         helper_->context()->AsWeakPtr());
 
+    // Make the registration findable via storage functions.
+    helper_->context()->storage()->LazyInitialize(base::Bind(&base::DoNothing));
+    base::RunLoop().RunUntilIdle();
+    ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
+    helper_->context()->storage()->StoreRegistration(
+        registration_.get(),
+        version_.get(),
+        CreateReceiverOnCurrentThread(&status));
+    base::RunLoop().RunUntilIdle();
+    ASSERT_EQ(SERVICE_WORKER_OK, status);
+
+    if (set_main_script_http_response_info) {
+      net::HttpResponseInfo http_info;
+      http_info.ssl_info.cert =
+          net::ImportCertFromFile(net::GetTestCertsDirectory(), "ok_cert.pem");
+      EXPECT_TRUE(http_info.ssl_info.is_valid());
+      http_info.ssl_info.security_bits = 0x100;
+      // SSL3 TLS_DHE_RSA_WITH_AES_256_CBC_SHA
+      http_info.ssl_info.connection_status = 0x300039;
+      version_->SetMainScriptHttpResponseInfo(http_info);
+    }
+
     scoped_ptr<ServiceWorkerProviderHost> provider_host(
-        new ServiceWorkerProviderHost(
-            kProcessID,
-            MSG_ROUTING_NONE,
-            kProviderID,
-            helper_->context()->AsWeakPtr(),
-            nullptr));
-    provider_host->AssociateRegistration(registration_.get());
+        new ServiceWorkerProviderHost(kProcessID, MSG_ROUTING_NONE, kProviderID,
+                                      SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+                                      helper_->context()->AsWeakPtr(),
+                                      nullptr));
+    provider_host->SetDocumentUrl(GURL("http://example.com/"));
+    provider_host->AssociateRegistration(registration_.get(),
+                                         false /* notify_controllerchange */);
     registration_->SetActiveVersion(version_.get());
 
     ChromeBlobStorageContext* chrome_blob_storage_context =
@@ -166,10 +192,8 @@ class ServiceWorkerURLRequestJobTest : public testing::Test {
                    const std::string& expected_status_text,
                    const std::string& expected_response) {
     request_ = url_request_context_.CreateRequest(
-        GURL("http://example.com/foo.html"),
-        net::DEFAULT_PRIORITY,
-        &url_request_delegate_,
-        nullptr);
+        GURL("http://example.com/foo.html"), net::DEFAULT_PRIORITY,
+        &url_request_delegate_);
 
     request_->set_method("GET");
     request_->Start();
@@ -180,6 +204,10 @@ class ServiceWorkerURLRequestJobTest : public testing::Test {
     EXPECT_EQ(expected_status_text,
               request_->response_headers()->GetStatusText());
     EXPECT_EQ(expected_response, url_request_delegate_.response_data());
+    const net::SSLInfo& ssl_info = request_->response_info().ssl_info;
+    EXPECT_TRUE(ssl_info.is_valid());
+    EXPECT_EQ(ssl_info.security_bits, 0x100);
+    EXPECT_EQ(ssl_info.connection_status, 0x300039);
   }
 
   bool HasInflightRequests() {
@@ -198,7 +226,7 @@ class ServiceWorkerURLRequestJobTest : public testing::Test {
   MockURLRequestDelegate url_request_delegate_;
   scoped_ptr<net::URLRequest> request_;
 
-  scoped_refptr<storage::BlobData> blob_data_;
+  scoped_ptr<storage::BlobDataBuilder> blob_data_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerURLRequestJobTest);
@@ -209,13 +237,46 @@ TEST_F(ServiceWorkerURLRequestJobTest, Simple) {
   TestRequest(200, "OK", std::string());
 }
 
+class ProviderDeleteHelper : public EmbeddedWorkerTestHelper {
+ public:
+  ProviderDeleteHelper(int mock_render_process_id)
+      : EmbeddedWorkerTestHelper(base::FilePath(), mock_render_process_id) {}
+  ~ProviderDeleteHelper() override {}
+
+ protected:
+  void OnFetchEvent(int embedded_worker_id,
+                    int request_id,
+                    const ServiceWorkerFetchRequest& request) override {
+    context()->RemoveProviderHost(kProcessID, kProviderID);
+    SimulateSend(new ServiceWorkerHostMsg_FetchEventFinished(
+        embedded_worker_id, request_id,
+        SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
+        ServiceWorkerResponse(
+            GURL(), 200, "OK", blink::WebServiceWorkerResponseTypeDefault,
+            ServiceWorkerHeaderMap(), std::string(), 0, GURL())));
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ProviderDeleteHelper);
+};
+
+TEST_F(ServiceWorkerURLRequestJobTest, DeletedProviderHost) {
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  // Shouldn't crash if the ProviderHost is deleted prior to completion of
+  // the fetch event.
+  SetUpWithHelper(new ProviderDeleteHelper(kProcessID));
+
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  TestRequest(200, "OK", std::string());
+}
+
 // Responds to fetch events with a blob.
 class BlobResponder : public EmbeddedWorkerTestHelper {
  public:
   BlobResponder(int mock_render_process_id,
                 const std::string& blob_uuid,
                 uint64 blob_size)
-      : EmbeddedWorkerTestHelper(mock_render_process_id),
+      : EmbeddedWorkerTestHelper(base::FilePath(), mock_render_process_id),
         blob_uuid_(blob_uuid),
         blob_size_(blob_size) {}
   ~BlobResponder() override {}
@@ -272,9 +333,8 @@ TEST_F(ServiceWorkerURLRequestJobTest, NonExistentBlobUUIDResponse) {
 // Responds to fetch events with a stream.
 class StreamResponder : public EmbeddedWorkerTestHelper {
  public:
-  StreamResponder(int mock_render_process_id,
-                  const GURL& stream_url)
-      : EmbeddedWorkerTestHelper(mock_render_process_id),
+  StreamResponder(int mock_render_process_id, const GURL& stream_url)
+      : EmbeddedWorkerTestHelper(base::FilePath(), mock_render_process_id),
         stream_url_(stream_url) {}
   ~StreamResponder() override {}
 
@@ -312,10 +372,8 @@ TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse) {
   SetUpWithHelper(new StreamResponder(kProcessID, stream_url));
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
-      GURL("http://example.com/foo.html"),
-      net::DEFAULT_PRIORITY,
-      &url_request_delegate_,
-      nullptr);
+      GURL("http://example.com/foo.html"), net::DEFAULT_PRIORITY,
+      &url_request_delegate_);
   request_->set_method("GET");
   request_->Start();
 
@@ -349,10 +407,8 @@ TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_DelayedRegistration) {
 
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
-      GURL("http://example.com/foo.html"),
-      net::DEFAULT_PRIORITY,
-      &url_request_delegate_,
-      nullptr);
+      GURL("http://example.com/foo.html"), net::DEFAULT_PRIORITY,
+      &url_request_delegate_);
   request_->set_method("GET");
   request_->Start();
 
@@ -398,10 +454,8 @@ TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_QuickFinalize) {
 
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
-      GURL("http://example.com/foo.html"),
-      net::DEFAULT_PRIORITY,
-      &url_request_delegate_,
-      nullptr);
+      GURL("http://example.com/foo.html"), net::DEFAULT_PRIORITY,
+      &url_request_delegate_);
   request_->set_method("GET");
   request_->Start();
   EXPECT_FALSE(HasInflightRequests());
@@ -429,10 +483,8 @@ TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_Flush) {
 
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
-      GURL("http://example.com/foo.html"),
-      net::DEFAULT_PRIORITY,
-      &url_request_delegate_,
-      nullptr);
+      GURL("http://example.com/foo.html"), net::DEFAULT_PRIORITY,
+      &url_request_delegate_);
   request_->set_method("GET");
   request_->Start();
   std::string expected_response;
@@ -467,10 +519,8 @@ TEST_F(ServiceWorkerURLRequestJobTest, StreamResponseAndCancel) {
 
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
-      GURL("http://example.com/foo.html"),
-      net::DEFAULT_PRIORITY,
-      &url_request_delegate_,
-      nullptr);
+      GURL("http://example.com/foo.html"), net::DEFAULT_PRIORITY,
+      &url_request_delegate_);
   request_->set_method("GET");
   request_->Start();
   EXPECT_FALSE(HasInflightRequests());
@@ -507,10 +557,8 @@ TEST_F(ServiceWorkerURLRequestJobTest,
 
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
-      GURL("http://example.com/foo.html"),
-      net::DEFAULT_PRIORITY,
-      &url_request_delegate_,
-      nullptr);
+      GURL("http://example.com/foo.html"), net::DEFAULT_PRIORITY,
+      &url_request_delegate_);
   request_->set_method("GET");
   request_->Start();
   EXPECT_FALSE(HasInflightRequests());
@@ -529,6 +577,23 @@ TEST_F(ServiceWorkerURLRequestJobTest,
 
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(request_->status().is_success());
+}
+
+// TODO(horo): Remove this test when crbug.com/485900 is fixed.
+TEST_F(ServiceWorkerURLRequestJobTest, MainScriptHTTPResponseInfoNotSet) {
+  // Shouldn't crash if MainScriptHttpResponseInfo is not set.
+  SetUpWithHelper(new EmbeddedWorkerTestHelper(base::FilePath(), kProcessID),
+                  false);
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  request_ = url_request_context_.CreateRequest(
+      GURL("http://example.com/foo.html"), net::DEFAULT_PRIORITY,
+      &url_request_delegate_);
+  request_->set_method("GET");
+  request_->Start();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(request_->status().is_success());
+  EXPECT_EQ(200, request_->GetResponseCode());
+  EXPECT_EQ("", url_request_delegate_.response_data());
 }
 
 // TODO(kinuko): Add more tests with different response data and also for

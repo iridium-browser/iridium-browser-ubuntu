@@ -29,7 +29,7 @@
 #include "config.h"
 #include "modules/accessibility/AXTableCell.h"
 
-#include "core/rendering/RenderTableCell.h"
+#include "core/layout/LayoutTableCell.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 
 
@@ -37,8 +37,8 @@ namespace blink {
 
 using namespace HTMLNames;
 
-AXTableCell::AXTableCell(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
-    : AXRenderObject(renderer, axObjectCache)
+AXTableCell::AXTableCell(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
+    : AXLayoutObject(layoutObject, axObjectCache)
 {
 }
 
@@ -46,14 +46,26 @@ AXTableCell::~AXTableCell()
 {
 }
 
-PassRefPtr<AXTableCell> AXTableCell::create(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
+PassRefPtr<AXTableCell> AXTableCell::create(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
 {
-    return adoptRef(new AXTableCell(renderer, axObjectCache));
+    return adoptRef(new AXTableCell(layoutObject, axObjectCache));
 }
 
 bool AXTableCell::isTableHeaderCell() const
 {
     return node() && node()->hasTagName(thTag);
+}
+
+bool AXTableCell::isRowHeaderCell() const
+{
+    const AtomicString& scope = getAttribute(scopeAttr);
+    return equalIgnoringCase(scope, "row") || equalIgnoringCase(scope, "rowgroup");
+}
+
+bool AXTableCell::isColumnHeaderCell() const
+{
+    const AtomicString& scope = getAttribute(scopeAttr);
+    return equalIgnoringCase(scope, "col") || equalIgnoringCase(scope, "colgroup");
 }
 
 bool AXTableCell::computeAccessibilityIsIgnored() const
@@ -65,26 +77,26 @@ bool AXTableCell::computeAccessibilityIsIgnored() const
         return true;
 
     if (!isTableCell())
-        return AXRenderObject::computeAccessibilityIsIgnored();
+        return AXLayoutObject::computeAccessibilityIsIgnored();
 
     return false;
 }
 
 AXObject* AXTableCell::parentTable() const
 {
-    if (!m_renderer || !m_renderer->isTableCell())
+    if (!m_layoutObject || !m_layoutObject->isTableCell())
         return 0;
 
     // If the document no longer exists, we might not have an axObjectCache.
     if (!axObjectCache())
         return 0;
 
-    // Do not use getOrCreate. parentTable() can be called while the render tree is being modified
-    // by javascript, and creating a table element may try to access the render tree while in a bad state.
+    // Do not use getOrCreate. parentTable() can be called while the layout tree is being modified
+    // by javascript, and creating a table element may try to access the layout tree while in a bad state.
     // By using only get() implies that the AXTable must be created before AXTableCells. This should
     // always be the case when AT clients access a table.
     // https://bugs.webkit.org/show_bug.cgi?id=42652
-    return axObjectCache()->get(toRenderTableCell(m_renderer)->table());
+    return axObjectCache()->get(toLayoutTableCell(m_layoutObject)->table());
 }
 
 bool AXTableCell::isTableCell() const
@@ -96,14 +108,18 @@ bool AXTableCell::isTableCell() const
     return true;
 }
 
-static AccessibilityRole decideRoleFromSibling(Node* siblingNode)
+static AccessibilityRole decideRoleFromSibling(LayoutTableCell* siblingCell)
 {
-    if (!siblingNode)
+    if (!siblingCell)
         return CellRole;
-    if (siblingNode->hasTagName(thTag))
-        return ColumnHeaderRole;
-    if (siblingNode->hasTagName(tdTag))
-        return RowHeaderRole;
+
+    if (Node* siblingNode = siblingCell->node()) {
+        if (siblingNode->hasTagName(thTag))
+            return ColumnHeaderRole;
+        if (siblingNode->hasTagName(tdTag))
+            return RowHeaderRole;
+    }
+
     return CellRole;
 }
 
@@ -113,57 +129,54 @@ AccessibilityRole AXTableCell::scanToDecideHeaderRole()
         return CellRole;
 
     // Check scope attribute first.
-    const AtomicString& scope = getAttribute(scopeAttr);
-    if (equalIgnoringCase(scope, "row"))
+    if (isRowHeaderCell())
         return RowHeaderRole;
-    if (equalIgnoringCase(scope, "col"))
+
+    if (isColumnHeaderCell())
         return ColumnHeaderRole;
 
-    // Check the previous cell and the next cell
-    RenderTableCell* renderCell = toRenderTableCell(m_renderer);
+    // Check the previous cell and the next cell on the same row.
+    LayoutTableCell* layoutCell = toLayoutTableCell(m_layoutObject);
     AccessibilityRole headerRole = CellRole;
 
-    // if header is preceded by header cells then it's a column header,
-    // if it is preceded by cells then it's a row header.
-    if (RenderTableCell* cell = renderCell->previousCell()) {
-        Node* siblingNode = cell->node();
-        headerRole = decideRoleFromSibling(siblingNode);
-        if (headerRole != CellRole)
-            return headerRole;
-    }
-    // if header is followed by header cells then it's a column header,
-    // if it is followed by cells then it's a row header.
-    if (RenderTableCell* cell = renderCell->nextCell()) {
-        Node* siblingNode = cell->node();
-        headerRole = decideRoleFromSibling(siblingNode);
-    }
-    return headerRole;
+    // if header is preceded by header cells on the same row, then it is a
+    // column header. If it is preceded by other cells then it's a row header.
+    if ((headerRole = decideRoleFromSibling(layoutCell->previousCell())) != CellRole)
+        return headerRole;
+
+    // if header is followed by header cells on the same row, then it is a
+    // column header. If it is followed by other cells then it's a row header.
+    if ((headerRole = decideRoleFromSibling(layoutCell->nextCell())) != CellRole)
+        return headerRole;
+
+    // If there are no other cells on that row, then it is a column header.
+    return ColumnHeaderRole;
 }
 
 AccessibilityRole AXTableCell::determineAccessibilityRole()
 {
     if (!isTableCell())
-        return AXRenderObject::determineAccessibilityRole();
+        return AXLayoutObject::determineAccessibilityRole();
 
     return scanToDecideHeaderRole();
 }
 
 void AXTableCell::rowIndexRange(pair<unsigned, unsigned>& rowRange)
 {
-    if (!m_renderer || !m_renderer->isTableCell())
+    if (!m_layoutObject || !m_layoutObject->isTableCell())
         return;
 
-    RenderTableCell* renderCell = toRenderTableCell(m_renderer);
-    rowRange.first = renderCell->rowIndex();
-    rowRange.second = renderCell->rowSpan();
+    LayoutTableCell* layoutCell = toLayoutTableCell(m_layoutObject);
+    rowRange.first = layoutCell->rowIndex();
+    rowRange.second = layoutCell->rowSpan();
 
     // since our table might have multiple sections, we have to offset our row appropriately
-    RenderTableSection* section = renderCell->section();
-    RenderTable* table = renderCell->table();
+    LayoutTableSection* section = layoutCell->section();
+    LayoutTable* table = layoutCell->table();
     if (!table || !section)
         return;
 
-    RenderTableSection* tableSection = table->topSection();
+    LayoutTableSection* tableSection = table->topSection();
     unsigned rowOffset = 0;
     while (tableSection) {
         if (tableSection == section)
@@ -177,12 +190,32 @@ void AXTableCell::rowIndexRange(pair<unsigned, unsigned>& rowRange)
 
 void AXTableCell::columnIndexRange(pair<unsigned, unsigned>& columnRange)
 {
-    if (!m_renderer || !m_renderer->isTableCell())
+    if (!m_layoutObject || !m_layoutObject->isTableCell())
         return;
 
-    RenderTableCell* renderCell = toRenderTableCell(m_renderer);
-    columnRange.first = renderCell->col();
-    columnRange.second = renderCell->colSpan();
+    LayoutTableCell* cell = toLayoutTableCell(m_layoutObject);
+    columnRange.first = cell->table()->colToEffCol(cell->col());
+    columnRange.second = cell->table()->colToEffCol(cell->col() + cell->colSpan()) - columnRange.first;
+}
+
+SortDirection AXTableCell::sortDirection() const
+{
+    if (roleValue() != RowHeaderRole
+        && roleValue() != ColumnHeaderRole)
+        return SortDirectionUndefined;
+
+    const AtomicString& ariaSort = getAttribute(aria_sortAttr);
+    if (ariaSort.isEmpty())
+        return SortDirectionUndefined;
+    if (equalIgnoringCase(ariaSort, "none"))
+        return SortDirectionNone;
+    if (equalIgnoringCase(ariaSort, "ascending"))
+        return SortDirectionAscending;
+    if (equalIgnoringCase(ariaSort, "descending"))
+        return SortDirectionDescending;
+    if (equalIgnoringCase(ariaSort, "other"))
+        return SortDirectionOther;
+    return SortDirectionUndefined;
 }
 
 AXObject* AXTableCell::titleUIElement() const
@@ -190,30 +223,29 @@ AXObject* AXTableCell::titleUIElement() const
     // Try to find if the first cell in this row is a <th>. If it is,
     // then it can act as the title ui element. (This is only in the
     // case when the table is not appearing as an AXTable.)
-    if (isTableCell() || !m_renderer || !m_renderer->isTableCell())
+    if (isTableCell() || !m_layoutObject || !m_layoutObject->isTableCell())
         return 0;
 
     // Table cells that are th cannot have title ui elements, since by definition
     // they are title ui elements
-    Node* node = m_renderer->node();
-    if (node && node->hasTagName(thTag))
+    if (isTableHeaderCell())
         return 0;
 
-    RenderTableCell* renderCell = toRenderTableCell(m_renderer);
+    LayoutTableCell* layoutCell = toLayoutTableCell(m_layoutObject);
 
     // If this cell is in the first column, there is no need to continue.
-    int col = renderCell->col();
+    int col = layoutCell->col();
     if (!col)
         return 0;
 
-    int row = renderCell->rowIndex();
+    int row = layoutCell->rowIndex();
 
-    RenderTableSection* section = renderCell->section();
+    LayoutTableSection* section = layoutCell->section();
     if (!section)
         return 0;
 
-    RenderTableCell* headerCell = section->primaryCellAt(row, 0);
-    if (!headerCell || headerCell == renderCell)
+    LayoutTableCell* headerCell = section->primaryCellAt(row, 0);
+    if (!headerCell || headerCell == layoutCell)
         return 0;
 
     Node* cellElement = headerCell->node();

@@ -12,7 +12,7 @@
 #include "base/message_loop/message_loop_proxy.h"
 #include "device/serial/data_stream.mojom.h"
 #include "device/serial/serial.mojom.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_request.h"
 
 namespace device {
 
@@ -32,7 +32,8 @@ class SerialConnectionFactory
       serial::ConnectionOptionsPtr options,
       mojo::InterfaceRequest<serial::Connection> connection_request,
       mojo::InterfaceRequest<serial::DataSink> sink,
-      mojo::InterfaceRequest<serial::DataSource> source);
+      mojo::InterfaceRequest<serial::DataSource> source,
+      mojo::InterfacePtr<serial::DataSourceClient> source_client);
 
  private:
   friend class base::RefCountedThreadSafe<SerialConnectionFactory>;

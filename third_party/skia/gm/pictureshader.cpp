@@ -27,34 +27,33 @@ public:
     PictureShaderGM(SkScalar tileSize, SkScalar sceneSize)
         : fTileSize(tileSize)
         , fSceneSize(sceneSize) {
+    }
 
-        // Build the picture.
+ protected:
+    void onOnceBeforeDraw() override {
+       // Build the picture.
         SkPictureRecorder recorder;
-        SkCanvas* pictureCanvas = recorder.beginRecording(tileSize, tileSize, NULL, 0);
+        SkCanvas* pictureCanvas = recorder.beginRecording(fTileSize, fTileSize, NULL, 0);
         this->drawTile(pictureCanvas);
         fPicture.reset(recorder.endRecording());
 
         // Build a reference bitmap.
-        fBitmap.allocN32Pixels(SkScalarCeilToInt(tileSize), SkScalarCeilToInt(tileSize));
+        fBitmap.allocN32Pixels(SkScalarCeilToInt(fTileSize), SkScalarCeilToInt(fTileSize));
         fBitmap.eraseColor(SK_ColorTRANSPARENT);
         SkCanvas bitmapCanvas(fBitmap);
         this->drawTile(&bitmapCanvas);
     }
 
-protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("pictureshader");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(1400, 1450);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         this->drawSceneColumn(canvas, SkPoint::Make(0, 0), 1, 1, 0);
         this->drawSceneColumn(canvas, SkPoint::Make(0, fSceneSize * 6.4f), 1, 2, 0);
         this->drawSceneColumn(canvas, SkPoint::Make(fSceneSize * 2.4f, 0), 1, 1, 1);
@@ -183,3 +182,38 @@ private:
 };
 
 DEF_GM( return SkNEW_ARGS(PictureShaderGM, (50, 100)); )
+
+DEF_SIMPLE_GM(tiled_picture_shader, canvas, 400, 400) {
+    // https://code.google.com/p/skia/issues/detail?id=3398
+    SkRect tile = SkRect::MakeWH(100, 100);
+
+    SkPictureRecorder recorder;
+    SkCanvas* c = recorder.beginRecording(tile);
+
+    SkRect r = tile;
+    r.inset(4, 4);
+    SkPaint p;
+    p.setColor(0xFF303F9F);  // dark blue
+    c->drawRect(r, p);
+    p.setColor(0xFFC5CAE9);  // light blue
+    p.setStrokeWidth(10);
+    c->drawLine(20, 20, 80, 80, p);
+
+    SkAutoTUnref<SkPicture> picture(recorder.endRecording());
+    SkAutoTUnref<SkShader> shader(SkShader::CreatePictureShader(
+	      picture.get(),
+	      SkShader::kRepeat_TileMode,
+	      SkShader::kRepeat_TileMode,
+	      NULL,
+	      NULL));
+
+    p.setColor(0xFF8BC34A);  // green
+    canvas->drawPaint(p);
+
+    canvas->clipRect(SkRect::MakeXYWH(0, 0, 400, 350));
+    p.setColor(0xFFB6B6B6);  // gray
+    canvas->drawPaint(p);
+    p.setShader(shader.get());
+
+    canvas->drawPaint(p);
+}

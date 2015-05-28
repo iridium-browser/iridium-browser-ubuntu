@@ -11,7 +11,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
 
-
 namespace {
 
 #if defined(OS_WIN)
@@ -69,7 +68,7 @@ TEST_F(ProcessTest, Duplicate) {
   Process process2 = process1.Duplicate();
   ASSERT_TRUE(process1.IsValid());
   ASSERT_TRUE(process2.IsValid());
-  EXPECT_EQ(process1.pid(), process2.pid());
+  EXPECT_EQ(process1.Pid(), process2.Pid());
   EXPECT_FALSE(process1.is_current());
   EXPECT_FALSE(process2.is_current());
 
@@ -84,7 +83,7 @@ TEST_F(ProcessTest, DuplicateCurrent) {
   Process process2 = process1.Duplicate();
   ASSERT_TRUE(process1.IsValid());
   ASSERT_TRUE(process2.IsValid());
-  EXPECT_EQ(process1.pid(), process2.pid());
+  EXPECT_EQ(process1.Pid(), process2.Pid());
   EXPECT_TRUE(process1.is_current());
   EXPECT_TRUE(process2.is_current());
 
@@ -99,7 +98,7 @@ TEST_F(ProcessTest, DeprecatedGetProcessFromHandle) {
   Process process2 = Process::DeprecatedGetProcessFromHandle(process1.Handle());
   ASSERT_TRUE(process1.IsValid());
   ASSERT_TRUE(process2.IsValid());
-  EXPECT_EQ(process1.pid(), process2.pid());
+  EXPECT_EQ(process1.Pid(), process2.Pid());
   EXPECT_FALSE(process1.is_current());
   EXPECT_FALSE(process2.is_current());
 
@@ -124,8 +123,9 @@ TEST_F(ProcessTest, Terminate) {
 
   exit_code = kDummyExitCode;
   int kExpectedExitCode = 250;
-  process.Terminate(kExpectedExitCode);
-  WaitForSingleProcess(process.Handle(), TestTimeouts::action_max_timeout());
+  process.Terminate(kExpectedExitCode, false);
+  process.WaitForExitWithTimeout(TestTimeouts::action_max_timeout(),
+                                 &exit_code);
 
   EXPECT_NE(TERMINATION_STATUS_STILL_RUNNING,
             GetTerminationStatus(process.Handle(), &exit_code));
@@ -160,7 +160,7 @@ TEST_F(ProcessTest, WaitForExitWithTimeout) {
   EXPECT_FALSE(process.WaitForExitWithTimeout(timeout, &exit_code));
   EXPECT_EQ(kDummyExitCode, exit_code);
 
-  process.Terminate(kDummyExitCode);
+  process.Terminate(kDummyExitCode, false);
 }
 
 // Ensure that the priority of a process is restored correctly after

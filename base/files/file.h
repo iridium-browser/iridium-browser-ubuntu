@@ -128,9 +128,9 @@ class BASE_EXPORT File {
 
   // Used to hold information about a given file.
   // If you add more fields to this structure (platform-specific fields are OK),
-  // make sure to update all functions that use it in file_util_{win|posix}.cc
-  // too, and the ParamTraits<base::PlatformFileInfo> implementation in
-  // chrome/common/common_param_traits.cc.
+  // make sure to update all functions that use it in file_util_{win|posix}.cc,
+  // too, and the ParamTraits<base::File::Info> implementation in
+  // ipc/ipc_message_utils.cc.
   struct BASE_EXPORT Info {
     Info();
     ~Info();
@@ -145,7 +145,8 @@ class BASE_EXPORT File {
     // True if the file corresponds to a directory.
     bool is_directory;
 
-    // True if the file corresponds to a symbolic link.
+    // True if the file corresponds to a symbolic link.  For Windows currently
+    // not supported and thus always false.
     bool is_symbolic_link;
 
     // The last modified time of a file.
@@ -287,6 +288,13 @@ class BASE_EXPORT File {
   // Unlock a file previously locked.
   Error Unlock();
 
+  // Returns a new object referencing this file for use within the current
+  // process. Handling of FLAG_DELETE_ON_CLOSE varies by OS. On POSIX, the File
+  // object that was created or initialized with this flag will have unlinked
+  // the underlying file when it was created or opened. On Windows, the
+  // underlying file is deleted when the last handle to it is closed.
+  File Duplicate();
+
   bool async() const { return async_; }
 
 #if defined(OS_WIN)
@@ -345,6 +353,10 @@ class BASE_EXPORT File {
     unsigned int file_memory_checksum_;
   };
 #endif
+
+  // TODO(tnagel): Reintegrate into Flush() once histogram isn't needed anymore,
+  // cf. issue 473337.
+  bool DoFlush();
 
   void SetPlatformFile(PlatformFile file);
 

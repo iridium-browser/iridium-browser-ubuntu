@@ -53,15 +53,15 @@ public:
 class ParseNode : public NoBaseWillBeGarbageCollectedFinalized<ParseNode> {
 public:
     virtual ~ParseNode() { }
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 };
 
 class Expression : public ParseNode {
-    WTF_MAKE_NONCOPYABLE(Expression); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_NONCOPYABLE(Expression); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(Expression);
 public:
     Expression();
     virtual ~Expression();
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     virtual Value evaluate(EvaluationContext&) const = 0;
 
@@ -88,7 +88,7 @@ protected:
     const Expression* subExpr(unsigned i) const { return m_subExpressions[i].get(); }
 
 private:
-    WillBeHeapVector<OwnPtrWillBeMember<Expression> > m_subExpressions;
+    WillBeHeapVector<OwnPtrWillBeMember<Expression>> m_subExpressions;
 
     // Evaluation details that can be used for optimization.
     bool m_isContextNodeSensitive;

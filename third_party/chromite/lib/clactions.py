@@ -4,8 +4,6 @@
 
 """Utility functions for interacting with a CL's action history."""
 
-# pylint: disable=bad-continuation
-
 from __future__ import print_function
 
 import datetime
@@ -13,10 +11,11 @@ import itertools
 import collections
 from chromite.cbuildbot import constants
 
+
 # Bidirectional mapping between pre-cq status strings and CL action strings.
 _PRECQ_STATUS_TO_ACTION = {
     constants.CL_STATUS_INFLIGHT: constants.CL_ACTION_PRE_CQ_INFLIGHT,
-    constants.CL_STATUS_FULLY_VERIFIED: \
+    constants.CL_STATUS_FULLY_VERIFIED:
         constants.CL_ACTION_PRE_CQ_FULLY_VERIFIED,
     constants.CL_STATUS_PASSED: constants.CL_ACTION_PRE_CQ_PASSED,
     constants.CL_STATUS_FAILED: constants.CL_ACTION_PRE_CQ_FAILED,
@@ -38,12 +37,32 @@ CL_ACTION_COLUMNS = ['id', 'build_id', 'action', 'reason',
 
 _CLActionTuple = collections.namedtuple('_CLActionTuple', CL_ACTION_COLUMNS)
 
-GerritPatchTuple = collections.namedtuple('GerritPatchTuple',
-                                          ['gerrit_number', 'patch_number',
-                                           'internal'])
+_GerritPatchTuple = collections.namedtuple('_GerritPatchTuple',
+                                           ['gerrit_number', 'patch_number',
+                                            'internal'])
+
+class GerritPatchTuple(_GerritPatchTuple):
+  """A tuple for a given Gerrit patch."""
+
+  def __str__(self):
+    prefix = (constants.INTERNAL_CHANGE_PREFIX
+              if self.internal else constants.EXTERNAL_CHANGE_PREFIX)
+    return 'CL:%s%s#%s' % (prefix, self.gerrit_number, self.patch_number)
 
 
-# pylint: disable=E1101,W0232
+_GerritChangeTuple = collections.namedtuple('_GerritChangeTuple',
+                                            ['gerrit_number', 'internal'])
+
+
+class GerritChangeTuple(_GerritChangeTuple):
+  """A tuple for a given Gerrit change."""
+
+  def __str__(self):
+    prefix = (constants.INTERNAL_CHANGE_PREFIX
+              if self.internal else constants.EXTERNAL_CHANGE_PREFIX)
+    return 'CL:%s%s' % (prefix, self.gerrit_number)
+
+
 class CLAction(_CLActionTuple):
   """An action or history log entry for a particular CL."""
 
@@ -78,10 +97,8 @@ class CLAction(_CLActionTuple):
                     BoolToChangeSource(change_dict['internal']),
                     entry[2])
 
-
   def AsMetadataEntry(self):
     """Get a tuple representation, suitable for metadata.json."""
-    # pylint: disable=W0212
     return (self.patch._asdict(), self.action, self.timestamp, self.reason)
 
   @property
@@ -128,6 +145,32 @@ def BoolToChangeSource(internal):
           else constants.CHANGE_SOURCE_EXTERNAL)
 
 
+def GetCLPreCQStatusAndTime(change, action_history):
+  """Get the pre-cq status and timestamp for |change| from |action_history|.
+
+  Args:
+    change: GerritPatch instance to get the pre-CQ status for.
+    action_history: A list of CLAction instances, which may include actions
+                    for other changes.
+
+  Returns:
+    A (status, timestamp) tuple where |status| is a valid pre-cq status
+    string and |timestamp| is a datetime object for when the status was
+    set. Or (None, None) if there is no pre-cq status.
+  """
+  actions_for_patch = ActionsForPatch(change, action_history)
+  actions_for_patch = [
+      a for a in actions_for_patch if a.action in _PRECQ_ACTION_TO_STATUS or
+      a.action == constants.CL_ACTION_PRE_CQ_RESET]
+
+  if (not actions_for_patch or
+      actions_for_patch[-1].action == constants.CL_ACTION_PRE_CQ_RESET):
+    return None, None
+
+  return (TranslatePreCQActionToStatus(actions_for_patch[-1].action),
+          actions_for_patch[-1].timestamp)
+
+
 def GetCLPreCQStatus(change, action_history):
   """Get the pre-cq status for |change| based on |action_history|.
 
@@ -139,25 +182,23 @@ def GetCLPreCQStatus(change, action_history):
   Returns:
     The status, as a string, or None if there is no recorded pre-cq status.
   """
-  raw_actions_for_patch = ActionsForPatch(change, action_history)
-  actions_for_patch = [a for a in raw_actions_for_patch
-                       if a.action in _PRECQ_ACTION_TO_STATUS]
+  return GetCLPreCQStatusAndTime(change, action_history)[0]
 
-  if not actions_for_patch:
-    return None
 
-  action = actions_for_patch[-1].action
+def IsChangeScreened(change, action_history):
+  """Get's whether |change| has been pre-cq screened.
 
-  # Workaround an old bug in the Pre-CQ where it forgot to mark patches as
-  # failed. See http://crbug.com/429777 . TODO(davidjames): Remove this.
-  if action == constants.CL_ACTION_PRE_CQ_INFLIGHT:
-    for a in reversed(raw_actions_for_patch):
-      if a.action == action:
-        break
-      elif a.action == constants.CL_ACTION_KICKED_OUT:
-        action = constants.CL_ACTION_PRE_CQ_FAILED
+  Args:
+    change: GerritPatch instance to get the pre-CQ status for.
+    action_history: A list of CLAction instances.
 
-  return TranslatePreCQActionToStatus(action)
+  Returns:
+    True if the change has been pre-cq screened, false otherwise.
+  """
+  actions_for_patch = ActionsForPatch(change, action_history)
+  actions_for_patch = FilterPreResetActions(actions_for_patch)
+  return any(a.action == constants.CL_ACTION_SCREENED_FOR_PRE_CQ
+             for a in actions_for_patch)
 
 
 def ActionsForPatch(change, action_history):
@@ -172,9 +213,9 @@ def ActionsForPatch(change, action_history):
   change_source = BoolToChangeSource(change.internal)
 
   actions_for_patch = [a for a in action_history
-                       if a.change_source == change_source and
-                          a.change_number == change_number and
-                          a.patch_number == patch_number]
+                       if (a.change_source == change_source and
+                           a.change_number == change_number and
+                           a.patch_number == patch_number)]
 
   return actions_for_patch
 
@@ -242,8 +283,8 @@ def GetCLActionCount(change, configs, action, action_history,
   change_number = int(change.gerrit_number)
   change_source = BoolToChangeSource(change.internal)
   actions_for_change = [a for a in action_history
-                        if a.change_source == change_source and
-                           a.change_number == change_number]
+                        if (a.change_source == change_source and
+                            a.change_number == change_number)]
 
   if actions_for_change and latest_patchset_only:
     latest_patch_number = max(a.patch_number for a in actions_for_change)
@@ -255,6 +296,25 @@ def GetCLActionCount(change, configs, action, action_history,
                             a.action == action)]
 
   return len(actions_for_change)
+
+
+def FilterPreResetActions(action_history):
+  """Filters out actions prior to most recent pre-cq reset action.
+
+  Args:
+    action_history: List of CLAction instance.
+
+  Returns:
+    List of CLAction instances that occur after the last pre-cq-reset action.
+  """
+  reset = False
+  for i, a in enumerate(action_history):
+    if a.action == constants.CL_ACTION_PRE_CQ_RESET:
+      reset = True
+      reset_index = i
+  if reset:
+    action_history = action_history[(reset_index+1):]
+  return action_history
 
 
 def GetCLPreCQProgress(change, action_history):
@@ -274,6 +334,9 @@ def GetCLPreCQProgress(change, action_history):
   actions_for_patch = ActionsForPatch(change, action_history)
   config_status_dict = {}
 
+  # If there is a reset action recorded, filter out all actions prior to it.
+  actions_for_patch = FilterPreResetActions(actions_for_patch)
+
   # Only configs for which the pre-cq-launcher has requested verification
   # should be included in the per-config status.
   for a in actions_for_patch:
@@ -283,10 +346,12 @@ def GetCLPreCQProgress(change, action_history):
                                       a.timestamp, a.build_id)
 
   # Loop through actions_for_patch several times, in order of status priority.
-  # CL_PRECQ_CONFIG_STATUS_LAUNCHED,
-  # CL_PRECQ_CONFIG_STATUS_FAILED,
-  # CL_PRECQ_CONFIG_STATUS_INFLIGHT
-  # All have the same priority
+  # Each action maps to a status:
+  #   CL_ACTION_TRYBOT_LAUNCHING -> CL_PRECQ_CONFIG_STATUS_LAUNCHED
+  #   CL_ACTION_PICKED_UP -> CL_PRECQ_CONFIG_STATUS_INFLIGHT
+  #   CL_ACTION_KICKED_OUT -> CL_PRECQ_CONFIG_STATUS_FAILED
+  #   CL_ACTION_FORGIVEN -> CL_PRECQ_CONFIG_STATUS_PENDING
+  # All have the same priority.
   for a in actions_for_patch:
     if (a.action == constants.CL_ACTION_TRYBOT_LAUNCHING and
         a.reason in config_status_dict):
@@ -297,11 +362,18 @@ def GetCLPreCQProgress(change, action_history):
       config_status_dict[a.build_config] = (
           constants.CL_PRECQ_CONFIG_STATUS_INFLIGHT, a.timestamp, a.build_id)
     elif (a.action == constants.CL_ACTION_KICKED_OUT and
-        (a.build_config in config_status_dict or
-         a.reason in config_status_dict)):
+          (a.build_config in config_status_dict or
+           a.reason in config_status_dict)):
       config = (a.build_config if a.build_config in config_status_dict else
                 a.reason)
       config_status_dict[config] = (constants.CL_PRECQ_CONFIG_STATUS_FAILED,
+                                    a.timestamp, a.build_id)
+    elif (a.action == constants.CL_ACTION_FORGIVEN and
+          (a.build_config in config_status_dict or
+           a.reason in config_status_dict)):
+      config = (a.build_config if a.build_config in config_status_dict else
+                a.reason)
+      config_status_dict[config] = (constants.CL_PRECQ_CONFIG_STATUS_PENDING,
                                     a.timestamp, a.build_id)
 
   for a in actions_for_patch:
@@ -421,7 +493,7 @@ def IntersectIntervals(intervals):
     current_intervals = [intervals[i][j] for (i, j) in
                          zip(itertools.count(), indices)]
     start = max([s[0] for s in current_intervals])
-    end, end_index = min([(e[1], i)  for e, i in
+    end, end_index = min([(e[1], i) for e, i in
                           zip(current_intervals, itertools.count())])
     if start < end:
       intersection.append((start, end))
@@ -439,7 +511,7 @@ def MeasureTimestampIntervals(intervals):
   Returns:
     The total length of the given intervals, in seconds.
   """
-  lengths = [e-s for s, e in intervals]
+  lengths = [e - s for s, e in intervals]
   return sum(lengths, datetime.timedelta(0)).total_seconds()
 
 

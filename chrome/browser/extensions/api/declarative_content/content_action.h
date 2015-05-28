@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/extensions/declarative_user_script_master.h"
 #include "extensions/browser/api/declarative/declarative_rule.h"
+#include "extensions/browser/declarative_user_script_master.h"
 
 namespace base {
 class Time;
@@ -137,7 +137,9 @@ class RequestContentScript : public ContentAction {
               ApplyInfo* apply_info) const override;
 
  private:
-  void InitScript(const Extension* extension, const ScriptData& script_data);
+  void InitScript(const HostID& host_id,
+                  const Extension* extension,
+                  const ScriptData& script_data);
 
   void AddScript() {
     DCHECK(master_);

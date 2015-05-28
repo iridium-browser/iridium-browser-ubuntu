@@ -11,9 +11,12 @@
 
 #include "base/command_line.h"
 #include "base/environment.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/i18n/rtl.h"
+#include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
@@ -34,13 +37,14 @@
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/uninstall_browser_prompt.h"
+#include "chrome/chrome_watcher/chrome_watcher_main_api.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/env_vars.h"
-#include "chrome/common/terminate_on_heap_corruption_experiment_win.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -67,6 +71,10 @@
 
 #if defined(GOOGLE_CHROME_BUILD)
 #include "chrome/browser/google/did_run_updater_win.h"
+#endif
+
+#if defined(KASKO)
+#include "syzygy/kasko/api/reporter.h"
 #endif
 
 namespace {
@@ -110,6 +118,41 @@ void ExecuteFontCacheBuildTask(const base::FilePath& path) {
   utility_process_host->Send(
       new ChromeUtilityHostMsg_BuildDirectWriteFontCache(path));
 }
+
+#if defined(KASKO)
+void ObserveFailedCrashReportDirectory(const base::FilePath& path, bool error) {
+  DCHECK(!error);
+  if (error)
+    return;
+  base::FileEnumerator enumerator(path, true, base::FileEnumerator::FILES);
+  for (base::FilePath report_file = enumerator.Next(); !report_file.empty();
+       report_file = enumerator.Next()) {
+    if (report_file.Extension() ==
+        kasko::api::kPermanentFailureMinidumpExtension) {
+      UMA_HISTOGRAM_BOOLEAN("CrashReport.PermanentUploadFailure", true);
+    }
+    bool result = base::DeleteFile(report_file, false);
+    DCHECK(result);
+  }
+}
+
+void StartFailedKaskoCrashReportWatcher(base::FilePathWatcher* watcher) {
+  base::FilePath watcher_data_directory;
+  if (!PathService::Get(chrome::DIR_WATCHER_DATA, &watcher_data_directory)) {
+    NOTREACHED();
+  } else {
+    base::FilePath permanent_failure_directory =
+        watcher_data_directory.Append(kPermanentlyFailedReportsSubdir);
+    if (!watcher->Watch(permanent_failure_directory, true,
+                        base::Bind(&ObserveFailedCrashReportDirectory))) {
+      NOTREACHED();
+    }
+
+    // Call it once to observe any files present prior to the Watch() call.
+    ObserveFailedCrashReportDirectory(permanent_failure_directory, false);
+  }
+}
+#endif
 
 }  // namespace
 
@@ -197,9 +240,7 @@ void ChromeBrowserMainPartsWin::ToolkitInitialized() {
   ChromeBrowserMainParts::ToolkitInitialized();
   gfx::PlatformFontWin::adjust_font_callback = &AdjustUIFont;
   gfx::PlatformFontWin::get_minimum_font_size_callback = &GetMinimumFontSize;
-#if defined(USE_AURA)
   ui::CursorLoaderWin::SetCursorResourceModule(chrome::kBrowserResourcesDll);
-#endif
 }
 
 void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
@@ -213,7 +254,8 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
     InitializeWindowProcExceptions();
   }
 
-  IncognitoModePrefs::InitializePlatformParentalControls();
+  // Prime the parental controls cache on Windows.
+  ignore_result(IncognitoModePrefs::ArePlatformParentalControlsEnabled());
 }
 
 int ChromeBrowserMainPartsWin::PreCreateThreads() {
@@ -228,20 +270,6 @@ int ChromeBrowserMainPartsWin::PreCreateThreads() {
         chrome::MESSAGE_BOX_TYPE_WARNING);
   }
 
-  // Windows 8+ provides a mode where by a process cannot call Win32K/GDI
-  // functions in the kernel (win32k.sys). If we are on Windows 8+ and if
-  // we are launched with the kEnableWin32kRendererLockDown switch then we
-  // force the PDF pepper plugin to run out of process. This is because the
-  // PDF plugin uses GDI for text rendering which does not work in the
-  // Win32K lockdown mode. Running it out of process ensures that the process
-  // launched for the plugin does not have the Win32K lockdown mode enabled.
-  // TODO(ananta)
-  // Revisit this when the pdf plugin uses skia and stops using GDI.
-  if (switches::IsWin32kRendererLockdownEnabled() &&
-      base::win::GetVersion() >= base::win::VERSION_WIN8) {
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableOutOfProcessPdf);
-  }
   return rv;
 }
 
@@ -263,9 +291,24 @@ void ChromeBrowserMainPartsWin::PostProfileInit() {
     // otherwise it will spawn utility process to build cache file, which will
     // be used during next browser start/postprofileinit.
     if (!content::LoadFontCache(path)) {
-      content::BrowserThread::PostTask(
-          content::BrowserThread::IO, FROM_HERE,
-          base::Bind(ExecuteFontCacheBuildTask, path));
+      // We delay building of font cache until first startup page loads.
+      // During first renderer start there are lot of things happening
+      // simultaneously some of them are:
+      // - Renderer is going through all font files on the system to create
+      //   a font collection.
+      // - Renderer loading up startup URL, accessing HTML/JS File cache,
+      //   net activity etc.
+      // - Extension initialization.
+      // We delay building of cache mainly to avoid parallel font file
+      // loading along with Renderer. Some systems have significant number of
+      // font files which takes long time to process.
+      // Related information is at http://crbug.com/436195.
+      const int kBuildFontCacheDelaySec = 30;
+      content::BrowserThread::PostDelayedTask(
+          content::BrowserThread::IO,
+          FROM_HERE,
+          base::Bind(ExecuteFontCacheBuildTask, path),
+          base::TimeDelta::FromSeconds(kBuildFontCacheDelaySec));
     }
   }
 }
@@ -274,8 +317,6 @@ void ChromeBrowserMainPartsWin::PostBrowserStart() {
   ChromeBrowserMainParts::PostBrowserStart();
 
   UMA_HISTOGRAM_BOOLEAN("Windows.Tablet", base::win::IsTabletDevice());
-  UMA_HISTOGRAM_BOOLEAN("Windows.Win32kRendererLockdown",
-                        switches::IsWin32kRendererLockdownEnabled());
 
   // Set up a task to verify installed modules in the current process. Use a
   // delay to reduce the impact on startup time.
@@ -287,9 +328,13 @@ void ChromeBrowserMainPartsWin::PostBrowserStart() {
 
   InitializeChromeElf();
 
-  // TODO(erikwright): Remove this and the implementation of the experiment by
-  // September 2014.
-  InitializeDisableTerminateOnHeapCorruptionExperiment();
+#if defined(KASKO)
+  content::BrowserThread::PostDelayedTask(
+      content::BrowserThread::FILE, FROM_HERE,
+      base::Bind(&StartFailedKaskoCrashReportWatcher,
+                 base::Unretained(&failed_kasko_crash_report_watcher_)),
+      base::TimeDelta::FromMinutes(5));
+#endif
 
 #if defined(GOOGLE_CHROME_BUILD)
   did_run_updater_.reset(new DidRunUpdater);
@@ -310,7 +355,6 @@ void ChromeBrowserMainPartsWin::PrepareRestartOnCrashEnviroment(
   // If the known command-line test options are used we don't create the
   // environment block which means we don't get the restart dialog.
   if (parsed_command_line.HasSwitch(switches::kBrowserCrashTest) ||
-      parsed_command_line.HasSwitch(switches::kBrowserAssertTest) ||
       parsed_command_line.HasSwitch(switches::kNoErrorDialogs))
     return;
 

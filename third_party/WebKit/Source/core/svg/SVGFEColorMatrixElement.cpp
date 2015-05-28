@@ -51,7 +51,7 @@ inline SVGFEColorMatrixElement::SVGFEColorMatrixElement(Document& document)
     addToPropertyMap(m_type);
 }
 
-void SVGFEColorMatrixElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFEColorMatrixElement)
 {
     visitor->trace(m_values);
     visitor->trace(m_in1);
@@ -70,11 +70,6 @@ bool SVGFEColorMatrixElement::isSupportedAttribute(const QualifiedName& attrName
         supportedAttributes.add(SVGNames::inAttr);
     }
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGFEColorMatrixElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
 }
 
 bool SVGFEColorMatrixElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)

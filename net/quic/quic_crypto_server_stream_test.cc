@@ -56,11 +56,11 @@ const uint16 kServerPort = 80;
 class QuicCryptoServerStreamTest : public ::testing::TestWithParam<bool> {
  public:
   QuicCryptoServerStreamTest()
-      : connection_(new PacketSavingConnection(true)),
+      : connection_(new PacketSavingConnection(Perspective::IS_SERVER)),
         session_(connection_, DefaultQuicConfig()),
         crypto_config_(QuicCryptoServerConfig::TESTING,
                        QuicRandom::GetInstance()),
-        stream_(crypto_config_, &session_),
+        stream_(&crypto_config_, &session_),
         strike_register_client_(nullptr) {
     session_.SetCryptoStream(&stream_);
     // We advance the clock initially because the default time is zero and the
@@ -133,8 +133,10 @@ TEST_P(QuicCryptoServerStreamTest, ConnectedAfterCHLO) {
 }
 
 TEST_P(QuicCryptoServerStreamTest, ZeroRTT) {
-  PacketSavingConnection* client_conn = new PacketSavingConnection(false);
-  PacketSavingConnection* server_conn = new PacketSavingConnection(false);
+  PacketSavingConnection* client_conn =
+      new PacketSavingConnection(Perspective::IS_CLIENT);
+  PacketSavingConnection* server_conn =
+      new PacketSavingConnection(Perspective::IS_SERVER);
   client_conn->AdvanceTime(QuicTime::Delta::FromSeconds(100000));
   server_conn->AdvanceTime(QuicTime::Delta::FromSeconds(100000));
 
@@ -152,11 +154,11 @@ TEST_P(QuicCryptoServerStreamTest, ZeroRTT) {
   // Do a first handshake in order to prime the client config with the server's
   // information.
   client->CryptoConnect();
-  CHECK_EQ(1u, client_conn->packets_.size());
+  CHECK_EQ(1u, client_conn->encrypted_packets_.size());
 
   scoped_ptr<TestSession> server_session(new TestSession(server_conn, config_));
   scoped_ptr<QuicCryptoServerStream> server(
-      new QuicCryptoServerStream(crypto_config_, server_session.get()));
+      new QuicCryptoServerStream(&crypto_config_, server_session.get()));
   server_session->SetCryptoStream(server.get());
 
   CryptoTestUtils::CommunicateHandshakeMessages(
@@ -166,8 +168,8 @@ TEST_P(QuicCryptoServerStreamTest, ZeroRTT) {
   // Now do another handshake, hopefully in 0-RTT.
   LOG(INFO) << "Resetting for 0-RTT handshake attempt";
 
-  client_conn = new PacketSavingConnection(false);
-  server_conn = new PacketSavingConnection(false);
+  client_conn = new PacketSavingConnection(Perspective::IS_CLIENT);
+  server_conn = new PacketSavingConnection(Perspective::IS_SERVER);
   // We need to advance time past the strike-server window so that it's
   // authoritative in this time span.
   client_conn->AdvanceTime(QuicTime::Delta::FromSeconds(102000));
@@ -182,7 +184,7 @@ TEST_P(QuicCryptoServerStreamTest, ZeroRTT) {
                                           nullptr, &client_crypto_config));
   client_session->SetCryptoStream(client.get());
 
-  server.reset(new QuicCryptoServerStream(crypto_config_,
+  server.reset(new QuicCryptoServerStream(&crypto_config_,
                                           server_session.get()));
   server_session->SetCryptoStream(server.get());
 

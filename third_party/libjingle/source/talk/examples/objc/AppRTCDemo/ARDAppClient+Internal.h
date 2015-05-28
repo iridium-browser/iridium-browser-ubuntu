@@ -1,6 +1,6 @@
 /*
  * libjingle
- * Copyright 2014, Google Inc.
+ * Copyright 2014 Google Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -38,6 +38,7 @@
 @interface ARDAppClient () <ARDSignalingChannelDelegate,
     RTCPeerConnectionDelegate, RTCSessionDescriptionDelegate>
 
+// All properties should only be mutated from the main queue.
 @property(nonatomic, strong) id<ARDRoomServerClient> roomServerClient;
 @property(nonatomic, strong) id<ARDSignalingChannel> channel;
 @property(nonatomic, strong) id<ARDTURNClient> turnClient;
@@ -48,7 +49,7 @@
 
 @property(nonatomic, assign) BOOL isTurnComplete;
 @property(nonatomic, assign) BOOL hasReceivedSdp;
-@property(nonatomic, readonly) BOOL isRegisteredWithRoomServer;
+@property(nonatomic, readonly) BOOL hasJoinedRoomServerRoom;
 
 @property(nonatomic, strong) NSString *roomId;
 @property(nonatomic, strong) NSString *clientId;

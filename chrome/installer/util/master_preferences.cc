@@ -51,7 +51,7 @@ std::vector<std::string> GetNamedList(const char* name,
 
 base::DictionaryValue* ParseDistributionPreferences(
     const std::string& json_data) {
-  JSONStringValueSerializer json(json_data);
+  JSONStringValueDeserializer json(json_data);
   std::string error;
   scoped_ptr<base::Value> root(json.Deserialize(NULL, &error));
   if (!root.get()) {
@@ -73,7 +73,6 @@ namespace installer {
 MasterPreferences::MasterPreferences() : distribution_(NULL),
                                          preferences_read_from_file_(false),
                                          chrome_(true),
-                                         chrome_app_launcher_(false),
                                          multi_install_(false) {
   InitializeFromCommandLine(*base::CommandLine::ForCurrentProcess());
 }
@@ -82,7 +81,6 @@ MasterPreferences::MasterPreferences(const base::CommandLine& cmd_line)
     : distribution_(NULL),
       preferences_read_from_file_(false),
       chrome_(true),
-      chrome_app_launcher_(false),
       multi_install_(false) {
   InitializeFromCommandLine(cmd_line);
 }
@@ -91,7 +89,6 @@ MasterPreferences::MasterPreferences(const base::FilePath& prefs_path)
     : distribution_(NULL),
       preferences_read_from_file_(false),
       chrome_(true),
-      chrome_app_launcher_(false),
       multi_install_(false) {
   std::string json_data;
   // Failure to read the file is ignored as |json_data| will be the empty string
@@ -109,7 +106,6 @@ MasterPreferences::MasterPreferences(const std::string& prefs)
     : distribution_(NULL),
       preferences_read_from_file_(false),
       chrome_(true),
-      chrome_app_launcher_(false),
       multi_install_(false) {
   InitializeFromString(prefs);
 }
@@ -139,10 +135,6 @@ void MasterPreferences::InitializeFromCommandLine(
   } translate_switches[] = {
     { installer::switches::kAutoLaunchChrome,
       installer::master_preferences::kAutoLaunchChrome },
-    { installer::switches::kChromeAppHostDeprecated,
-      installer::master_preferences::kChromeAppHostDeprecated },
-    { installer::switches::kChromeAppLauncher,
-      installer::master_preferences::kChromeAppLauncher },
     { installer::switches::kChrome,
       installer::master_preferences::kChrome },
     { installer::switches::kDisableLogging,
@@ -225,19 +217,9 @@ bool MasterPreferences::InitializeFromString(const std::string& json_data) {
 void MasterPreferences::InitializeProductFlags() {
   // Make sure we start out with the correct defaults.
   multi_install_ = false;
-  chrome_app_launcher_ = false;
   chrome_ = true;
 
   GetBool(installer::master_preferences::kMultiInstall, &multi_install_);
-
-  GetBool(installer::master_preferences::kChromeAppLauncher,
-          &chrome_app_launcher_);
-
-  // The deprecated switch --app-host behaves like --app-launcher.
-  bool chrome_app_host = false;
-  GetBool(installer::master_preferences::kChromeAppHostDeprecated,
-          &chrome_app_host);
-  chrome_app_launcher_ = chrome_app_launcher_ || chrome_app_host;
 
   // When multi-install is specified, the checks are pretty simple (in theory):
   // In order to be installed/uninstalled, each product must have its switch
@@ -308,6 +290,10 @@ bool MasterPreferences::GetExtensionsBlock(
     base::DictionaryValue** extensions) const {
   return master_dictionary_->GetDictionary(
       master_preferences::kExtensionsBlock, extensions);
+}
+
+std::string MasterPreferences::GetCompressedVariationsSeed() const {
+  return ExtractPrefString(prefs::kVariationsCompressedSeed);
 }
 
 std::string MasterPreferences::GetVariationsSeed() const {

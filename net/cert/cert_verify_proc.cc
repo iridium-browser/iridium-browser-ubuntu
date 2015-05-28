@@ -4,16 +4,20 @@
 
 #include "net/cert/cert_verify_proc.h"
 
+#include <stdint.h>
+
 #include "base/basictypes.h"
 #include "base/metrics/histogram.h"
 #include "base/sha1.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/cert_verifier.h"
+#include "net/cert/cert_verify_proc_whitelist.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/crl_set.h"
 #include "net/cert/x509_certificate.h"
@@ -32,7 +36,6 @@
 #else
 #error Implement certificate verification.
 #endif
-
 
 namespace net {
 
@@ -233,6 +236,12 @@ int CertVerifyProc::Verify(X509Certificate* cert,
     rv = MapCertStatusToNetError(verify_result->cert_status);
   }
 
+  if (IsNonWhitelistedCertificate(*verify_result->verified_cert,
+                                  verify_result->public_key_hashes)) {
+    verify_result->cert_status |= CERT_STATUS_AUTHORITY_INVALID;
+    rv = MapCertStatusToNetError(verify_result->cert_status);
+  }
+
   // Check for weak keys in the entire verified chain.
   bool weak_key = ExaminePublicKeys(verify_result->verified_cert,
                                     verify_result->is_issued_by_known_root);
@@ -274,6 +283,13 @@ int CertVerifyProc::Verify(X509Certificate* cert,
     verify_result->cert_status |= CERT_STATUS_NON_UNIQUE_NAME;
     // CERT_STATUS_NON_UNIQUE_NAME will eventually become a hard error. For
     // now treat it as a warning and do not map it to an error return value.
+  }
+
+  // Flag certificates using too long validity periods.
+  if (verify_result->is_issued_by_known_root && HasTooLongValidity(*cert)) {
+    verify_result->cert_status |= CERT_STATUS_VALIDITY_TOO_LONG;
+    if (rv == OK)
+      rv = MapCertStatusToNetError(verify_result->cert_status);
   }
 
   return rv;
@@ -610,6 +626,52 @@ bool CertVerifyProc::HasNameConstraintsViolation(
       }
     }
   }
+
+  return false;
+}
+
+// static
+bool CertVerifyProc::HasTooLongValidity(const X509Certificate& cert) {
+  const base::Time& start = cert.valid_start();
+  const base::Time& expiry = cert.valid_expiry();
+  if (start.is_max() || start.is_null() || expiry.is_max() ||
+      expiry.is_null() || start > expiry) {
+    return true;
+  }
+
+  base::Time::Exploded exploded_start;
+  base::Time::Exploded exploded_expiry;
+  cert.valid_start().UTCExplode(&exploded_start);
+  cert.valid_expiry().UTCExplode(&exploded_expiry);
+
+  if (exploded_expiry.year - exploded_start.year > 10)
+    return true;
+
+  int month_diff = (exploded_expiry.year - exploded_start.year) * 12 +
+                   (exploded_expiry.month - exploded_start.month);
+
+  // Add any remainder as a full month.
+  if (exploded_expiry.day_of_month > exploded_start.day_of_month)
+    ++month_diff;
+
+  static const base::Time time_2012_07_01 =
+      base::Time::FromUTCExploded({2012, 7, 0, 1, 0, 0, 0, 0});
+  static const base::Time time_2015_04_01 =
+      base::Time::FromUTCExploded({2015, 4, 0, 1, 0, 0, 0, 0});
+  static const base::Time time_2019_07_01 =
+      base::Time::FromUTCExploded({2019, 7, 0, 1, 0, 0, 0, 0});
+
+  // For certificates issued before the BRs took effect.
+  if (start < time_2012_07_01 && (month_diff > 120 || expiry > time_2019_07_01))
+    return true;
+
+  // For certificates issued after 1 July 2012: 60 months.
+  if (start >= time_2012_07_01 && month_diff > 60)
+    return true;
+
+  // For certificates issued after 1 April 2015: 39 months.
+  if (start >= time_2015_04_01 && month_diff > 39)
+    return true;
 
   return false;
 }

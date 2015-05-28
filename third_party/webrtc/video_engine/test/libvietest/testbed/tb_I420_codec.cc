@@ -46,7 +46,7 @@ int32_t TbI420Encoder::Release()
     return WEBRTC_VIDEO_CODEC_OK;
 }
 
-int32_t TbI420Encoder::SetChannelParameters(uint32_t packetLoss, int rtt) {
+int32_t TbI420Encoder::SetChannelParameters(uint32_t packetLoss, int64_t rtt) {
   _functionCalls.SetChannelParameters++;
   return WEBRTC_VIDEO_CODEC_OK;
 }
@@ -132,7 +132,7 @@ int32_t TbI420Encoder::Encode(
     }
 
     _encodedImage._length = reqSize;
-    _encodedCompleteCallback->Encoded(_encodedImage);
+    _encodedCompleteCallback->Encoded(_encodedImage, NULL, NULL);
     return WEBRTC_VIDEO_CODEC_OK;
 }
 
@@ -237,9 +237,9 @@ int32_t TbI420Decoder::Decode(
       return WEBRTC_VIDEO_CODEC_ERROR;
     }
 
-    int ret = ConvertToI420(webrtc::kI420, inputImage._buffer, 0, 0,
-                           _width, _height,
-                           0, webrtc::kRotateNone, &_decodedImage);
+    int ret =
+        ConvertToI420(webrtc::kI420, inputImage._buffer, 0, 0, _width, _height,
+                      0, webrtc::kVideoRotation_0, &_decodedImage);
 
     if (ret < 0)
       return WEBRTC_VIDEO_CODEC_ERROR;

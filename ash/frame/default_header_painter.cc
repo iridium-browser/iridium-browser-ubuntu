@@ -37,10 +37,10 @@ const SkColor kHeaderContentSeparatorInactiveColor =
     SkColorSetRGB(180, 180, 182);
 // The default color of the frame.
 const SkColor kDefaultFrameColor = SkColorSetRGB(242, 242, 242);
-// The alpha of the inactive frame.
-const SkAlpha kInactiveFrameAlpha = 204;
 // Duration of crossfade animation for activating and deactivating frame.
 const int kActivationCrossfadeDurationMs = 200;
+// Luminance below which to use white caption buttons.
+const int kMaxLuminanceForLightButtons = 125;
 
 // Tiles an image into an area, rounding the top corners.
 void TileRoundRect(gfx::Canvas* canvas,
@@ -101,36 +101,7 @@ void DefaultHeaderPainter::Init(
   frame_ = frame;
   view_ = header_view;
   caption_button_container_ = caption_button_container;
-
-  caption_button_container_->SetButtonImages(
-      CAPTION_BUTTON_ICON_MINIMIZE,
-      IDR_AURA_WINDOW_CONTROL_ICON_MINIMIZE,
-      IDR_AURA_WINDOW_CONTROL_ICON_MINIMIZE_I,
-      IDR_AURA_WINDOW_CONTROL_BACKGROUND_H,
-      IDR_AURA_WINDOW_CONTROL_BACKGROUND_P);
-  UpdateSizeButtonImages();
-  caption_button_container_->SetButtonImages(
-      CAPTION_BUTTON_ICON_CLOSE,
-      IDR_AURA_WINDOW_CONTROL_ICON_CLOSE,
-      IDR_AURA_WINDOW_CONTROL_ICON_CLOSE_I,
-      IDR_AURA_WINDOW_CONTROL_BACKGROUND_H,
-      IDR_AURA_WINDOW_CONTROL_BACKGROUND_P);
-
-  // There is no dedicated icon for the snap-left and snap-right buttons
-  // when |frame_| is inactive because they should never be visible while
-  // |frame_| is inactive.
-  caption_button_container_->SetButtonImages(
-      CAPTION_BUTTON_ICON_LEFT_SNAPPED,
-      IDR_AURA_WINDOW_CONTROL_ICON_LEFT_SNAPPED,
-      IDR_AURA_WINDOW_CONTROL_ICON_LEFT_SNAPPED,
-      IDR_AURA_WINDOW_CONTROL_BACKGROUND_H,
-      IDR_AURA_WINDOW_CONTROL_BACKGROUND_P);
-  caption_button_container_->SetButtonImages(
-      CAPTION_BUTTON_ICON_RIGHT_SNAPPED,
-      IDR_AURA_WINDOW_CONTROL_ICON_RIGHT_SNAPPED,
-      IDR_AURA_WINDOW_CONTROL_ICON_RIGHT_SNAPPED,
-      IDR_AURA_WINDOW_CONTROL_BACKGROUND_H,
-      IDR_AURA_WINDOW_CONTROL_BACKGROUND_P);
+  UpdateAllButtonImages();
 }
 
 int DefaultHeaderPainter::GetMinimumHeaderWidth() const {
@@ -145,6 +116,7 @@ void DefaultHeaderPainter::PaintHeader(gfx::Canvas* canvas, Mode mode) {
   mode_ = mode;
 
   if (mode_ != old_mode) {
+    UpdateAllButtonImages();
     if (!initial_paint_ && HeaderPainterUtil::CanAnimateActivation(frame_)) {
       activation_animation_->SetSlideDuration(kActivationCrossfadeDurationMs);
       if (mode_ == MODE_ACTIVE)
@@ -165,25 +137,25 @@ void DefaultHeaderPainter::PaintHeader(gfx::Canvas* canvas, Mode mode) {
 
   SkPaint paint;
   int active_alpha = activation_animation_->CurrentValueBetween(0, 255);
-  paint.setColor(color_utils::AlphaBlend(
-      active_frame_color_, GetInactiveFrameColor(), active_alpha));
+  paint.setColor(color_utils::AlphaBlend(active_frame_color_,
+                                         inactive_frame_color_, active_alpha));
 
   TileRoundRect(canvas, paint, GetLocalBounds(), corner_radius);
 
-  if (!frame_->IsMaximized() &&
-      !frame_->IsFullscreen() &&
-      mode_ == MODE_INACTIVE) {
+  if (!frame_->IsMaximized() && !frame_->IsFullscreen() &&
+      mode_ == MODE_INACTIVE && !UsesCustomFrameColors()) {
     PaintHighlightForInactiveRestoredWindow(canvas);
   }
   if (frame_->widget_delegate() &&
       frame_->widget_delegate()->ShouldShowWindowTitle()) {
     PaintTitleBar(canvas);
   }
-  PaintHeaderContentSeparator(canvas);
+  if (!UsesCustomFrameColors())
+    PaintHeaderContentSeparator(canvas);
 }
 
 void DefaultHeaderPainter::LayoutHeader() {
-  UpdateSizeButtonImages();
+  UpdateSizeButtonImages(ShouldUseLightImages());
   caption_button_container_->Layout();
 
   gfx::Size caption_button_container_size =
@@ -223,6 +195,7 @@ void DefaultHeaderPainter::SetFrameColors(SkColor active_frame_color,
                                           SkColor inactive_frame_color) {
   active_frame_color_ = active_frame_color;
   inactive_frame_color_ = inactive_frame_color;
+  UpdateAllButtonImages();
 }
 
 void DefaultHeaderPainter::UpdateLeftHeaderView(views::View* left_header_view) {
@@ -313,20 +286,57 @@ void DefaultHeaderPainter::LayoutLeftHeaderView() {
   }
 }
 
-void DefaultHeaderPainter::UpdateSizeButtonImages() {
+bool DefaultHeaderPainter::ShouldUseLightImages() {
+  int luminance = color_utils::GetLuminanceForColor(
+      mode_ == MODE_INACTIVE ? inactive_frame_color_ : active_frame_color_);
+  return luminance < kMaxLuminanceForLightButtons;
+}
+
+void DefaultHeaderPainter::UpdateAllButtonImages() {
+  bool use_light_images = ShouldUseLightImages();
+  caption_button_container_->SetButtonImages(
+      CAPTION_BUTTON_ICON_MINIMIZE,
+      use_light_images ? IDR_AURA_WINDOW_CONTROL_ICON_MINIMIZE_WHITE
+                       : IDR_AURA_WINDOW_CONTROL_ICON_MINIMIZE,
+      IDR_AURA_WINDOW_CONTROL_BACKGROUND_H,
+      IDR_AURA_WINDOW_CONTROL_BACKGROUND_P);
+
+  UpdateSizeButtonImages(use_light_images);
+
+  caption_button_container_->SetButtonImages(
+      CAPTION_BUTTON_ICON_CLOSE,
+      use_light_images ? IDR_AURA_WINDOW_CONTROL_ICON_CLOSE_WHITE
+                       : IDR_AURA_WINDOW_CONTROL_ICON_CLOSE,
+      IDR_AURA_WINDOW_CONTROL_BACKGROUND_H,
+      IDR_AURA_WINDOW_CONTROL_BACKGROUND_P);
+
+  caption_button_container_->SetButtonImages(
+      CAPTION_BUTTON_ICON_LEFT_SNAPPED,
+      use_light_images ? IDR_AURA_WINDOW_CONTROL_ICON_LEFT_SNAPPED_WHITE
+                       : IDR_AURA_WINDOW_CONTROL_ICON_LEFT_SNAPPED,
+      IDR_AURA_WINDOW_CONTROL_BACKGROUND_H,
+      IDR_AURA_WINDOW_CONTROL_BACKGROUND_P);
+
+  caption_button_container_->SetButtonImages(
+      CAPTION_BUTTON_ICON_RIGHT_SNAPPED,
+      use_light_images ? IDR_AURA_WINDOW_CONTROL_ICON_RIGHT_SNAPPED_WHITE
+                       : IDR_AURA_WINDOW_CONTROL_ICON_RIGHT_SNAPPED,
+      IDR_AURA_WINDOW_CONTROL_BACKGROUND_H,
+      IDR_AURA_WINDOW_CONTROL_BACKGROUND_P);
+}
+
+void DefaultHeaderPainter::UpdateSizeButtonImages(bool use_light_images) {
   int icon_id = 0;
-  int inactive_icon_id = 0;
   if (frame_->IsMaximized() || frame_->IsFullscreen()) {
-    icon_id = IDR_AURA_WINDOW_CONTROL_ICON_RESTORE;
-    inactive_icon_id = IDR_AURA_WINDOW_CONTROL_ICON_RESTORE_I;
+    icon_id = use_light_images ? IDR_AURA_WINDOW_CONTROL_ICON_RESTORE_WHITE
+                               : IDR_AURA_WINDOW_CONTROL_ICON_RESTORE;
   } else {
-    icon_id = IDR_AURA_WINDOW_CONTROL_ICON_MAXIMIZE;
-    inactive_icon_id = IDR_AURA_WINDOW_CONTROL_ICON_MAXIMIZE_I;
+    icon_id = use_light_images ? IDR_AURA_WINDOW_CONTROL_ICON_MAXIMIZE_WHITE
+                               : IDR_AURA_WINDOW_CONTROL_ICON_MAXIMIZE;
   }
   caption_button_container_->SetButtonImages(
       CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE,
       icon_id,
-      inactive_icon_id,
       IDR_AURA_WINDOW_CONTROL_BACKGROUND_H,
       IDR_AURA_WINDOW_CONTROL_BACKGROUND_P);
 }
@@ -340,15 +350,9 @@ gfx::Rect DefaultHeaderPainter::GetTitleBounds() const {
       left_header_view_, caption_button_container_, GetTitleFontList());
 }
 
-SkColor DefaultHeaderPainter::GetInactiveFrameColor() const {
-  SkColor color = inactive_frame_color_;
-  if (!frame_->IsMaximized() && !frame_->IsFullscreen()) {
-    color = SkColorSetARGB(kInactiveFrameAlpha,
-                           SkColorGetR(color),
-                           SkColorGetG(color),
-                           SkColorGetB(color));
-  }
-  return color;
+bool DefaultHeaderPainter::UsesCustomFrameColors() const {
+  return active_frame_color_ != kDefaultFrameColor ||
+         inactive_frame_color_ != kDefaultFrameColor;
 }
 
 }  // namespace ash

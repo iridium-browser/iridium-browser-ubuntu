@@ -314,10 +314,10 @@ void RTCDataChannel::scheduledEventTimerFired(Timer<RTCDataChannel>*)
     if (m_stopped)
         return;
 
-    WillBeHeapVector<RefPtrWillBeMember<Event> > events;
+    WillBeHeapVector<RefPtrWillBeMember<Event>> events;
     events.swap(m_scheduledEvents);
 
-    WillBeHeapVector<RefPtrWillBeMember<Event> >::iterator it = events.begin();
+    WillBeHeapVector<RefPtrWillBeMember<Event>>::iterator it = events.begin();
     for (; it != events.end(); ++it)
         dispatchEvent((*it).release());
 
@@ -332,10 +332,10 @@ void RTCDataChannel::clearWeakMembers(Visitor* visitor)
     m_connection = nullptr;
 }
 
-void RTCDataChannel::trace(Visitor* visitor)
+DEFINE_TRACE(RTCDataChannel)
 {
     visitor->trace(m_scheduledEvents);
-    visitor->registerWeakMembers<RTCDataChannel, &RTCDataChannel::clearWeakMembers>(this);
+    visitor->template registerWeakMembers<RTCDataChannel, &RTCDataChannel::clearWeakMembers>(this);
     RefCountedGarbageCollectedEventTargetWithInlineData<RTCDataChannel>::trace(visitor);
 }
 

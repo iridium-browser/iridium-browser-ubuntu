@@ -6,9 +6,9 @@
 #define CONTENT_CHILD_BLINK_PLATFORM_IMPL_H_
 
 #include "base/compiler_specific.h"
-#include "base/debug/trace_event.h"
 #include "base/threading/thread_local_storage.h"
 #include "base/timer/timer.h"
+#include "base/trace_event/trace_event.h"
 #include "content/child/webcrypto/webcrypto_impl.h"
 #include "content/child/webfallbackthemeengine_impl.h"
 #include "content/common/content_export.h"
@@ -34,6 +34,7 @@ class MessageLoop;
 namespace content {
 class FlingCurveConfiguration;
 class NotificationDispatcher;
+class PermissionDispatcher;
 class PushDispatcher;
 class ThreadSafeSender;
 class WebBluetoothImpl;
@@ -82,9 +83,7 @@ class CONTENT_EXPORT BlinkPlatformImpl
       const blink::WebURL& url, blink::WebString& mimetype,
       blink::WebString& charset);
   virtual blink::WebURLError cancelledError(const blink::WebURL& url) const;
-  virtual bool isReservedIPAddress(
-      const blink::WebSecurityOrigin&) const;
-  virtual bool isReservedIPAddress(const blink::WebURL&) const;
+  virtual bool isReservedIPAddress(const blink::WebString& host) const;
   virtual blink::WebThread* createThread(const char* name);
   virtual blink::WebThread* currentThread();
   virtual void yieldCurrentThread();
@@ -106,6 +105,7 @@ class CONTENT_EXPORT BlinkPlatformImpl
       const unsigned char* category_group_enabled,
       const char* name,
       unsigned long long id,
+      double timestamp,
       int num_args,
       const char** arg_names,
       const unsigned char* arg_types,
@@ -116,6 +116,7 @@ class CONTENT_EXPORT BlinkPlatformImpl
       const unsigned char* category_group_enabled,
       const char* name,
       unsigned long long id,
+      double timestamp,
       int num_args,
       const char** arg_names,
       const unsigned char* arg_types,
@@ -139,6 +140,7 @@ class CONTENT_EXPORT BlinkPlatformImpl
   virtual void suddenTerminationChanged(bool enabled) { }
   virtual double currentTime();
   virtual double monotonicallyIncreasingTime();
+  virtual double systemTraceTime();
   virtual void cryptographicallyRandomValues(
       unsigned char* buffer, size_t length);
   virtual void setSharedTimerFiredFunction(void (*func)());
@@ -149,16 +151,15 @@ class CONTENT_EXPORT BlinkPlatformImpl
       blink::WebGestureDevice device_source,
       const blink::WebFloatPoint& velocity,
       const blink::WebSize& cumulative_scroll);
-  virtual void didStartWorkerRunLoop(
-      const blink::WebWorkerRunLoop& runLoop);
-  virtual void didStopWorkerRunLoop(
-      const blink::WebWorkerRunLoop& runLoop);
+  virtual void didStartWorkerRunLoop();
+  virtual void didStopWorkerRunLoop();
   virtual blink::WebCrypto* crypto();
   virtual blink::WebGeofencingProvider* geofencingProvider();
   virtual blink::WebBluetooth* bluetooth();
   virtual blink::WebNotificationManager* notificationManager();
   virtual blink::WebPushProvider* pushProvider();
   virtual blink::WebNavigatorConnectProvider* navigatorConnectProvider();
+  virtual blink::WebPermissionClient* permissionClient();
 
   void SuspendSharedTimer();
   void ResumeSharedTimer();
@@ -166,15 +167,19 @@ class CONTENT_EXPORT BlinkPlatformImpl
 
   WebBluetoothImpl* BluetoothImplForTesting() { return bluetooth_.get(); }
 
- private:
-  static void DestroyCurrentThread(void*);
+  virtual blink::WebString domCodeStringFromEnum(int dom_code);
+  virtual int domEnumFromCodeString(const blink::WebString& codeString);
 
+ private:
   void DoTimeout() {
     if (shared_timer_func_ && !shared_timer_suspended_)
       shared_timer_func_();
   }
 
   void InternalInit();
+  void UpdateWebThreadTLS(blink::WebThread* thread);
+
+  bool IsMainThread() const;
 
   scoped_refptr<base::SingleThreadTaskRunner> MainTaskRunnerForCurrentThread();
 
@@ -194,6 +199,7 @@ class CONTENT_EXPORT BlinkPlatformImpl
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
   scoped_refptr<NotificationDispatcher> notification_dispatcher_;
   scoped_refptr<PushDispatcher> push_dispatcher_;
+  scoped_ptr<PermissionDispatcher> permission_client_;
 };
 
 }  // namespace content

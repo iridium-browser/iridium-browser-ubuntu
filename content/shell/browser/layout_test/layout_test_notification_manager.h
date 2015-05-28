@@ -10,9 +10,11 @@
 
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "base/synchronization/lock.h"
 #include "content/public/browser/platform_notification_service.h"
+#include "content/public/common/permission_status.mojom.h"
 #include "content/public/common/platform_notification_data.h"
-#include "third_party/WebKit/public/platform/WebNotificationPermission.h"
+#include "third_party/WebKit/public/platform/modules/notifications/WebNotificationPermission.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -30,7 +32,14 @@ class LayoutTestNotificationManager : public PlatformNotificationService {
   // Requests permission for |origin| to display notifications in layout tests.
   // Must be called on the IO thread.
   // Returns whether the permission is granted.
-  bool RequestPermission(const GURL& origin);
+  PermissionStatus RequestPermission(const GURL& origin);
+
+  // Checks if |origin| has permission to display notifications. May be called
+  // on both the IO and the UI threads.
+  blink::WebNotificationPermission CheckPermission(const GURL& origin);
+
+  // Similar to CheckPermission() above but returns a PermissionStatus object.
+  PermissionStatus GetPermissionStatus(const GURL& origin);
 
   // Sets the permission to display notifications for |origin| to |permission|.
   // Must be called on the IO thread.
@@ -45,7 +54,11 @@ class LayoutTestNotificationManager : public PlatformNotificationService {
   void SimulateClick(const std::string& title);
 
   // PlatformNotificationService implementation.
-  blink::WebNotificationPermission CheckPermission(
+  blink::WebNotificationPermission CheckPermissionOnUIThread(
+      BrowserContext* browser_context,
+      const GURL& origin,
+      int render_process_id) override;
+  blink::WebNotificationPermission CheckPermissionOnIOThread(
       ResourceContext* resource_context,
       const GURL& origin,
       int render_process_id) override;
@@ -54,15 +67,13 @@ class LayoutTestNotificationManager : public PlatformNotificationService {
                            const SkBitmap& icon,
                            const PlatformNotificationData& notification_data,
                            scoped_ptr<DesktopNotificationDelegate> delegate,
-                           int render_process_id,
                            base::Closure* cancel_callback) override;
   void DisplayPersistentNotification(
       BrowserContext* browser_context,
       int64 service_worker_registration_id,
       const GURL& origin,
       const SkBitmap& icon,
-      const PlatformNotificationData& notification_data,
-      int render_process_id) override;
+      const PlatformNotificationData& notification_data) override;
   void ClosePersistentNotification(
       BrowserContext* browser_context,
       const std::string& persistent_notification_id) override;
@@ -89,6 +100,7 @@ class LayoutTestNotificationManager : public PlatformNotificationService {
   };
 
   std::map<GURL, blink::WebNotificationPermission> permission_map_;
+  base::Lock permission_lock_;
 
   std::map<std::string, DesktopNotificationDelegate*> page_notifications_;
   std::map<std::string, PersistentNotification> persistent_notifications_;

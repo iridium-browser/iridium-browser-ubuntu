@@ -20,28 +20,33 @@ namespace {
 // later.
 const char kBluetoothMediaTransportInterface[] = "org.bluez.MediaTransport1";
 
+// Constants used to indicate exceptional error conditions.
+const char kNoResponseError[] = "org.chromium.Error.NoResponse";
+const char kUnexpectedResponse[] = "org.chromium.Error.UnexpectedResponse";
+
 // Method names of Media Transport interface.
 const char kAcquire[] = "Acquire";
 const char kTryAcquire[] = "TryAcquire";
 const char kRelease[] = "Release";
 
-// Property names of Media Transport interface.
-const char kDeviceProperty[] = "Device";
-const char kUUIDProperty[] = "UUID";
-const char kCodecProperty[] = "Codec";
-const char kConfigurationProperty[] = "Configuration";
-const char kStateProperty[] = "State";
-const char kDelayProperty[] = "Delay";
-const char kVolumeProperty[] = "Volume";
-
 }  // namespace
 
 namespace chromeos {
 
-const char BluetoothMediaTransportClient::kNoResponseError[] =
-    "org.chromium.Error.NoResponse";
-const char BluetoothMediaTransportClient::kUnexpectedResponse[] =
-    "org.chromium.Error.UnexpectedResponse";
+// static
+const char BluetoothMediaTransportClient::kDeviceProperty[] = "Device";
+const char BluetoothMediaTransportClient::kUUIDProperty[] = "UUID";
+const char BluetoothMediaTransportClient::kCodecProperty[] = "Codec";
+const char BluetoothMediaTransportClient::kConfigurationProperty[] =
+    "Configuration";
+const char BluetoothMediaTransportClient::kStateProperty[] = "State";
+const char BluetoothMediaTransportClient::kDelayProperty[] = "Delay";
+const char BluetoothMediaTransportClient::kVolumeProperty[] = "Volume";
+
+// static
+const char BluetoothMediaTransportClient::kStateIdle[] = "idle";
+const char BluetoothMediaTransportClient::kStatePending[] = "pending";
+const char BluetoothMediaTransportClient::kStateActive[] = "active";
 
 BluetoothMediaTransportClient::Properties::Properties(
     dbus::ObjectProxy* object_proxy,
@@ -124,6 +129,8 @@ class BluetoothMediaTransportClientImpl
   void Acquire(const dbus::ObjectPath& object_path,
                const AcquireCallback& callback,
                const ErrorCallback& error_callback) override {
+    VLOG(1) << "Acquire - transport: " << object_path.value();
+
     DCHECK(object_manager_);
 
     dbus::MethodCall method_call(kBluetoothMediaTransportInterface, kAcquire);
@@ -145,6 +152,8 @@ class BluetoothMediaTransportClientImpl
   void TryAcquire(const dbus::ObjectPath& object_path,
                   const AcquireCallback& callback,
                   const ErrorCallback& error_callback) override {
+    VLOG(1) << "TryAcquire - transport: " << object_path.value();
+
     DCHECK(object_manager_);
 
     dbus::MethodCall method_call(kBluetoothMediaTransportInterface,
@@ -167,6 +176,8 @@ class BluetoothMediaTransportClientImpl
   void Release(const dbus::ObjectPath& object_path,
                const base::Closure& callback,
                const ErrorCallback& error_callback) override {
+    VLOG(1) << "Release - transport: " << object_path.value();
+
     DCHECK(object_manager_);
 
     dbus::MethodCall method_call(kBluetoothMediaTransportInterface, kRelease);
@@ -230,7 +241,16 @@ class BluetoothMediaTransportClientImpl
     if (reader.PopFileDescriptor(&fd) &&
         reader.PopUint16(&read_mtu) &&
         reader.PopUint16(&write_mtu)) {
-      callback.Run(fd, read_mtu, write_mtu);
+      fd.CheckValidity();
+      DCHECK(fd.is_valid());
+
+      VLOG(1) << "OnAcquireSuccess - fd: "<<  fd.value()
+              <<", read MTU: " << read_mtu
+              <<", write MTU: " << write_mtu;
+
+      // The ownership of the file descriptor is transferred to the user
+      // application.
+      callback.Run(&fd, read_mtu, write_mtu);
       return;
     }
 

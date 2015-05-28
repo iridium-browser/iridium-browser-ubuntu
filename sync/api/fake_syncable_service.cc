@@ -26,8 +26,8 @@ void FakeSyncableService::set_process_sync_changes_error(
 }
 
 void FakeSyncableService::set_attachment_store(
-    const scoped_refptr<AttachmentStore>& attachment_store) {
-  attachment_store_ = attachment_store;
+    scoped_ptr<AttachmentStore> attachment_store) {
+  attachment_store_ = attachment_store.Pass();
 }
 
 const AttachmentService* FakeSyncableService::attachment_service() const {
@@ -70,8 +70,10 @@ SyncError FakeSyncableService::ProcessSyncChanges(
   return process_sync_changes_error_;
 }
 
-scoped_refptr<AttachmentStore> FakeSyncableService::GetAttachmentStore() {
-  return attachment_store_;
+scoped_ptr<AttachmentStoreForSync>
+FakeSyncableService::GetAttachmentStoreForSync() {
+  return attachment_store_ ? attachment_store_->CreateAttachmentStoreForSync()
+                           : scoped_ptr<AttachmentStoreForSync>();
 }
 
 void FakeSyncableService::SetAttachmentService(

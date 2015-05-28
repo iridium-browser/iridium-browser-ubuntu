@@ -11,6 +11,7 @@ from idl_types import IdlType
 from v8_globals import includes
 import v8_types
 import v8_utilities
+from v8_utilities import has_extended_attribute_value
 
 
 DICTIONARY_H_INCLUDES = frozenset([
@@ -56,7 +57,7 @@ def dictionary_context(dictionary, interfaces_info):
     context = {
         'cpp_class': cpp_class,
         'header_includes': set(DICTIONARY_H_INCLUDES),
-        'members': [member_context(member)
+        'members': [member_context(dictionary, member)
                     for member in sorted(dictionary.members,
                                          key=operator.attrgetter('name'))],
         'use_permissive_dictionary_conversion': 'PermissiveDictionaryConversion' in dictionary.extended_attributes,
@@ -74,17 +75,22 @@ def dictionary_context(dictionary, interfaces_info):
     return context
 
 
-def member_context(member):
+def member_context(dictionary, member):
     idl_type = member.idl_type
     idl_type.add_includes_for_type()
     unwrapped_idl_type = unwrap_nullable_if_needed(idl_type)
+
+    if member.is_required and member.default_value:
+        raise Exception(
+            'Required member %s must not have a default value.' % member.name)
 
     def default_values():
         if not member.default_value:
             return None, None
         if member.default_value.is_null:
             return None, 'v8::Null(isolate)'
-        cpp_default_value = str(member.default_value)
+        cpp_default_value = unwrapped_idl_type.literal_cpp_value(
+            member.default_value)
         v8_default_value = unwrapped_idl_type.cpp_value_to_v8_value(
             cpp_value=cpp_default_value, isolate='isolate',
             creation_context='creationContext')
@@ -102,20 +108,21 @@ def member_context(member):
             creation_context='creationContext',
             extended_attributes=member.extended_attributes),
         'deprecate_as': v8_utilities.deprecate_as(member),
-        'enum_validation_expression': unwrapped_idl_type.enum_validation_expression,
+        'enum_type': idl_type.enum_type,
+        'enum_values': unwrapped_idl_type.enum_values,
         'has_method_name': has_method_name_for_dictionary_member(member),
         'idl_type': idl_type.base_type,
         'is_interface_type': idl_type.is_interface_type and not idl_type.is_dictionary,
         'is_nullable': idl_type.is_nullable,
         'is_object': unwrapped_idl_type.name == 'Object',
+        'is_required': member.is_required,
         'name': member.name,
         'setter_name': setter_name_for_dictionary_member(member),
         'null_setter_name': null_setter_name_for_dictionary_member(member),
-        'use_output_parameter_for_result': unwrapped_idl_type.use_output_parameter_for_result,
         'v8_default_value': v8_default_value,
         'v8_value_to_local_cpp_value': unwrapped_idl_type.v8_value_to_local_cpp_value(
             member.extended_attributes, member.name + 'Value',
-            member.name, isolate='isolate'),
+            member.name, isolate='isolate', use_exception_state=True),
     }
 
 
@@ -181,7 +188,7 @@ def member_impl_context(member, interfaces_info, header_includes):
 
     cpp_default_value = None
     if member.default_value and not member.default_value.is_null:
-        cpp_default_value = str(member.default_value)
+        cpp_default_value = idl_type.literal_cpp_value(member.default_value)
 
     header_includes.update(idl_type.impl_includes_for_type(interfaces_info))
     return {

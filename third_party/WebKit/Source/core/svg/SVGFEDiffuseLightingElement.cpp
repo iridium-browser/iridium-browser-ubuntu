@@ -20,8 +20,8 @@
 #include "config.h"
 #include "core/svg/SVGFEDiffuseLightingElement.h"
 
-#include "core/rendering/RenderObject.h"
-#include "core/rendering/style/RenderStyle.h"
+#include "core/layout/LayoutObject.h"
+#include "core/style/ComputedStyle.h"
 #include "core/svg/SVGParserUtilities.h"
 #include "core/svg/graphics/filters/SVGFilterBuilder.h"
 #include "platform/graphics/filters/FEDiffuseLighting.h"
@@ -42,7 +42,7 @@ inline SVGFEDiffuseLightingElement::SVGFEDiffuseLightingElement(Document& docume
     addToPropertyMap(m_in1);
 }
 
-void SVGFEDiffuseLightingElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFEDiffuseLightingElement)
 {
     visitor->trace(m_diffuseConstant);
     visitor->trace(m_surfaceScale);
@@ -66,17 +66,12 @@ bool SVGFEDiffuseLightingElement::isSupportedAttribute(const QualifiedName& attr
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGFEDiffuseLightingElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
-}
-
 bool SVGFEDiffuseLightingElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)
 {
     FEDiffuseLighting* diffuseLighting = static_cast<FEDiffuseLighting*>(effect);
 
     if (attrName == SVGNames::lighting_colorAttr) {
-        RenderObject* renderer = this->renderer();
+        LayoutObject* renderer = this->layoutObject();
         ASSERT(renderer);
         ASSERT(renderer->style());
         return diffuseLighting->setLightingColor(renderer->style()->svgStyle().lightingColor());
@@ -85,6 +80,11 @@ bool SVGFEDiffuseLightingElement::setFilterEffectAttribute(FilterEffect* effect,
         return diffuseLighting->setSurfaceScale(m_surfaceScale->currentValue()->value());
     if (attrName == SVGNames::diffuseConstantAttr)
         return diffuseLighting->setDiffuseConstant(m_diffuseConstant->currentValue()->value());
+    if (attrName == SVGNames::kernelUnitLengthAttr) {
+        bool changedX = diffuseLighting->setKernelUnitLengthX(m_kernelUnitLength->firstNumber()->currentValue()->value());
+        bool changedY = diffuseLighting->setKernelUnitLengthY(m_kernelUnitLength->secondNumber()->currentValue()->value());
+        return changedX || changedY;
+    }
 
     LightSource* lightSource = const_cast<LightSource*>(diffuseLighting->lightSource());
     const SVGFELightElement* lightElement = SVGFELightElement::findLightElement(*this);
@@ -154,7 +154,7 @@ PassRefPtrWillBeRawPtr<FilterEffect> SVGFEDiffuseLightingElement::build(SVGFilte
     if (!lightNode)
         return nullptr;
 
-    RenderObject* renderer = this->renderer();
+    LayoutObject* renderer = this->layoutObject();
     if (!renderer)
         return nullptr;
 

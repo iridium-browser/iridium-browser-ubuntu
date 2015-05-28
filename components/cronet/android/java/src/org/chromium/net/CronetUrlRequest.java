@@ -13,9 +13,9 @@ import org.chromium.base.JNINamespace;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.Executor;
 
 /**
@@ -34,6 +34,7 @@ final class CronetUrlRequest implements UrlRequest {
     private boolean mStarted = false;
     private boolean mCanceled = false;
     private boolean mInOnDataReceived = false;
+    private boolean mDisableCache = false;
 
     /*
      * Synchronize access to mUrlRequestAdapter, mStarted, mCanceled and
@@ -55,6 +56,8 @@ final class CronetUrlRequest implements UrlRequest {
     private final int mPriority;
     private String mInitialMethod;
     private final HeadersList mRequestHeaders = new HeadersList();
+
+    private CronetUploadDataStream mUploadDataStream;
 
     private NativeResponseInfo mResponseInfo;
 
@@ -117,6 +120,8 @@ final class CronetUrlRequest implements UrlRequest {
         private final HeadersList mAllHeaders = new HeadersList();
         private final boolean mWasCached;
         private final String mNegotiatedProtocol;
+        private Map<String, List<String>> mResponseHeaders;
+        private List<Pair<String, String>> mUnmodifiableAllHeaders;
 
         NativeResponseInfo(String[] urlChain, int httpStatusCode,
                 String httpStatusText, boolean wasCached,
@@ -150,22 +155,30 @@ final class CronetUrlRequest implements UrlRequest {
 
         @Override
         public List<Pair<String, String>> getAllHeadersAsList() {
-            return Collections.unmodifiableList(mAllHeaders);
+            if (mUnmodifiableAllHeaders == null) {
+                mUnmodifiableAllHeaders =
+                        Collections.unmodifiableList(mAllHeaders);
+            }
+            return mUnmodifiableAllHeaders;
         }
 
         @Override
         public Map<String, List<String>> getAllHeaders() {
-            Map<String, List<String>> map = new HashMap<String, List<String>>();
-            for (Pair<String, String> entry : mAllHeaders) {
-                if (map.containsKey(entry.first)) {
-                    map.get(entry.first).add(entry.second);
-                } else {
-                    List<String> values = new ArrayList<String>();
-                    values.add(entry.second);
-                    map.put(entry.first, values);
-                }
+            if (mResponseHeaders != null) {
+                return mResponseHeaders;
             }
-            return Collections.unmodifiableMap(map);
+            Map<String, List<String>> map = new TreeMap<String, List<String>>(
+                    String.CASE_INSENSITIVE_ORDER);
+            for (Pair<String, String> entry : mAllHeaders) {
+                List<String> values = new ArrayList<String>();
+                if (map.containsKey(entry.first)) {
+                    values.addAll(map.get(entry.first));
+                }
+                values.add(entry.second);
+                map.put(entry.first, Collections.unmodifiableList(values));
+            }
+            mResponseHeaders = Collections.unmodifiableMap(map);
+            return mResponseHeaders;
         }
 
         @Override
@@ -247,28 +260,58 @@ final class CronetUrlRequest implements UrlRequest {
     }
 
     @Override
+    public void setUploadDataProvider(UploadDataProvider uploadDataProvider, Executor executor) {
+        if (uploadDataProvider == null) {
+            throw new NullPointerException("Invalid UploadDataProvider.");
+        }
+        if (mInitialMethod == null) {
+            mInitialMethod = "POST";
+        }
+        mUploadDataStream = new CronetUploadDataStream(uploadDataProvider, executor);
+    }
+
+    @Override
     public void start() {
         synchronized (mUrlRequestAdapterLock) {
             checkNotStarted();
-            mUrlRequestAdapter = nativeCreateRequestAdapter(
-                    mRequestContext.getUrlRequestContextAdapter(),
-                    mInitialUrl,
-                    mPriority);
-            mRequestContext.onRequestStarted(this);
-            if (mInitialMethod != null) {
-                if (!nativeSetHttpMethod(mUrlRequestAdapter, mInitialMethod)) {
-                    destroyRequestAdapter();
-                    throw new IllegalArgumentException("Invalid http method "
-                            + mInitialMethod);
+
+            try {
+                mUrlRequestAdapter = nativeCreateRequestAdapter(
+                        mRequestContext.getUrlRequestContextAdapter(), mInitialUrl, mPriority);
+                mRequestContext.onRequestStarted(this);
+                if (mInitialMethod != null) {
+                    if (!nativeSetHttpMethod(mUrlRequestAdapter, mInitialMethod)) {
+                        throw new IllegalArgumentException("Invalid http method " + mInitialMethod);
+                    }
                 }
+
+                boolean hasContentType = false;
+                for (Pair<String, String> header : mRequestHeaders) {
+                    if (header.first.equalsIgnoreCase("Content-Type")
+                            && !header.second.isEmpty()) {
+                        hasContentType = true;
+                    }
+                    if (!nativeAddHeader(mUrlRequestAdapter, header.first, header.second)) {
+                        destroyRequestAdapter();
+                        throw new IllegalArgumentException(
+                                "Invalid header " + header.first + "=" + header.second);
+                    }
+                }
+                if (mUploadDataStream != null) {
+                    if (!hasContentType) {
+                        throw new IllegalArgumentException(
+                                "Requests with upload data must have a Content-Type.");
+                    }
+                    mUploadDataStream.attachToRequest(this, mUrlRequestAdapter);
+                }
+            } catch (RuntimeException e) {
+                // If there's an exception, cleanup and then throw the
+                // exception to the caller.
+                destroyRequestAdapter();
+                throw e;
             }
-            for (Pair<String, String> header : mRequestHeaders) {
-                if (!nativeAddHeader(mUrlRequestAdapter, header.first,
-                        header.second)) {
-                    destroyRequestAdapter();
-                    throw new IllegalArgumentException("Invalid header "
-                            + header.first + "=" + header.second);
-                }
+            if (mDisableCache) {
+                nativeDisableCache(mUrlRequestAdapter);
             }
             mStarted = true;
             nativeStart(mUrlRequestAdapter);
@@ -310,6 +353,12 @@ final class CronetUrlRequest implements UrlRequest {
     @Override
     public void resume() {
         throw new UnsupportedOperationException("Not implemented yet");
+    }
+
+    @Override
+    public void disableCache() {
+        checkNotStarted();
+        mDisableCache = true;
     }
 
     /**
@@ -402,6 +451,28 @@ final class CronetUrlRequest implements UrlRequest {
         } catch (Exception failException) {
             Log.e(CronetUrlRequestContext.LOG_TAG,
                     "Exception notifying of failed request", failException);
+        }
+    }
+
+    /**
+     * Called when UploadDataProvider encounters an error.
+     */
+    void onUploadException(Exception e) {
+        UrlRequestException uploadError =
+                new UrlRequestException("Exception received from UploadDataProvider", e);
+        Log.e(CronetUrlRequestContext.LOG_TAG, "Exception in upload method", e);
+        // Do not call into listener if request is canceled.
+        synchronized (mUrlRequestAdapterLock) {
+            if (isCanceled()) {
+                return;
+            }
+            cancel();
+        }
+        try {
+            mListener.onFailed(this, mResponseInfo, uploadError);
+        } catch (Exception failException) {
+            Log.e(CronetUrlRequestContext.LOG_TAG, "Exception notifying of failed upload",
+                    failException);
         }
     }
 
@@ -610,4 +681,6 @@ final class CronetUrlRequest implements UrlRequest {
     private native boolean nativeGetWasCached(long urlRequestAdapter);
 
     private native long nativeGetTotalReceivedBytes(long urlRequestAdapter);
+
+    private native void nativeDisableCache(long urlRequestAdapter);
 }

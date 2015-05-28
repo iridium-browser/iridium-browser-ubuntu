@@ -1,17 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Copyright 2014 The Chromium Authors. All rights reserved.
      Use of this source code is governed by a BSD-style license that can be
-     found in the LICENSE file.
--->
+     found in the LICENSE file. -->
 
 <resources>
-    <!-- Certificate Viewer Dimensions -->
-    <dimen name="certificate_viewer_padding_wide">24dp</dimen>
-    <dimen name="certificate_viewer_padding_thin">16dp</dimen>
-
     <!-- Website Settings Popup Dimensions -->
     <dimen name="website_settings_popup_padding_sides">16dp</dimen>
-    <dimen name="website_settings_popup_button_text_size">14sp</dimen>
     <dimen name="website_settings_popup_button_height">36dp</dimen>
     <dimen name="website_settings_popup_button_padding_sides">8dp</dimen>
     <dimen name="website_settings_popup_button_margin_sides">4dp</dimen>
@@ -23,7 +17,7 @@
 
     <!-- TabSwitcher - The minimum distance from the edge to commit a side swap. -->
     <dimen name="swipe_commit_distance">120dp</dimen>
-    
+
     <!-- Tab title -->
     <dimen name="border_texture_title_fade">24dp</dimen>                    <!-- 40px hdpi -->
     <dimen name="tab_title_favicon_start_padding">10dp</dimen>
@@ -42,47 +36,22 @@
     <!-- Infobar dimensions -->
     <!-- Text size of the infobar message. -->
     <dimen name="infobar_text_size">16sp</dimen>
-    <!-- Text size of text inside infobar buttons. -->
-    <dimen name="infobar_button_text_size">14sp</dimen>
     <!-- Minimum width of an infobar. -->
     <dimen name="infobar_min_width">220dp</dimen>
     <!-- Margin between items in an infobar. -->
     <dimen name="infobar_margin">16dp</dimen>
-    <!-- Left/right padding for infobar button text. -->
-    <dimen name="infobar_button_horizontal_padding">20dp</dimen>
     <!-- Minimum height for a touch target. -->
     <dimen name="infobar_touch_target_height">40dp</dimen>
     <!-- Width and height of the infobar icon. -->
     <dimen name="infobar_icon_size">36dp</dimen>
 
     <!-- App banner dimensions -->
-    <dimen name="app_banner_max_width">424dp</dimen>
-    <dimen name="app_banner_margin_sides">8dp</dimen>
-    <dimen name="app_banner_margin_bottom">8dp</dimen>
-    <dimen name="app_banner_padding">8dp</dimen>
-    <dimen name="app_banner_padding_controls">4dp</dimen>
+    <dimen name="app_banner_icon_size">48dp</dimen>
+    <dimen name="app_banner_icon_spacing">16dp</dimen>
 
-    <dimen name="app_banner_button_text_size">14sp</dimen>
-    <dimen name="app_banner_button_height">28dp</dimen>
-    <dimen name="app_banner_button_margin_top">8dp</dimen>
-    <dimen name="app_banner_button_padding_sides">12dp</dimen>
-    <dimen name="app_banner_button_padding_above_below">0dp</dimen>
-
-    <dimen name="app_banner_close_button_padding">12dp</dimen>
-
-    <dimen name="app_banner_icon_size">80dp</dimen>
-    <dimen name="app_banner_icon_margin_end">8dp</dimen>
-
-    <dimen name="app_banner_title_text_size">20sp</dimen>
-    <dimen name="app_banner_title_margin_top">0dp</dimen>
-    <dimen name="app_banner_title_margin_bottom">8dp</dimen>
-
-    <dimen name="app_banner_logo_height">24dp</dimen>
-    <dimen name="app_banner_logo_margin_top">4dp</dimen>
-    <dimen name="app_banner_logo_margin_bottom">0dp</dimen>
-    <dimen name="app_banner_logo_margin_end">8dp</dimen>
-
-    <dimen name="app_banner_star_height">16dp</dimen>
+    <!-- Contextual search dimensions -->
+    <dimen name="contextual_search_bar_height">80dp</dimen>
+    <dimen name="contextual_search_text_size">18sp</dimen>
 
     <!-- Password generation popup dimensions -->
     <dimen name="password_generation_divider_height">1dp</dimen>
@@ -90,16 +59,17 @@
     <dimen name="password_generation_horizontal_margin">10dp</dimen>
     <dimen name="password_generation_text_vertical_margin">12dp</dimen>
 
-    <!--  Preferences button dimensions -->
-    <!-- TODO(twellington): Remove/update the following dimens after we switch the PreferencesTheme
-                                parent to AppCompat. -->
-    <dimen name="pref_button_margin_start">0dp</dimen>
-    <dimen name="pref_button_corner_radius">2dp</dimen>
-    <dimen name="pref_button_horizontal_padding">16dp</dimen>
-    <dimen name="pref_button_vertical_padding">10dp</dimen>
+    <!--  Preferences dimensions -->
+    <dimen name="pref_autofill_field_horizontal_padding">3dp</dimen>
+    <dimen name="pref_autofill_field_top_padding">10dp</dimen>
 
     <!-- Minimum height/width for a touchable item -->
     <dimen name="min_touch_target_size">48dp</dimen>
+
+    <!-- Data Saver -->
+    <dimen name="data_usage_chart_height">252dp</dimen>
+    <dimen name="data_reduction_promo_screen_width">320dp</dimen>
+    <dimen name="data_reduction_promo_screen_height">550dp</dimen>
 
     <!-- Text bubble dimensions -->
     <!-- Tooltip min distance from the edge of the screen. -->
@@ -113,4 +83,51 @@
     <!-- Tooltip x margin for text bubble -->
     <dimen name="bubble_tip_margin">8dp</dimen>
 
+    <!-- Compositor Tab Title Dimensions -->
+    <dimen name="compositor_tab_title_bar_shadow_x_offset">0.6667dp</dimen>            <!-- 1px hdpi -->
+    <dimen name="compositor_tab_title_bar_shadow_y_offset">0.6667dp</dimen>            <!-- 1px hdpi -->
+    <dimen name="compositor_tab_title_bar_shadow_x_offset_incognito">-0.6667dp</dimen> <!-- -1px hdpi -->
+    <dimen name="compositor_tab_title_bar_shadow_y_offset_incognito">-0.6667dp</dimen> <!-- -1px hdpi -->
+    <!-- The size of the text for tab titles. -->
+    <dimen name="compositor_tab_title_text_size">13dp</dimen>
+    <!-- The size of the bounding box for favicons. -->
+    <dimen name="compositor_tab_title_favicon_size">16dp</dimen>
+    <!-- Slop value for allowing slight misses on the compositor button. -->
+    <dimen name="compositor_button_slop">10dp</dimen>
+
+    <!-- User Picture Dimensions -->
+    <dimen name="user_picture_size">40dp</dimen>
+    <dimen name="badged_user_picture_height">40dp</dimen>
+    <!-- The design spec is that the center of the badge should be 4dp from the right edge of the
+    user picture. This is equivalent to a badged_user_picture_width of 46dp assuming a badge_radius
+    of 10dp. -->
+    <dimen name="badged_user_picture_width">46dp</dimen>
+    <dimen name="badge_radius">10dp</dimen>
+    <dimen name="badge_border_size">1.3dp</dimen>
+
+    <!-- Account Chooser infobar Dimensions -->
+    <dimen name="account_chooser_infobar_item_height">80dp</dimen>
+
+    <!-- First Run Experience and Welcome Page dimensions -->
+    <dimen name="fre_button_padding">16dp</dimen>
+    <dimen name="fre_margin">24dp</dimen>
+    <dimen name="fre_title_text_size">24sp</dimen>
+    <dimen name="fre_button_text_size">14sp</dimen>
+    <dimen name="fre_button_padding">12dp</dimen>
+    <dimen name="fre_normal_text_size">14sp</dimen>
+    <dimen name="fre_image_carousel_width">260dp</dimen>
+    <dimen name="fre_image_carousel_height">130dp</dimen>
+    <dimen name="fre_checkmark_size">38dp</dimen>
+    <dimen name="fre_tos_checkbox_padding">12dp</dimen>
+
+    <!-- Sign-in promo dimensions -->
+    <dimen name="sign_in_promo_padding_bottom">16dp</dimen>
+
+    <!-- Autofill card unmasking prompt dimensions -->
+    <dimen name="autofill_card_unmask_tooltip_horizontal_padding">16dp</dimen>
+    <dimen name="autofill_card_unmask_tooltip_vertical_padding">4dp</dimen>
+
+    <!-- Cast related constants -->
+    <dimen name="remote_notification_logo_max_width">@android:dimen/notification_large_icon_width</dimen>
+    <dimen name="remote_notification_logo_max_height">64dp</dimen>
 </resources>

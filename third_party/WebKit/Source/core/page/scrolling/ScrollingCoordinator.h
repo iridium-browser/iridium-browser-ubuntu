@@ -26,7 +26,7 @@
 #ifndef ScrollingCoordinator_h
 #define ScrollingCoordinator_h
 
-#include "core/rendering/RenderObject.h"
+#include "core/layout/LayoutObject.h"
 #include "platform/PlatformWheelEvent.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/scroll/ScrollTypes.h"
@@ -66,6 +66,9 @@ public:
     void updateHaveWheelEventHandlers();
     void updateHaveScrollEventHandlers();
 
+    // Should be called whenever scrollable area set changes.
+    void scrollableAreasDidChange();
+
     // Should be called whenever the slow repaint objects counter changes between zero and one.
     void frameViewHasSlowRepaintObjectsDidChange(FrameView*);
 
@@ -96,12 +99,12 @@ public:
     bool scrollableAreaScrollLayerDidChange(ScrollableArea*);
     void scrollableAreaScrollbarLayerDidChange(ScrollableArea*, ScrollbarOrientation);
     void setLayerIsContainerForFixedPositionLayers(GraphicsLayer*, bool);
-    void updateLayerPositionConstraint(RenderLayer*);
+    void updateLayerPositionConstraint(DeprecatedPaintLayer*);
     void touchEventTargetRectsDidChange();
-    void willDestroyRenderLayer(RenderLayer*);
+    void willDestroyLayer(DeprecatedPaintLayer*);
 
-    void updateScrollParentForGraphicsLayer(GraphicsLayer* child, RenderLayer* parent);
-    void updateClipParentForGraphicsLayer(GraphicsLayer* child, RenderLayer* parent);
+    void updateScrollParentForGraphicsLayer(GraphicsLayer* child, DeprecatedPaintLayer* parent);
+    void updateClipParentForGraphicsLayer(GraphicsLayer* child, DeprecatedPaintLayer* parent);
 
     static String mainThreadScrollingReasonsAsText(MainThreadScrollingReasons);
     String mainThreadScrollingReasonsAsText() const;
@@ -128,7 +131,7 @@ protected:
     bool m_shouldScrollOnMainThreadDirty;
 
 private:
-    bool shouldUpdateAfterCompositingChange() const { return m_scrollGestureRegionIsDirty || m_touchEventTargetRectsAreDirty || frameViewIsDirty(); }
+    bool shouldUpdateAfterCompositingChange() const { return m_scrollGestureRegionIsDirty || m_touchEventTargetRectsAreDirty || m_shouldScrollOnMainThreadDirty || frameViewIsDirty(); }
 
     void setShouldUpdateScrollLayerPositionOnMainThread(MainThreadScrollingReasons);
 
@@ -147,7 +150,7 @@ private:
     using ScrollbarMap = HashMap<ScrollableArea*, OwnPtr<blink::WebScrollbarLayer>>;
     ScrollbarMap m_horizontalScrollbars;
     ScrollbarMap m_verticalScrollbars;
-    HashSet<const RenderLayer*> m_layersWithTouchRects;
+    HashSet<const DeprecatedPaintLayer*> m_layersWithTouchRects;
     bool m_wasFrameScrollable;
 
     MainThreadScrollingReasons m_lastMainThreadScrollingReasons;

@@ -61,7 +61,7 @@ SVGComponentTransferFunctionElement::SVGComponentTransferFunctionElement(const Q
     addToPropertyMap(m_type);
 }
 
-void SVGComponentTransferFunctionElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGComponentTransferFunctionElement)
 {
     visitor->trace(m_tableValues);
     visitor->trace(m_slope);
@@ -86,11 +86,6 @@ bool SVGComponentTransferFunctionElement::isSupportedAttribute(const QualifiedNa
         supportedAttributes.add(SVGNames::offsetAttr);
     }
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGComponentTransferFunctionElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
 }
 
 void SVGComponentTransferFunctionElement::svgAttributeChanged(const QualifiedName& attrName)

@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/strings/string16.h"
+#include "components/user_manager/user_id.h"
 #include "components/user_manager/user_image/user_image.h"
 #include "components/user_manager/user_info.h"
 #include "components/user_manager/user_manager_export.h"
@@ -19,8 +20,7 @@
 
 namespace chromeos {
 class ChromeUserManagerImpl;
-class FakeLoginUtils;
-class FakeUserManager;
+class FakeChromeUserManager;
 class MockUserManager;
 class SupervisedUserManagerImpl;
 class UserAddingScreenTest;
@@ -31,6 +31,7 @@ class UserSessionManager;
 namespace user_manager {
 
 class UserManagerBase;
+class FakeUserManager;
 
 // A class representing information about a previously logged in user.
 // Each user has a canonical email (username), returned by |email()| and
@@ -92,7 +93,7 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   base::string16 GetDisplayName() const override;
   base::string16 GetGivenName() const override;
   const gfx::ImageSkia& GetImage() const override;
-  std::string GetUserID() const override;
+  UserID GetUserID() const override;
 
   // Allows managing child status of the user. Used for RegularUser.
   virtual void SetIsChild(bool is_child);
@@ -169,17 +170,17 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   friend class chromeos::UserSessionManager;
 
   // For testing:
+  friend class FakeUserManager;
+  friend class chromeos::FakeChromeUserManager;
   friend class chromeos::MockUserManager;
-  friend class chromeos::FakeLoginUtils;
-  friend class chromeos::FakeUserManager;
   friend class chromeos::UserAddingScreenTest;
 
   // Do not allow anyone else to create new User instances.
-  static User* CreateRegularUser(const std::string& email);
+  static User* CreateRegularUser(const UserID& email);
   static User* CreateGuestUser();
-  static User* CreateKioskAppUser(const std::string& kiosk_app_username);
-  static User* CreateSupervisedUser(const std::string& username);
-  static User* CreatePublicAccountUser(const std::string& email);
+  static User* CreateKioskAppUser(const UserID& kiosk_app_username);
+  static User* CreateSupervisedUser(const UserID& username);
+  static User* CreatePublicAccountUser(const UserID& email);
 
   explicit User(const std::string& email);
   ~User() override;

@@ -88,20 +88,12 @@ bool AppViewGuest::CompletePendingRequest(
 }
 
 // static
-GuestViewBase* AppViewGuest::Create(content::BrowserContext* browser_context,
-                                    content::WebContents* owner_web_contents,
-                                    int guest_instance_id) {
-  return new AppViewGuest(browser_context,
-                          owner_web_contents,
-                          guest_instance_id);
+GuestViewBase* AppViewGuest::Create(content::WebContents* owner_web_contents) {
+  return new AppViewGuest(owner_web_contents);
 }
 
-AppViewGuest::AppViewGuest(content::BrowserContext* browser_context,
-                           content::WebContents* owner_web_contents,
-                           int guest_instance_id)
-    : GuestView<AppViewGuest>(browser_context,
-                              owner_web_contents,
-                              guest_instance_id),
+AppViewGuest::AppViewGuest(content::WebContents* owner_web_contents)
+    : GuestView<AppViewGuest>(owner_web_contents),
       app_view_guest_delegate_(
           ExtensionsAPIClient::Get()->CreateAppViewGuestDelegate()),
       weak_ptr_factory_(this) {
@@ -113,7 +105,7 @@ AppViewGuest::~AppViewGuest() {
 }
 
 WindowController* AppViewGuest::GetExtensionWindowController() const {
-  return NULL;
+  return nullptr;
 }
 
 content::WebContents* AppViewGuest::GetAssociatedWebContents() const {
@@ -171,12 +163,8 @@ bool AppViewGuest::CheckMediaAccessPermission(
       web_contents, security_origin, type, guest_extension);
 }
 
-const char* AppViewGuest::GetAPINamespace() const {
-  return appview::kEmbedderAPINamespace;
-}
-
-int AppViewGuest::GetTaskPrefix() const {
-  return IDS_EXTENSION_TASK_MANAGER_APPVIEW_TAG_PREFIX;
+bool AppViewGuest::CanRunInDetachedState() const {
+  return true;
 }
 
 void AppViewGuest::CreateWebContents(
@@ -184,13 +172,13 @@ void AppViewGuest::CreateWebContents(
     const WebContentsCreatedCallback& callback) {
   std::string app_id;
   if (!create_params.GetString(appview::kAppID, &app_id)) {
-    callback.Run(NULL);
+    callback.Run(nullptr);
     return;
   }
 
-  const base::DictionaryValue* data = NULL;
+  const base::DictionaryValue* data = nullptr;
   if (!create_params.GetDictionary(appview::kData, &data)) {
-    callback.Run(NULL);
+    callback.Run(nullptr);
     return;
   }
 
@@ -202,7 +190,7 @@ void AppViewGuest::CreateWebContents(
 
   if (!guest_extension || !guest_extension->is_platform_app() ||
       !embedder_extension | !embedder_extension->is_platform_app()) {
-    callback.Run(NULL);
+    callback.Run(nullptr);
     return;
   }
 
@@ -233,22 +221,23 @@ void AppViewGuest::CreateWebContents(
   LaunchAppAndFireEvent(make_scoped_ptr(data->DeepCopy()), callback, host);
 }
 
-void AppViewGuest::DidAttachToEmbedder() {
-  // This is called after the guest process has been attached to a host
-  // element. This means that the host element knows how to route input
-  // events to the guest, and the guest knows how to get frames to the
-  // embedder.
+void AppViewGuest::DidInitialize(const base::DictionaryValue& create_params) {
+  extension_function_dispatcher_.reset(
+      new ExtensionFunctionDispatcher(browser_context(), this));
+
   if (!url_.is_valid())
     return;
 
   web_contents()->GetController().LoadURL(
       url_, content::Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
-  url_ = GURL();
 }
 
-void AppViewGuest::DidInitialize() {
-  extension_function_dispatcher_.reset(
-      new ExtensionFunctionDispatcher(browser_context(), this));
+const char* AppViewGuest::GetAPINamespace() const {
+  return appview::kEmbedderAPINamespace;
+}
+
+int AppViewGuest::GetTaskPrefix() const {
+  return IDS_EXTENSION_TASK_MANAGER_APPVIEW_TAG_PREFIX;
 }
 
 void AppViewGuest::OnRequest(const ExtensionHostMsg_Request_Params& params) {
@@ -261,7 +250,7 @@ void AppViewGuest::CompleteCreateWebContents(
     const Extension* guest_extension,
     const WebContentsCreatedCallback& callback) {
   if (!url.is_valid()) {
-    callback.Run(NULL);
+    callback.Run(nullptr);
     return;
   }
   url_ = url;
@@ -284,7 +273,7 @@ void AppViewGuest::LaunchAppAndFireEvent(
       extension_host->extension()->id(),
       app_runtime::OnEmbedRequested::kEventName);
   if (!has_event_listener) {
-    callback.Run(NULL);
+    callback.Run(nullptr);
     return;
   }
 

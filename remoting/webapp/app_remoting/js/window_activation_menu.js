@@ -18,10 +18,7 @@ var remoting = remoting || {};
  * @constructor
  */
 remoting.WindowActivationMenu = function(adapter) {
-  /**
-   * @type {remoting.SubmenuManager}
-   * @private
-   */
+  /** @private {remoting.SubmenuManager} */
   this.submenuManager_ = new remoting.SubmenuManager(
       adapter,
       chrome.i18n.getMessage(/*i18n-content*/'WINDOWS_SUBMENU_TITLE'),
@@ -66,11 +63,11 @@ remoting.WindowActivationMenu.prototype.makeMenuId_ = function(windowId) {
 /**
  * Handle a click on the application's context menu.
  *
- * @param {OnClickData} info
+ * @param {OnClickData=} info
  * @private
  */
 remoting.WindowActivationMenu.prototype.onContextMenu_ = function(info) {
-  /** @type {Array.<string>} */
+  /** @type {Array<string>} */
   var components = info.menuItemId.split('-');
   if (components.length == 2 &&
       this.makeMenuId_(parseInt(components[1], 10)) == info.menuItemId) {

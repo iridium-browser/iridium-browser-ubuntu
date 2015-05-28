@@ -5,7 +5,7 @@
 #ifndef ScreenOrientationController_h
 #define ScreenOrientationController_h
 
-#include "core/frame/FrameDestructionObserver.h"
+#include "core/frame/LocalFrameLifecycleObserver.h"
 #include "core/frame/PlatformEventController.h"
 #include "platform/Supplementable.h"
 #include "platform/Timer.h"
@@ -22,7 +22,7 @@ class WebScreenOrientationClient;
 class ScreenOrientationController final
     : public NoBaseWillBeGarbageCollectedFinalized<ScreenOrientationController>
     , public WillBeHeapSupplement<LocalFrame>
-    , public FrameDestructionObserver
+    , public LocalFrameLifecycleObserver
     , public PlatformEventController {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ScreenOrientationController);
     WTF_MAKE_NONCOPYABLE(ScreenOrientationController);
@@ -39,10 +39,11 @@ public:
     static ScreenOrientationController* from(LocalFrame&);
     static const char* supplementName();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
-    explicit ScreenOrientationController(LocalFrame&, WebScreenOrientationClient*);
+    ScreenOrientationController(LocalFrame&, WebScreenOrientationClient*);
+
     static WebScreenOrientationType computeOrientation(FrameView*);
 
     // Inherited from PlatformEventController.
@@ -52,7 +53,7 @@ private:
     virtual bool hasLastData() override;
     virtual void pageVisibilityChanged() override;
 
-    // Inherited from FrameDestructionObserver.
+    // Inherited from LocalFrameLifecycleObserver.
     virtual void willDetachFrameHost() override;
 
     void notifyDispatcher();

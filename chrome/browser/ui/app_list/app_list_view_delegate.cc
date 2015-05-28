@@ -11,6 +11,7 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/metrics/user_metrics.h"
+#include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "chrome/browser/apps/scoped_keep_alive.h"
@@ -20,6 +21,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/search/hotword_service_factory.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
@@ -36,8 +38,11 @@
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/page_navigator.h"
@@ -133,6 +138,15 @@ void GetCustomLauncherPageUrls(content::BrowserContext* browser_context,
     }
   }
 
+  // Prevent launcher pages from loading unless the pref is enabled.
+  // (Command-line specified pages are exempt from this rule).
+  PrefService* profile_prefs = user_prefs::UserPrefs::Get(browser_context);
+  if (profile_prefs &&
+      profile_prefs->HasPrefPath(prefs::kGoogleNowLauncherEnabled) &&
+      !profile_prefs->GetBoolean(prefs::kGoogleNowLauncherEnabled)) {
+    return;
+  }
+
   // Search the list of installed extensions for ones with 'launcher_page'.
   extensions::ExtensionRegistry* extension_registry =
       extensions::ExtensionRegistry::Get(browser_context);
@@ -158,6 +172,7 @@ AppListViewDelegate::AppListViewDelegate(AppListControllerDelegate* controller)
       profile_(NULL),
       model_(NULL),
       is_voice_query_(false),
+      template_url_service_observer_(this),
       scoped_observer_(this) {
   // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
@@ -278,17 +293,31 @@ void AppListViewDelegate::SetProfile(Profile* new_profile) {
         FROM_HERE_WITH_EXPLICIT_FUNCTION(
             "431326 AppListViewDelegate::SetProfile2"));
 
-    speech_ui_->SetSpeechRecognitionState(app_list::SPEECH_RECOGNITION_OFF);
+    speech_ui_->SetSpeechRecognitionState(app_list::SPEECH_RECOGNITION_OFF,
+                                          false);
     return;
   }
+
+  // If we are in guest mode, the new profile should be an incognito profile.
+  // Otherwise, this may later hit a check (same condition as this one) in
+  // Browser::Browser when opening links in a browser window (see
+  // http://crbug.com/460437).
+  DCHECK(!profile_->IsGuestSession() || profile_->IsOffTheRecord())
+      << "Guest mode must use incognito profile";
 
   // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
   tracked_objects::ScopedTracker tracking_profile3(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "431326 AppListViewDelegate::SetProfile3"));
+  template_url_service_observer_.RemoveAll();
+  if (app_list::switches::IsExperimentalAppListEnabled()) {
+    TemplateURLService* template_url_service =
+        TemplateURLServiceFactory::GetForProfile(profile_);
+    template_url_service_observer_.Add(template_url_service);
+  }
 
-  model_ =
-      app_list::AppListSyncableServiceFactory::GetForProfile(profile_)->model();
+  model_ = app_list::AppListSyncableServiceFactory::GetForProfile(profile_)
+               ->GetModel();
 
 #if defined(USE_ASH)
   app_sync_ui_state_watcher_.reset(new AppSyncUIStateWatcher(profile_, model_));
@@ -297,6 +326,7 @@ void AppListViewDelegate::SetProfile(Profile* new_profile) {
   SetUpSearchUI();
   SetUpProfileSwitcher();
   SetUpCustomLauncherPages();
+  OnTemplateURLServiceChanged();
 
   // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
   tracked_objects::ScopedTracker tracking_profile4(
@@ -315,15 +345,15 @@ void AppListViewDelegate::SetUpSearchUI() {
 
   speech_ui_->SetSpeechRecognitionState(start_page_service
                                             ? start_page_service->state()
-                                            : app_list::SPEECH_RECOGNITION_OFF);
+                                            : app_list::SPEECH_RECOGNITION_OFF,
+                                        false);
 
   search_resource_manager_.reset(new app_list::SearchResourceManager(
       profile_,
       model_->search_box(),
       speech_ui_.get()));
 
-  search_controller_ = CreateSearchController(
-      profile_, model_->search_box(), model_->results(), controller_);
+  search_controller_ = CreateSearchController(profile_, model_, controller_);
 }
 
 void AppListViewDelegate::SetUpProfileSwitcher() {
@@ -366,10 +396,16 @@ void AppListViewDelegate::SetUpCustomLauncherPages() {
     custom_page_contents_.push_back(page_contents);
   }
 
+  std::string first_launcher_page_app_id = custom_launcher_page_urls[0].host();
+  const extensions::Extension* extension =
+      extensions::ExtensionRegistry::Get(profile_)
+          ->GetExtensionById(first_launcher_page_app_id,
+                             extensions::ExtensionRegistry::EVERYTHING);
+  model_->set_custom_launcher_page_name(extension->name());
   // Only the first custom launcher page gets events dispatched to it.
   launcher_page_event_dispatcher_.reset(
-      new app_list::LauncherPageEventDispatcher(
-          profile_, custom_launcher_page_urls[0].host()));
+      new app_list::LauncherPageEventDispatcher(profile_,
+                                                first_launcher_page_app_id));
 }
 
 void AppListViewDelegate::OnHotwordStateChanged(bool started) {
@@ -496,6 +532,7 @@ void AppListViewDelegate::OpenSearchResult(
   if (auto_launch)
     base::RecordAction(base::UserMetricsAction("AppList_AutoLaunched"));
   search_controller_->OpenResult(result, event_flags);
+  is_voice_query_ = false;
 }
 
 void AppListViewDelegate::InvokeSearchResultAction(
@@ -510,10 +547,12 @@ base::TimeDelta AppListViewDelegate::GetAutoLaunchTimeout() {
 }
 
 void AppListViewDelegate::AutoLaunchCanceled() {
-  base::RecordAction(base::UserMetricsAction("AppList_AutoLaunchCanceled"));
+  if (is_voice_query_) {
+    base::RecordAction(base::UserMetricsAction("AppList_AutoLaunchCanceled"));
+    // Cancelling the auto launch means we are no longer in a voice query.
+    is_voice_query_ = false;
+  }
   auto_launch_timeout_ = base::TimeDelta();
-  // Cancelling the auto launch means we are no longer in a voice query.
-  is_voice_query_ = false;
 }
 
 void AppListViewDelegate::ViewInitialized() {
@@ -527,6 +566,7 @@ void AppListViewDelegate::ViewInitialized() {
       if (hotword_service)
         hotword_service->RequestHotwordSession(this);
     }
+    OnHotwordStateChanged(service->HotwordEnabled());
   }
 }
 
@@ -611,8 +651,17 @@ void AppListViewDelegate::ToggleSpeechRecognitionForHotword(
     const scoped_refptr<content::SpeechRecognitionSessionPreamble>& preamble) {
   app_list::StartPageService* service =
       app_list::StartPageService::Get(profile_);
-  if (service)
+
+  // Don't start the recognizer or stop the hotword session if there is a
+  // network error. Show the network error message instead.
+  if (service) {
+    if (service->state() == app_list::SPEECH_RECOGNITION_NETWORK_ERROR) {
+      speech_ui_->SetSpeechRecognitionState(
+          app_list::SPEECH_RECOGNITION_NETWORK_ERROR, true);
+      return;
+    }
     service->ToggleSpeechRecognition(preamble);
+  }
 
   // With the new hotword extension, stop the hotword session. With the launcher
   // and NTP, this is unnecessary since the hotwording is implicitly stopped.
@@ -623,8 +672,7 @@ void AppListViewDelegate::ToggleSpeechRecognitionForHotword(
   // should cause a search to happen for 'Ok Google', not two hotword triggers).
   // To get around this, always stop the session when switching to speech
   // recognition.
-  if (HotwordService::IsExperimentalHotwordingEnabled() &&
-      service && service->HotwordEnabled()) {
+  if (service && service->HotwordEnabled()) {
     HotwordService* hotword_service =
         HotwordServiceFactory::GetForProfile(profile_);
     if (hotword_service)
@@ -654,7 +702,7 @@ void AppListViewDelegate::OnSpeechSoundLevelChanged(int16 level) {
 
 void AppListViewDelegate::OnSpeechRecognitionStateChanged(
     app_list::SpeechRecognitionState new_state) {
-  speech_ui_->SetSpeechRecognitionState(new_state);
+  speech_ui_->SetSpeechRecognitionState(new_state, false);
 
   app_list::StartPageService* service =
       app_list::StartPageService::Get(profile_);
@@ -662,7 +710,6 @@ void AppListViewDelegate::OnSpeechRecognitionStateChanged(
   // speech recognition has stopped. Do not request hotwording after the app
   // list has already closed.
   if (new_state == app_list::SPEECH_RECOGNITION_READY &&
-      HotwordService::IsExperimentalHotwordingEnabled() &&
       service && service->HotwordEnabled() &&
       controller_->GetAppListWindow()) {
     HotwordService* hotword_service =
@@ -681,6 +728,8 @@ views::View* AppListViewDelegate::CreateStartPageWebView(
   if (!service)
     return NULL;
 
+  service->LoadContentsIfNeeded();
+
   content::WebContents* web_contents = service->GetStartPageContents();
   if (!web_contents)
     return NULL;
@@ -689,6 +738,7 @@ views::View* AppListViewDelegate::CreateStartPageWebView(
   views::WebView* web_view = new views::WebView(
       web_contents->GetBrowserContext());
   web_view->SetPreferredSize(size);
+  web_view->SetResizeBackgroundColor(SK_ColorTRANSPARENT);
   web_view->SetWebContents(web_contents);
   return web_view;
 }
@@ -707,8 +757,11 @@ std::vector<views::View*> AppListViewDelegate::CreateCustomPageWebViews(
     DCHECK_EQ(profile_, web_contents->GetBrowserContext());
 
     // Make the webview transparent.
-    web_contents->GetRenderViewHost()->GetView()->SetBackgroundColor(
-        SK_ColorTRANSPARENT);
+    content::RenderWidgetHostView* render_view_host_view =
+        web_contents->GetRenderViewHost()->GetView();
+    // The RenderWidgetHostView may be null if the renderer has crashed.
+    if (render_view_host_view)
+      render_view_host_view->SetBackgroundColor(SK_ColorTRANSPARENT);
 
     views::WebView* web_view =
         new views::WebView(web_contents->GetBrowserContext());
@@ -770,6 +823,27 @@ void AppListViewDelegate::AddObserver(
 void AppListViewDelegate::RemoveObserver(
     app_list::AppListViewDelegateObserver* observer) {
   observers_.RemoveObserver(observer);
+}
+
+void AppListViewDelegate::OnTemplateURLServiceChanged() {
+  if (!app_list::switches::IsExperimentalAppListEnabled())
+    return;
+
+  TemplateURLService* template_url_service =
+      TemplateURLServiceFactory::GetForProfile(profile_);
+  const TemplateURL* default_provider =
+      template_url_service->GetDefaultSearchProvider();
+  bool is_google =
+      TemplateURLPrepopulateData::GetEngineType(
+          *default_provider, template_url_service->search_terms_data()) ==
+      SEARCH_ENGINE_GOOGLE;
+
+  model_->SetSearchEngineIsGoogle(is_google);
+
+  app_list::StartPageService* start_page_service =
+      app_list::StartPageService::Get(profile_);
+  if (start_page_service)
+    start_page_service->set_search_engine_is_google(is_google);
 }
 
 void AppListViewDelegate::Observe(int type,

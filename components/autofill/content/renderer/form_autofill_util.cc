@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_vector.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/common/autofill_data_validation.h"
@@ -128,9 +129,42 @@ bool IsElementInsideFormOrFieldSet(const WebElement& element) {
   return false;
 }
 
+// Returns true if |node| is an element and it is a container type that
+// InferLabelForElement() can traverse.
+bool IsTraversableContainerElement(const WebNode& node) {
+  if (!node.isElementNode())
+    return false;
+
+  std::string tag_name = node.toConst<WebElement>().tagName().utf8();
+  return (tag_name == "DD" ||
+          tag_name == "DIV" ||
+          tag_name == "FIELDSET" ||
+          tag_name == "LI" ||
+          tag_name == "TD" ||
+          tag_name == "TABLE");
+}
+
 // Check whether the given field satisfies the REQUIRE_AUTOCOMPLETE requirement.
 bool SatisfiesRequireAutocomplete(const WebInputElement& input_element) {
   return input_element.autoComplete();
+}
+
+// Returns the colspan for a <td> / <th>. Defaults to 1.
+size_t CalculateTableCellColumnSpan(const WebElement& element) {
+  DCHECK(element.hasHTMLTagName("td") || element.hasHTMLTagName("th"));
+
+  size_t span = 1;
+  if (element.hasAttribute("colspan")) {
+    base::string16 colspan = element.getAttribute("colspan");
+    // Do not check return value to accept imperfect conversions.
+    base::StringToSizeT(colspan, &span);
+    // Handle overflow.
+    if (span == std::numeric_limits<size_t>::max())
+      span = 1;
+    span = std::max(span, static_cast<size_t>(1));
+  }
+
+  return span;
 }
 
 // Appends |suffix| to |prefix| so that any intermediary whitespace is collapsed
@@ -332,7 +366,7 @@ base::string16 InferLabelFromNext(const WebFormControlElement& element) {
 }
 
 // Helper for |InferLabelForElement()| that infers a label, if possible, from
-// placeholder text,
+// the placeholder text. e.g. <input placeholder="foo">
 base::string16 InferLabelFromPlaceholder(const WebFormControlElement& element) {
   CR_DEFINE_STATIC_LOCAL(WebString, kPlaceholder, ("placeholder"));
   if (element.hasAttribute(kPlaceholder))
@@ -392,8 +426,62 @@ base::string16 InferLabelFromTableColumn(const WebFormControlElement& element) {
 
 // Helper for |InferLabelForElement()| that infers a label, if possible, from
 // surrounding table structure,
+//
+// If there are multiple cells and the row with the input matches up with the
+// previous row, then look for a specific cell within the previous row.
+// e.g. <tr><td>Input 1 label</td><td>Input 2 label</td></tr>
+//      <tr><td><input name="input 1"></td><td><input name="input2"></td></tr>
+//
+// Otherwise, just look in the entire previous row.
 // e.g. <tr><td>Some Text</td></tr><tr><td><input ...></td></tr>
 base::string16 InferLabelFromTableRow(const WebFormControlElement& element) {
+  CR_DEFINE_STATIC_LOCAL(WebString, kTableCell, ("td"));
+  base::string16 inferred_label;
+
+  // First find the <td> that contains |element|.
+  WebNode cell = element.parentNode();
+  while (!cell.isNull()) {
+    if (cell.isElementNode() &&
+        cell.to<WebElement>().hasHTMLTagName(kTableCell)) {
+      break;
+    }
+    cell = cell.parentNode();
+  }
+
+  // Not in a cell - bail out.
+  if (cell.isNull())
+    return inferred_label;
+
+  // Count the cell holding |element|.
+  size_t cell_count = CalculateTableCellColumnSpan(cell.to<WebElement>());
+  size_t cell_position = 0;
+  size_t cell_position_end = cell_count - 1;
+
+  // Count cells to the left to figure out |element|'s cell's position.
+  for (WebNode cell_it = cell.previousSibling();
+       !cell_it.isNull();
+       cell_it = cell_it.previousSibling()) {
+    if (cell_it.isElementNode() &&
+        cell_it.to<WebElement>().hasHTMLTagName(kTableCell)) {
+      cell_position += CalculateTableCellColumnSpan(cell_it.to<WebElement>());
+    }
+  }
+
+  // Count cells to the right.
+  for (WebNode cell_it = cell.nextSibling();
+       !cell_it.isNull();
+       cell_it = cell_it.nextSibling()) {
+    if (cell_it.isElementNode() &&
+        cell_it.to<WebElement>().hasHTMLTagName(kTableCell)) {
+      cell_count += CalculateTableCellColumnSpan(cell_it.to<WebElement>());
+    }
+  }
+
+  // Combine left + right.
+  cell_count += cell_position;
+  cell_position_end += cell_position;
+
+  // Find the current row.
   CR_DEFINE_STATIC_LOCAL(WebString, kTableRow, ("tr"));
   WebNode parent = element.parentNode();
   while (!parent.isNull() && parent.isElementNode() &&
@@ -402,11 +490,51 @@ base::string16 InferLabelFromTableRow(const WebFormControlElement& element) {
   }
 
   if (parent.isNull())
-    return base::string16();
+    return inferred_label;
 
-  // Check all previous siblings, skipping non-element nodes, until we find a
-  // non-empty text block.
-  base::string16 inferred_label;
+  // Now find the previous row.
+  WebNode row_it = parent.previousSibling();
+  while (!row_it.isNull()) {
+    if (row_it.isElementNode() &&
+        row_it.to<WebElement>().hasHTMLTagName(kTableRow)) {
+      break;
+    }
+    row_it = row_it.previousSibling();
+  }
+
+  // If there exists a previous row, check its cells and size. If they align
+  // with the current row, infer the label from the cell above.
+  if (!row_it.isNull()) {
+    WebNode matching_cell;
+    size_t prev_row_count = 0;
+    WebNode prev_row_it = row_it.firstChild();
+    CR_DEFINE_STATIC_LOCAL(WebString, kTableHeader, ("th"));
+    while (!prev_row_it.isNull()) {
+      if (prev_row_it.isElementNode()) {
+        WebElement prev_row_element = prev_row_it.to<WebElement>();
+        if (prev_row_element.hasHTMLTagName(kTableCell) ||
+            prev_row_element.hasHTMLTagName(kTableHeader)) {
+          size_t span = CalculateTableCellColumnSpan(prev_row_element);
+          size_t prev_row_count_end = prev_row_count + span - 1;
+          if (prev_row_count == cell_position &&
+              prev_row_count_end == cell_position_end) {
+            matching_cell = prev_row_it;
+          }
+          prev_row_count += span;
+        }
+      }
+      prev_row_it = prev_row_it.nextSibling();
+    }
+    if ((cell_count == prev_row_count) && !matching_cell.isNull()) {
+      inferred_label = FindChildText(matching_cell);
+      if (!inferred_label.empty())
+        return inferred_label;
+    }
+  }
+
+  // If there is no previous row, or if the previous row and current row do not
+  // align, check all previous siblings, skipping non-element nodes, until we
+  // find a non-empty text block.
   WebNode previous = parent.previousSibling();
   while (inferred_label.empty() && !previous.isNull()) {
     if (HasTagName(previous, kTableRow))
@@ -422,6 +550,9 @@ base::string16 InferLabelFromTableRow(const WebFormControlElement& element) {
 // a surrounding div table,
 // e.g. <div>Some Text<span><input ...></span></div>
 // e.g. <div>Some Text</div><div><input ...></div>
+//
+// Because this is already traversing the <div> structure, if it finds a <label>
+// sibling along the way, infer from that <label>.
 base::string16 InferLabelFromDivTable(const WebFormControlElement& element) {
   WebNode node = element.parentNode();
   bool looking_for_parent = true;
@@ -430,8 +561,7 @@ base::string16 InferLabelFromDivTable(const WebFormControlElement& element) {
   // Search the sibling and parent <div>s until we find a candidate label.
   base::string16 inferred_label;
   CR_DEFINE_STATIC_LOCAL(WebString, kDiv, ("div"));
-  CR_DEFINE_STATIC_LOCAL(WebString, kTable, ("table"));
-  CR_DEFINE_STATIC_LOCAL(WebString, kFieldSet, ("fieldset"));
+  CR_DEFINE_STATIC_LOCAL(WebString, kLabel, ("label"));
   while (inferred_label.empty() && !node.isNull()) {
     if (HasTagName(node, kDiv)) {
       if (looking_for_parent)
@@ -452,9 +582,12 @@ base::string16 InferLabelFromDivTable(const WebFormControlElement& element) {
       }
 
       looking_for_parent = false;
-    } else if (looking_for_parent &&
-               (HasTagName(node, kTable) || HasTagName(node, kFieldSet))) {
-      // If the element is in a table or fieldset, its label most likely is too.
+    } else if (!looking_for_parent && HasTagName(node, kLabel)) {
+      WebLabelElement label_element = node.to<WebLabelElement>();
+      if (label_element.correspondingControl().isNull())
+        inferred_label = FindChildText(node);
+    } else if (looking_for_parent && IsTraversableContainerElement(node)) {
+      // If the element is in a non-div container, its label most likely is too.
       break;
     }
 
@@ -496,23 +629,20 @@ base::string16 InferLabelFromDefinitionList(
   return FindChildText(previous);
 }
 
-// Returns true if the closest ancestor is a <div> and not a <td>.
-// Returns false if the closest ancestor is a <td> tag,
-// or if there is no <div> or <td> ancestor.
-bool ClosestAncestorIsDivAndNotTD(const WebFormControlElement& element) {
+// Returns the element type for all ancestor nodes in CAPS, starting with the
+// parent node.
+std::vector<std::string> AncestorTagNames(
+    const WebFormControlElement& element) {
+  std::vector<std::string> tag_names;
   for (WebNode parent_node = element.parentNode();
        !parent_node.isNull();
        parent_node = parent_node.parentNode()) {
     if (!parent_node.isElementNode())
       continue;
 
-    WebElement cur_element = parent_node.to<WebElement>();
-    if (cur_element.hasHTMLTagName("div"))
-      return true;
-    if (cur_element.hasHTMLTagName("td"))
-      return false;
+    tag_names.push_back(parent_node.to<WebElement>().tagName().utf8());
   }
-  return false;
+  return tag_names;
 }
 
 // Infers corresponding label for |element| from surrounding context in the DOM,
@@ -534,40 +664,33 @@ base::string16 InferLabelForElement(const WebFormControlElement& element) {
   if (!inferred_label.empty())
     return inferred_label;
 
-  // If we didn't find a label, check for list item case.
-  inferred_label = InferLabelFromListItem(element);
-  if (!inferred_label.empty())
-    return inferred_label;
+  // For all other searches that involve traversing up the tree, the search
+  // order is based on which tag is the closest ancestor to |element|.
+  std::vector<std::string> tag_names = AncestorTagNames(element);
+  std::set<std::string> seen_tag_names;
+  for (const std::string& tag_name : tag_names) {
+    if (ContainsKey(seen_tag_names, tag_name))
+      continue;
 
-  // If we didn't find a label, check for definition list case.
-  inferred_label = InferLabelFromDefinitionList(element);
-  if (!inferred_label.empty())
-    return inferred_label;
+    seen_tag_names.insert(tag_name);
+    if (tag_name == "DIV") {
+      inferred_label = InferLabelFromDivTable(element);
+    } else if (tag_name == "TD") {
+      inferred_label = InferLabelFromTableColumn(element);
+      if (inferred_label.empty())
+        inferred_label = InferLabelFromTableRow(element);
+    } else if (tag_name == "DD") {
+      inferred_label = InferLabelFromDefinitionList(element);
+    } else if (tag_name == "LI") {
+      inferred_label = InferLabelFromListItem(element);
+    } else if (tag_name == "FIELDSET") {
+      break;
+    }
 
-  bool check_div_first = ClosestAncestorIsDivAndNotTD(element);
-  if (check_div_first) {
-    // If we didn't find a label, check for div table case first since it's the
-    // closest ancestor.
-    inferred_label = InferLabelFromDivTable(element);
     if (!inferred_label.empty())
-      return inferred_label;
+      break;
   }
 
-  // If we didn't find a label, check for table cell case.
-  inferred_label = InferLabelFromTableColumn(element);
-  if (!inferred_label.empty())
-    return inferred_label;
-
-  // If we didn't find a label, check for table row case.
-  inferred_label = InferLabelFromTableRow(element);
-  if (!inferred_label.empty())
-    return inferred_label;
-
-  if (!check_div_first) {
-    // If we didn't find a label from the table, check for div table case if we
-    // haven't already.
-    inferred_label = InferLabelFromDivTable(element);
-  }
   return inferred_label;
 }
 
@@ -610,7 +733,7 @@ void ForEachMatchingFormFieldCommon(
     const FormData& data,
     FieldFilterMask filters,
     bool force_override,
-    Callback callback) {
+    const Callback& callback) {
   DCHECK(control_elements);
   if (control_elements->size() != data.fields.size()) {
     // This case should be reachable only for pathological websites and tests,
@@ -664,7 +787,7 @@ void ForEachMatchingFormField(const WebFormElement& form_element,
                               const FormData& data,
                               FieldFilterMask filters,
                               bool force_override,
-                              Callback callback) {
+                              const Callback& callback) {
   std::vector<WebFormControlElement> control_elements =
       ExtractAutofillableElementsInForm(form_element, ExtractionRequirements());
   ForEachMatchingFormFieldCommon(&control_elements, initiating_element, data,
@@ -678,7 +801,7 @@ void ForEachMatchingUnownedFormField(const WebElement& initiating_element,
                                      const FormData& data,
                                      FieldFilterMask filters,
                                      bool force_override,
-                                     Callback callback) {
+                                     const Callback& callback) {
   if (initiating_element.isNull())
     return;
 
@@ -1415,7 +1538,7 @@ bool IsWebElementEmpty(const blink::WebElement& element) {
   return true;
 }
 
-gfx::RectF GetScaledBoundingBox(float scale, WebFormControlElement* element) {
+gfx::RectF GetScaledBoundingBox(float scale, WebElement* element) {
   gfx::Rect bounding_box(element->boundsInViewportSpace());
   return gfx::RectF(bounding_box.x() * scale,
                     bounding_box.y() * scale,

@@ -14,7 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/version.h"
-#include "components/component_updater/component_updater_service.h"
+#include "components/update_client/update_client.h"
 
 namespace base {
 class DictionaryValue;
@@ -32,27 +32,27 @@ bool NeedsOnDemandUpdate();
 
 namespace component_updater {
 
+class ComponentUpdateService;
+
 // Component installer responsible for Portable Native Client files.
 // Files can be installed to a shared location, or be installed to
 // a per-user location.
-class PnaclComponentInstaller : public ComponentInstaller {
+class PnaclComponentInstaller : public update_client::ComponentInstaller {
  public:
   PnaclComponentInstaller();
 
-  ~PnaclComponentInstaller() override;
-
+  // ComponentInstaller implementation:
   void OnUpdateError(int error) override;
-
   bool Install(const base::DictionaryValue& manifest,
                const base::FilePath& unpack_path) override;
-
   bool GetInstalledFile(const std::string& file,
                         base::FilePath* installed_file) override;
+  bool Uninstall() override;
 
   // Register a PNaCl component for the first time.
   void RegisterPnaclComponent(ComponentUpdateService* cus);
 
-  CrxComponent GetCrxComponent();
+  update_client::CrxComponent GetCrxComponent();
 
   // Determine the base directory for storing each version of PNaCl.
   base::FilePath GetPnaclBaseDirectory();
@@ -72,9 +72,12 @@ class PnaclComponentInstaller : public ComponentInstaller {
   ComponentUpdateService* cus() const { return cus_; }
 
  private:
+  ~PnaclComponentInstaller() override;
+
   base::Version current_version_;
   std::string current_fingerprint_;
   ComponentUpdateService* cus_;
+
   DISALLOW_COPY_AND_ASSIGN(PnaclComponentInstaller);
 };
 

@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/ui.gni")
+import("//testing/test.gni")
 
 static_library("dom4_keycode_converter") {
   sources = [
@@ -101,6 +102,8 @@ component("events") {
     "events_stub.cc",
     "gestures/gesture_recognizer_impl_mac.cc",
     "gestures/gesture_types.h",
+    "null_event_targeter.cc",
+    "null_event_targeter.h",
     "win/events_win.cc",
   ]
 
@@ -148,11 +151,11 @@ component("events") {
     sources += [
       "gestures/gesture_provider_aura.cc",
       "gestures/gesture_provider_aura.h",
-      "gestures/motion_event_aura.cc",
-      "gestures/motion_event_aura.h",
       "gestures/gesture_recognizer.h",
       "gestures/gesture_recognizer_impl.cc",
       "gestures/gesture_recognizer_impl.h",
+      "gestures/motion_event_aura.cc",
+      "gestures/motion_event_aura.h",
     ]
   }
 
@@ -197,10 +200,10 @@ component("gesture_detection") {
     "gesture_detection/snap_scroll_controller.h",
     "gesture_detection/touch_disposition_gesture_filter.cc",
     "gesture_detection/touch_disposition_gesture_filter.h",
-    "gesture_detection/velocity_tracker_state.cc",
-    "gesture_detection/velocity_tracker_state.h",
     "gesture_detection/velocity_tracker.cc",
     "gesture_detection/velocity_tracker.h",
+    "gesture_detection/velocity_tracker_state.cc",
+    "gesture_detection/velocity_tracker_state.h",
   ]
 
   deps = [
@@ -291,6 +294,7 @@ test("events_unittests") {
     "gesture_detection/snap_scroll_controller_unittest.cc",
     "gesture_detection/touch_disposition_gesture_filter_unittest.cc",
     "gesture_detection/velocity_tracker_unittest.cc",
+    "gestures/blink/web_gesture_curve_impl_unittest.cc",
     "gestures/fling_curve_unittest.cc",
     "keycodes/dom4/keycode_converter_unittest.cc",
     "latency_info_unittest.cc",
@@ -308,7 +312,9 @@ test("events_unittests") {
     "//base/test:run_all_unittests",
     "//skia",
     "//testing/gtest",
+    "//third_party/WebKit/public:blink_headers",
     "//ui/events/devices",
+    "//ui/events/gestures/blink",
     "//ui/events/platform",
     "//ui/gfx:test_support",
   ]
@@ -329,9 +335,13 @@ test("events_unittests") {
     sources += [
       "ozone/chromeos/cursor_controller_unittest.cc",
       "ozone/evdev/event_converter_evdev_impl_unittest.cc",
+      "ozone/evdev/event_converter_test_util.cc",
+      "ozone/evdev/event_device_info_unittest.cc",
+      "ozone/evdev/event_device_test_util.cc",
       "ozone/evdev/input_injector_evdev_unittest.cc",
       "ozone/evdev/tablet_event_converter_evdev_unittest.cc",
       "ozone/evdev/touch_event_converter_evdev_unittest.cc",
+      "ozone/evdev/touch_noise/touch_noise_finder_unittest.cc",
       "ozone/layout/xkb/xkb_keyboard_layout_engine_unittest.cc",
     ]
     deps += [
@@ -343,5 +353,16 @@ test("events_unittests") {
 
   if (use_aura) {
     sources += [ "gestures/gesture_provider_aura_unittest.cc" ]
+  }
+}
+
+if (is_nacl) {
+  source_set("latency_info") {
+    sources = [
+      "ipc/latency_info_param_traits.cc",
+      "ipc/latency_info_param_traits.h",
+      "latency_info.cc",
+      "latency_info.h",
+    ]
   }
 }

@@ -363,25 +363,6 @@ TEST(Parser, FunctionWithConditional) {
   DoParserPrintTest(input, expected);
 }
 
-TEST(Parser, NestedBlocks) {
-  const char* input = "{cc_test(\"foo\") {{foo=1}\n{}}}";
-  const char* expected =
-      "BLOCK\n"
-      " BLOCK\n"
-      "  FUNCTION(cc_test)\n"
-      "   LIST\n"
-      "    LITERAL(\"foo\")\n"
-      "   BLOCK\n"
-      "    BLOCK\n"
-      "     BINARY(=)\n"
-      "      IDENTIFIER(foo)\n"
-      "      LITERAL(1)\n"
-      "    BLOCK\n";
-  DoParserPrintTest(input, expected);
-  const char* input_with_newline = "{cc_test(\"foo\") {{foo=1}\n{}}}";
-  DoParserPrintTest(input_with_newline, expected);
-}
-
 TEST(Parser, UnterminatedBlock) {
   DoParserErrorTest("stuff() {", 1, 9);
 }
@@ -676,4 +657,47 @@ TEST(Parser, HangingIf) {
 
 TEST(Parser, NegatingList) {
   DoParserErrorTest("executable(\"wee\") { sources =- [ \"foo.cc\" ] }", 1, 30);
+}
+
+TEST(Parser, ConditionNoBracesIf) {
+  DoParserErrorTest(
+      "if (true)\n"
+      "  foreach(foo, []) {}\n"
+      "else {\n"
+      "  foreach(bar, []) {}\n"
+      "}\n",
+      2, 3);
+}
+
+TEST(Parser, ConditionNoBracesElse) {
+  DoParserErrorTest(
+      "if (true) {\n"
+      "  foreach(foo, []) {}\n"
+      "} else\n"
+      "  foreach(bar, []) {}\n",
+      4, 3);
+}
+
+TEST(Parser, ConditionNoBracesElseIf) {
+  DoParserErrorTest(
+      "if (true) {\n"
+      "  foreach(foo, []) {}\n"
+      "} else if (true)\n"
+      "  foreach(bar, []) {}\n",
+      4, 3);
+}
+
+// Disallow standalone {} for introducing new scopes. These are ambiguous with
+// target declarations (e.g. is:
+//   foo("bar") {}
+// a function with an associated block, or a standalone function with a
+// freestanding block.
+TEST(Parser, StandaloneBlock) {
+  DoParserErrorTest(
+      "if (true) {\n"
+      "}\n"
+      "{\n"
+      "  assert(false)\n"
+      "}\n",
+      3, 1);
 }

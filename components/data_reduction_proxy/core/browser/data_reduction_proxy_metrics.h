@@ -16,8 +16,8 @@ class PrefService;
 
 namespace data_reduction_proxy {
 
-class DataReductionProxyParams;
-class DataReductionProxyStatisticsPrefs;
+class DataReductionProxyConfig;
+class DataReductionProxyCompressionStats;
 
 enum DataReductionProxyRequestType {
   VIA_DATA_REDUCTION_PROXY,  // A request served by the data reduction proxy.
@@ -35,7 +35,7 @@ enum DataReductionProxyRequestType {
 DataReductionProxyRequestType GetDataReductionProxyRequestType(
     const net::URLRequest& request,
     const net::ProxyConfig& data_reduction_proxy_config,
-    const DataReductionProxyParams& params);
+    const DataReductionProxyConfig& config);
 
 // Returns |received_content_length| as adjusted original content length if
 // |original_content_length| has the invalid value (-1) or |request_type|
@@ -48,12 +48,12 @@ int64 GetAdjustedOriginalContentLength(
 // This is only exposed for testing. It is normally called by
 // UpdateContentLengthPrefs.
 void UpdateContentLengthPrefsForDataReductionProxy(
-    int received_content_length,
-    int original_content_length,
+    int64 received_content_length,
+    int64 original_content_length,
     bool with_data_reduction_proxy_enabled,
     DataReductionProxyRequestType request_type,
     base::Time now,
-    DataReductionProxyStatisticsPrefs* prefs);
+    DataReductionProxyCompressionStats* compression_stats);
 
 }  // namespace data_reduction_proxy
 

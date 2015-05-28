@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -8,28 +7,21 @@
 from __future__ import print_function
 
 import base64
+import mock
 import os
-import sys
-
 from StringIO import StringIO
 
-import constants
-sys.path.insert(0, constants.SOURCE_ROOT)
 from chromite.cbuildbot import commands
+from chromite.cbuildbot import constants
 from chromite.cbuildbot import failures_lib
 from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_test_lib
-from chromite.lib import gs
 from chromite.lib import git
 from chromite.lib import gob_util
 from chromite.lib import osutils
 from chromite.lib import partial_mock
 from chromite.scripts import pushimage
-
-# TODO(build): Finish test wrapper (http://crosbug.com/37517).
-# Until then, this has to be after the chromite imports.
-import mock
 
 
 class RunBuildScriptTest(cros_test_lib.TempDirTestCase):
@@ -207,6 +199,7 @@ class HWLabCommandsTest(cros_build_lib_unittest.RunCommandTestCase):
     self._priority = 'test-priority'
     self._timeout_mins = 23
     self._retry = False
+    self._max_retries = 3
     self._minimum_duts = 2
     self._suite_min_duts = 2
 
@@ -224,7 +217,7 @@ class HWLabCommandsTest(cros_build_lib_unittest.RunCommandTestCase):
     commands.RunHWTestSuite(self._build, self._suite, self._board,
                             self._pool, self._num, self._file_bugs,
                             self._wait_for_results, self._priority,
-                            self._timeout_mins, self._retry,
+                            self._timeout_mins, self._retry, self._max_retries,
                             self._minimum_duts, self._suite_min_duts,
                             debug=False)
     self.assertCommandCalled([
@@ -233,7 +226,8 @@ class HWLabCommandsTest(cros_build_lib_unittest.RunCommandTestCase):
         '--board', 'test-board', '--pool', 'test-pool', '--num', '42',
         '--file_bugs', 'True', '--no_wait', 'True',
         '--priority', 'test-priority', '--timeout_mins', '23',
-        '--retry', 'False', '--minimum_duts', '2', '--suite_min_duts', '2',
+        '--retry', 'False', '--max_retries', '3', '--minimum_duts', '2',
+        '--suite_min_duts', '2',
     ], error_code_ok=True)
 
   def testRunHWTestSuiteFailure(self):
@@ -455,18 +449,6 @@ f6b0b80d5f2d9a2fb41ebb6e2cee7ad8 *./updater4.sh
     commands.AbortHWTests('my_config', 'my_version', debug=False)
     self.assertCommandContains(['-i', 'my_config/my_version'])
 
-  def testAbortCQHWTests(self):
-    commands.AbortCQHWTests('my-version', debug=False)
-    self.assertCommandContains(['cp'])
-    self.assertCommandContains(['-i', 'paladin/my-version'])
-
-  def testHWTestsAborted(self, aborted=True):
-    self.PatchObject(gs.GSContext, 'Exists', return_value=aborted)
-    self.assertEqual(commands.HaveCQHWTestsBeenAborted('my-version'), aborted)
-
-  def testHWTestsNotAborted(self):
-    self.testHWTestsAborted(aborted=False)
-
 
 class BuildTarballTests(cros_build_lib_unittest.RunCommandTempDirTestCase):
   """Tests related to Building the Test Tarball Artifacts."""
@@ -535,6 +517,19 @@ class BuildTarballTests(cros_build_lib_unittest.RunCommandTempDirTestCase):
                                                       'control_files.tar'),
                                          cwd=self._cwd, compressed=False)
 
+  def testBuildAutotestServerPackageTarball(self):
+    """Tests that generating the autotest server package tarball is correct."""
+    control_file_list = ['autotest/server/site_tests/testA/control',
+                         'autotest/server/site_tests/testB/control']
+    self.PatchObject(commands, 'FindFilesWithPattern',
+                     return_value=control_file_list)
+    tar_mock = self.PatchObject(commands, 'BuildTarball')
+    commands.BuildAutotestServerPackageTarball(self._buildroot, self._cwd,
+                                               self._tarball_dir)
+    tar_mock.assert_called_once_with(
+        self._buildroot, control_file_list,
+        os.path.join(self._tarball_dir, 'autotest_server_package.tar.bz2'),
+        cwd=self._cwd, error_code_ok=True)
 
 class UnmockedTests(cros_test_lib.TempDirTestCase):
   """Test cases which really run tests, instead of using mocks."""
@@ -620,6 +615,38 @@ class UnmockedTests(cros_test_lib.TempDirTestCase):
         commands.BuildFirmwareArchive(fw_test_root, board, fw_test_root))
     # Verify the tarball contents.
     cros_test_lib.VerifyTarball(tarball, fw_archived_files)
+
+  def findFilesWithPatternExpectedResults(self, root, files):
+    """Generate the expected results for testFindFilesWithPattern"""
+    return [os.path.join(root, f) for f in files]
+
+  def testFindFilesWithPattern(self):
+    """Verifies FindFilesWithPattern searches and excludes files properly"""
+    search_files = (
+        'file1',
+        'test1',
+        'file2',
+        'dir1/file1',
+        'dir1/test1',
+        'dir2/file2',
+    )
+    search_files_root = os.path.join(self.tempdir, 'FindFilesWithPatternTest')
+    cros_test_lib.CreateOnDiskHierarchy(search_files_root, search_files)
+    find_all = commands.FindFilesWithPattern('*', target=search_files_root)
+    expected_find_all = self.findFilesWithPatternExpectedResults(
+        search_files_root, search_files)
+    self.assertEquals(set(find_all), set(expected_find_all))
+    find_test_files = commands.FindFilesWithPattern('test*',
+                                                    target=search_files_root)
+    find_test_expected = self.findFilesWithPatternExpectedResults(
+        search_files_root, ['test1', 'dir1/test1'])
+    self.assertEquals(set(find_test_files), set(find_test_expected))
+    find_exclude = commands.FindFilesWithPattern(
+        '*', target=search_files_root,
+        exclude_dirs=(os.path.join(search_files_root, 'dir1'),))
+    find_exclude_expected = self.findFilesWithPatternExpectedResults(
+        search_files_root, ['file1', 'test1', 'file2', 'dir2/file2'])
+    self.assertEquals(set(find_exclude), set(find_exclude_expected))
 
   def testGenerateHtmlIndexTuple(self):
     """Verifies GenerateHtmlIndex gives us something sane (input: tuple)"""
@@ -735,7 +762,3 @@ class ImageTestCommandsTest(cros_build_lib_unittest.RunCommandTestCase):
         ],
         enter_chroot=True,
     )
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()

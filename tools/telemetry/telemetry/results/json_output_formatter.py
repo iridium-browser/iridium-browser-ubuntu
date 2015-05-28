@@ -36,7 +36,7 @@ def ResultsAsDict(page_test_results, benchmark_metadata):
 
 
 def _GetAllPages(page_test_results):
-  pages = set(page_run.page for page_run in
+  pages = set(page_run.user_story for page_run in
               page_test_results.all_page_runs)
   return pages
 
@@ -53,5 +53,5 @@ class JsonOutputFormatter(output_formatter.OutputFormatter):
   def Format(self, page_test_results):
     json.dump(
         ResultsAsDict(page_test_results, self.benchmark_metadata),
-        self.output_stream)
+        self.output_stream, indent=2)
     self.output_stream.write('\n')

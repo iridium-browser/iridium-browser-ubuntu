@@ -310,8 +310,8 @@ void RecentTabsSubMenuModel::ExecuteCommand(int command_id, int event_flags) {
                                 browser_->host_desktop_type(), disposition);
     }
   }
-  UMA_HISTOGRAM_TIMES("WrenchMenu.TimeToAction.RecentTab",
-                       menu_opened_timer_.Elapsed());
+  UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.OpenRecentTab",
+                             menu_opened_timer_.Elapsed());
   UMA_HISTOGRAM_ENUMERATION("WrenchMenu.MenuAction", MENU_ACTION_RECENT_TAB,
                              LIMIT_MENU_ACTION);
 }
@@ -611,8 +611,9 @@ void RecentTabsSubMenuModel::AddTabFavicon(int command_id, const GURL& url) {
   // Set default icon first.
   SetIcon(index_in_menu, default_favicon_);
   // Start request to fetch actual icon if possible.
-  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
-      browser_->profile(), Profile::EXPLICIT_ACCESS);
+  favicon::FaviconService* favicon_service =
+      FaviconServiceFactory::GetForProfile(browser_->profile(),
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   if (!favicon_service)
     return;
 

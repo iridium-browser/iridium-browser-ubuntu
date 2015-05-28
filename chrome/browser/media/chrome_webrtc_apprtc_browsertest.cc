@@ -27,14 +27,15 @@ const char kAdviseOnGclientSolution[] =
     "You need to add this solution to your .gclient to run this test:\n"
     "{\n"
     "  \"name\"        : \"webrtc.DEPS\",\n"
-    "  \"url\"         : \"svn://svn.chromium.org/chrome/trunk/deps/"
-    "third_party/webrtc/webrtc.DEPS\",\n"
+    "  \"url\"         : \"https://chromium.googlesource.com/chromium/deps/"
+    "webrtc/webrtc.DEPS\",\n"
     "}";
 const char kTitlePageOfAppEngineAdminPage[] = "Instances";
 
 const char kIsApprtcCallUpJavascript[] =
+    "var remoteVideo = document.querySelector('#remote-video');"
     "var remoteVideoActive ="
-    "    typeof remoteVideo != undefined &&"
+    "    remoteVideo != null &&"
     "    remoteVideo.classList.contains('active');"
     "window.domAutomationController.send(remoteVideoActive.toString());";
 
@@ -65,11 +66,11 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
     // especially if the test hangs or if we're on Windows.
     LOG(INFO) << "Entering TearDown";
     if (dev_appserver_.IsValid())
-      base::KillProcess(dev_appserver_.Handle(), 0, false);
+      dev_appserver_.Terminate(0, false);
     if (collider_server_.IsValid())
-      base::KillProcess(collider_server_.Handle(), 0, false);
+      collider_server_.Terminate(0, false);
     if (firefox_.IsValid())
-      base::KillProcess(firefox_.Handle(), 0, false);
+      firefox_.Terminate(0, false);
     LOG(INFO) << "Exiting TearDown";
   }
 
@@ -85,10 +86,17 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
     }
 
     base::FilePath apprtc_dir =
-        GetSourceDir().Append(FILE_PATH_LITERAL("out/apprtc"));
+        GetSourceDir().Append(FILE_PATH_LITERAL("out/apprtc/out/app_engine"));
     if (!base::PathExists(apprtc_dir)) {
-      LOG(ERROR) << "Missing AppRTC code at " <<
+      LOG(ERROR) << "Missing AppRTC AppEngine app at " <<
           apprtc_dir.value() << ". " << kAdviseOnGclientSolution;
+      return false;
+    }
+    if (!base::PathExists(apprtc_dir.Append(FILE_PATH_LITERAL("app.yaml")))) {
+      LOG(ERROR) << "The AppRTC AppEngine app at " <<
+          apprtc_dir.value() << " appears to have not been built." <<
+          "This should have been done by webrtc.DEPS scripts which invoke " <<
+          "'grunt build' on AppRTC.";
       return false;
     }
 
@@ -155,11 +163,6 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
                                   tab_contents);
   }
 
-  bool WaitForCallToHangUp(content::WebContents* tab_contents) {
-    return test::PollingWaitUntil(kIsApprtcCallUpJavascript, "false",
-                                  tab_contents);
-  }
-
   bool EvalInJavascriptFile(content::WebContents* tab_contents,
                             const base::FilePath& path) {
     std::string javascript;
@@ -188,11 +191,6 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
     StartDetectingVideo(tab_contents, "remote-video");
     WaitForVideoToPlay(tab_contents);
     return true;
-  }
-
-  bool HangUpApprtcCall(content::WebContents* tab_contents) {
-    // This is the same as clicking the Hangup button in the AppRTC call.
-    return content::ExecuteScript(tab_contents, "hangup()");
   }
 
   base::FilePath GetSourceDir() {
@@ -246,7 +244,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcApprtcBrowserTest, MANUAL_WorksOnApprtc) {
     DVLOG(1) << "Waiting for AppRTC to come up...";
 
   GURL room_url = GURL("http://localhost:9999/r/some_room"
-                       "?wsh=localhost&wsp=8089&wstls=false");
+                       "?wshpp=localhost:8089&wstls=false");
 
   chrome::AddTabAt(browser(), GURL(), -1, true);
   content::WebContents* left_tab = OpenPageAndAcceptUserMedia(room_url);
@@ -259,11 +257,6 @@ IN_PROC_BROWSER_TEST_F(WebRtcApprtcBrowserTest, MANUAL_WorksOnApprtc) {
 
   ASSERT_TRUE(DetectRemoteVideoPlaying(left_tab));
   ASSERT_TRUE(DetectRemoteVideoPlaying(right_tab));
-
-  ASSERT_TRUE(HangUpApprtcCall(left_tab));
-
-  ASSERT_TRUE(WaitForCallToHangUp(left_tab));
-  ASSERT_TRUE(WaitForCallToHangUp(right_tab));
 
   chrome::CloseWebContents(browser(), left_tab, false);
   chrome::CloseWebContents(browser(), right_tab, false);
@@ -289,7 +282,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcApprtcBrowserTest,
     DVLOG(1) << "Waiting for AppRTC to come up...";
 
   GURL room_url = GURL("http://localhost:9999/r/some_room"
-                       "?wsh=localhost&wsp=8089&wstls=false"
+                       "?wshpp=localhost:8089&wstls=false"
                        "&firefox_fake_device=1");
   content::WebContents* chrome_tab = OpenPageAndAcceptUserMedia(room_url);
 

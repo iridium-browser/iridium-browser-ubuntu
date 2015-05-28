@@ -2,12 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//testing/test.gni")
+
 # GYP version: //cc/blink/cc_blink.gyp:cc_blink
 component("blink") {
   output_name = "cc_blink"
 
   sources = [
     "cc_blink_export.h",
+    "context_provider_web_context.h",
     "scrollbar_impl.cc",
     "scrollbar_impl.h",
     "web_animation_curve_common.cc",

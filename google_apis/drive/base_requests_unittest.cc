@@ -43,7 +43,7 @@ class FakeUrlFetchRequest : public UrlFetchRequestBase {
   void ProcessURLFetchResults(const net::URLFetcher* source) override {
     callback_.Run(GetErrorCode());
   }
-  void RunCallbackOnPrematureFailure(GDataErrorCode code) override {
+  void RunCallbackOnPrematureFailure(DriveApiErrorCode code) override {
     callback_.Run(code);
   }
 
@@ -55,12 +55,9 @@ class FakeMultipartUploadRequest : public MultipartUploadRequestBase {
  public:
   FakeMultipartUploadRequest(
       RequestSender* sender,
-      const std::string& title,
-      const std::string& parent_resource_id,
+      const std::string& metadata_json,
       const std::string& content_type,
       int64 content_length,
-      const base::Time& modified_date,
-      const base::Time& last_viewed_by_me_date,
       const base::FilePath& local_file_path,
       const FileResourceCallback& callback,
       const google_apis::ProgressCallback& progress_callback,
@@ -68,12 +65,9 @@ class FakeMultipartUploadRequest : public MultipartUploadRequestBase {
       std::string* upload_content_type,
       std::string* upload_content_data)
       : MultipartUploadRequestBase(sender,
-                                   title,
-                                   parent_resource_id,
+                                   metadata_json,
                                    content_type,
                                    content_length,
-                                   modified_date,
-                                   last_viewed_by_me_date,
                                    local_file_path,
                                    callback,
                                    progress_callback),
@@ -178,7 +172,7 @@ TEST_F(BaseRequestsTest, UrlFetchRequestBaseResponseCodeOverride) {
       " }\n"
       "}\n";
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   base::RunLoop run_loop;
   sender_->StartRequestWithRetry(
       new FakeUrlFetchRequest(
@@ -196,15 +190,14 @@ TEST_F(MultipartUploadRequestBaseTest, Basic) {
   response_code_ = net::HTTP_OK;
   response_body_ = "{\"kind\": \"drive#file\", \"id\": \"file_id\"}";
   scoped_ptr<google_apis::FileResource> file;
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   base::RunLoop run_loop;
   const base::FilePath source_path =
       google_apis::test_util::GetTestFilePath("chromeos/file_manager/text.txt");
   std::string upload_content_type;
   std::string upload_content_data;
   scoped_ptr<FakeMultipartUploadRequest> request(new FakeMultipartUploadRequest(
-      sender_.get(), "test.txt", "parent_id", "text/plain", 10, base::Time(),
-      base::Time(), source_path,
+      sender_.get(), "{json:\"test\"}", "text/plain", 10, source_path,
       test_util::CreateQuitCallback(
           &run_loop, test_util::CreateCopyResultCallback(&error, &file)),
       ProgressCallback(), test_server_.base_url(), &upload_content_type,
@@ -217,8 +210,7 @@ TEST_F(MultipartUploadRequestBaseTest, Basic) {
       "--TESTBOUNDARY\n"
       "Content-Type: application/json\n"
       "\n"
-      "{\"parents\":[{\"id\":\"parent_id\",\"kind\":\"drive#fileLink\"}],"
-      "\"title\":\"test.txt\"}\n"
+      "{json:\"test\"}\n"
       "--TESTBOUNDARY\n"
       "Content-Type: text/plain\n"
       "\n"

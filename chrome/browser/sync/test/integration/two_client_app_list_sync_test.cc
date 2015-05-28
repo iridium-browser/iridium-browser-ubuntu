@@ -63,7 +63,7 @@ void CheckAppInfoInPrefs(Profile* profile,
 
   for (auto id : expected_ids) {
     app_list::AppListItem* item =
-        service->model()->top_level_item_list()->FindItem(id);
+        service->GetModel()->top_level_item_list()->FindItem(id);
     ASSERT_TRUE(item);
     // Ensure local prefs matches the model data.
     scoped_ptr<app_list::AppListPrefs::AppListInfo> info =
@@ -153,7 +153,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, StartWithSameApps) {
 // Install some apps on both clients, some on only one client, some on only the
 // other, and sync.  Both clients should end up with all apps, and the app and
 // page ordinals should be identical.
-IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, StartWithDifferentApps) {
+// Disabled, see http://crbug.com/434438 for details.
+IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest,
+                       DISABLED_StartWithDifferentApps) {
   ASSERT_TRUE(SetupClients());
 
   int i = 0;
@@ -528,7 +530,7 @@ class TwoClientAppListSyncFolderTest : public TwoClientAppListSyncTest {
     bool res = TwoClientAppListSyncTest::SetupClients();
     app_list::AppListSyncableService* verifier_service =
         app_list::AppListSyncableServiceFactory::GetForProfile(verifier());
-    verifier_service->model()->SetFoldersEnabled(true);
+    verifier_service->GetModel()->SetFoldersEnabled(true);
     return res;
   }
 

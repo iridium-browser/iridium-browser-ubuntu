@@ -77,11 +77,11 @@ class LowMemoryObserverImpl
    public:
     explicit FileWatcherDelegate(LowMemoryObserverImpl* owner)
         : owner_(owner) {}
-    virtual ~FileWatcherDelegate() {}
+    ~FileWatcherDelegate() override {}
 
     // Overrides for base::MessageLoopForIO::Watcher
-    virtual void OnFileCanWriteWithoutBlocking(int fd) override {}
-    virtual void OnFileCanReadWithoutBlocking(int fd) override {
+    void OnFileCanWriteWithoutBlocking(int fd) override {}
+    void OnFileCanReadWithoutBlocking(int fd) override {
       LOG(WARNING) << "Low memory condition detected.  Discarding a tab.";
       // We can only discard tabs on the UI thread.
       base::Callback<void(void)> callback = base::Bind(&DiscardTab);
@@ -117,7 +117,7 @@ void LowMemoryObserverImpl::StartObservingOnFileThread() {
   DCHECK_LE(file_descriptor_, 0)
       << "Attempted to start observation when it was already started.";
   DCHECK(watcher_.get() == NULL);
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   DCHECK(base::MessageLoopForIO::current());
 
   file_descriptor_ = ::open(kLowMemFile, O_RDONLY);
@@ -135,7 +135,7 @@ void LowMemoryObserverImpl::StopObservingOnFileThread() {
   // If StartObserving failed, StopObserving will still get called.
   timer_.Stop();
   if (file_descriptor_ >= 0) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+    DCHECK_CURRENTLY_ON(BrowserThread::FILE);
     watcher_.reset(NULL);
     ::close(file_descriptor_);
     file_descriptor_ = -1;
@@ -151,7 +151,7 @@ void LowMemoryObserverImpl::ScheduleNextObservation() {
 
 void LowMemoryObserverImpl::StartWatchingDescriptor() {
   DCHECK(watcher_.get());
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   DCHECK(base::MessageLoopForIO::current());
   if (file_descriptor_ < 0)
     return;

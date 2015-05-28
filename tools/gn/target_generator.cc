@@ -164,14 +164,8 @@ bool TargetGenerator::FillPublic() {
 
 bool TargetGenerator::FillInputs() {
   const Value* value = scope_->GetValue(variables::kInputs, true);
- if (!value) {
-    // Older versions used "source_prereqs". Allow use of this variable until
-    // all callers are updated.
-    // TODO(brettw) remove this eventually.
-    value = scope_->GetValue("source_prereqs", true);
-    if (!value)
-      return true;
-  }
+ if (!value)
+   return true;
 
   Target::FileList dest_inputs;
   if (!ExtractListOfRelativeFiles(scope_->settings()->build_settings(), *value,
@@ -280,6 +274,16 @@ bool TargetGenerator::FillOutputs(bool allow_substitutions) {
                                          value->list_value()[i]))
       return false;
   }
+  return true;
+}
+
+bool TargetGenerator::FillCheckIncludes() {
+  const Value* value = scope_->GetValue(variables::kCheckIncludes, true);
+  if (!value)
+    return true;
+  if (!value->VerifyTypeIs(Value::BOOLEAN, err_))
+    return false;
+  target_->set_check_includes(value->boolean_value());
   return true;
 }
 

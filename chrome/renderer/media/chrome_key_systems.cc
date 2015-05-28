@@ -72,14 +72,26 @@ static void AddExternalClearKey(
     return;
   }
 
-  KeySystemInfo info(kExternalClearKeyKeySystem);
+  KeySystemInfo info;
+  info.key_system = kExternalClearKeyKeySystem;
 
+  info.supported_init_data_types =
+    media::kInitDataTypeMaskWebM | media::kInitDataTypeMaskKeyIds;
   info.supported_codecs = media::EME_CODEC_WEBM_ALL;
-  info.supported_init_data_types = media::EME_INIT_DATA_TYPE_WEBM;
 #if defined(USE_PROPRIETARY_CODECS)
+  info.supported_init_data_types |= media::kInitDataTypeMaskCenc;
   info.supported_codecs |= media::EME_CODEC_MP4_ALL;
-  info.supported_init_data_types |= media::EME_INIT_DATA_TYPE_CENC;
 #endif  // defined(USE_PROPRIETARY_CODECS)
+
+  info.max_audio_robustness = media::EmeRobustness::EMPTY;
+  info.max_video_robustness = media::EmeRobustness::EMPTY;
+
+  // Persistent sessions are faked.
+  info.persistent_license_support = media::EME_SESSION_TYPE_SUPPORTED;
+  info.persistent_release_message_support =
+      media::EME_SESSION_TYPE_NOT_SUPPORTED;
+  info.persistent_state_support = media::EME_FEATURE_REQUESTABLE;
+  info.distinctive_identifier_support = media::EME_FEATURE_NOT_SUPPORTED;
 
   info.pepper_type = kExternalClearKeyPepperType;
 
@@ -178,9 +190,25 @@ static void AddPepperBasedWidevine(
 #endif  // defined(USE_PROPRIETARY_CODECS)
   }
 
-  cdm::AddWidevineWithCodecs(cdm::WIDEVINE,
-                             supported_codecs,
-                             concrete_key_systems);
+  cdm::AddWidevineWithCodecs(
+      cdm::WIDEVINE, supported_codecs,
+#if defined(OS_CHROMEOS)
+      media::EmeRobustness::HW_SECURE_ALL,     // Maximum audio robustness.
+      media::EmeRobustness::HW_SECURE_ALL,     // Maximim video robustness.
+      // persistent-license.
+      media::EME_SESSION_TYPE_SUPPORTED_WITH_IDENTIFIER,
+      media::EME_SESSION_TYPE_NOT_SUPPORTED,   // persistent-release-message.
+      media::EME_FEATURE_REQUESTABLE,          // Persistent state.
+      media::EME_FEATURE_REQUESTABLE,          // Distinctive identifier.
+#else   // (Desktop)
+      media::EmeRobustness::SW_SECURE_CRYPTO,  // Maximum audio robustness.
+      media::EmeRobustness::SW_SECURE_DECODE,  // Maximum video robustness.
+      media::EME_SESSION_TYPE_NOT_SUPPORTED,   // persistent-license.
+      media::EME_SESSION_TYPE_NOT_SUPPORTED,   // persistent-release-message.
+      media::EME_FEATURE_REQUESTABLE,          // Persistent state.
+      media::EME_FEATURE_NOT_SUPPORTED,        // Distinctive identifier.
+#endif  // defined(OS_CHROMEOS)
+      concrete_key_systems);
 }
 #endif  // defined(WIDEVINE_CDM_AVAILABLE)
 #endif  // defined(ENABLE_PEPPER_CDMS)
@@ -195,6 +223,10 @@ void AddChromeKeySystems(std::vector<KeySystemInfo>* key_systems_info) {
 #endif  // defined(ENABLE_PEPPER_CDMS)
 
 #if defined(OS_ANDROID)
-  cdm::AddAndroidWidevine(key_systems_info);
+  // TODO(sandersd): Non-compositing support depends on the
+  // use_video_overlay_for_embedded_encrypted_video pref, which may differ per
+  // WebContents. For now, Chromium does not support them.
+  // http://crbug.com/467779
+  cdm::AddAndroidWidevine(key_systems_info, false);
 #endif  // defined(OS_ANDROID)
 }

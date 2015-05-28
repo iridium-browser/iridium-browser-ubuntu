@@ -5,13 +5,24 @@
 package org.chromium.base.library_loader;
 
 import android.content.Context;
+import android.content.pm.ApplicationInfo;
+import android.os.AsyncTask;
 import android.os.SystemClock;
 import android.util.Log;
 
+import org.chromium.base.CalledByNative;
 import org.chromium.base.CommandLine;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.TraceEvent;
+import org.chromium.base.VisibleForTesting;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.util.HashMap;
 import java.util.Locale;
 
 import javax.annotation.Nullable;
@@ -40,41 +51,76 @@ public class LibraryLoader {
     // Guards all access to the libraries
     private static final Object sLock = new Object();
 
+    // The singleton instance of LibraryLoader.
+    private static volatile LibraryLoader sInstance;
+
     // One-way switch becomes true when the libraries are loaded.
-    private static boolean sLoaded = false;
+    private boolean mLoaded;
 
     // One-way switch becomes true when the Java command line is switched to
     // native.
-    private static boolean sCommandLineSwitched = false;
+    private boolean mCommandLineSwitched;
 
     // One-way switch becomes true when the libraries are initialized (
     // by calling nativeLibraryLoaded, which forwards to LibraryLoaded(...) in
     // library_loader_hooks.cc).
-    private static boolean sInitialized = false;
+    // Note that this member should remain a one-way switch, since it accessed from multiple
+    // threads without a lock.
+    private volatile boolean mInitialized;
 
     // One-way switches recording attempts to use Relro sharing in the browser.
     // The flags are used to report UMA stats later.
-    private static boolean sIsUsingBrowserSharedRelros = false;
-    private static boolean sLoadAtFixedAddressFailed = false;
+    private boolean mIsUsingBrowserSharedRelros;
+    private boolean mLoadAtFixedAddressFailed;
 
     // One-way switch becomes true if the device supports memory mapping the
     // APK file with executable permissions.
-    private static boolean sMapApkWithExecPermission = false;
+    private boolean mMapApkWithExecPermission;
 
     // One-way switch to indicate whether we probe for memory mapping the APK
     // file with executable permissions. We suppress the probe under some
     // conditions.
     // For more, see:
     //   https://code.google.com/p/chromium/issues/detail?id=448084
-    private static boolean sProbeMapApkWithExecPermission = true;
+    private boolean mProbeMapApkWithExecPermission = true;
 
     // One-way switch becomes true if the Chromium library was loaded from the
     // APK file directly.
-    private static boolean sLibraryWasLoadedFromApk = false;
+    private boolean mLibraryWasLoadedFromApk;
 
     // One-way switch becomes false if the Chromium library should be loaded
     // directly from the APK file but it was compressed or not aligned.
-    private static boolean sLibraryIsMappableInApk = true;
+    private boolean mLibraryIsMappableInApk = true;
+
+    // The type of process the shared library is loaded in.
+    // This member can be accessed from multiple threads simultaneously, so it have to be
+    // final (like now) or be protected in some way (volatile of synchronized).
+    private final int mLibraryProcessType;
+
+    // Library -> Path it has been loaded from.
+    private final HashMap<String, String> mLoadedFrom;
+
+    /**
+     * @param libraryProcessType the process the shared library is loaded in. refer to
+     *                           LibraryProcessType for possible values.
+     * @return LibraryLoader if existing, otherwise create a new one.
+     */
+    public static LibraryLoader get(int libraryProcessType) throws ProcessInitException {
+        synchronized (sLock) {
+            if (sInstance != null) {
+                if (sInstance.mLibraryProcessType == libraryProcessType) return sInstance;
+                throw new ProcessInitException(
+                        LoaderErrors.LOADER_ERROR_NATIVE_LIBRARY_LOAD_FAILED);
+            }
+            sInstance = new LibraryLoader(libraryProcessType);
+            return sInstance;
+        }
+    }
+
+    private LibraryLoader(int libraryProcessType) {
+        mLibraryProcessType = libraryProcessType;
+        mLoadedFrom = new HashMap<String, String>();
+    }
 
     /**
      * The same as ensureInitialized(null, false), should only be called
@@ -82,7 +128,8 @@ public class LibraryLoader {
      *
      * @throws ProcessInitException
      */
-    public static void ensureInitialized() throws ProcessInitException {
+    @VisibleForTesting
+    public void ensureInitialized() throws ProcessInitException {
         ensureInitialized(null, false);
     }
 
@@ -96,11 +143,11 @@ public class LibraryLoader {
      *  @param shouldDeleteFallbackLibraries The flag tells whether the method
      *    should delete the fallback libraries or not.
      */
-    public static void ensureInitialized(
+    public void ensureInitialized(
             Context context, boolean shouldDeleteFallbackLibraries)
             throws ProcessInitException {
         synchronized (sLock) {
-            if (sInitialized) {
+            if (mInitialized) {
                 // Already initialized, nothing to do.
                 return;
             }
@@ -113,9 +160,7 @@ public class LibraryLoader {
      * Checks if library is fully loaded and initialized.
      */
     public static boolean isInitialized() {
-        synchronized (sLock) {
-            return sInitialized;
-        }
+        return sInstance != null && sInstance.mInitialized;
     }
 
     /**
@@ -124,7 +169,7 @@ public class LibraryLoader {
      *
      * @throws ProcessInitException
      */
-    public static void loadNow() throws ProcessInitException {
+    public void loadNow() throws ProcessInitException {
         loadNow(null, false);
     }
 
@@ -141,7 +186,7 @@ public class LibraryLoader {
      *
      * @throws ProcessInitException if the native library failed to load.
      */
-    public static void loadNow(Context context, boolean shouldDeleteFallbackLibraries)
+    public void loadNow(Context context, boolean shouldDeleteFallbackLibraries)
             throws ProcessInitException {
         synchronized (sLock) {
             loadAlreadyLocked(context, shouldDeleteFallbackLibraries);
@@ -153,19 +198,81 @@ public class LibraryLoader {
      * native will call its "main" thread. The library must have previously been
      * loaded with loadNow.
      */
-    public static void initialize() throws ProcessInitException {
+    public void initialize() throws ProcessInitException {
         synchronized (sLock) {
             initializeAlreadyLocked();
         }
     }
 
+    private void prefetchLibraryToMemory(Context context, String library) {
+        String libFilePath = mLoadedFrom.get(library);
+        if (libFilePath == null) {
+            Log.i(TAG, "File path not found for " + library);
+            return;
+        }
+        String apkFilePath = context.getApplicationInfo().sourceDir;
+        if (libFilePath.equals(apkFilePath)) {
+            // TODO(lizeb): Make pre-faulting work with libraries loaded from the APK.
+            return;
+        }
+        try {
+            TraceEvent.begin("LibraryLoader.prefetchLibraryToMemory");
+            File file = new File(libFilePath);
+            int size = (int) file.length();
+            FileChannel channel = new RandomAccessFile(file, "r").getChannel();
+            MappedByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, size);
+            // TODO(lizeb): Figure out whether walking the entire library is really necessary.
+            // Page size is 4096 for all current Android architectures.
+            for (int index = 0; index < size; index += 4096) {
+                // Note: Testing shows that neither the Java compiler nor
+                // Dalvik/ART eliminates this loop.
+                buffer.get(index);
+            }
+        } catch (FileNotFoundException e) {
+            Log.w(TAG, "Library file not found: " + e);
+        } catch (IOException e) {
+            Log.w(TAG, "Impossible to map the file: " + e);
+        } finally {
+            TraceEvent.end("LibraryLoader.prefetchLibraryToMemory");
+        }
+    }
+
+    /** Prefetches the native libraries in a background thread.
+     *
+     * Launches an AsyncTask that maps the native libraries into memory, reads a
+     * part of each page from it, than unmaps it. This is done to warm up the
+     * page cache, turning hard page faults into soft ones.
+     *
+     * This is done this way, as testing shows that fadvise(FADV_WILLNEED) is
+     * detrimental to the startup time.
+     *
+     * @param context the application context.
+     */
+    public void asyncPrefetchLibrariesToMemory(final Context context) {
+        new AsyncTask<Void, Void, Void>() {
+            @Override
+            protected Void doInBackground(Void... params) {
+                // Note: AsyncTasks are executed in a low priority background
+                // thread, which is the desired behavior here since we don't
+                // want to interfere with the rest of the initialization.
+                for (String library : NativeLibraries.LIBRARIES) {
+                    if (Linker.isChromiumLinkerLibrary(library)) {
+                        continue;
+                    }
+                    prefetchLibraryToMemory(context, library);
+                }
+                return null;
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    }
+
     // Invoke System.loadLibrary(...), triggering JNI_OnLoad in native code
-    private static void loadAlreadyLocked(
+    private void loadAlreadyLocked(
             Context context, boolean shouldDeleteFallbackLibraries)
             throws ProcessInitException {
         try {
-            if (!sLoaded) {
-                assert !sInitialized;
+            if (!mLoaded) {
+                assert !mInitialized;
 
                 long startTime = SystemClock.uptimeMillis();
                 boolean useChromiumLinker = Linker.isUsed();
@@ -183,17 +290,20 @@ public class LibraryLoader {
                     if (manufacturer != null
                             && manufacturer.toLowerCase(Locale.ENGLISH).contains("samsung")) {
                         Log.w(TAG, "Suppressed load from APK support check on this device");
-                        sProbeMapApkWithExecPermission = false;
+                        mProbeMapApkWithExecPermission = false;
                     }
 
                     // Check if the device supports memory mapping the APK file
                     // with executable permissions.
                     if (context != null) {
                         apkFilePath = context.getApplicationInfo().sourceDir;
-                        if (sProbeMapApkWithExecPermission) {
-                            sMapApkWithExecPermission = Linker.checkMapExecSupport(apkFilePath);
+                        if (mProbeMapApkWithExecPermission) {
+                            mMapApkWithExecPermission = Linker.checkMapExecSupport(apkFilePath);
+                        } else {
+                            // Assume map executable support on Samsung devices.
+                            mMapApkWithExecPermission = true;
                         }
-                        if (!sMapApkWithExecPermission && Linker.isInZipFile()) {
+                        if (!mMapApkWithExecPermission && Linker.isInZipFile()) {
                             Log.w(TAG, "the no map executable support fallback will be used because"
                                     + " memory mapping the APK file with executable permissions is"
                                     + " not supported");
@@ -222,9 +332,9 @@ public class LibraryLoader {
                         if (apkFilePath != null && Linker.isInZipFile()) {
                             // The library is in the APK file.
                             if (!Linker.checkLibraryIsMappableInApk(apkFilePath, libFilePath)) {
-                                sLibraryIsMappableInApk = false;
+                                mLibraryIsMappableInApk = false;
                             }
-                            if (sLibraryIsMappableInApk || useMapExecSupportFallback) {
+                            if (mLibraryIsMappableInApk || useMapExecSupportFallback) {
                                 // Load directly from the APK (or use the no map executable
                                 // support fallback, see crazy_linker_elf_loader.cpp).
                                 zipFilePath = apkFilePath;
@@ -233,6 +343,7 @@ public class LibraryLoader {
                                                 ? "using no map executable support fallback"
                                                 : "directly")
                                         + " from within " + apkFilePath);
+                                mLoadedFrom.put(library, apkFilePath);
                             } else {
                                 // Unpack library fallback.
                                 Log.i(TAG, "Loading " + library
@@ -242,16 +353,25 @@ public class LibraryLoader {
                                         context, library);
                                 fallbackWasUsed = true;
                                 Log.i(TAG, "Built fallback library " + libFilePath);
+                                mLoadedFrom.put(library, libFilePath);
                             }
                         } else {
                             // The library is in its own file.
                             Log.i(TAG, "Loading " + library);
+                            if (context != null) {
+                                ApplicationInfo applicationInfo = context.getApplicationInfo();
+                                File file = new File(applicationInfo.nativeLibraryDir, libFilePath);
+                                mLoadedFrom.put(library, file.getAbsolutePath());
+                            } else {
+                                Log.i(TAG, "No context, cannot locate the native library file for "
+                                        + library);
+                            }
                         }
 
                         // Load the library.
                         boolean isLoaded = false;
                         if (Linker.isUsingBrowserSharedRelros()) {
-                            sIsUsingBrowserSharedRelros = true;
+                            mIsUsingBrowserSharedRelros = true;
                             try {
                                 loadLibrary(zipFilePath, libFilePath);
                                 isLoaded = true;
@@ -259,7 +379,7 @@ public class LibraryLoader {
                                 Log.w(TAG, "Failed to load native library with shared RELRO, "
                                         + "retrying without");
                                 Linker.disableSharedRelros();
-                                sLoadAtFixedAddressFailed = true;
+                                mLoadAtFixedAddressFailed = true;
                             }
                         }
                         if (!isLoaded) {
@@ -287,7 +407,7 @@ public class LibraryLoader {
                         startTime % 10000,
                         stopTime % 10000));
 
-                sLoaded = true;
+                mLoaded = true;
             }
         } catch (UnsatisfiedLinkError e) {
             throw new ProcessInitException(LoaderErrors.LOADER_ERROR_NATIVE_LIBRARY_LOAD_FAILED, e);
@@ -305,17 +425,17 @@ public class LibraryLoader {
 
     // Load a native shared library with the Chromium linker. If the zip file
     // path is not null, the library is loaded directly from the zip file.
-    private static void loadLibrary(@Nullable String zipFilePath, String libFilePath) {
+    private void loadLibrary(@Nullable String zipFilePath, String libFilePath) {
         Linker.loadLibrary(zipFilePath, libFilePath);
         if (zipFilePath != null) {
-            sLibraryWasLoadedFromApk = true;
+            mLibraryWasLoadedFromApk = true;
         }
     }
 
     // The WebView requires the Command Line to be switched over before
     // initialization is done. This is okay in the WebView's case since the
     // JNI is already loaded by this point.
-    public static void switchCommandLineForWebView() {
+    public void switchCommandLineForWebView() {
         synchronized (sLock) {
             ensureCommandLineSwitchedAlreadyLocked();
         }
@@ -324,24 +444,24 @@ public class LibraryLoader {
     // Switch the CommandLine over from Java to native if it hasn't already been done.
     // This must happen after the code is loaded and after JNI is ready (since after the
     // switch the Java CommandLine will delegate all calls the native CommandLine).
-    private static void ensureCommandLineSwitchedAlreadyLocked() {
-        assert sLoaded;
-        if (sCommandLineSwitched) {
+    private void ensureCommandLineSwitchedAlreadyLocked() {
+        assert mLoaded;
+        if (mCommandLineSwitched) {
             return;
         }
         nativeInitCommandLine(CommandLine.getJavaSwitchesOrNull());
         CommandLine.enableNativeProxy();
-        sCommandLineSwitched = true;
+        mCommandLineSwitched = true;
     }
 
     // Invoke base::android::LibraryLoaded in library_loader_hooks.cc
-    private static void initializeAlreadyLocked() throws ProcessInitException {
-        if (sInitialized) {
+    private void initializeAlreadyLocked() throws ProcessInitException {
+        if (mInitialized) {
             return;
         }
 
         // Setup the native command line if necessary.
-        if (!sCommandLineSwitched) {
+        if (!mCommandLineSwitched) {
             nativeInitCommandLine(CommandLine.getJavaSwitchesOrNull());
         }
 
@@ -349,49 +469,52 @@ public class LibraryLoader {
             Log.e(TAG, "error calling nativeLibraryLoaded");
             throw new ProcessInitException(LoaderErrors.LOADER_ERROR_FAILED_TO_REGISTER_JNI);
         }
-        // From this point on, native code is ready to use and checkIsReady()
-        // shouldn't complain from now on (and in fact, it's used by the
-        // following calls).
-        sInitialized = true;
 
         // The Chrome JNI is registered by now so we can switch the Java
         // command line over to delegating to native if it's necessary.
-        if (!sCommandLineSwitched) {
+        if (!mCommandLineSwitched) {
             CommandLine.enableNativeProxy();
-            sCommandLineSwitched = true;
+            mCommandLineSwitched = true;
         }
 
         // From now on, keep tracing in sync with native.
         TraceEvent.registerNativeEnabledObserver();
+
+        // From this point on, native code is ready to use and checkIsReady()
+        // shouldn't complain from now on (and in fact, it's used by the
+        // following calls).
+        // Note that this flag can be accessed asynchronously, so any initialization
+        // must be performed before.
+        mInitialized = true;
     }
 
     // Called after all native initializations are complete.
-    public static void onNativeInitializationComplete(Context context) {
+    public void onNativeInitializationComplete(Context context) {
         recordBrowserProcessHistogram(context);
     }
 
     // Record Chromium linker histogram state for the main browser process. Called from
     // onNativeInitializationComplete().
-    private static void recordBrowserProcessHistogram(Context context) {
+    private void recordBrowserProcessHistogram(Context context) {
         if (Linker.isUsed()) {
-            nativeRecordChromiumAndroidLinkerBrowserHistogram(sIsUsingBrowserSharedRelros,
-                                                              sLoadAtFixedAddressFailed,
+            nativeRecordChromiumAndroidLinkerBrowserHistogram(mIsUsingBrowserSharedRelros,
+                                                              mLoadAtFixedAddressFailed,
                                                               getLibraryLoadFromApkStatus(context));
         }
     }
 
     // Returns the device's status for loading a library directly from the APK file.
     // This method can only be called when the Chromium linker is used.
-    private static int getLibraryLoadFromApkStatus(Context context) {
+    private int getLibraryLoadFromApkStatus(Context context) {
         assert Linker.isUsed();
 
-        if (sLibraryWasLoadedFromApk) {
-            return sMapApkWithExecPermission
+        if (mLibraryWasLoadedFromApk) {
+            return mMapApkWithExecPermission
                     ? LibraryLoadFromApkStatusCodes.SUCCESSFUL
                     : LibraryLoadFromApkStatusCodes.USED_NO_MAP_EXEC_SUPPORT_FALLBACK;
         }
 
-        if (!sLibraryIsMappableInApk) {
+        if (!mLibraryIsMappableInApk) {
             return LibraryLoadFromApkStatusCodes.USED_UNPACK_LIBRARY_FALLBACK;
         }
 
@@ -400,11 +523,11 @@ public class LibraryLoader {
             return LibraryLoadFromApkStatusCodes.UNKNOWN;
         }
 
-        if (!sProbeMapApkWithExecPermission) {
+        if (!mProbeMapApkWithExecPermission) {
             return LibraryLoadFromApkStatusCodes.UNKNOWN;
         }
 
-        return sMapApkWithExecPermission
+        return mMapApkWithExecPermission
                 ? LibraryLoadFromApkStatusCodes.SUPPORTED
                 : LibraryLoadFromApkStatusCodes.NOT_SUPPORTED;
     }
@@ -413,15 +536,25 @@ public class LibraryLoader {
     // recorded as a histogram immediately because histograms and IPC are not ready at the
     // time it are captured. This function stores a pending value, so that a later call to
     // RecordChromiumAndroidLinkerRendererHistogram() will record it correctly.
-    public static void registerRendererProcessHistogram(boolean requestedSharedRelro,
-                                                        boolean loadAtFixedAddressFailed) {
+    public void registerRendererProcessHistogram(boolean requestedSharedRelro,
+                                                 boolean loadAtFixedAddressFailed) {
         if (Linker.isUsed()) {
             nativeRegisterChromiumAndroidLinkerRendererHistogram(requestedSharedRelro,
                                                                  loadAtFixedAddressFailed);
         }
     }
 
-    private static native void nativeInitCommandLine(String[] initCommandLine);
+    /**
+     * @return the process the shared library is loaded in, see the LibraryProcessType
+     *         for possible values.
+     */
+    @CalledByNative
+    public static int getLibraryProcessType() {
+        if (sInstance == null) return LibraryProcessType.PROCESS_UNINITIALIZED;
+        return sInstance.mLibraryProcessType;
+    }
+
+    private native void nativeInitCommandLine(String[] initCommandLine);
 
     // Only methods needed before or during normal JNI registration are during System.OnLoad.
     // nativeLibraryLoaded is then called to register everything else.  This process is called
@@ -429,13 +562,13 @@ public class LibraryLoader {
     // definition in base/android/library_loader/library_loader_hooks.cc.
     //
     // Return true on success and false on failure.
-    private static native boolean nativeLibraryLoaded();
+    private native boolean nativeLibraryLoaded();
 
     // Method called to record statistics about the Chromium linker operation for the main
     // browser process. Indicates whether the linker attempted relro sharing for the browser,
     // and if it did, whether the library failed to load at a fixed address. Also records
     // support for loading a library directly from the APK file.
-    private static native void nativeRecordChromiumAndroidLinkerBrowserHistogram(
+    private native void nativeRecordChromiumAndroidLinkerBrowserHistogram(
             boolean isUsingBrowserSharedRelros,
             boolean loadAtFixedAddressFailed,
             int libraryLoadFromApkStatus);
@@ -443,11 +576,11 @@ public class LibraryLoader {
     // Method called to register (for later recording) statistics about the Chromium linker
     // operation for a renderer process. Indicates whether the linker attempted relro sharing,
     // and if it did, whether the library failed to load at a fixed address.
-    private static native void nativeRegisterChromiumAndroidLinkerRendererHistogram(
+    private native void nativeRegisterChromiumAndroidLinkerRendererHistogram(
             boolean requestedSharedRelro,
             boolean loadAtFixedAddressFailed);
 
     // Get the version of the native library. This is needed so that we can check we
     // have the right version before initializing the (rest of the) JNI.
-    private static native String nativeGetVersionNumber();
+    private native String nativeGetVersionNumber();
 }

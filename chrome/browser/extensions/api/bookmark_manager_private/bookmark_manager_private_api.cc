@@ -15,6 +15,7 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_stats.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/enhanced_bookmarks/enhanced_bookmark_model_factory.h"
 #include "chrome/browser/extensions/api/bookmarks/bookmark_api_constants.h"
 #include "chrome/browser/extensions/api/bookmarks/bookmark_api_helpers.h"
@@ -41,7 +42,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using bookmarks::BookmarkNodeData;
+using content::WebContents;
 
 namespace extensions {
 
@@ -64,8 +68,6 @@ namespace SortChildren = api::bookmark_manager_private::SortChildren;
 namespace StartDrag = api::bookmark_manager_private::StartDrag;
 namespace UndoInfo = api::bookmark_manager_private::GetUndoInfo;
 namespace UpdateMetaInfo = api::bookmark_manager_private::UpdateMetaInfo;
-
-using content::WebContents;
 
 namespace {
 
@@ -161,9 +163,8 @@ CreateApiBookmarkNodeData(Profile* profile, const BookmarkNodeData& data) {
     }
   } else {
     // We do not have a node IDs when the data comes from a different profile.
-    std::vector<BookmarkNodeData::Element> elements = data.elements;
-    for (size_t i = 0; i < elements.size(); ++i)
-      node_data->elements.push_back(CreateApiNodeDataElement(elements[i]));
+    for (size_t i = 0; i < data.size(); ++i)
+      node_data->elements.push_back(CreateApiNodeDataElement(data.elements[i]));
   }
   return node_data.Pass();
 }
@@ -308,7 +309,7 @@ void BookmarkManagerPrivateDragEventRouter::DispatchEvent(
 
 void BookmarkManagerPrivateDragEventRouter::OnDragEnter(
     const BookmarkNodeData& data) {
-  if (data.size() == 0)
+  if (!data.is_valid())
     return;
   DispatchEvent(bookmark_manager_private::OnDragEnter::kEventName,
                 bookmark_manager_private::OnDragEnter::Create(
@@ -323,7 +324,7 @@ void BookmarkManagerPrivateDragEventRouter::OnDragOver(
 
 void BookmarkManagerPrivateDragEventRouter::OnDragLeave(
     const BookmarkNodeData& data) {
-  if (data.size() == 0)
+  if (!data.is_valid())
     return;
   DispatchEvent(bookmark_manager_private::OnDragLeave::kEventName,
                 bookmark_manager_private::OnDragLeave::Create(
@@ -332,7 +333,7 @@ void BookmarkManagerPrivateDragEventRouter::OnDragLeave(
 
 void BookmarkManagerPrivateDragEventRouter::OnDrop(
     const BookmarkNodeData& data) {
-  if (data.size() == 0)
+  if (!data.is_valid())
     return;
   DispatchEvent(bookmark_manager_private::OnDrop::kEventName,
                 bookmark_manager_private::OnDrop::Create(
@@ -360,7 +361,7 @@ bool ClipboardBookmarkManagerFunction::CopyOrCut(bool cut,
   ChromeBookmarkClient* client = GetChromeBookmarkClient();
   std::vector<const BookmarkNode*> nodes;
   EXTENSION_FUNCTION_VALIDATE(GetNodesFromVector(model, id_list, &nodes));
-  if (cut && client->HasDescendantsOfManagedNode(nodes)) {
+  if (cut && bookmarks::HasDescendantsOf(nodes, client->managed_node())) {
     error_ = bookmark_keys::kModifyManagedError;
     return false;
   }
@@ -517,7 +518,8 @@ bool BookmarkManagerPrivateGetStringsFunction::RunAsync() {
   localized_strings->SetString("cancel",
       l10n_util::GetStringUTF16(IDS_CANCEL));
 
-  webui::SetFontAndTextDirection(localized_strings);
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
+  webui::SetLoadTimeDataDefaults(app_locale, localized_strings);
 
   SetResult(localized_strings);
 
@@ -617,7 +619,7 @@ bool BookmarkManagerPrivateGetSubtreeFunction::RunOnReady() {
 
   const BookmarkNode* node = NULL;
 
-  if (params->id == "") {
+  if (params->id.empty()) {
     BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
     node = model->root_node();
   } else {

@@ -145,6 +145,23 @@ TEST(FormDataTest, SerializeIncorrectFormatAndDeserialize) {
   PickleIterator iter(pickle);
   FormData actual;
   EXPECT_FALSE(DeserializeFormData(&iter, &actual));
+
+  FormData empty;
+  EXPECT_TRUE(actual.SameFormAs(empty));
+}
+
+TEST(FormDataTest, SerializeAndDeserializeInStrings) {
+  FormData data;
+  FillInDummyFormData(&data);
+  data.is_form_tag = false;
+
+  std::string serialized_data;
+  SerializeFormDataToBase64String(data, &serialized_data);
+
+  FormData actual;
+  EXPECT_TRUE(DeserializeFormDataFromBase64String(serialized_data, &actual));
+
+  EXPECT_TRUE(actual.SameFormAs(data));
 }
 
 }  // namespace autofill

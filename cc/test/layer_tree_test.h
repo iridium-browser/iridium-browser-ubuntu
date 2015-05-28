@@ -12,10 +12,6 @@
 #include "cc/trees/layer_tree_host_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace Webkit {
-class WebGraphicsContext3D;
-}
-
 namespace cc {
 class FakeExternalBeginFrameSource;
 class FakeLayerTreeHostClient;
@@ -25,6 +21,7 @@ class LayerTreeHost;
 class LayerTreeHostClient;
 class LayerTreeHostImpl;
 class TestContextProvider;
+class TestGpuMemoryBufferManager;
 class TestWebGraphicsContext3D;
 
 // Used by test stubs to notify the test when something interesting happens.
@@ -35,7 +32,6 @@ class TestHooks : public AnimationDelegate {
 
   void ReadSettings(const LayerTreeSettings& settings);
 
-  virtual scoped_ptr<Rasterizer> CreateRasterizer(LayerTreeHostImpl* host_impl);
   virtual void CreateResourceAndTileTaskWorkerPool(
       LayerTreeHostImpl* host_impl,
       scoped_ptr<TileTaskWorkerPool>* tile_task_worker_pool,
@@ -69,8 +65,8 @@ class TestHooks : public AnimationDelegate {
   virtual void WillAnimateLayers(LayerTreeHostImpl* host_impl,
                                  base::TimeTicks monotonic_time) {}
   virtual void ApplyViewportDeltas(
-      const gfx::Vector2d& inner_delta,
-      const gfx::Vector2d& outer_delta,
+      const gfx::Vector2dF& inner_delta,
+      const gfx::Vector2dF& outer_delta,
       const gfx::Vector2dF& elastic_overscroll_delta,
       float scale,
       float top_controls_delta) {}
@@ -88,13 +84,13 @@ class TestHooks : public AnimationDelegate {
   virtual void DidCommit() {}
   virtual void DidCommitAndDrawFrame() {}
   virtual void DidCompleteSwapBuffers() {}
-  virtual void DidDeferCommit() {}
   virtual void DidSetVisibleOnImplTree(LayerTreeHostImpl* host_impl,
                                        bool visible) {}
   virtual void ScheduleComposite() {}
   virtual void SendBeginFramesToChildren(const BeginFrameArgs& args) {}
 
   // Hooks for SchedulerClient.
+  virtual void WillBeginImplFrame(const BeginFrameArgs& args) {}
   virtual void ScheduledActionWillSendBeginMainFrame() {}
   virtual void ScheduledActionSendBeginMainFrame() {}
   virtual void ScheduledActionDrawAndSwapIfPossible() {}
@@ -102,6 +98,7 @@ class TestHooks : public AnimationDelegate {
   virtual void ScheduledActionCommit() {}
   virtual void ScheduledActionBeginOutputSurfaceCreation() {}
   virtual void ScheduledActionPrepareTiles() {}
+  virtual void ScheduledActionInvalidateOutputSurface() {}
 
   // Implementation of AnimationDelegate:
   void NotifyAnimationStarted(base::TimeTicks monotonic_time,
@@ -141,6 +138,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void PostAddAnimationToMainThread(Layer* layer_to_receive_animation);
   void PostAddInstantAnimationToMainThread(Layer* layer_to_receive_animation);
   void PostAddLongAnimationToMainThread(Layer* layer_to_receive_animation);
+  void PostSetDeferCommitsToMainThread(bool defer_commits);
   void PostSetNeedsCommitToMainThread();
   void PostSetNeedsUpdateLayersToMainThread();
   void PostSetNeedsRedrawToMainThread();
@@ -166,6 +164,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 
   virtual void DispatchAddAnimation(Layer* layer_to_receive_animation,
                                     double animation_duration);
+  void DispatchSetDeferCommits(bool defer_commits);
   void DispatchSetNeedsCommit();
   void DispatchSetNeedsUpdateLayers();
   void DispatchSetNeedsRedraw();
@@ -197,10 +196,13 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   Proxy* proxy() const {
     return layer_tree_host_ ? layer_tree_host_->proxy() : NULL;
   }
+  TaskGraphRunner* task_graph_runner() const {
+    return task_graph_runner_.get();
+  }
 
   bool TestEnded() const { return ended_; }
 
-  LayerTreeHost* layer_tree_host() { return layer_tree_host_.get(); }
+  LayerTreeHost* layer_tree_host();
   bool delegating_renderer() const { return delegating_renderer_; }
   FakeOutputSurface* output_surface() { return output_surface_; }
   int LastCommittedSourceFrameNumber(LayerTreeHostImpl* impl) const;
@@ -236,6 +238,9 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 
   scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
   scoped_ptr<base::Thread> impl_thread_;
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
+  scoped_ptr<TestGpuMemoryBufferManager> gpu_memory_buffer_manager_;
+  scoped_ptr<TaskGraphRunner> task_graph_runner_;
   base::CancelableClosure timeout_;
   scoped_refptr<TestContextProvider> compositor_contexts_;
   base::WeakPtr<LayerTreeTest> main_thread_weak_ptr_;

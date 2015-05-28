@@ -71,15 +71,15 @@ public:
     }
 
 protected:
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("aaclip");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(240, 120);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         // Initial pixel-boundary-aligned draw
         draw_rect_tests(canvas);
 
@@ -100,8 +100,6 @@ protected:
         canvas->translate(SkIntToScalar(50), 0);
         draw_rect_tests(canvas);
     }
-
-    virtual uint32_t onGetFlags() const SK_OVERRIDE { return kSkipPipe_Flag; }
 
 private:
     typedef skiagm::GM INHERITED;
@@ -156,15 +154,15 @@ public:
     CGImageGM() {}
 
 protected:
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("cgimage");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(800, 250);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         const struct {
             SkColorType fCT;
             SkAlphaType fAT;
@@ -186,8 +184,6 @@ protected:
             canvas->translate(info.width() + 10, 0);
         }
     }
-
-    virtual uint32_t onGetFlags() const SK_OVERRIDE { return kSkipPipe_Flag; }
 
 private:
     typedef skiagm::GM INHERITED;

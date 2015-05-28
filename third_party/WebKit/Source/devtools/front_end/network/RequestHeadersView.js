@@ -44,9 +44,21 @@ WebInspector.RequestHeadersView = function(request)
     this._showRequestHeadersText = false;
     this._showResponseHeadersText = false;
 
-    var outline = this.element.createChild("ol", "outline-disclosure");
-    var root = new TreeOutline(outline);
+    /** @type {?RegExp} */
+    this._filterRegex = null;
+    if (Runtime.experiments.isEnabled("networkRequestHeadersFilterInDetailsView")) {
+        this._filterInput = this.element.createChild("input", "filter-input");
+        this._filterInput.type = "text";
+        this._filterInput.placeholder = WebInspector.UIString("Filter headers");
+        this._filterInput.addEventListener("input", this._updateFilter.bind(this), false);
+        this._filterInput.addEventListener("keydown", this._onFilterKeyDown.bind(this), false);
+        this._filterInput.value = WebInspector.RequestHeadersView._requestHeaderFilterSetting.get() || "";
+    }
+
+    var root = new TreeOutline(true);
+    root.element.classList.add("outline-disclosure");
     root.expandTreeElementsWhenArrowing = true;
+    this.element.appendChild(root.element);
 
     var generalCategory = new WebInspector.RequestHeadersView.Category(root, "general", WebInspector.UIString("General"));
     generalCategory.hidden = false;
@@ -63,15 +75,7 @@ WebInspector.RequestHeadersView = function(request)
     this._requestPayloadCategory = new WebInspector.RequestHeadersView.Category(root, "requestPayload", WebInspector.UIString("Request Payload"));
 
 
-    /** @type {?RegExp} */
-    this._filterRegex = null;
     if (Runtime.experiments.isEnabled("networkRequestHeadersFilterInDetailsView")) {
-        this._filterInput = this.element.createChild("input", "filter-input");
-        this._filterInput.type = "text";
-        this._filterInput.placeholder = WebInspector.UIString("Filter headers");
-        this._filterInput.addEventListener("input", this._updateFilter.bind(this), false);
-        this._filterInput.addEventListener("keydown", this._onFilterKeyDown.bind(this), false);
-        this._filterInput.value = WebInspector.RequestHeadersView._requestHeaderFilterSetting.get() || "";
         this._updateFilter();
     }
 }
@@ -272,7 +276,7 @@ WebInspector.RequestHeadersView.prototype = {
             paramNameValue.appendChild(name);
             paramNameValue.appendChild(value);
 
-            var parmTreeElement = new TreeElement(paramNameValue, null, false);
+            var parmTreeElement = new TreeElement(paramNameValue);
             parmTreeElement.selectable = false;
             paramsTreeElement.appendChild(parmTreeElement);
         }
@@ -395,15 +399,15 @@ WebInspector.RequestHeadersView.prototype = {
             var statusCodeFragment = createDocumentFragment();
             statusCodeFragment.createChild("div", "header-name").textContent = WebInspector.UIString("Status Code") + ":";
 
-            var statusCodeImage = statusCodeFragment.createChild("div", "resource-status-image");
+            var statusCodeImage = statusCodeFragment.createChild("label", "resource-status-image", "dt-icon-label");
             statusCodeImage.title = this._request.statusCode + " " + this._request.statusText;
 
             if (this._request.statusCode < 300 || this._request.statusCode === 304)
-                statusCodeImage.classList.add("green-ball");
+                statusCodeImage.type = "green-ball";
             else if (this._request.statusCode < 400)
-                statusCodeImage.classList.add("orange-ball");
+                statusCodeImage.type = "orange-ball";
             else
-                statusCodeImage.classList.add("red-ball");
+                statusCodeImage.type = "red-ball";
 
             requestMethodElement.title = this._formatHeader(WebInspector.UIString("Request Method"), this._request.requestMethod);
 
@@ -452,7 +456,7 @@ WebInspector.RequestHeadersView.prototype = {
         if (provisionalHeaders) {
             var cautionText = WebInspector.UIString("Provisional headers are shown");
             var cautionFragment = createDocumentFragment();
-            cautionFragment.createChild("div", "warning-icon-small");
+            cautionFragment.createChild("label", "", "dt-icon-label").type = "warning-icon";
             cautionFragment.createChild("div", "caution").textContent = cautionText;
             var cautionTreeElement = new TreeElement(cautionFragment);
             cautionTreeElement.selectable = false;
@@ -541,7 +545,7 @@ WebInspector.RequestHeadersView.prototype = {
  */
 WebInspector.RequestHeadersView.Category = function(root, name, title)
 {
-    TreeElement.call(this, title || "", null, true);
+    TreeElement.call(this, title || "", true);
     this.selectable = false;
     this.toggleOnClick = true;
     this.hidden = true;
@@ -556,7 +560,7 @@ WebInspector.RequestHeadersView.Category.prototype = {
      */
     createLeaf: function()
     {
-        var leaf = new TreeElement("", null, false);
+        var leaf = new TreeElement();
         leaf.selectable = false;
         this.appendChild(leaf);
         return leaf;

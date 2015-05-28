@@ -27,6 +27,7 @@
 #define TimeRanges_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "core/CoreExport.h"
 #include "public/platform/WebTimeRange.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefCounted.h"
@@ -38,7 +39,7 @@ namespace blink {
 
 class ExceptionState;
 
-class TimeRanges : public RefCountedWillBeGarbageCollected<TimeRanges>, public ScriptWrappable {
+class CORE_EXPORT TimeRanges : public RefCountedWillBeGarbageCollected<TimeRanges>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     // We consider all the Ranges to be semi-bounded as follow: [start, end[
@@ -84,7 +85,7 @@ public:
             return range.m_start >= m_end;
         }
 
-        void trace(Visitor*) { }
+        DEFINE_INLINE_TRACE() { }
     };
 
     static PassRefPtrWillBeRawPtr<TimeRanges> create()
@@ -111,7 +112,7 @@ public:
 
     double nearest(double newPlaybackPosition, double currentPlaybackPosition) const;
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     TimeRanges() { }

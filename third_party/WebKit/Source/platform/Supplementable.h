@@ -29,6 +29,7 @@
 #include "platform/heap/Handle.h"
 #include "wtf/Assertions.h"
 #include "wtf/HashMap.h"
+#include "wtf/Noncopyable.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
 
@@ -99,12 +100,12 @@ struct SupplementableTraits;
 
 template<typename T>
 struct SupplementableTraits<T, true> {
-    typedef RawPtr<SupplementBase<T, true> > SupplementArgumentType;
+    typedef RawPtr<SupplementBase<T, true>> SupplementArgumentType;
 };
 
 template<typename T>
 struct SupplementableTraits<T, false> {
-    typedef PassOwnPtr<SupplementBase<T, false> > SupplementArgumentType;
+    typedef PassOwnPtr<SupplementBase<T, false>> SupplementArgumentType;
 };
 
 template<bool>
@@ -123,7 +124,7 @@ public:
     //
     // When that transition type is removed (or its use is substantially
     // reduced), remove this dummy trace method also.
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 };
 
 template<typename T, bool isGarbageCollected = false>
@@ -155,20 +156,22 @@ class SupplementableTracing;
 template<typename T>
 class SupplementableTracing<T, true> : public GarbageCollectedMixin {
 public:
-    virtual void trace(Visitor* visitor)
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_supplements);
     }
 
 protected:
-    typedef HeapHashMap<const char*, Member<SupplementBase<T, true> >, PtrHash<const char*> > SupplementMap;
+    typedef HeapHashMap<const char*, Member<SupplementBase<T, true>>, PtrHash<const char*>> SupplementMap;
     SupplementMap m_supplements;
 };
 
 template<typename T>
 class SupplementableTracing<T, false> {
+    WTF_MAKE_NONCOPYABLE(SupplementableTracing);
 protected:
-    typedef HashMap<const char*, OwnPtr<SupplementBase<T, false> >, PtrHash<const char*> > SupplementMap;
+    SupplementableTracing() { }
+    typedef HashMap<const char*, OwnPtr<SupplementBase<T, false>>, PtrHash<const char*>> SupplementMap;
     SupplementMap m_supplements;
 };
 
@@ -224,12 +227,12 @@ template<typename T>
 class Supplementable : public SupplementableBase<T, false> { };
 
 template<typename T>
-struct ThreadingTrait<SupplementBase<T, true> > {
+struct ThreadingTrait<SupplementBase<T, true>> {
     static const ThreadAffinity Affinity = ThreadingTrait<T>::Affinity;
 };
 
 template<typename T>
-struct ThreadingTrait<SupplementableBase<T, true> > {
+struct ThreadingTrait<SupplementableBase<T, true>> {
     static const ThreadAffinity Affinity = ThreadingTrait<T>::Affinity;
 };
 

@@ -21,7 +21,6 @@ from chromite.lib import cgroups
 from chromite.lib import cros_build_lib
 from chromite.lib import osutils
 from chromite.lib import perf_uploader
-from chromite.lib import retry_util
 from chromite.lib import timeout_util
 
 
@@ -276,6 +275,7 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
                             priority=self.suite_config.priority,
                             timeout_mins=self.suite_config.timeout_mins,
                             retry=self.suite_config.retry,
+                            max_retries=self.suite_config.max_retries,
                             minimum_duts=self.suite_config.minimum_duts,
                             suite_min_duts=self.suite_config.suite_min_duts,
                             debug=debug)
@@ -370,7 +370,6 @@ class ImageTestStage(generic_stages.BoardSpecificBuilderStage,
     cros_ver = self._run.GetVersionInfo(self._run.buildroot).VersionString()
     chrome_ver = self._run.DetermineChromeVersion()
     for test_name, perf_values in perf_entries.iteritems():
-      retry_util.RetryException(perf_uploader.PerfUploadingError, 3,
-                                perf_uploader.UploadPerfValues,
-                                perf_values, platform_name, cros_ver,
-                                chrome_ver, test_name)
+      perf_uploader.UploadPerfValues(perf_values, platform_name, test_name,
+                                     cros_version=cros_ver,
+                                     chrome_version=chrome_ver)

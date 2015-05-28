@@ -23,6 +23,7 @@ class SingleThreadTaskRunner;
 namespace net {
 class GrowableIOBuffer;
 class HttpResponseHeaders;
+class UploadDataStream;
 }  // namespace net
 
 namespace cronet {
@@ -80,10 +81,13 @@ class CronetURLRequestAdapter : public net::URLRequest::Delegate {
   // Adds a header to the request before it starts.
   void AddRequestHeader(const std::string& name, const std::string& value);
 
+  // Adds a request body to the request before it starts.
+  void SetUpload(scoped_ptr<net::UploadDataStream> upload);
+
   // Methods called on any thread.
 
   // Posts tasks to network thread.
-  bool PostTaskToNetworkThread(const tracked_objects::Location& from_here,
+  void PostTaskToNetworkThread(const tracked_objects::Location& from_here,
                                const base::Closure& task);
 
   // Returns true if called on network thread.
@@ -121,6 +125,10 @@ class CronetURLRequestAdapter : public net::URLRequest::Delegate {
   // prior to decompression.
   int64 GetTotalReceivedBytes() const;
 
+  // Bypasses cache. If context is not set up to use cache, this call has no
+  // effect.
+  void DisableCache();
+
   // net::URLRequest::Delegate overrides.
   void OnReceivedRedirect(net::URLRequest* request,
                           const net::RedirectInfo& redirect_info,
@@ -139,7 +147,9 @@ class CronetURLRequestAdapter : public net::URLRequest::Delegate {
   const GURL initial_url_;
   const net::RequestPriority initial_priority_;
   std::string initial_method_;
+  int load_flags_;
   net::HttpRequestHeaders initial_request_headers_;
+  scoped_ptr<net::UploadDataStream> upload_;
 
   scoped_refptr<net::IOBufferWithSize> read_buffer_;
   scoped_ptr<net::URLRequest> url_request_;

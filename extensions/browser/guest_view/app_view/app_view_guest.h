@@ -31,9 +31,7 @@ class AppViewGuest : public GuestView<AppViewGuest>,
       int guest_instance_id,
       const std::string& guest_extension_id);
 
-  static GuestViewBase* Create(content::BrowserContext* browser_context,
-                               content::WebContents* owner_web_contents,
-                               int guest_instance_id);
+  static GuestViewBase* Create(content::WebContents* owner_web_contents);
 
   // ExtensionFunctionDispatcher::Delegate implementation.
   WindowController* GetExtensionWindowController() const override;
@@ -53,20 +51,18 @@ class AppViewGuest : public GuestView<AppViewGuest>,
                                   content::MediaStreamType type) override;
 
   // GuestViewBase implementation.
-  const char* GetAPINamespace() const override;
-  int GetTaskPrefix() const override;
+  bool CanRunInDetachedState() const override;
   void CreateWebContents(const base::DictionaryValue& create_params,
                          const WebContentsCreatedCallback& callback) override;
-  void DidAttachToEmbedder() override;
-  void DidInitialize() override;
+  void DidInitialize(const base::DictionaryValue& create_params) override;
+  const char* GetAPINamespace() const override;
+  int GetTaskPrefix() const override;
 
   // Sets the AppDelegate for this guest.
   void SetAppDelegateForTest(AppDelegate* delegate);
 
  private:
-  AppViewGuest(content::BrowserContext* browser_context,
-               content::WebContents* owner_web_contents,
-               int guest_instance_id);
+  explicit AppViewGuest(content::WebContents* owner_web_contents);
 
   ~AppViewGuest() override;
 

@@ -9,6 +9,7 @@
 #define GrGLVertexShader_DEFINED
 
 #include "GrGLShaderBuilder.h"
+#include "GrGeometryProcessor.h"
 
 class GrGLVarying;
 
@@ -16,12 +17,10 @@ class GrGLVertexBuilder : public GrGLShaderBuilder {
 public:
     GrGLVertexBuilder(GrGLProgramBuilder* program);
 
-    /** returns the expected position output */
-    const char* glPosition() const { return "pos3"; }
-    const char* positionCoords() const { return "position"; }
-    const char* localCoords() const { return "localCoords"; }
+    void transformToNormalizedDeviceSpace(const GrShaderVar& posVar);
+    void emitAttributes(const GrGeometryProcessor& gp);
 
-    void addAttribute(const GrGeometryProcessor::GrAttribute* attr) {
+    void addAttribute(const GrGeometryProcessor::Attribute* attr) {
         this->addAttribute(GrShaderVar(attr->fName,
                                        GrVertexAttribTypeToSLType(attr->fType),
                                        GrShaderVar::kAttribute_TypeModifier));
@@ -36,10 +35,8 @@ private:
     /*
      * private helpers for compilation by GrGLProgramBuilder
      */
-    void transformToNormalizedDeviceSpace();
-    void emitAttributes(const GrGeometryProcessor& gp);
     void bindVertexAttributes(GrGLuint programID);
-    bool compileAndAttachShaders(GrGLuint programId, SkTDArray<GrGLuint>* shaderIds) const;
+    bool compileAndAttachShaders(GrGLuint programId, SkTDArray<GrGLuint>* shaderIds);
 
     // an internal call which checks for uniquness of a var before adding it to the list of inputs
     bool addAttribute(const GrShaderVar& var);

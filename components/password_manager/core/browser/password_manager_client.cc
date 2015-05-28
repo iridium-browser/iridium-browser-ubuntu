@@ -14,16 +14,19 @@ bool PasswordManagerClient::IsPasswordManagerEnabledForCurrentPage() const {
   return true;
 }
 
-base::FieldTrial::Probability
-PasswordManagerClient::GetProbabilityForExperiment(
-    const std::string& experiment_name) {
-  return 0;
+void PasswordManagerClient::AutofillResultsComputed() {
 }
 
-void PasswordManagerClient::AskUserAndMaybeReportURL(const GURL& url) const {
+void PasswordManagerClient::PasswordWasAutofilled(
+    const autofill::PasswordFormMap& best_matches) const {
 }
 
-bool PasswordManagerClient::IsPasswordSyncEnabled(CustomPassphraseState state) {
+void PasswordManagerClient::PasswordAutofillWasBlocked(
+    const autofill::PasswordFormMap& best_matches) const {
+}
+
+bool PasswordManagerClient::IsPasswordSyncEnabled(
+    CustomPassphraseState state) const {
   return false;
 }
 
@@ -36,10 +39,6 @@ void PasswordManagerClient::LogSavePasswordProgress(
 }
 
 bool PasswordManagerClient::IsLoggingActive() const {
-  return false;
-}
-
-bool PasswordManagerClient::ShouldAskUserToSubmitURL(const GURL& url) {
   return false;
 }
 
@@ -63,11 +62,11 @@ PasswordManagerClient::GetAuthorizationPromptPolicy(
   return PasswordStore::DISALLOW_PROMPT;
 }
 
-bool PasswordManagerClient::DidLastPageLoadEncounterSSLErrors() {
+bool PasswordManagerClient::DidLastPageLoadEncounterSSLErrors() const {
   return false;
 }
 
-bool PasswordManagerClient::IsOffTheRecord() {
+bool PasswordManagerClient::IsOffTheRecord() const {
   return false;
 }
 
@@ -80,7 +79,7 @@ PasswordManagerClient::GetAutofillManagerForMainFrame() {
   return nullptr;
 }
 
-const GURL& PasswordManagerClient::GetMainFrameURL() {
+const GURL& PasswordManagerClient::GetMainFrameURL() const {
   return GURL::EmptyGURL();
 }
 

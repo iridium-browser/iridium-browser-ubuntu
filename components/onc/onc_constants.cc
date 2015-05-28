@@ -90,6 +90,7 @@ namespace cellular {
 const char kActivationState[] = "ActivationState";
 const char kActivated[] = "Activated";
 const char kActivating[] = "Activating";
+const char kAutoConnect[] = "AutoConnect";
 const char kNotActivated[] = "NotActivated";
 const char kPartiallyActivated[] = "PartiallyActivated";
 const char kActivationType[] = "ActivationType";
@@ -114,15 +115,26 @@ const char kMIN[] = "MIN";
 const char kModelID[] = "ModelID";
 const char kNetworkTechnology[] = "NetworkTechnology";
 const char kPRLVersion[] = "PRLVersion";
-const char kProviderRequiresRoaming[] = "ProviderRequiresRoaming";
+const char kRoamingHome[] = "Home";
+const char kRoamingRequired[] = "Required";
+const char kRoamingRoaming[] = "Roaming";
 const char kRoamingState[] = "RoamingState";
-const char kHome[] = "Home";
-const char kRoaming[] = "Roaming";
 const char kServingOperator[] = "ServingOperator";
+const char kSignalStrength[] = "SignalStrength";
 const char kSIMLockStatus[] = "SIMLockStatus";
 const char kSIMPresent[] = "SIMPresent";
 const char kSupportedCarriers[] = "SupportedCarriers";
 const char kSupportNetworkScan[] = "SupportNetworkScan";
+const char kTechnologyCdma1Xrtt[] = "CDMA1XRTT";
+const char kTechnologyEdge[] = "EDGE";
+const char kTechnologyEvdo[] = "EVDO";
+const char kTechnologyGprs[] = "GPRS";
+const char kTechnologyGsm[] = "GSM";
+const char kTechnologyHspa[] = "HSPA";
+const char kTechnologyHspaPlus[] = "HSPAPlus";
+const char kTechnologyLte[] = "LTE";
+const char kTechnologyLteAdvanced[] = "LTEAdvanced";
+const char kTechnologyUmts[] = "UMTS";
 }  // namespace cellular
 
 namespace cellular_provider {
@@ -347,6 +359,10 @@ const char kOTP[] = "OTP";
 const char kPassword[] = "Password";
 const char kPasswordAndOTP[] = "PasswordAndOTP";
 }  // openvpn_user_auth_type
+
+namespace third_party_vpn {
+const char kExtensionID[] = "ExtensionID";
+}  // third_party_vpn
 
 namespace verify_x509 {
 const char kName[] = "Name";

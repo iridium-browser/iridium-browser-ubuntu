@@ -48,13 +48,12 @@ public:
     virtual bool hasLastData() override;
 
     // ActiveDOMObject implementation.
-    virtual bool canSuspend() const { return true; }
     virtual void suspend() override;
     virtual void resume() override;
     virtual void stop() override;
     virtual bool hasPendingActivity() const override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     enum State {

@@ -64,6 +64,7 @@ void ContentLayer::SetProperties(int id,
                                  bool should_override_content_alpha,
                                  float content_alpha_override,
                                  float saturation,
+                                 float brightness,
                                  const gfx::Rect& desired_bounds,
                                  const gfx::Size& content_size) {
   scoped_refptr<cc::Layer> content_layer =
@@ -72,7 +73,8 @@ void ContentLayer::SetProperties(int id,
   bool content_layer_draws = DoesLeafDrawContents(content_layer);
 
   scoped_refptr<ThumbnailLayer> static_layer =
-      tab_content_manager_->GetStaticLayer(id, !content_layer_draws);
+      tab_content_manager_->GetStaticLayer(
+          id, !(can_use_live_layer && content_layer_draws));
 
   ClipStaticLayer(static_layer, desired_bounds);
 
@@ -127,15 +129,24 @@ void ContentLayer::SetProperties(int id,
 
   layer_->SetBounds(content_bounds);
 
-  // Only worry about saturation on the static layer
+  // Only worry about saturation on the static layer.
   if (static_layer.get()) {
-    if (saturation != saturation_) {
-      saturation_ = saturation;
-      cc::FilterOperations filters;
-      if (saturation_ < 1.0f)
-        filters.Append(cc::FilterOperation::CreateSaturateFilter(saturation_));
-      static_layer->layer()->SetFilters(filters);
+    static_filter_operations_.Clear();
+    if (saturation < 1.0f) {
+      static_filter_operations_.Append(
+          cc::FilterOperation::CreateSaturateFilter(saturation));
     }
+    static_layer->layer()->SetFilters(static_filter_operations_);
+  }
+
+  // Only worry about brightness on the content layer.
+  if (content_layer.get()) {
+    content_filter_operations_.Clear();
+    if (brightness < 1.0f) {
+      content_filter_operations_.Append(
+          cc::FilterOperation::CreateBrightnessFilter(brightness));
+    }
+    content_layer->SetFilters(content_filter_operations_);
   }
 }
 
@@ -153,7 +164,6 @@ ContentLayer::ContentLayer(TabContentManager* tab_content_manager)
     : layer_(cc::Layer::Create()),
       content_attached_(false),
       static_attached_(false),
-      saturation_(1.0f),
       tab_content_manager_(tab_content_manager) {
 }
 
@@ -210,7 +220,6 @@ void ContentLayer::SetStaticLayer(
   }
   static_layer_ = new_static_layer;
   static_layer_->AddSelfToParentOrReplaceAt(layer_, content_attached_ ? 1 : 0);
-  saturation_ = -1.0f;
   static_layer_->layer()->SetIsDrawable(true);
   static_attached_ = true;
 }

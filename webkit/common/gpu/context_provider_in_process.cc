@@ -4,13 +4,11 @@
 
 #include "webkit/common/gpu/context_provider_in_process.h"
 
-#include <set>
-
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "cc/output/managed_memory_policy.h"
+#include "gpu/blink/webgraphicscontext3d_in_process_command_buffer_impl.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "webkit/common/gpu/grcontext_for_webgraphicscontext3d.h"
 
@@ -111,6 +109,10 @@ bool ContextProviderInProcess::BindToCurrentThread() {
   return true;
 }
 
+void ContextProviderInProcess::DetachFromThread() {
+  context_thread_checker_.DetachFromThread();
+}
+
 void ContextProviderInProcess::InitializeCapabilities() {
   capabilities_.gpu = context3d_->GetImplementation()->capabilities();
 
@@ -156,6 +158,14 @@ class GrContext* ContextProviderInProcess::GrContext() {
 
   gr_context_.reset(new GrContextForWebGraphicsContext3D(context3d_.get()));
   return gr_context_->get();
+}
+
+void ContextProviderInProcess::SetupLock() {
+  context3d_->SetLock(&context_lock_);
+}
+
+base::Lock* ContextProviderInProcess::GetLock() {
+  return &context_lock_;
 }
 
 bool ContextProviderInProcess::IsContextLost() {

@@ -1,4 +1,0 @@
-include_rules = [
-  "+mojo/application_manager",
-  "+shell/shell_test_helper.h",
-]

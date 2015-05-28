@@ -63,6 +63,9 @@ enum ModelType {
   AUTOFILL_PROFILE,
   // An autofill object.
   AUTOFILL,
+  // Credit cards and addresses synced from the user's account. These are
+  // read-only on the client.
+  AUTOFILL_WALLET_DATA,
   // A themes object.
   THEMES,
   // A typed_url object.
@@ -323,6 +326,14 @@ SYNC_EXPORT bool IsProxyType(ModelType model_type);
 // clients.
 // TODO(haitaol): Make entries of act-once data types immutable.
 SYNC_EXPORT bool IsActOnceDataType(ModelType model_type);
+
+// Returns true if |model_type| requires its root folder to be explicitly
+// created on the server during initial sync.
+SYNC_EXPORT bool IsTypeWithServerGeneratedRoot(ModelType model_type);
+
+// Returns true if root folder for |model_type| is created on the client when
+// that type is initially synced.
+SYNC_EXPORT bool IsTypeWithClientGeneratedRoot(ModelType model_type);
 
 // Returns set of model types that should be backed up before first sync.
 SYNC_EXPORT ModelTypeSet BackupTypes();

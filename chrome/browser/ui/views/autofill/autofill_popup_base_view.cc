@@ -9,6 +9,7 @@
 #include "base/message_loop/message_loop.h"
 #include "chrome/browser/ui/autofill/popup_constants.h"
 #include "ui/views/border.h"
+#include "ui/views/focus/focus_manager.h"
 #include "ui/views/widget/widget.h"
 
 namespace autofill {
@@ -28,9 +29,9 @@ const SkColor AutofillPopupBaseView::kWarningTextColor =
 
 AutofillPopupBaseView::AutofillPopupBaseView(
     AutofillPopupViewDelegate* delegate,
-    views::Widget* observing_widget)
+    views::FocusManager* focus_manager)
     : delegate_(delegate),
-      observing_widget_(observing_widget),
+      focus_manager_(focus_manager),
       weak_ptr_factory_(this) {}
 
 AutofillPopupBaseView::~AutofillPopupBaseView() {
@@ -44,14 +45,11 @@ AutofillPopupBaseView::~AutofillPopupBaseView() {
 void AutofillPopupBaseView::DoShow() {
   const bool initialize_widget = !GetWidget();
   if (initialize_widget) {
-    observing_widget_->AddObserver(this);
-
-    views::FocusManager* focus_manager = observing_widget_->GetFocusManager();
-    focus_manager->RegisterAccelerator(
+    focus_manager_->RegisterAccelerator(
         ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE),
         ui::AcceleratorManager::kNormalPriority,
         this);
-    focus_manager->RegisterAccelerator(
+    focus_manager_->RegisterAccelerator(
         ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE),
         ui::AcceleratorManager::kNormalPriority,
         this);
@@ -68,6 +66,8 @@ void AutofillPopupBaseView::DoShow() {
 
     // No animation for popup appearance (too distracting).
     widget->SetVisibilityAnimationTransition(views::Widget::ANIMATE_HIDE);
+
+    show_time_ = base::Time::Now();
   }
 
   SetBorder(views::Border::CreateSolidBorder(kPopupBorderThickness,
@@ -100,8 +100,7 @@ void AutofillPopupBaseView::DoHide() {
 }
 
 void AutofillPopupBaseView::RemoveObserver() {
-  observing_widget_->GetFocusManager()->UnregisterAccelerators(this);
-  observing_widget_->RemoveObserver(this);
+  focus_manager_->UnregisterAccelerators(this);
   views::WidgetFocusManager::GetInstance()->RemoveFocusChangeListener(this);
 }
 
@@ -110,17 +109,9 @@ void AutofillPopupBaseView::DoUpdateBoundsAndRedrawPopup() {
   SchedulePaint();
 }
 
-void AutofillPopupBaseView::OnNativeFocusChange(
-    gfx::NativeView focused_before,
-    gfx::NativeView focused_now) {
+void AutofillPopupBaseView::OnNativeFocusChanged(gfx::NativeView focused_now) {
   if (GetWidget() && GetWidget()->GetNativeView() != focused_now)
     HideController();
-}
-
-void AutofillPopupBaseView::OnWidgetBoundsChanged(views::Widget* widget,
-                                                  const gfx::Rect& new_bounds) {
-  DCHECK_EQ(widget, observing_widget_);
-  HideController();
 }
 
 void AutofillPopupBaseView::OnMouseCaptureLost() {
@@ -152,6 +143,18 @@ void AutofillPopupBaseView::OnMouseExited(const ui::MouseEvent& event) {
 }
 
 void AutofillPopupBaseView::OnMouseMoved(const ui::MouseEvent& event) {
+  // A synthesized mouse move will be sent when the popup is first shown.
+  // Don't preview a suggestion if the mouse happens to be hovering there.
+#if defined(OS_WIN)
+  // TODO(rouslan): Use event.time_stamp() and ui::EventTimeForNow() when they
+  // become comparable. http://crbug.com/453559
+  if (base::Time::Now() - show_time_ <= base::TimeDelta::FromMilliseconds(50))
+    return;
+#else
+  if (event.flags() & ui::EF_IS_SYNTHESIZED)
+    return;
+#endif
+
   if (HitTestPoint(event.location()))
     SetSelection(event.location());
   else

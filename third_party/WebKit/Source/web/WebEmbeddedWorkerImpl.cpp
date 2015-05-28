@@ -33,12 +33,12 @@
 
 #include "core/dom/CrossThreadTask.h"
 #include "core/dom/Document.h"
+#include "core/fetch/SubstituteData.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/WorkerDebuggerAgent.h"
 #include "core/inspector/WorkerInspectorController.h"
 #include "core/loader/FrameLoadRequest.h"
-#include "core/loader/SubstituteData.h"
 #include "core/workers/WorkerClients.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkerInspectorProxy.h"
@@ -46,24 +46,26 @@
 #include "core/workers/WorkerScriptLoader.h"
 #include "core/workers/WorkerScriptLoaderClient.h"
 #include "core/workers/WorkerThreadStartupData.h"
+#include "modules/serviceworkers/ServiceWorkerContainerClient.h"
 #include "modules/serviceworkers/ServiceWorkerThread.h"
 #include "platform/SharedBuffer.h"
 #include "platform/heap/Handle.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/ContentSecurityPolicyResponseHeaders.h"
 #include "public/platform/Platform.h"
+#include "public/platform/WebServiceWorkerProvider.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/web/WebDevToolsAgent.h"
 #include "public/web/WebServiceWorkerContextClient.h"
 #include "public/web/WebServiceWorkerNetworkProvider.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebView.h"
-#include "public/web/WebWorkerPermissionClientProxy.h"
+#include "public/web/WebWorkerContentSettingsClientProxy.h"
 #include "web/ServiceWorkerGlobalScopeClientImpl.h"
 #include "web/ServiceWorkerGlobalScopeProxy.h"
 #include "web/WebDataSourceImpl.h"
 #include "web/WebLocalFrameImpl.h"
-#include "web/WorkerPermissionClient.h"
+#include "web/WorkerContentSettingsClient.h"
 #include "wtf/Functional.h"
 
 namespace blink {
@@ -110,6 +112,8 @@ public:
     bool failed() const { return m_scriptLoader->failed(); }
     const KURL& url() const { return m_scriptLoader->responseURL(); }
     String script() const { return m_scriptLoader->script(); }
+    const Vector<char>* cachedMetadata() const { return m_scriptLoader->cachedMetadata(); }
+    PassOwnPtr<Vector<char>> releaseCachedMetadata() const { return m_scriptLoader->releaseCachedMetadata(); }
     PassRefPtr<ContentSecurityPolicy> releaseContentSecurityPolicy() { return m_contentSecurityPolicy.release(); }
 
 private:
@@ -122,41 +126,9 @@ private:
     RefPtr<ContentSecurityPolicy> m_contentSecurityPolicy;
 };
 
-class WebEmbeddedWorkerImpl::LoaderProxy : public WorkerLoaderProxy {
-public:
-    static PassOwnPtr<LoaderProxy> create(WebEmbeddedWorkerImpl& embeddedWorker)
-    {
-        return adoptPtr(new LoaderProxy(embeddedWorker));
-    }
-
-    virtual void postTaskToLoader(PassOwnPtr<ExecutionContextTask> task) override
-    {
-        toWebLocalFrameImpl(m_embeddedWorker.m_mainFrame)->frame()->document()->postTask(task);
-    }
-
-    virtual bool postTaskToWorkerGlobalScope(PassOwnPtr<ExecutionContextTask> task) override
-    {
-        if (m_embeddedWorker.m_askedToTerminate || !m_embeddedWorker.m_workerThread)
-            return false;
-        m_embeddedWorker.m_workerThread->postTask(task);
-        return !m_embeddedWorker.m_workerThread->terminated();
-    }
-
-private:
-    explicit LoaderProxy(WebEmbeddedWorkerImpl& embeddedWorker)
-        : m_embeddedWorker(embeddedWorker)
-    {
-    }
-
-    // Not owned, embedded worker owns this.
-    WebEmbeddedWorkerImpl& m_embeddedWorker;
-};
-
-WebEmbeddedWorker* WebEmbeddedWorker::create(
-    WebServiceWorkerContextClient* client,
-    WebWorkerPermissionClientProxy* permissionClient)
+WebEmbeddedWorker* WebEmbeddedWorker::create(WebServiceWorkerContextClient* client, WebWorkerContentSettingsClientProxy* contentSettingsClient)
 {
-    return new WebEmbeddedWorkerImpl(adoptPtr(client), adoptPtr(permissionClient));
+    return new WebEmbeddedWorkerImpl(adoptPtr(client), adoptPtr(contentSettingsClient));
 }
 
 static HashSet<WebEmbeddedWorkerImpl*>& runningWorkerInstances()
@@ -165,11 +137,9 @@ static HashSet<WebEmbeddedWorkerImpl*>& runningWorkerInstances()
     return set;
 }
 
-WebEmbeddedWorkerImpl::WebEmbeddedWorkerImpl(
-    PassOwnPtr<WebServiceWorkerContextClient> client,
-    PassOwnPtr<WebWorkerPermissionClientProxy> permissionClient)
+WebEmbeddedWorkerImpl::WebEmbeddedWorkerImpl(PassOwnPtr<WebServiceWorkerContextClient> client, PassOwnPtr<WebWorkerContentSettingsClientProxy> ContentSettingsClient)
     : m_workerContextClient(client)
-    , m_permissionClient(permissionClient)
+    , m_contentSettingsClient(ContentSettingsClient)
     , m_workerInspectorProxy(WorkerInspectorProxy::create())
     , m_webView(0)
     , m_mainFrame(0)
@@ -197,6 +167,8 @@ WebEmbeddedWorkerImpl::~WebEmbeddedWorkerImpl()
 
     m_webView->close();
     m_mainFrame->close();
+    if (m_loaderProxy)
+        m_loaderProxy->detachProvider(this);
 }
 
 void WebEmbeddedWorkerImpl::terminateAll()
@@ -294,6 +266,20 @@ void WebEmbeddedWorkerImpl::postMessageToPageInspector(const String& message)
     pageInspector->dispatchMessageFromWorker(message);
 }
 
+void WebEmbeddedWorkerImpl::postTaskToLoader(PassOwnPtr<ExecutionContextTask> task)
+{
+    toWebLocalFrameImpl(m_mainFrame)->frame()->document()->postTask(FROM_HERE, task);
+}
+
+bool WebEmbeddedWorkerImpl::postTaskToWorkerGlobalScope(PassOwnPtr<ExecutionContextTask> task)
+{
+    if (m_askedToTerminate || !m_workerThread)
+        return false;
+
+    m_workerThread->postTask(FROM_HERE, task);
+    return !m_workerThread->terminated();
+}
+
 void WebEmbeddedWorkerImpl::prepareShadowPageForLoader()
 {
     // Create 'shadow page', which is never displayed and is used mainly to
@@ -304,9 +290,16 @@ void WebEmbeddedWorkerImpl::prepareShadowPageForLoader()
     // with SharedWorker.
     ASSERT(!m_webView);
     m_webView = WebView::create(0);
+    WebSettings* settings = m_webView->settings();
     // FIXME: http://crbug.com/363843. This needs to find a better way to
     // not create graphics layers.
-    m_webView->settings()->setAcceleratedCompositingEnabled(false);
+    settings->setAcceleratedCompositingEnabled(false);
+    // Currently we block all mixed-content requests from a ServiceWorker.
+    // FIXME: When we support FetchEvent.default(), we should relax this
+    // restriction.
+    settings->setStrictMixedContentChecking(true);
+    settings->setAllowDisplayOfInsecureContent(false);
+    settings->setAllowRunningOfInsecureContent(false);
     m_mainFrame = WebLocalFrame::create(this);
     m_webView->setMainFrame(m_mainFrame);
     m_webView->setDevToolsAgentClient(this);
@@ -359,9 +352,9 @@ void WebEmbeddedWorkerImpl::didFinishDocumentLoad(WebLocalFrame* frame)
         bind(&WebEmbeddedWorkerImpl::onScriptLoaderFinished, this));
 }
 
-void WebEmbeddedWorkerImpl::sendMessageToInspectorFrontend(const WebString& message)
+void WebEmbeddedWorkerImpl::sendProtocolMessage(int callId, const WebString& message, const WebString& state)
 {
-    m_workerContextClient->dispatchDevToolsMessage(message);
+    m_workerContextClient->sendDevToolsMessage(callId, message, state);
 }
 
 void WebEmbeddedWorkerImpl::resumeStartup()
@@ -372,11 +365,6 @@ void WebEmbeddedWorkerImpl::resumeStartup()
         loadShadowPage();
     else if (waitingForDebuggerState == WaitingForDebuggerAfterScriptLoaded)
         startWorkerThread();
-}
-
-void WebEmbeddedWorkerImpl::saveAgentRuntimeState(const WebString& inspectorState)
-{
-    m_workerContextClient->saveDevToolsAgentState(inspectorState);
 }
 
 void WebEmbeddedWorkerImpl::onScriptLoaderFinished()
@@ -394,6 +382,8 @@ void WebEmbeddedWorkerImpl::onScriptLoaderFinished()
     }
 
     Platform::current()->histogramCustomCounts("ServiceWorker.ScriptSize", m_mainScriptLoader->script().length(), 1000, 5000000, 50);
+    if (m_mainScriptLoader->cachedMetadata())
+        Platform::current()->histogramCustomCounts("ServiceWorker.ScriptCachedMetadataSize", m_mainScriptLoader->cachedMetadata()->size(), 1000, 50000000, 50);
 
     if (m_pauseAfterDownloadState == DoPauseAfterDownload) {
         m_pauseAfterDownloadState = IsPausedAfterDownload;
@@ -418,29 +408,32 @@ void WebEmbeddedWorkerImpl::startWorkerThread()
     SecurityOrigin* starterOrigin = document->securityOrigin();
 
     OwnPtrWillBeRawPtr<WorkerClients> workerClients = WorkerClients::create();
-    providePermissionClientToWorker(workerClients.get(), m_permissionClient.release());
+    provideContentSettingsClientToWorker(workerClients.get(), m_contentSettingsClient.release());
     provideServiceWorkerGlobalScopeClientToWorker(workerClients.get(), ServiceWorkerGlobalScopeClientImpl::create(*m_workerContextClient));
+    provideServiceWorkerContainerClientToWorker(workerClients.get(), adoptPtr(m_workerContextClient->createServiceWorkerProvider()));
 
     // We need to set the CSP to both the shadow page's document and the ServiceWorkerGlobalScope.
     document->initContentSecurityPolicy(m_mainScriptLoader->releaseContentSecurityPolicy());
 
     KURL scriptURL = m_mainScriptLoader->url();
-    OwnPtrWillBeRawPtr<WorkerThreadStartupData> startupData =
+    OwnPtr<WorkerThreadStartupData> startupData =
         WorkerThreadStartupData::create(
             scriptURL,
             m_workerStartData.userAgent,
             m_mainScriptLoader->script(),
+            m_mainScriptLoader->releaseCachedMetadata(),
             startMode,
             document->contentSecurityPolicy()->deprecatedHeader(),
             document->contentSecurityPolicy()->deprecatedHeaderType(),
             starterOrigin,
-            workerClients.release());
+            workerClients.release(),
+            static_cast<blink::V8CacheOptions>(m_workerStartData.v8CacheOptions));
 
     m_mainScriptLoader.clear();
 
     m_workerGlobalScopeProxy = ServiceWorkerGlobalScopeProxy::create(*this, *document, *m_workerContextClient);
-    m_loaderProxy = LoaderProxy::create(*this);
-    m_workerThread = ServiceWorkerThread::create(*m_loaderProxy, *m_workerGlobalScopeProxy, startupData.release());
+    m_loaderProxy = WorkerLoaderProxy::create(this);
+    m_workerThread = ServiceWorkerThread::create(m_loaderProxy, *m_workerGlobalScopeProxy, startupData.release());
     m_workerThread->start();
     m_workerInspectorProxy->workerThreadCreated(document, m_workerThread.get(), scriptURL);
 }

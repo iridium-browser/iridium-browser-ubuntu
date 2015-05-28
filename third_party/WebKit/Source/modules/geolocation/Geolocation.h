@@ -55,7 +55,7 @@ class Geolocation final
 public:
     static Geolocation* create(ExecutionContext*);
     virtual ~Geolocation();
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     virtual void stop() override;
     Document* document() const;
@@ -102,8 +102,8 @@ private:
 
     explicit Geolocation(ExecutionContext*);
 
-    typedef HeapVector<Member<GeoNotifier> > GeoNotifierVector;
-    typedef HeapHashSet<Member<GeoNotifier> > GeoNotifierSet;
+    typedef HeapVector<Member<GeoNotifier>> GeoNotifierVector;
+    typedef HeapHashSet<Member<GeoNotifier>> GeoNotifierSet;
 
     bool hasListeners() const { return !m_oneShots.isEmpty() || !m_watchers.isEmpty(); }
 

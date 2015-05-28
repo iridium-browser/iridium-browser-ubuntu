@@ -22,6 +22,7 @@ SSLConfig::SSLConfig()
       version_min(kDefaultSSLVersionMin),
       version_max(SSLClientSocket::GetMaxSupportedSSLVersion()),
       version_fallback_min(kDefaultSSLVersionFallbackMin),
+      enable_deprecated_cipher_suites(false),
       channel_id_enabled(true),
       false_start_enabled(true),
       signed_cert_timestamps_enabled(true),
@@ -29,7 +30,9 @@ SSLConfig::SSLConfig()
       send_client_cert(false),
       verify_ev_cert(false),
       version_fallback(false),
-      cert_io_enabled(true) {
+      cert_io_enabled(true),
+      fastradio_padding_enabled(false),
+      fastradio_padding_eligible(false) {
 }
 
 SSLConfig::~SSLConfig() {}

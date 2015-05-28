@@ -14,7 +14,6 @@
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/dom_distiller/tab_utils.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
@@ -61,6 +60,7 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/translate/core/browser/language_state.h"
+#include "components/ui/zoom/page_zoom.h"
 #include "components/ui/zoom/zoom_controller.h"
 #include "components/web_modal/popup_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -109,6 +109,7 @@ const char kOsOverrideForTabletSite[] = "Linux; Android 4.0.3";
 }
 
 using base::UserMetricsAction;
+using bookmarks::BookmarkModel;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
@@ -441,8 +442,8 @@ void Home(Browser* browser, WindowOpenDisposition disposition) {
   GURL url = browser->profile()->GetHomePage();
 
 #if defined(ENABLE_EXTENSIONS)
-  // Streamlined hosted apps should return to their launch page when the home
-  // button is pressed.
+  // With bookmark apps enabled, hosted apps should return to their launch page
+  // when the home button is pressed.
   if (browser->is_app()) {
     const extensions::Extension* extension =
         extensions::ExtensionRegistry::Get(browser->profile())
@@ -567,8 +568,7 @@ void CloseTab(Browser* browser) {
 bool CanZoomIn(content::WebContents* contents) {
   ui_zoom::ZoomController* zoom_controller =
       ui_zoom::ZoomController::FromWebContents(contents);
-  return zoom_controller->GetZoomPercent() !=
-      contents->GetMaximumZoomPercent() + 1;
+  return zoom_controller->GetZoomPercent() != contents->GetMaximumZoomPercent();
 }
 
 bool CanZoomOut(content::WebContents* contents) {
@@ -578,10 +578,11 @@ bool CanZoomOut(content::WebContents* contents) {
       contents->GetMinimumZoomPercent();
 }
 
-bool ActualSize(content::WebContents* contents) {
+bool CanResetZoom(content::WebContents* contents) {
   ui_zoom::ZoomController* zoom_controller =
       ui_zoom::ZoomController::FromWebContents(contents);
-  return zoom_controller->GetZoomPercent() != 100.0f;
+  return !zoom_controller->IsAtDefaultZoom() ||
+         !zoom_controller->PageScaleFactorIsOne();
 }
 
 TabStripModelDelegate::RestoreTabType GetRestoreTabType(
@@ -810,16 +811,12 @@ void Translate(Browser* browser) {
 }
 
 void ManagePasswordsForPage(Browser* browser) {
-  if (!browser->window()->IsActive())
-    return;
-
   WebContents* web_contents =
       browser->tab_strip_model()->GetActiveWebContents();
   ManagePasswordsUIController* controller =
       ManagePasswordsUIController::FromWebContents(web_contents);
-  TabDialogs::FromWebContents(web_contents)
-      ->ShowManagePasswordsBubble(
-          !password_manager::ui::IsAutomaticDisplayState(controller->state()));
+  TabDialogs::FromWebContents(web_contents)->ShowManagePasswordsBubble(
+      !controller->IsAutomaticallyOpeningBubble());
 }
 
 #if defined(OS_WIN)
@@ -970,8 +967,8 @@ void FindInPage(Browser* browser, bool find_next, bool forward_direction) {
 }
 
 void Zoom(Browser* browser, content::PageZoom zoom) {
-  chrome_page_zoom::Zoom(browser->tab_strip_model()->GetActiveWebContents(),
-                         zoom);
+  ui_zoom::PageZoom::Zoom(browser->tab_strip_model()->GetActiveWebContents(),
+                          zoom);
 }
 
 void FocusToolbar(Browser* browser) {
@@ -1061,6 +1058,12 @@ void ShowAvatarMenu(Browser* browser) {
       signin::ManageAccountsParams());
 }
 
+void ShowFastUserSwitcher(Browser* browser) {
+  browser->window()->ShowAvatarBubbleFromAvatarButton(
+      BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH,
+      signin::ManageAccountsParams());
+}
+
 void OpenUpdateChromeDialog(Browser* browser) {
   if (UpgradeDetector::GetInstance()->is_outdated_install()) {
     content::NotificationService::current()->Notify(
@@ -1129,7 +1132,9 @@ void ToggleRequestTabletSite(Browser* browser) {
 
 void ToggleFullscreenMode(Browser* browser) {
   DCHECK(browser);
-  browser->fullscreen_controller()->ToggleBrowserFullscreenMode();
+  browser->exclusive_access_manager()
+      ->fullscreen_controller()
+      ->ToggleBrowserFullscreenMode();
 }
 
 void ClearCache(Browser* browser) {

@@ -45,7 +45,6 @@ CaptivePortalTabHelper::CaptivePortalTabHelper(
               base::Bind(&CaptivePortalTabHelper::OpenLoginTabForWebContents,
                          web_contents, false))),
       login_detector_(new CaptivePortalLoginDetector(profile_)),
-      web_contents_(web_contents),
       pending_error_code_(net::OK),
       provisional_render_view_host_(NULL) {
   registrar_.Add(this,
@@ -146,8 +145,7 @@ void CaptivePortalTabHelper::DidFailProvisionalLoad(
   pending_error_code_ = error_code;
 }
 
-void CaptivePortalTabHelper::DidStopLoading(
-    content::RenderViewHost* render_view_host) {
+void CaptivePortalTabHelper::DidStopLoading() {
   DCHECK(CalledOnValidThread());
 
   login_detector_->OnStoppedLoading();

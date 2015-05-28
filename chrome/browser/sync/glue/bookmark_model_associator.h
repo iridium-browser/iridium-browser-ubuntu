@@ -17,9 +17,12 @@
 #include "components/sync_driver/model_associator.h"
 #include "sync/internal_api/public/util/unrecoverable_error_handler.h"
 
+class Profile;
+
+namespace bookmarks {
 class BookmarkModel;
 class BookmarkNode;
-class Profile;
+}
 
 namespace syncer {
 class BaseNode;
@@ -34,14 +37,15 @@ namespace browser_sync {
 // * Methods to get a bookmark node for a given sync node and vice versa.
 // * Persisting model associations and loading them back.
 class BookmarkModelAssociator
-    : public sync_driver::PerDataTypeAssociatorInterface<BookmarkNode, int64> {
+    : public sync_driver::
+          PerDataTypeAssociatorInterface<bookmarks::BookmarkNode, int64> {
  public:
   static syncer::ModelType model_type() { return syncer::BOOKMARKS; }
   // |expect_mobile_bookmarks_folder| controls whether or not we
   // expect the mobile bookmarks permanent folder to be created.
   // Should be set to true only by mobile clients.
   BookmarkModelAssociator(
-      BookmarkModel* bookmark_model,
+      bookmarks::BookmarkModel* bookmark_model,
       Profile* profile_,
       syncer::UserShare* user_share,
       sync_driver::DataTypeErrorHandler* unrecoverable_error_handler,
@@ -77,7 +81,8 @@ class BookmarkModelAssociator
 
   // Returns the bookmark node for the given sync id.
   // Returns NULL if no bookmark node is found for the given sync id.
-  const BookmarkNode* GetChromeNodeFromSyncId(int64 sync_id) override;
+  const bookmarks::BookmarkNode* GetChromeNodeFromSyncId(
+      int64 sync_id) override;
 
   // Initializes the given sync node from the given bookmark node id.
   // Returns false if no sync node was found for the given bookmark node id or
@@ -86,7 +91,7 @@ class BookmarkModelAssociator
                                 syncer::BaseNode* sync_node) override;
 
   // Associates the given bookmark node with the given sync id.
-  void Associate(const BookmarkNode* node, int64 sync_id) override;
+  void Associate(const bookmarks::BookmarkNode* node, int64 sync_id) override;
   // Remove the association that corresponds to the given sync id.
   void Disassociate(int64 sync_id) override;
 
@@ -106,7 +111,8 @@ class BookmarkModelAssociator
 
  private:
   typedef std::map<int64, int64> BookmarkIdToSyncIdMap;
-  typedef std::map<int64, const BookmarkNode*> SyncIdToBookmarkNodeMap;
+  typedef std::map<int64, const bookmarks::BookmarkNode*>
+      SyncIdToBookmarkNodeMap;
   typedef std::set<int64> DirtyAssociationsSyncIds;
 
   // Posts a task to persist dirty associations.
@@ -131,12 +137,8 @@ class BookmarkModelAssociator
   // Bookmarks folder.  The sync nodes are server-created.
   // Returns true on success, false if association failed.
   bool AssociateTaggedPermanentNode(
-      const BookmarkNode* permanent_node,
+      const bookmarks::BookmarkNode* permanent_node,
       const std::string& tag) WARN_UNUSED_RESULT;
-
-  // Compare the properties of a pair of nodes from either domain.
-  bool NodesMatch(const BookmarkNode* bookmark,
-                  const syncer::BaseNode* sync_node) const;
 
   // Check whether bookmark model and sync model are synced by comparing
   // their transaction versions.
@@ -146,7 +148,7 @@ class BookmarkModelAssociator
       syncer::SyncMergeResult* local_merge_result,
       syncer::SyncMergeResult* syncer_merge_result) const;
 
-  BookmarkModel* bookmark_model_;
+  bookmarks::BookmarkModel* bookmark_model_;
   Profile* profile_;
   syncer::UserShare* user_share_;
   sync_driver::DataTypeErrorHandler* unrecoverable_error_handler_;

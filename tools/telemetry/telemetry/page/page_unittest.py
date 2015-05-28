@@ -52,9 +52,12 @@ class TestPage(unittest.TestCase):
                       pages)
 
   def testGetUrlBaseDirAndFileForUrlBaseDir(self):
-    ps = page_set.PageSet(file_path='basedir/', serving_dirs=['../somedir/'])
+    base_dir = os.path.dirname(__file__)
+    file_path = os.path.join(os.path.dirname(base_dir), 'otherdir', 'file.html')
+    ps = page_set.PageSet(file_path=base_dir,
+                          serving_dirs=[os.path.join('..', 'somedir', '')])
     ps.AddUserStory(page.Page('file://../otherdir/file.html', ps, ps.base_dir))
-    self.assertPathEqual(ps[0].file_path, 'otherdir/file.html')
+    self.assertPathEqual(ps[0].file_path, file_path)
 
   def testDisplayUrlForHttp(self):
     ps = page_set.PageSet(file_path=os.path.dirname(__file__))
@@ -143,22 +146,6 @@ class TestPage(unittest.TestCase):
           'url': 'http://example.com/',
           'name': 'Example'
         }, named_dict)
-
-  def testTransferToPageSet(self):
-    page_set_a = page_set.PageSet()
-    page_set_b = page_set.PageSet()
-    page_foo = page.Page('http://foo.com', page_set_a)
-    page_bar = page.Page('http://bar.com', page_set_a)
-    page_baz = page.Page('http://baz.com', page_set_a)
-
-    page_set_a.AddUserStory(page_foo)
-    page_set_a.AddUserStory(page_bar)
-    page_set_a.AddUserStory(page_baz)
-
-    page_bar.TransferToPageSet(page_set_b)
-    self.assertEqual([page_foo, page_baz], page_set_a.pages)
-    self.assertEqual([page_bar], page_set_b.pages)
-    self.assertIs(page_set_b, page_bar.page_set)
 
   def testIsLocal(self):
     p = page.Page('file://foo.html')

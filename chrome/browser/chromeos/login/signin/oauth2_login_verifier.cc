@@ -64,29 +64,28 @@ OAuth2LoginVerifier::~OAuth2LoginVerifier() {
 }
 
 void OAuth2LoginVerifier::VerifyUserCookies(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Delay the verification if the network is not connected or on a captive
   // portal.
   DelayNetworkCall(
+      base::TimeDelta::FromMilliseconds(kRequestRestartDelay),
       base::Bind(&OAuth2LoginVerifier::StartAuthCookiesVerification,
-                 AsWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kRequestRestartDelay));
+                 AsWeakPtr()));
 }
 
 void OAuth2LoginVerifier::VerifyProfileTokens(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Delay the verification if the network is not connected or on a captive
   // portal.
-  DelayNetworkCall(
-      base::Bind(
-          &OAuth2LoginVerifier::VerifyProfileTokensImpl, AsWeakPtr(), profile),
-      base::TimeDelta::FromMilliseconds(kRequestRestartDelay));
+  DelayNetworkCall(base::TimeDelta::FromMilliseconds(kRequestRestartDelay),
+                   base::Bind(&OAuth2LoginVerifier::VerifyProfileTokensImpl,
+                              AsWeakPtr(), profile));
 }
 
 void OAuth2LoginVerifier::VerifyProfileTokensImpl(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   gaia_token_.clear();
   if (access_token_.empty()) {
@@ -133,7 +132,7 @@ void OAuth2LoginVerifier::OnUberAuthTokenSuccess(
 
 void OAuth2LoginVerifier::OnUberAuthTokenFailure(
     const GoogleServiceAuthError& error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   LOG(WARNING) << "OAuthLogin(uber_token) failed,"
                << " error: " << error.state();
   RetryOnError("OAuthLoginUberToken", error,
@@ -153,7 +152,7 @@ void OAuth2LoginVerifier::StartMergeSession() {
 }
 
 void OAuth2LoginVerifier::OnMergeSessionSuccess(const std::string& data) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   VLOG(1) << "MergeSession successful.";
   delegate_->OnSessionMergeSuccess();
   // Schedule post-merge verification to analyze how many LSID/SID overruns
@@ -208,7 +207,7 @@ void OAuth2LoginVerifier::OnGetTokenSuccess(
 void OAuth2LoginVerifier::OnGetTokenFailure(
     const OAuth2TokenService::Request* request,
     const GoogleServiceAuthError& error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_EQ(login_token_request_.get(), request);
   login_token_request_.reset();
 
@@ -223,14 +222,14 @@ void OAuth2LoginVerifier::OnGetTokenFailure(
 
 void OAuth2LoginVerifier::OnListAccountsSuccess(
     const std::string& data) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   VLOG(1) << "ListAccounts successful.";
   delegate_->OnListAccountsSuccess(data);
 }
 
 void OAuth2LoginVerifier::OnListAccountsFailure(
     const GoogleServiceAuthError& error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   LOG(WARNING) << "Failed to get list of session accounts, "
                << " error: " << error.state();
   RetryOnError(

@@ -5,9 +5,11 @@
 #ifndef CHROME_BROWSER_UI_EXTENSIONS_EXTENSION_ACTION_VIEW_CONTROLLER_H_
 #define CHROME_BROWSER_UI_EXTENSIONS_EXTENSION_ACTION_VIEW_CONTROLLER_H_
 
+#include "base/scoped_observer.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
+#include "extensions/browser/extension_host_observer.h"
 #include "ui/gfx/image/image.h"
 
 class Browser;
@@ -19,6 +21,7 @@ namespace extensions {
 class Command;
 class Extension;
 class ExtensionRegistry;
+class ExtensionViewHost;
 }
 
 // The platform-independent controller for an ExtensionAction that is shown on
@@ -29,7 +32,8 @@ class ExtensionRegistry;
 class ExtensionActionViewController
     : public ToolbarActionViewController,
       public ExtensionActionIconFactory::Observer,
-      public ExtensionContextMenuModel::PopupDelegate {
+      public ExtensionContextMenuModel::PopupDelegate,
+      public extensions::ExtensionHostObserver {
  public:
   // The different options for showing a popup.
   enum PopupShowAction { SHOW_POPUP, SHOW_POPUP_AND_INSPECT };
@@ -53,6 +57,7 @@ class ExtensionActionViewController
   bool HasPopup(content::WebContents* web_contents) const override;
   void HidePopup() override;
   gfx::NativeView GetPopupNativeView() override;
+  ui::MenuModel* GetContextMenu() override;
   bool IsMenuRunning() const override;
   bool CanDrag() const override;
   bool ExecuteAction(bool by_user) override;
@@ -74,6 +79,7 @@ class ExtensionActionViewController
   ExtensionAction* extension_action() { return extension_action_; }
   const ExtensionAction* extension_action() const { return extension_action_; }
   ToolbarActionViewDelegate* view_delegate() { return view_delegate_; }
+  bool is_showing_popup() const { return popup_host_ != nullptr; }
 
   void set_icon_observer(ExtensionActionIconFactory::Observer* icon_observer) {
     icon_observer_ = icon_observer;
@@ -82,6 +88,9 @@ class ExtensionActionViewController
  private:
   // ExtensionActionIconFactory::Observer:
   void OnIconUpdated() override;
+
+  // ExtensionHostObserver:
+  void OnExtensionHostDestroyed(const extensions::ExtensionHost* host) override;
 
   // Checks if the associated |extension| is still valid by checking its
   // status in the registry. Since the OnExtensionUnloaded() notifications are
@@ -104,6 +113,9 @@ class ExtensionActionViewController
                         const GURL& popup_url,
                         bool grant_tab_permissions);
 
+  // Handles cleanup after the popup closes.
+  void OnPopupClosed();
+
   // The extension associated with the action we're displaying.
   const extensions::Extension* extension_;
 
@@ -113,6 +125,12 @@ class ExtensionActionViewController
   // The browser action this view represents. The ExtensionAction is not owned
   // by this class.
   ExtensionAction* extension_action_;
+
+  // The extension popup's host if the popup is visible; null otherwise.
+  extensions::ExtensionViewHost* popup_host_;
+
+  // The context menu model for the extension.
+  scoped_refptr<ExtensionContextMenuModel> context_menu_model_;
 
   // Our view delegate.
   ToolbarActionViewDelegate* view_delegate_;
@@ -132,6 +150,9 @@ class ExtensionActionViewController
 
   // The associated ExtensionRegistry; cached for quick checking.
   extensions::ExtensionRegistry* extension_registry_;
+
+  ScopedObserver<extensions::ExtensionHost, extensions::ExtensionHostObserver>
+      popup_host_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionActionViewController);
 };

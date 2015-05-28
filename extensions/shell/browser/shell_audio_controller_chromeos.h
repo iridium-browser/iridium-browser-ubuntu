@@ -14,13 +14,13 @@ namespace extensions {
 class ShellAudioController : public chromeos::CrasAudioHandler::AudioObserver {
  public:
   ShellAudioController();
-  virtual ~ShellAudioController();
+  ~ShellAudioController() override;
 
   // chromeos::CrasAudioHandler::Observer implementation:
-  void OnOutputVolumeChanged() override;
-  void OnOutputMuteChanged() override;
-  void OnInputGainChanged() override;
-  void OnInputMuteChanged() override;
+  void OnOutputNodeVolumeChanged(uint64_t node_id, int volume) override;
+  void OnOutputMuteChanged(bool mute_on) override;
+  void OnInputNodeGainChanged(uint64_t node_id, int gain) override;
+  void OnInputMuteChanged(bool mute_on) override;
   void OnAudioNodesChanged() override;
   void OnActiveOutputNodeChanged() override;
   void OnActiveInputNodeChanged() override;

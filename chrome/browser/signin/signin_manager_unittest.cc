@@ -21,6 +21,7 @@
 #include "chrome/browser/signin/fake_account_tracker_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
+#include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/test_signin_client_builder.h"
@@ -52,7 +53,8 @@ KeyedService* SigninManagerBuild(content::BrowserContext* context) {
   service = new SigninManager(
       ChromeSigninClientFactory::GetInstance()->GetForProfile(profile),
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
-      AccountTrackerServiceFactory::GetForProfile(profile));
+      AccountTrackerServiceFactory::GetForProfile(profile),
+      GaiaCookieManagerServiceFactory::GetForProfile(profile));
   service->Initialize(NULL);
   return service;
 }
@@ -158,7 +160,8 @@ class SigninManagerTest : public testing::Test {
     naked_manager_.reset(new SigninManager(
         ChromeSigninClientFactory::GetInstance()->GetForProfile(profile()),
         ProfileOAuth2TokenServiceFactory::GetForProfile(profile()),
-        AccountTrackerServiceFactory::GetForProfile(profile())));
+        AccountTrackerServiceFactory::GetForProfile(profile()),
+        GaiaCookieManagerServiceFactory::GetForProfile(profile())));
 
     manager_ = naked_manager_.get();
     manager_->AddObserver(&test_observer_);
@@ -304,23 +307,6 @@ TEST_F(SigninManagerTest, SignOutWhileProhibited) {
   manager_->ProhibitSignout(false);
   manager_->SignOut(signin_metrics::SIGNOUT_TEST);
   EXPECT_FALSE(manager_->IsAuthenticated());
-}
-
-TEST_F(SigninManagerTest, TestIsWebBasedSigninFlowURL) {
-  EXPECT_FALSE(SigninManager::IsWebBasedSigninFlowURL(
-      GURL("http://www.google.com")));
-  EXPECT_TRUE(SigninManager::IsWebBasedSigninFlowURL(
-      GURL("https://accounts.google.com/ServiceLogin?service=chromiumsync")));
-  EXPECT_FALSE(SigninManager::IsWebBasedSigninFlowURL(
-      GURL("http://accounts.google.com/ServiceLogin?service=chromiumsync")));
-  // http, not https, should not be treated as web based signin.
-  EXPECT_FALSE(SigninManager::IsWebBasedSigninFlowURL(
-      GURL("http://accounts.google.com/ServiceLogin?service=googlemail")));
-  // chromiumsync is double-embedded in a continue query param.
-  EXPECT_TRUE(SigninManager::IsWebBasedSigninFlowURL(
-      GURL("https://accounts.google.com/CheckCookie?"
-           "continue=https%3A%2F%2Fwww.google.com%2Fintl%2Fen-US%2Fchrome"
-           "%2Fblank.html%3Fsource%3D3%26nonadv%3D1&service=chromiumsync")));
 }
 
 TEST_F(SigninManagerTest, Prohibited) {

@@ -16,11 +16,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
-#include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_service.h"
+#include "chrome/browser/autocomplete/in_memory_url_index_types.h"
+#include "chrome/browser/autocomplete/scored_history_match.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/scored_history_match.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
@@ -28,8 +26,10 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/history/core/browser/history_backend.h"
+#include "components/history/core/browser/history_database.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
-#include "components/history/core/browser/in_memory_url_index_types.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/omnibox/autocomplete_provider_listener.h"
@@ -493,7 +493,7 @@ void HistoryURLProvider::Start(const AutocompleteInput& input,
   // re-run the query from scratch and ignore |minimal_changes|.
 
   // Cancel any in-progress query.
-  Stop(false);
+  Stop(false, false);
 
   matches_.clear();
 
@@ -528,8 +528,9 @@ void HistoryURLProvider::Start(const AutocompleteInput& input,
   // We'll need the history service to run both passes, so try to obtain it.
   if (!profile_)
     return;
-  HistoryService* const history_service =
-      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
+  history::HistoryService* const history_service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   if (!history_service)
     return;
 
@@ -584,7 +585,8 @@ void HistoryURLProvider::Start(const AutocompleteInput& input,
   }
 }
 
-void HistoryURLProvider::Stop(bool clear_cached_results) {
+void HistoryURLProvider::Stop(bool clear_cached_results,
+                              bool due_to_user_inactivity) {
   done_ = true;
 
   if (params_)
@@ -705,18 +707,17 @@ ACMatchClassifications HistoryURLProvider::ClassifyDescription(
     const base::string16& description) {
   base::string16 clean_description =
       bookmarks::CleanUpTitleForMatching(description);
-  history::TermMatches description_matches(SortAndDeoverlapMatches(
-      history::MatchTermInString(input_text, clean_description, 0)));
-  history::WordStarts description_word_starts;
-  history::String16VectorFromString16(
-      clean_description, false, &description_word_starts);
+  TermMatches description_matches(SortAndDeoverlapMatches(
+      MatchTermInString(input_text, clean_description, 0)));
+  WordStarts description_word_starts;
+  String16VectorFromString16(clean_description, false,
+                             &description_word_starts);
   // If HistoryURL retrieves any matches (and hence we reach this code), we
   // are guaranteed that the beginning of input_text must be a word break.
-  history::WordStarts offsets(1, 0u);
-  description_matches =
-      history::ScoredHistoryMatch::FilterTermMatchesByWordStarts(
-          description_matches, offsets, description_word_starts, 0,
-          std::string::npos);
+  WordStarts offsets(1, 0u);
+  description_matches = ScoredHistoryMatch::FilterTermMatchesByWordStarts(
+      description_matches, offsets, description_word_starts, 0,
+      std::string::npos);
   return SpansFromTermMatch(
       description_matches, clean_description.length(), false);
 }
@@ -773,8 +774,7 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
        (AutocompleteInput::NumNonHostComponents(params->input.parts()) > 0) ||
        !params->default_search_provider);
   const bool have_shorter_suggestion_suitable_for_inline_autocomplete =
-      PromoteOrCreateShorterSuggestion(
-          db, params->have_what_you_typed_match, params);
+      PromoteOrCreateShorterSuggestion(db, params);
 
   // Check whether what the user typed appears in history.
   const bool can_check_history_for_exact_match =
@@ -802,9 +802,20 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
   // this input, so we can promote that as the best match.
   if (params->exact_suggestion_is_in_history) {
     params->promote_type = HistoryURLProviderParams::WHAT_YOU_TYPED_MATCH;
-  } else if (!params->prevent_inline_autocomplete && !params->matches.empty() &&
-      (have_shorter_suggestion_suitable_for_inline_autocomplete ||
-       CanPromoteMatchForInlineAutocomplete(params->matches[0]))) {
+  } else if (!params->matches.empty() &&
+             (have_shorter_suggestion_suitable_for_inline_autocomplete ||
+              CanPromoteMatchForInlineAutocomplete(params->matches[0]))) {
+    // Note that we promote this inline-autocompleted match even when
+    // params->prevent_inline_autocomplete is true.  This is safe because in
+    // this case the match will be marked as "not allowed to be default", and
+    // a non-inlined match that is "allowed to be default" will be reordered
+    // above it by the controller/AutocompleteResult.  We ensure there is such
+    // a match in two ways:
+    //   * If params->have_what_you_typed_match is true, we force the
+    //     what-you-typed match to be added in this case.  See comments in
+    //     PromoteMatchesIfNecessary().
+    //   * Otherwise, we should have some sort of QUERY or UNKNOWN input that
+    //     the SearchProvider will provide a defaultable WYT match for.
     params->promote_type = HistoryURLProviderParams::FRONT_HISTORY_MATCH;
   } else {
     // Failed to promote any URLs.  Use the What You Typed match, if we have it.
@@ -828,15 +839,29 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
 
 void HistoryURLProvider::PromoteMatchesIfNecessary(
     const HistoryURLProviderParams& params) {
+  if (params.promote_type == HistoryURLProviderParams::NEITHER)
+    return;
   if (params.promote_type == HistoryURLProviderParams::FRONT_HISTORY_MATCH) {
-    matches_.push_back(HistoryMatchToACMatch(params, 0, INLINE_AUTOCOMPLETE,
-        CalculateRelevance(INLINE_AUTOCOMPLETE, 0)));
-    if (OmniboxFieldTrial::AddUWYTMatchEvenIfPromotedURLs() &&
-        params.have_what_you_typed_match) {
-      matches_.push_back(params.what_you_typed_match);
-    }
-  } else if (params.promote_type ==
-      HistoryURLProviderParams::WHAT_YOU_TYPED_MATCH) {
+    matches_.push_back(
+        HistoryMatchToACMatch(params, 0, INLINE_AUTOCOMPLETE,
+                              CalculateRelevance(INLINE_AUTOCOMPLETE, 0)));
+  }
+  // There are two cases where we need to add the what-you-typed-match:
+  //   * If params.promote_type is WHAT_YOU_TYPED_MATCH, we're being explicitly
+  //     directed to.
+  //   * If params.have_what_you_typed_match is true, then params.promote_type
+  //     can't be NEITHER (see code near the end of DoAutocomplete()), so if
+  //     it's not WHAT_YOU_TYPED_MATCH, it must be FRONT_HISTORY_MATCH, and
+  //     we'll have promoted the history match above.  If
+  //     params.prevent_inline_autocomplete is also true, then this match
+  //     will be marked "not allowed to be default", and we need to add the
+  //     what-you-typed match to ensure there's a legal default match for the
+  //     controller/AutocompleteResult to promote.  (If
+  //     params.have_what_you_typed_match is false, the SearchProvider should
+  //     take care of adding this defaultable match.)
+  if ((params.promote_type == HistoryURLProviderParams::WHAT_YOU_TYPED_MATCH) ||
+      (params.prevent_inline_autocomplete &&
+       params.have_what_you_typed_match)) {
     matches_.push_back(params.what_you_typed_match);
   }
 }
@@ -960,7 +985,6 @@ bool HistoryURLProvider::CanFindIntranetURL(
 
 bool HistoryURLProvider::PromoteOrCreateShorterSuggestion(
     history::URLDatabase* db,
-    bool have_what_you_typed_match,
     HistoryURLProviderParams* params) {
   if (params->matches.empty())
     return false;  // No matches, nothing to do.
@@ -970,7 +994,7 @@ bool HistoryURLProvider::PromoteOrCreateShorterSuggestion(
   // the same" as any "what you typed" match.
   const history::HistoryMatch& match = params->matches[0];
   GURL search_base = ConvertToHostOnly(match, params->input.text());
-  bool can_add_search_base_to_matches = !have_what_you_typed_match;
+  bool can_add_search_base_to_matches = !params->have_what_you_typed_match;
   if (search_base.is_empty()) {
     // Search from what the user typed when we couldn't reduce the best match
     // to a host.  Careful: use a substring of |match| here, rather than the

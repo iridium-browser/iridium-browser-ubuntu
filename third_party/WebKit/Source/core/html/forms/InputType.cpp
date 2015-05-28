@@ -32,7 +32,8 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/InputTypeNames.h"
 #include "core/dom/AXObjectCache.h"
-#include "core/dom/NodeRenderStyle.h"
+#include "core/dom/ExceptionCode.h"
+#include "core/dom/NodeComputedStyle.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/events/ScopedEventQueue.h"
 #include "core/fileapi/FileList.h"
@@ -65,7 +66,7 @@
 #include "core/html/forms/URLInputType.h"
 #include "core/html/forms/WeekInputType.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "core/rendering/RenderTheme.h"
+#include "core/layout/LayoutTheme.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/text/PlatformLocale.h"
 #include "platform/text/TextBreakIterator.h"
@@ -75,8 +76,8 @@ namespace blink {
 using blink::WebLocalizedString;
 using namespace HTMLNames;
 
-typedef PassRefPtrWillBeRawPtr<InputType> (*InputTypeFactoryFunction)(HTMLInputElement&);
-typedef HashMap<AtomicString, InputTypeFactoryFunction, CaseFoldingHash> InputTypeFactoryMap;
+using InputTypeFactoryFunction = PassRefPtrWillBeRawPtr<InputType> (*)(HTMLInputElement&);
+using InputTypeFactoryMap = HashMap<AtomicString, InputTypeFactoryFunction, CaseFoldingHash>;
 
 static PassOwnPtr<InputTypeFactoryMap> createInputTypeFactoryMap()
 {
@@ -293,6 +294,9 @@ bool InputType::isInRange(const String& value) const
     if (!isSteppable())
         return false;
 
+    // This function should return true if both of validity.rangeUnderflow and
+    // validity.rangeOverflow are false.
+    // If the INPUT has no value, they are false.
     const Decimal numericValue = parseToNumberOrNaN(value);
     if (!numericValue.isFinite())
         return true;
@@ -306,9 +310,12 @@ bool InputType::isOutOfRange(const String& value) const
     if (!isSteppable())
         return false;
 
+    // This function should return true if either validity.rangeUnderflow or
+    // validity.rangeOverflow are true.
+    // If the INPUT has no value, they are false.
     const Decimal numericValue = parseToNumberOrNaN(value);
     if (!numericValue.isFinite())
-        return true;
+        return false;
 
     StepRange stepRange(createStepRange(RejectAny));
     return numericValue < stepRange.minimum() || numericValue > stepRange.maximum();
@@ -501,7 +508,7 @@ bool InputType::canBeSuccessfulSubmitButton()
     return false;
 }
 
-bool InputType::rendererIsNeeded()
+bool InputType::layoutObjectIsNeeded()
 {
     return true;
 }
@@ -592,7 +599,7 @@ String InputType::sanitizeValue(const String& proposedValue) const
 void InputType::warnIfValueIsInvalidAndElementIsVisible(const String& value) const
 {
     // Don't warn if the value is set in Modernizr.
-    RenderStyle* style = element().renderStyle();
+    const ComputedStyle* style = element().computedStyle();
     if (style && style->visibility() != HIDDEN)
         warnIfValueIsInvalid(value);
 }
@@ -614,11 +621,6 @@ String InputType::droppedFileSystemId()
 }
 
 bool InputType::shouldRespectListAttribute()
-{
-    return false;
-}
-
-bool InputType::shouldRespectSpeechAttribute()
 {
     return false;
 }
@@ -703,6 +705,17 @@ const QualifiedName& InputType::subResourceAttributeName() const
     return QualifiedName::null();
 }
 
+bool InputType::supportsAutocapitalize() const
+{
+    return false;
+}
+
+const AtomicString& InputType::defaultAutocapitalize() const
+{
+    DEFINE_STATIC_LOCAL(const AtomicString, none, ("none", AtomicString::ConstructFromLiteral));
+    return none;
+}
+
 bool InputType::shouldAppearIndeterminate() const
 {
     return false;
@@ -730,7 +743,7 @@ unsigned InputType::width() const
 
 TextDirection InputType::computedTextDirection()
 {
-    return element().computedStyle()->direction();
+    return element().ensureComputedStyle()->direction();
 }
 
 ColorChooserClient* InputType::colorChooserClient()
@@ -897,7 +910,7 @@ void InputType::stepUpFromRenderer(int n)
 
 void InputType::countUsageIfVisible(UseCounter::Feature feature) const
 {
-    if (RenderStyle* style = element().renderStyle()) {
+    if (const ComputedStyle* style = element().computedStyle()) {
         if (style->visibility() != HIDDEN)
             UseCounter::count(element().document(), feature);
     }

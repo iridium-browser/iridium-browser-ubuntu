@@ -196,6 +196,9 @@ class FatalMessageVoidify {
 
 #endif  // WEBRTC_CHROMIUM_BUILD
 
+#define RTC_UNREACHABLE_CODE_HIT false
+#define RTC_NOTREACHED() DCHECK(RTC_UNREACHABLE_CODE_HIT)
+
 #define FATAL() rtc::FatalMessage(__FILE__, __LINE__).stream()
 // TODO(ajm): Consider adding NOTIMPLEMENTED and NOTREACHED macros when
 // base/logging.h and system_wrappers/logging.h are consolidated such that we
@@ -216,6 +219,14 @@ class FatalMessage {
 
   std::ostringstream stream_;
 };
+
+// Performs the integer division a/b and returns the result. CHECKs that the
+// remainder is zero.
+template <typename T>
+inline T CheckedDivExact(T a, T b) {
+  CHECK_EQ(a % b, static_cast<T>(0));
+  return a / b;
+}
 
 }  // namespace rtc
 

@@ -33,10 +33,18 @@ public:
         yuvMatrix[1].preScale(w[1] / w[0], h[1] / h[0]);
         yuvMatrix[2] = yuvMatrix[0];
         yuvMatrix[2].preScale(w[2] / w[0], h[2] / h[0]);
-        return SkNEW_ARGS(YUVtoRGBEffect, (yTexture, uTexture, vTexture, yuvMatrix, colorSpace));
+        GrTextureParams::FilterMode uvFilterMode =
+            ((sizes[1].fWidth  != sizes[0].fWidth) ||
+             (sizes[1].fHeight != sizes[0].fHeight) ||
+             (sizes[2].fWidth  != sizes[0].fWidth) ||
+             (sizes[2].fHeight != sizes[0].fHeight)) ?
+            GrTextureParams::kBilerp_FilterMode :
+            GrTextureParams::kNone_FilterMode;
+        return SkNEW_ARGS(YUVtoRGBEffect, (yTexture, uTexture, vTexture, yuvMatrix,
+                                           uvFilterMode, colorSpace));
     }
 
-    virtual const char* name() const SK_OVERRIDE { return "YUV to RGB"; }
+    const char* name() const override { return "YUV to RGB"; }
 
     SkYUVColorSpace getColorSpace() const {
         return fColorSpace;
@@ -57,7 +65,7 @@ public:
                               const char* outputColor,
                               const char* inputColor,
                               const TransformedCoordsArray& coords,
-                              const TextureSamplerArray& samplers) SK_OVERRIDE {
+                              const TextureSamplerArray& samplers) override {
             GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
 
             const char* yuvMatrix   = NULL;
@@ -74,7 +82,7 @@ public:
         }
 
         virtual void setData(const GrGLProgramDataManager& pdman,
-                             const GrProcessor& processor) SK_OVERRIDE {
+                             const GrProcessor& processor) override {
             const YUVtoRGBEffect& yuvEffect = processor.cast<YUVtoRGBEffect>();
             switch (yuvEffect.getColorSpace()) {
                 case kJPEG_SkYUVColorSpace:
@@ -93,23 +101,24 @@ public:
     };
 
     virtual void getGLProcessorKey(const GrGLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const SK_OVERRIDE {
+                                   GrProcessorKeyBuilder* b) const override {
         GLProcessor::GenKey(*this, caps, b);
     }
 
-    virtual GrGLFragmentProcessor* createGLInstance() const SK_OVERRIDE {
+    GrGLFragmentProcessor* createGLInstance() const override {
         return SkNEW_ARGS(GLProcessor, (*this));
     }
 
 private:
     YUVtoRGBEffect(GrTexture* yTexture, GrTexture* uTexture, GrTexture* vTexture,
-                   SkMatrix yuvMatrix[3], SkYUVColorSpace colorSpace)
+                   SkMatrix yuvMatrix[3], GrTextureParams::FilterMode uvFilterMode,
+                   SkYUVColorSpace colorSpace)
     : fYTransform(kLocal_GrCoordSet, yuvMatrix[0], yTexture, GrTextureParams::kNone_FilterMode)
     , fYAccess(yTexture)
-    , fUTransform(kLocal_GrCoordSet, yuvMatrix[1], uTexture, GrTextureParams::kNone_FilterMode)
-    , fUAccess(uTexture)
-    , fVTransform(kLocal_GrCoordSet, yuvMatrix[2], vTexture, GrTextureParams::kNone_FilterMode)
-    , fVAccess(vTexture)
+    , fUTransform(kLocal_GrCoordSet, yuvMatrix[1], uTexture, uvFilterMode)
+    , fUAccess(uTexture, uvFilterMode)
+    , fVTransform(kLocal_GrCoordSet, yuvMatrix[2], vTexture, uvFilterMode)
+    , fVAccess(vTexture, uvFilterMode)
     , fColorSpace(colorSpace) {
         this->initClassID<YUVtoRGBEffect>();
         this->addCoordTransform(&fYTransform);
@@ -120,12 +129,12 @@ private:
         this->addTextureAccess(&fVAccess);
     }
 
-    virtual bool onIsEqual(const GrFragmentProcessor& sBase) const SK_OVERRIDE {
+    bool onIsEqual(const GrFragmentProcessor& sBase) const override {
         const YUVtoRGBEffect& s = sBase.cast<YUVtoRGBEffect>();
         return fColorSpace == s.getColorSpace();
     }
 
-    virtual void onComputeInvariantOutput(GrInvariantOutput* inout) const SK_OVERRIDE {
+    void onComputeInvariantOutput(GrInvariantOutput* inout) const override {
         // YUV is opaque
         inout->setToOther(kA_GrColorComponentFlag, 0xFF << GrColor_SHIFT_A,
                           GrInvariantOutput::kWillNot_ReadInput);

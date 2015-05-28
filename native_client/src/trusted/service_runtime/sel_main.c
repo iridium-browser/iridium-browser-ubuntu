@@ -7,6 +7,7 @@
 /*
  * NaCl Simple/secure ELF loader (NaCl SEL).
  */
+#include "native_client/src/include/build_config.h"
 #include "native_client/src/include/portability.h"
 #include "native_client/src/include/portability_io.h"
 
@@ -41,11 +42,9 @@
 #include "native_client/src/trusted/service_runtime/load_file.h"
 #include "native_client/src/trusted/service_runtime/nacl_app.h"
 #include "native_client/src/trusted/service_runtime/nacl_all_modules.h"
-#include "native_client/src/trusted/service_runtime/nacl_bootstrap_channel_error_reporter.h"
 #include "native_client/src/trusted/service_runtime/nacl_debug_init.h"
 #include "native_client/src/trusted/service_runtime/nacl_error_log_hook.h"
 #include "native_client/src/trusted/service_runtime/nacl_globals.h"
-#include "native_client/src/trusted/service_runtime/nacl_runtime_host_interface.h"
 #include "native_client/src/trusted/service_runtime/nacl_signal.h"
 #include "native_client/src/trusted/service_runtime/nacl_syscall_common.h"
 #include "native_client/src/trusted/service_runtime/nacl_valgrind_hooks.h"
@@ -549,9 +548,6 @@ int NaClSelLdrMain(int argc, char **argv) {
     NaClLog(LOG_FATAL, "NaClAppCreate() failed\n");
   }
 
-  NaClBootstrapChannelErrorReporterInit();
-  NaClErrorLogHookInit(NaClBootstrapChannelErrorReporter, nap);
-
   NaClPerfCounterCtor(&time_all_main, "SelMain");
 
   fflush((FILE *) NULL);
@@ -838,9 +834,6 @@ int NaClSelLdrMain(int argc, char **argv) {
     goto done;
   }
 
-  if (!NaClAppLaunchServiceThreads(nap)) {
-    goto done;
-  }
   if (options->enable_debug_stub) {
     if (!NaClDebugInit(nap)) {
       goto done;

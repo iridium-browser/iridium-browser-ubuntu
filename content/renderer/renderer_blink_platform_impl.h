@@ -34,6 +34,7 @@ class WebBatteryStatus;
 class WebDeviceMotionData;
 class WebDeviceOrientationData;
 class WebGraphicsContext3DProvider;
+class WebServiceWorkerCacheStorage;
 }
 
 namespace content {
@@ -50,6 +51,7 @@ class ThreadSafeSender;
 class WebClipboardImpl;
 class WebDatabaseObserverImpl;
 class WebFileSystemImpl;
+class WebThreadImplForScheduler;
 class WebSchedulerImpl;
 
 class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
@@ -76,8 +78,7 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   virtual void createMessageChannel(blink::WebMessagePortChannel** channel1,
                                     blink::WebMessagePortChannel** channel2);
   virtual blink::WebPrescientNetworking* prescientNetworking();
-  virtual void cacheMetadata(
-      const blink::WebURL&, double, const char*, size_t);
+  virtual void cacheMetadata(const blink::WebURL&, int64, const char*, size_t);
   virtual blink::WebString defaultLocale();
   virtual void suddenTerminationChanged(bool enabled);
   virtual blink::WebStorageNamespace* createLocalStorageNamespace();
@@ -101,6 +102,8 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   virtual void screenColorProfile(blink::WebVector<char>* to_profile);
   virtual blink::WebScrollbarBehavior* scrollbarBehavior();
   virtual blink::WebIDBFactory* idbFactory();
+  virtual blink::WebServiceWorkerCacheStorage* cacheStorage(
+      const blink::WebString& origin_identifier);
   virtual blink::WebFileSystem* fileSystem();
   virtual bool canAccelerate2dCanvas();
   virtual bool isThreadedCompositingEnabled();
@@ -153,6 +156,7 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   virtual void vibrate(unsigned int milliseconds);
   virtual void cancelVibration();
   virtual blink::WebScheduler* scheduler();
+  virtual blink::WebThread* currentThread();
 
   // Set the PlatformEventObserverBase in |platform_event_observers_| associated
   // with |type| to |observer|. If there was already an observer associated to
@@ -203,6 +207,7 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   device::VibrationManagerPtr& GetConnectedVibrationManagerService();
 
   scoped_ptr<WebSchedulerImpl> web_scheduler_;
+  scoped_ptr<WebThreadImplForScheduler> main_thread_;
 
   scoped_ptr<RendererClipboardDelegate> clipboard_delegate_;
   scoped_ptr<WebClipboardImpl> clipboard_;
@@ -213,8 +218,10 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   class MimeRegistry;
   scoped_ptr<MimeRegistry> mime_registry_;
 
+#if !defined(OS_ANDROID) && !defined(OS_WIN)
   class SandboxSupport;
   scoped_ptr<SandboxSupport> sandbox_support_;
+#endif
 
   // This counter keeps track of the number of times sudden termination is
   // enabled or disabled. It starts at 0 (enabled) and for every disable

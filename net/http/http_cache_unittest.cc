@@ -13,6 +13,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/simple_test_clock.h"
 #include "net/base/cache_type.h"
 #include "net/base/elements_upload_data_stream.h"
 #include "net/base/host_port_pair.h"
@@ -20,11 +21,11 @@
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log_unittest.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_byte_range.h"
+#include "net/http/http_cache_transaction.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_headers.h"
@@ -33,6 +34,7 @@
 #include "net/http/http_transaction_test_util.h"
 #include "net/http/http_util.h"
 #include "net/http/mock_http_cache.h"
+#include "net/log/net_log_unittest.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/websockets/websocket_handshake_stream_base.h"
@@ -2106,7 +2108,7 @@ void RevalidationServer::Handler(const net::HttpRequestInfo* request,
 }
 
 // Tests revalidation after a vary match.
-TEST(HttpCache, SimpleGET_LoadValidateCache_VaryMatch) {
+TEST(HttpCache, GET_ValidateCache_VaryMatch) {
   MockHttpCache cache;
 
   // Write to the cache.
@@ -2139,7 +2141,7 @@ TEST(HttpCache, SimpleGET_LoadValidateCache_VaryMatch) {
 }
 
 // Tests revalidation after a vary mismatch if etag is present.
-TEST(HttpCache, SimpleGET_LoadValidateCache_VaryMismatch) {
+TEST(HttpCache, GET_ValidateCache_VaryMismatch) {
   MockHttpCache cache;
 
   // Write to the cache.
@@ -2173,7 +2175,7 @@ TEST(HttpCache, SimpleGET_LoadValidateCache_VaryMismatch) {
 }
 
 // Tests lack of revalidation after a vary mismatch and no etag.
-TEST(HttpCache, SimpleGET_LoadDontValidateCache_VaryMismatch) {
+TEST(HttpCache, GET_DontValidateCache_VaryMismatch) {
   MockHttpCache cache;
 
   // Write to the cache.
@@ -2203,6 +2205,154 @@ TEST(HttpCache, SimpleGET_LoadDontValidateCache_VaryMismatch) {
   EXPECT_EQ(1, cache.disk_cache()->create_count());
   TestLoadTimingNetworkRequest(load_timing_info);
   RemoveMockTransaction(&transaction);
+}
+
+// Tests that a new vary header provided when revalidating an entry is saved.
+TEST(HttpCache, GET_ValidateCache_VaryMatch_UpdateVary) {
+  MockHttpCache cache;
+
+  // Write to the cache.
+  ScopedMockTransaction transaction(kTypicalGET_Transaction);
+  transaction.request_headers = "Foo: bar\r\n Name: bar\r\n";
+  transaction.response_headers =
+      "Etag: \"foopy\"\n"
+      "Cache-Control: max-age=0\n"
+      "Vary: Foo\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  // Validate the entry and change the vary field in the response.
+  transaction.request_headers = "Foo: bar\r\n Name: none\r\n";
+  transaction.status = "HTTP/1.1 304 Not Modified";
+  transaction.response_headers =
+      "Etag: \"foopy\"\n"
+      "Cache-Control: max-age=3600\n"
+      "Vary: Name\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Make sure that the ActiveEntry is gone.
+  base::RunLoop().RunUntilIdle();
+
+  // Generate a vary mismatch.
+  transaction.request_headers = "Foo: bar\r\n Name: bar\r\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(3, cache.network_layer()->transaction_count());
+  EXPECT_EQ(2, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+}
+
+// Tests that new request headers causing a vary mismatch are paired with the
+// new response when the server says the old response can be used.
+TEST(HttpCache, GET_ValidateCache_VaryMismatch_UpdateRequestHeader) {
+  MockHttpCache cache;
+
+  // Write to the cache.
+  ScopedMockTransaction transaction(kTypicalGET_Transaction);
+  transaction.request_headers = "Foo: bar\r\n";
+  transaction.response_headers =
+      "Etag: \"foopy\"\n"
+      "Cache-Control: max-age=3600\n"
+      "Vary: Foo\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  // Vary-mismatch validation receives 304.
+  transaction.request_headers = "Foo: none\r\n";
+  transaction.status = "HTTP/1.1 304 Not Modified";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Make sure that the ActiveEntry is gone.
+  base::RunLoop().RunUntilIdle();
+
+  // Generate a vary mismatch.
+  transaction.request_headers = "Foo: bar\r\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(3, cache.network_layer()->transaction_count());
+  EXPECT_EQ(2, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+}
+
+// Tests that a 304 without vary headers doesn't delete the previously stored
+// vary data after a vary match revalidation.
+TEST(HttpCache, GET_ValidateCache_VaryMatch_DontDeleteVary) {
+  MockHttpCache cache;
+
+  // Write to the cache.
+  ScopedMockTransaction transaction(kTypicalGET_Transaction);
+  transaction.request_headers = "Foo: bar\r\n";
+  transaction.response_headers =
+      "Etag: \"foopy\"\n"
+      "Cache-Control: max-age=0\n"
+      "Vary: Foo\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  // Validate the entry and remove the vary field in the response.
+  transaction.status = "HTTP/1.1 304 Not Modified";
+  transaction.response_headers =
+      "Etag: \"foopy\"\n"
+      "Cache-Control: max-age=3600\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Make sure that the ActiveEntry is gone.
+  base::RunLoop().RunUntilIdle();
+
+  // Generate a vary mismatch.
+  transaction.request_headers = "Foo: none\r\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(3, cache.network_layer()->transaction_count());
+  EXPECT_EQ(2, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+}
+
+// Tests that a 304 without vary headers doesn't delete the previously stored
+// vary data after a vary mismatch.
+TEST(HttpCache, GET_ValidateCache_VaryMismatch_DontDeleteVary) {
+  MockHttpCache cache;
+
+  // Write to the cache.
+  ScopedMockTransaction transaction(kTypicalGET_Transaction);
+  transaction.request_headers = "Foo: bar\r\n";
+  transaction.response_headers =
+      "Etag: \"foopy\"\n"
+      "Cache-Control: max-age=3600\n"
+      "Vary: Foo\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  // Vary-mismatch validation receives 304 and no vary header.
+  transaction.request_headers = "Foo: none\r\n";
+  transaction.status = "HTTP/1.1 304 Not Modified";
+  transaction.response_headers =
+      "Etag: \"foopy\"\n"
+      "Cache-Control: max-age=3600\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Make sure that the ActiveEntry is gone.
+  base::RunLoop().RunUntilIdle();
+
+  // Generate a vary mismatch.
+  transaction.request_headers = "Foo: bar\r\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(3, cache.network_layer()->transaction_count());
+  EXPECT_EQ(2, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
 }
 
 static void ETagGet_UnconditionalRequest_Handler(
@@ -2321,7 +2471,7 @@ static void ConditionalizedRequestUpdatesCacheHelper(
   MockHttpCache cache;
 
   // The URL we will be requesting.
-  const char* kUrl = "http://foobar.com/main.css";
+  const char kUrl[] = "http://foobar.com/main.css";
 
   // Junk network response.
   static const Response kUnexpectedResponse = {
@@ -2432,7 +2582,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache1) {
     "body2"
   };
 
-  const char* extra_headers =
+  const char extra_headers[] =
       "If-Modified-Since: Wed, 06 Feb 2008 22:38:21 GMT\r\n";
 
   ConditionalizedRequestUpdatesCacheHelper(
@@ -2460,7 +2610,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache2) {
     "body2"
   };
 
-  const char* extra_headers = "If-None-Match: \"ETAG1\"\r\n";
+  const char extra_headers[] = "If-None-Match: \"ETAG1\"\r\n";
 
   ConditionalizedRequestUpdatesCacheHelper(
       kNetResponse1, kNetResponse2, kNetResponse2, extra_headers);
@@ -2496,7 +2646,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache3) {
     "body1"
   };
 
-  const char* extra_headers =
+  const char extra_headers[] =
       "If-Modified-Since: Wed, 06 Feb 2008 22:38:21 GMT\r\n";
 
   ConditionalizedRequestUpdatesCacheHelper(
@@ -2509,7 +2659,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache3) {
 TEST(HttpCache, ConditionalizedRequestUpdatesCache4) {
   MockHttpCache cache;
 
-  const char* kUrl = "http://foobar.com/main.css";
+  const char kUrl[] = "http://foobar.com/main.css";
 
   static const Response kNetResponse = {
     "HTTP/1.1 304 Not Modified",
@@ -2518,7 +2668,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache4) {
     ""
   };
 
-  const char* kExtraRequestHeaders =
+  const char kExtraRequestHeaders[] =
       "If-Modified-Since: Wed, 06 Feb 2008 22:38:21 GMT\r\n";
 
   // We will control the network layer's responses for |kUrl| using
@@ -2553,7 +2703,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache4) {
 TEST(HttpCache, ConditionalizedRequestUpdatesCache5) {
   MockHttpCache cache;
 
-  const char* kUrl = "http://foobar.com/main.css";
+  const char kUrl[] = "http://foobar.com/main.css";
 
   static const Response kNetResponse = {
     "HTTP/1.1 200 OK",
@@ -2562,7 +2712,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache5) {
     "foobar!!!"
   };
 
-  const char* kExtraRequestHeaders =
+  const char kExtraRequestHeaders[] =
       "If-Modified-Since: Wed, 06 Feb 2008 22:38:21 GMT\r\n";
 
   // We will control the network layer's responses for |kUrl| using
@@ -2615,7 +2765,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache6) {
 
   // This is two days in the future from the original response's last-modified
   // date!
-  const char* kExtraRequestHeaders =
+  const char kExtraRequestHeaders[] =
       "If-Modified-Since: Fri, 08 Feb 2008 22:38:21 GMT\r\n";
 
   ConditionalizedRequestUpdatesCacheHelper(
@@ -2644,7 +2794,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache7) {
   };
 
   // Different etag from original response.
-  const char* kExtraRequestHeaders = "If-None-Match: \"Foo2\"\r\n";
+  const char kExtraRequestHeaders[] = "If-None-Match: \"Foo2\"\r\n";
 
   ConditionalizedRequestUpdatesCacheHelper(
       kNetResponse1, kNetResponse2, kNetResponse1, kExtraRequestHeaders);
@@ -2670,7 +2820,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache8) {
     "body2"
   };
 
-  const char* kExtraRequestHeaders =
+  const char kExtraRequestHeaders[] =
       "If-Modified-Since: Wed, 06 Feb 2008 22:38:21 GMT\r\n"
       "If-None-Match: \"Foo1\"\r\n";
 
@@ -2699,7 +2849,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache9) {
   };
 
   // The etag doesn't match what we have stored.
-  const char* kExtraRequestHeaders =
+  const char kExtraRequestHeaders[] =
       "If-Modified-Since: Wed, 06 Feb 2008 22:38:21 GMT\r\n"
       "If-None-Match: \"Foo2\"\r\n";
 
@@ -2728,7 +2878,7 @@ TEST(HttpCache, ConditionalizedRequestUpdatesCache10) {
   };
 
   // The modification date doesn't match what we have stored.
-  const char* kExtraRequestHeaders =
+  const char kExtraRequestHeaders[] =
       "If-Modified-Since: Fri, 08 Feb 2008 22:38:21 GMT\r\n"
       "If-None-Match: \"Foo1\"\r\n";
 
@@ -3167,7 +3317,7 @@ TEST(HttpCache, SimpleHEAD_WithCachedRanges) {
   RunTransactionTestWithResponse(cache.http_cache(), transaction, &headers);
 
   EXPECT_NE(std::string::npos, headers.find("HTTP/1.1 200 OK\n"));
-  EXPECT_EQ(std::string::npos, headers.find("Content-Length"));
+  EXPECT_NE(std::string::npos, headers.find("Content-Length: 80\n"));
   EXPECT_EQ(std::string::npos, headers.find("Content-Range"));
   EXPECT_EQ(1, cache.network_layer()->transaction_count());
   EXPECT_EQ(1, cache.disk_cache()->open_count());
@@ -6364,8 +6514,8 @@ TEST(HttpCache, CacheDisabledMode) {
 TEST(HttpCache, UpdatesRequestResponseTimeOn304) {
   MockHttpCache cache;
 
-  const char* kUrl = "http://foobar";
-  const char* kData = "body";
+  const char kUrl[] = "http://foobar";
+  const char kData[] = "body";
 
   MockTransaction mock_network_response = { 0 };
   mock_network_response.url = kUrl;
@@ -6448,11 +6598,9 @@ TEST(HttpCache, WriteMetadata_OK) {
   scoped_refptr<net::IOBufferWithSize> buf(new net::IOBufferWithSize(50));
   memset(buf->data(), 0, buf->size());
   base::strlcpy(buf->data(), "Hi there", buf->size());
-  cache.http_cache()->WriteMetadata(GURL(kSimpleGET_Transaction.url),
-                                    net::DEFAULT_PRIORITY,
-                                    response.response_time,
-                                    buf.get(),
-                                    buf->size());
+  cache.http_cache()->WriteMetadata(
+      GURL(kSimpleGET_Transaction.url), net::DEFAULT_PRIORITY,
+      response.response_time, buf.get(), buf->size());
 
   // Release the buffer before the operation takes place.
   buf = NULL;
@@ -6488,10 +6636,8 @@ TEST(HttpCache, WriteMetadata_Fail) {
   base::Time expected_time = response.response_time -
                              base::TimeDelta::FromMilliseconds(20);
   cache.http_cache()->WriteMetadata(GURL(kSimpleGET_Transaction.url),
-                                    net::DEFAULT_PRIORITY,
-                                    expected_time,
-                                    buf.get(),
-                                    buf->size());
+                                    net::DEFAULT_PRIORITY, expected_time,
+                                    buf.get(), buf->size());
 
   // Makes sure we finish pending operations.
   base::MessageLoop::current()->RunUntilIdle();
@@ -6520,11 +6666,9 @@ TEST(HttpCache, ReadMetadata) {
   scoped_refptr<net::IOBufferWithSize> buf(new net::IOBufferWithSize(50));
   memset(buf->data(), 0, buf->size());
   base::strlcpy(buf->data(), "Hi there", buf->size());
-  cache.http_cache()->WriteMetadata(GURL(kTypicalGET_Transaction.url),
-                                    net::DEFAULT_PRIORITY,
-                                    response.response_time,
-                                    buf.get(),
-                                    buf->size());
+  cache.http_cache()->WriteMetadata(
+      GURL(kTypicalGET_Transaction.url), net::DEFAULT_PRIORITY,
+      response.response_time, buf.get(), buf->size());
 
   // Makes sure we finish pending operations.
   base::MessageLoop::current()->RunUntilIdle();
@@ -7094,6 +7238,115 @@ TEST(HttpCache, ReceivedBytesRange) {
   EXPECT_EQ(range_response_size * 2, received_bytes);
 
   RemoveMockTransaction(&kRangeGET_TransactionOK);
+}
+
+class HttpCachePrefetchValidationTest : public ::testing::Test {
+ protected:
+  static const int kMaxAgeSecs = 100;
+  static const int kRequireValidationSecs = kMaxAgeSecs + 1;
+
+  HttpCachePrefetchValidationTest() : transaction_(kSimpleGET_Transaction) {
+    DCHECK_LT(kMaxAgeSecs, prefetch_reuse_mins() * net::kNumSecondsPerMinute);
+
+    clock_ = new base::SimpleTestClock();
+    cache_.http_cache()->SetClockForTesting(make_scoped_ptr(clock_));
+    cache_.network_layer()->SetClock(clock_);
+
+    transaction_.response_headers = "Cache-Control: max-age=100\n";
+  }
+
+  bool TransactionRequiredNetwork(int load_flags) {
+    int pre_transaction_count = transaction_count();
+    transaction_.load_flags = load_flags;
+    RunTransactionTest(cache_.http_cache(), transaction_);
+    return pre_transaction_count != transaction_count();
+  }
+
+  void AdvanceTime(int seconds) {
+    clock_->Advance(base::TimeDelta::FromSeconds(seconds));
+  }
+
+  int prefetch_reuse_mins() { return net::HttpCache::kPrefetchReuseMins; }
+
+  // How many times this test has sent requests to the (fake) origin
+  // server. Every test case needs to make at least one request to initialise
+  // the cache.
+  int transaction_count() {
+    return cache_.network_layer()->transaction_count();
+  }
+
+  MockHttpCache cache_;
+  ScopedMockTransaction transaction_;
+  std::string response_headers_;
+  base::SimpleTestClock* clock_;
+};
+
+TEST_F(HttpCachePrefetchValidationTest, SkipValidationShortlyAfterPrefetch) {
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_PREFETCH));
+  AdvanceTime(kRequireValidationSecs);
+  EXPECT_FALSE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+}
+
+TEST_F(HttpCachePrefetchValidationTest, ValidateLongAfterPrefetch) {
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_PREFETCH));
+  AdvanceTime(prefetch_reuse_mins() * net::kNumSecondsPerMinute);
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+}
+
+TEST_F(HttpCachePrefetchValidationTest, SkipValidationOnceOnly) {
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_PREFETCH));
+  AdvanceTime(kRequireValidationSecs);
+  EXPECT_FALSE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+}
+
+TEST_F(HttpCachePrefetchValidationTest, SkipValidationOnceReadOnly) {
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_PREFETCH));
+  AdvanceTime(kRequireValidationSecs);
+  EXPECT_FALSE(TransactionRequiredNetwork(net::LOAD_ONLY_FROM_CACHE));
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+}
+
+TEST_F(HttpCachePrefetchValidationTest, BypassCacheOverwritesPrefetch) {
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_PREFETCH));
+  AdvanceTime(kRequireValidationSecs);
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_BYPASS_CACHE));
+  AdvanceTime(kRequireValidationSecs);
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+}
+
+TEST_F(HttpCachePrefetchValidationTest,
+       SkipValidationOnExistingEntryThatNeedsValidation) {
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+  AdvanceTime(kRequireValidationSecs);
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_PREFETCH));
+  AdvanceTime(kRequireValidationSecs);
+  EXPECT_FALSE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+}
+
+TEST_F(HttpCachePrefetchValidationTest,
+       SkipValidationOnExistingEntryThatDoesNotNeedValidation) {
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+  EXPECT_FALSE(TransactionRequiredNetwork(net::LOAD_PREFETCH));
+  AdvanceTime(kRequireValidationSecs);
+  EXPECT_FALSE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+}
+
+TEST_F(HttpCachePrefetchValidationTest, PrefetchMultipleTimes) {
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_PREFETCH));
+  EXPECT_FALSE(TransactionRequiredNetwork(net::LOAD_PREFETCH));
+  AdvanceTime(kRequireValidationSecs);
+  EXPECT_FALSE(TransactionRequiredNetwork(net::LOAD_NORMAL));
+}
+
+TEST_F(HttpCachePrefetchValidationTest, ValidateOnDelayedSecondPrefetch) {
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_PREFETCH));
+  AdvanceTime(kRequireValidationSecs);
+  EXPECT_TRUE(TransactionRequiredNetwork(net::LOAD_PREFETCH));
+  AdvanceTime(kRequireValidationSecs);
+  EXPECT_FALSE(TransactionRequiredNetwork(net::LOAD_NORMAL));
 }
 
 // Framework for tests of stale-while-revalidate related functionality.  With

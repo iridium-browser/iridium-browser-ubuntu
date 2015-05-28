@@ -30,10 +30,12 @@ const uint16 kServerPort = 80;
 class QuicCryptoClientStreamTest : public ::testing::Test {
  public:
   QuicCryptoClientStreamTest()
-      : connection_(new PacketSavingConnection(false)),
+      : connection_(new PacketSavingConnection(Perspective::IS_CLIENT)),
         session_(new TestClientSession(connection_, DefaultQuicConfig())),
         server_id_(kServerHostname, kServerPort, false, PRIVACY_MODE_DISABLED),
-        stream_(new QuicCryptoClientStream(server_id_, session_.get(), nullptr,
+        stream_(new QuicCryptoClientStream(server_id_,
+                                           session_.get(),
+                                           nullptr,
                                            &crypto_config_)) {
     session_->SetCryptoStream(stream_.get());
     // Advance the time, because timers do not like uninitialized times.
@@ -95,7 +97,6 @@ TEST_F(QuicCryptoClientStreamTest, NegotiatedParameters) {
   CompleteCryptoHandshake();
 
   const QuicConfig* config = session_->config();
-  EXPECT_EQ(kQBIC, config->CongestionFeedback());
   EXPECT_EQ(kMaximumIdleTimeoutSecs,
             config->IdleConnectionStateLifetime().ToSeconds());
   EXPECT_EQ(kDefaultMaxStreamsPerConnection,
@@ -122,7 +123,7 @@ TEST_F(QuicCryptoClientStreamTest, ExpiredServerConfig) {
   // Seed the config with a cached server config.
   CompleteCryptoHandshake();
 
-  connection_ = new PacketSavingConnection(true);
+  connection_ = new PacketSavingConnection(Perspective::IS_CLIENT);
   session_.reset(new TestClientSession(connection_, DefaultQuicConfig()));
   stream_.reset(new QuicCryptoClientStream(server_id_, session_.get(), nullptr,
                                            &crypto_config_));
@@ -136,7 +137,7 @@ TEST_F(QuicCryptoClientStreamTest, ExpiredServerConfig) {
 
   stream_->CryptoConnect();
   // Check that a client hello was sent.
-  ASSERT_EQ(1u, connection_->packets_.size());
+  ASSERT_EQ(1u, connection_->encrypted_packets_.size());
 }
 
 TEST_F(QuicCryptoClientStreamTest, ServerConfigUpdate) {

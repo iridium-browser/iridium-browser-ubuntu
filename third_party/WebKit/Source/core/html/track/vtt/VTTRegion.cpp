@@ -39,8 +39,8 @@
 #include "core/html/HTMLDivElement.h"
 #include "core/html/track/vtt/VTTParser.h"
 #include "core/html/track/vtt/VTTScanner.h"
-#include "core/rendering/RenderInline.h"
-#include "core/rendering/RenderObject.h"
+#include "core/layout/LayoutInline.h"
+#include "core/layout/LayoutObject.h"
 #include "platform/Logging.h"
 #include "wtf/MathExtras.h"
 #include "wtf/text/StringBuilder.h"
@@ -469,7 +469,7 @@ void VTTRegion::scrollTimerFired(Timer<VTTRegion>*)
     displayLastVTTCueBox();
 }
 
-void VTTRegion::trace(Visitor* visitor)
+DEFINE_TRACE(VTTRegion)
 {
     visitor->trace(m_cueContainer);
     visitor->trace(m_regionDisplayTree);

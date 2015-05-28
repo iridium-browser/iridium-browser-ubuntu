@@ -6,16 +6,30 @@
 
 #include "compiler/translator/TranslatorESSL.h"
 
+#include "compiler/translator/BuiltInFunctionEmulatorGLSL.h"
 #include "compiler/translator/EmulatePrecision.h"
 #include "compiler/translator/OutputESSL.h"
 #include "angle_gl.h"
 
 TranslatorESSL::TranslatorESSL(sh::GLenum type, ShShaderSpec spec)
-    : TCompiler(type, spec, SH_ESSL_OUTPUT) {
+    : TCompiler(type, spec, SH_ESSL_OUTPUT)
+{
 }
 
-void TranslatorESSL::translate(TIntermNode* root) {
+void TranslatorESSL::initBuiltInFunctionEmulator(BuiltInFunctionEmulator *emu, int compileOptions)
+{
+    if (compileOptions & SH_EMULATE_BUILT_IN_FUNCTIONS)
+        InitBuiltInFunctionEmulatorForGLSL(emu, getShaderType());
+}
+
+void TranslatorESSL::translate(TIntermNode *root, int) {
     TInfoSinkBase& sink = getInfoSink().obj;
+
+    int shaderVersion = getShaderVersion();
+    if (shaderVersion > 100)
+    {
+        sink << "#version " << shaderVersion << " es\n";
+    }
 
     writePragma();
 
@@ -33,22 +47,45 @@ void TranslatorESSL::translate(TIntermNode* root) {
     }
 
     // Write emulated built-in functions if needed.
-    getBuiltInFunctionEmulator().OutputEmulatedFunctionDefinition(
-        sink, getShaderType() == GL_FRAGMENT_SHADER);
+    if (!getBuiltInFunctionEmulator().IsOutputEmpty())
+    {
+        sink << "// BEGIN: Generated code for built-in function emulation\n\n";
+        if (getShaderType() == GL_FRAGMENT_SHADER)
+        {
+            sink << "#if defined(GL_FRAGMENT_PRECISION_HIGH)\n"
+                 << "#define webgl_emu_precision highp\n"
+                 << "#else\n"
+                 << "#define webgl_emu_precision mediump\n"
+                 << "#endif\n\n";
+        }
+        else
+        {
+            sink << "#define webgl_emu_precision highp\n";
+        }
+
+        getBuiltInFunctionEmulator().OutputEmulatedFunctions(sink);
+        sink << "// END: Generated code for built-in function emulation\n\n";
+    }
 
     // Write array bounds clamping emulation if needed.
     getArrayBoundsClamper().OutputClampingFunctionDefinition(sink);
 
     // Write translated shader.
-    TOutputESSL outputESSL(sink, getArrayIndexClampingStrategy(), getHashFunction(), getNameMap(), getSymbolTable(), getShaderVersion(), precisionEmulation);
+    TOutputESSL outputESSL(sink,
+                           getArrayIndexClampingStrategy(),
+                           getHashFunction(),
+                           getNameMap(),
+                           getSymbolTable(),
+                           shaderVersion,
+                           precisionEmulation);
     root->traverse(&outputESSL);
 }
 
 void TranslatorESSL::writeExtensionBehavior() {
     TInfoSinkBase& sink = getInfoSink().obj;
-    const TExtensionBehavior& extensionBehavior = getExtensionBehavior();
-    for (TExtensionBehavior::const_iterator iter = extensionBehavior.begin();
-         iter != extensionBehavior.end(); ++iter) {
+    const TExtensionBehavior& extBehavior = getExtensionBehavior();
+    for (TExtensionBehavior::const_iterator iter = extBehavior.begin();
+         iter != extBehavior.end(); ++iter) {
         if (iter->second != EBhUndefined) {
             if (getResources().NV_shader_framebuffer_fetch && iter->first == "GL_EXT_shader_framebuffer_fetch") {
                 sink << "#extension GL_NV_shader_framebuffer_fetch : "

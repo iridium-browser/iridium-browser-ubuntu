@@ -67,7 +67,7 @@ public:
     virtual void send(const String& message) override;
     virtual void send(const DOMArrayBuffer&, unsigned byteOffset, unsigned byteLength) override;
     virtual void send(PassRefPtr<BlobDataHandle>) override;
-    virtual void send(PassOwnPtr<Vector<char> >) override
+    virtual void send(PassOwnPtr<Vector<char>>) override
     {
         ASSERT_NOT_REACHED();
     }
@@ -75,7 +75,7 @@ public:
     virtual void fail(const String& reason, MessageLevel, const String&, unsigned) override;
     virtual void disconnect() override; // Will suppress didClose().
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     class Bridge;
     // Allocated in the worker thread, but used in the main thread.
@@ -83,7 +83,7 @@ public:
         USING_GARBAGE_COLLECTED_MIXIN(Peer);
         WTF_MAKE_NONCOPYABLE(Peer);
     public:
-        Peer(Bridge*, WorkerLoaderProxy&, WebSocketChannelSyncHelper*);
+        Peer(Bridge*, PassRefPtr<WorkerLoaderProxy>, WebSocketChannelSyncHelper*);
         virtual ~Peer();
 
         // sourceURLAtConnection and lineNumberAtConnection parameters may
@@ -95,18 +95,18 @@ public:
 
         void connect(const KURL&, const String& protocol);
         void send(const String& message);
-        void sendArrayBuffer(PassOwnPtr<Vector<char> >);
+        void sendArrayBuffer(PassOwnPtr<Vector<char>>);
         void sendBlob(PassRefPtr<BlobDataHandle>);
         void close(int code, const String& reason);
         void fail(const String& reason, MessageLevel, const String& sourceURL, unsigned lineNumber);
         void disconnect();
 
-        virtual void trace(Visitor*) override;
+        DECLARE_VIRTUAL_TRACE();
 
         // WebSocketChannelClient functions.
         virtual void didConnect(const String& subprotocol, const String& extensions) override;
         virtual void didReceiveTextMessage(const String& payload) override;
-        virtual void didReceiveBinaryMessage(PassOwnPtr<Vector<char> >) override;
+        virtual void didReceiveBinaryMessage(PassOwnPtr<Vector<char>>) override;
         virtual void didConsumeBufferedAmount(uint64_t) override;
         virtual void didStartClosingHandshake() override;
         virtual void didClose(ClosingHandshakeCompletionStatus, unsigned short code, const String& reason) override;
@@ -116,7 +116,7 @@ public:
         void initializeInternal(ExecutionContext*, const String& sourceURLAtConnection, unsigned lineNumberAtConnection);
 
         Member<Bridge> m_bridge;
-        WorkerLoaderProxy& m_loaderProxy;
+        RefPtr<WorkerLoaderProxy> m_loaderProxy;
         Member<WebSocketChannel> m_mainWebSocketChannel;
         Member<WebSocketChannelSyncHelper> m_syncHelper;
     };
@@ -141,7 +141,7 @@ public:
         // Returns null when |disconnect| has already been called.
         WebSocketChannelClient* client() { return m_client; }
 
-        void trace(Visitor*);
+        DECLARE_TRACE();
 
     private:
         // Returns false if shutdown event is received before method completion.
@@ -149,7 +149,7 @@ public:
 
         Member<WebSocketChannelClient> m_client;
         RefPtrWillBeMember<WorkerGlobalScope> m_workerGlobalScope;
-        WorkerLoaderProxy& m_loaderProxy;
+        RefPtr<WorkerLoaderProxy> m_loaderProxy;
         Member<WebSocketChannelSyncHelper> m_syncHelper;
         Member<Peer> m_peer;
     };

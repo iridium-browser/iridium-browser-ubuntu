@@ -5,13 +5,11 @@
 #ifndef DEVICE_BATTERY_BATTERY_MONITOR_IMPL_H_
 #define DEVICE_BATTERY_BATTERY_MONITOR_IMPL_H_
 
-#include <vector>
-
 #include "base/memory/scoped_ptr.h"
 #include "device/battery/battery_export.h"
 #include "device/battery/battery_monitor.mojom.h"
 #include "device/battery/battery_status_service.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/strong_binding.h"
 
 namespace device {
 
@@ -35,7 +33,7 @@ class BatteryMonitorImpl : public BatteryMonitor {
 
   mojo::StrongBinding<BatteryMonitor> binding_;
   scoped_ptr<BatteryStatusService::BatteryUpdateSubscription> subscription_;
-  std::vector<BatteryStatusCallback> callbacks_;
+  BatteryStatusCallback callback_;
   BatteryStatus status_;
   bool status_to_report_;
 

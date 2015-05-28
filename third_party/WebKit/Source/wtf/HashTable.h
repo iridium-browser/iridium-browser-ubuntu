@@ -22,9 +22,9 @@
 
 #include "wtf/Alignment.h"
 #include "wtf/Assertions.h"
+#include "wtf/ConditionalDestructor.h"
 #include "wtf/DefaultAllocator.h"
 #include "wtf/HashTraits.h"
-#include "wtf/WTF.h"
 
 #define DUMP_HASHTABLE_STATS 0
 #define DUMP_HASHTABLE_STATS_PER_TABLE 0
@@ -257,7 +257,8 @@ namespace WTF {
         swap(a.value, b.value);
     }
 
-    template<typename T, typename Allocator, bool useSwap> struct Mover;
+    template<typename T, typename Allocator, bool useSwap = !IsTriviallyDestructible<T>::value>
+    struct Mover;
     template<typename T, typename Allocator> struct Mover<T, Allocator, true> {
         static void move(T& from, T& to)
         {
@@ -299,6 +300,10 @@ namespace WTF {
             ASSERT_UNUSED(container, container);
         }
 
+        ValueType* storedValue;
+        bool isNewEntry;
+
+#if ENABLE(SECURITY_ASSERT)
         ~HashTableAddResult()
         {
             // If rehash happened before accessing storedValue, it's
@@ -310,10 +315,6 @@ namespace WTF {
             ASSERT_WITH_SECURITY_IMPLICATION(m_containerModifications == m_container->modifications());
         }
 
-        ValueType* storedValue;
-        bool isNewEntry;
-
-#if ENABLE(SECURITY_ASSERT)
     private:
         const HashTableType* m_container;
         const int64_t m_containerModifications;
@@ -345,23 +346,10 @@ namespace WTF {
         }
     };
 
-    // Don't declare a destructor for HeapAllocated hash tables.
-    template<typename Derived, bool isGarbageCollected>
-    class HashTableDestructorBase;
-
-    template<typename Derived>
-    class HashTableDestructorBase<Derived, true> { };
-
-    template<typename Derived>
-    class HashTableDestructorBase<Derived, false> {
-    public:
-        ~HashTableDestructorBase() { static_cast<Derived*>(this)->finalize(); }
-    };
-
     // Note: empty or deleted key values are not allowed, using them may lead to undefined behavior.
     // For pointer keys this means that null pointers are not allowed unless you supply custom key traits.
     template<typename Key, typename Value, typename Extractor, typename HashFunctions, typename Traits, typename KeyTraits, typename Allocator>
-    class HashTable : public HashTableDestructorBase<HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>, Allocator::isGarbageCollected> {
+    class HashTable : public ConditionalDestructor<HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>, Allocator::isGarbageCollected> {
     public:
         typedef HashTableIterator<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator> iterator;
         typedef HashTableConstIterator<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator> const_iterator;
@@ -909,7 +897,7 @@ namespace WTF {
         ++m_stats->numReinserts;
 #endif
         Value* newEntry = lookupForWriting(Extractor::extract(entry)).first;
-        Mover<ValueType, Allocator, Traits::needsDestruction>::move(entry, *newEntry);
+        Mover<ValueType, Allocator>::move(entry, *newEntry);
 
         return newEntry;
     }
@@ -1010,7 +998,7 @@ namespace WTF {
     template<typename Key, typename Value, typename Extractor, typename HashFunctions, typename Traits, typename KeyTraits, typename Allocator>
     void HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::deleteAllBucketsAndDeallocate(ValueType* table, unsigned size)
     {
-        if (Traits::needsDestruction) {
+        if (!IsTriviallyDestructible<ValueType>::value) {
             for (unsigned i = 0; i < size; ++i) {
                 // This code is called when the hash table is cleared or
                 // resized. We have allocated a new backing store and we need
@@ -1021,10 +1009,11 @@ namespace WTF {
                 // store. With the default allocator it's enough to call the
                 // destructor, since we will free the memory explicitly and
                 // we won't see the memory with the bucket again.
-                if (!isEmptyOrDeletedBucket(table[i])) {
-                    if (Allocator::isGarbageCollected)
+                if (Allocator::isGarbageCollected) {
+                    if (!isEmptyOrDeletedBucket(table[i]))
                         deleteBucket(table[i]);
-                    else
+                } else {
+                    if (!isDeletedBucket(table[i]))
                         table[i].~ValueType();
                 }
             }
@@ -1074,7 +1063,7 @@ namespace WTF {
                     initializeBucket(temporaryTable[i]);
                 }
             } else {
-                Mover<ValueType, Allocator, Traits::needsDestruction>::move(m_table[i], temporaryTable[i]);
+                Mover<ValueType, Allocator>::move(m_table[i], temporaryTable[i]);
             }
         }
         m_table = temporaryTable;
@@ -1256,6 +1245,11 @@ template<typename Key, typename Value, typename Extractor, typename HashFunction
                         // At this stage calling trace can make no difference
                         // (everything is already traced), but we use the
                         // return value to remove things from the collection.
+
+                        // FIXME: This should be rewritten so that this can check
+                        // if the element is dead without calling trace,
+                        // which is semantically not correct to be called in
+                        // weak processing stage.
                         if (TraceInCollectionTrait<WeakHandlingInCollections, WeakPointersActWeak, ValueType, Traits>::trace(visitor, *element)) {
                             table->registerModification();
                             HashTableType::deleteBucket(*element); // Also calls the destructor.

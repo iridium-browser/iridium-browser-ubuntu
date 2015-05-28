@@ -35,6 +35,7 @@
 #include "core/fetch/RawResource.h"
 #include "core/fetch/ResourcePtr.h"
 #include "platform/network/ResourceRequest.h"
+#include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "wtf/OwnPtr.h"
 
@@ -249,7 +250,6 @@ static void TestLiveResourceEvictionAtEndOfTask(Resource* cachedDeadResource, co
             // Next task: now, the live resource was evicted.
             ASSERT_EQ(0u, memoryCache()->deadSize());
             ASSERT_EQ(m_liveSizeWithoutDecode, memoryCache()->liveSize());
-            blink::Platform::current()->currentThread()->exitRunLoop();
         }
 
     private:
@@ -257,9 +257,9 @@ static void TestLiveResourceEvictionAtEndOfTask(Resource* cachedDeadResource, co
     };
 
 
-    blink::Platform::current()->currentThread()->postTask(new Task1(cachedLiveResource, cachedDeadResource));
-    blink::Platform::current()->currentThread()->postTask(new Task2(cachedLiveResource->encodedSize() + cachedLiveResource->overheadSize()));
-    blink::Platform::current()->currentThread()->enterRunLoop();
+    blink::Platform::current()->currentThread()->postTask(FROM_HERE, new Task1(cachedLiveResource, cachedDeadResource));
+    blink::Platform::current()->currentThread()->postTask(FROM_HERE, new Task2(cachedLiveResource->encodedSize() + cachedLiveResource->overheadSize()));
+    testing::runPendingTasks();
     cachedLiveResource->removeClient(&client);
 }
 

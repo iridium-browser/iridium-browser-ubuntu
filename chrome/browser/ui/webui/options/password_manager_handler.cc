@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/options/password_manager_handler.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -15,6 +16,7 @@
 #if defined(OS_WIN) && defined(USE_ASH)
 #include "chrome/browser/ui/ash/ash_util.h"
 #endif
+#include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -25,6 +27,7 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/common/content_switches.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -50,6 +53,10 @@ void PasswordManagerHandler::GetLocalizedValues(
   DCHECK(localized_strings);
 
   static const OptionsStringResource resources[] = {
+    { "autoSigninTitle",
+      IDS_PASSWORDS_AUTO_SIGNIN_TITLE },
+    { "autoSigninDescription",
+      IDS_PASSWORDS_AUTO_SIGNIN_DESCRIPTION },
     { "savedPasswordsTitle",
       IDS_PASSWORDS_SHOW_PASSWORDS_TAB_TITLE },
     { "passwordExceptionsTitle",
@@ -99,6 +106,10 @@ void PasswordManagerHandler::GetLocalizedValues(
 #endif
 
   localized_strings->SetBoolean("disableShowPasswords", disable_show_passwords);
+  localized_strings->SetBoolean(
+      "enableCredentialManagerAPI",
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableCredentialManagerAPI));
 }
 
 void PasswordManagerHandler::RegisterMessages() {
@@ -182,15 +193,20 @@ void PasswordManagerHandler::SetPasswordList(
   base::string16 placeholder(base::ASCIIToUTF16("        "));
   for (size_t i = 0; i < password_list.size(); ++i) {
     base::ListValue* entry = new base::ListValue();
-    entry->Append(new base::StringValue(net::FormatUrl(password_list[i]->origin,
-                                                       languages_)));
-    entry->Append(new base::StringValue(password_list[i]->username_value));
+    entry->AppendString(GetHumanReadableOrigin(*password_list[i], languages_));
+    entry->AppendString(password_list[i]->username_value);
     if (show_passwords) {
-      entry->Append(new base::StringValue(password_list[i]->password_value));
+      entry->AppendString(password_list[i]->password_value);
     } else {
       // Use a placeholder value with the same length as the password.
-      entry->Append(new base::StringValue(
-          base::string16(password_list[i]->password_value.length(), ' ')));
+      entry->AppendString(
+          base::string16(password_list[i]->password_value.length(), ' '));
+    }
+    const GURL& federation_url = password_list[i]->federation_url;
+    if (!federation_url.is_empty()) {
+      entry->AppendString(l10n_util::GetStringFUTF16(
+          IDS_PASSWORDS_VIA_FEDERATION,
+          base::UTF8ToUTF16(federation_url.host())));
     }
     entries.Append(entry);
   }
@@ -203,8 +219,8 @@ void PasswordManagerHandler::SetPasswordExceptionList(
     const ScopedVector<autofill::PasswordForm>& password_exception_list) {
   base::ListValue entries;
   for (size_t i = 0; i < password_exception_list.size(); ++i) {
-    entries.Append(new base::StringValue(
-        net::FormatUrl(password_exception_list[i]->origin, languages_)));
+    entries.AppendString(
+        GetHumanReadableOrigin(*password_exception_list[i], languages_));
   }
 
   web_ui()->CallJavascriptFunction("PasswordManager.setPasswordExceptionsList",

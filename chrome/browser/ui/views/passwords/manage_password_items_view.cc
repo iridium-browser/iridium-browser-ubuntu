@@ -6,7 +6,6 @@
 
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/autofill/core/common/password_form.h"
 #include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -147,7 +146,7 @@ void ManagePasswordItemsView::PasswordFormRow::AddCredentialsRow(
     views::GridLayout* layout) {
   ResetControls();
   int column_set_id =
-      password_manager::ui::IsPendingState(host_->model_->state())
+      host_->model_->state() == password_manager::ui::PENDING_PASSWORD_STATE
           ? TWO_COLUMN_SET
           : THREE_COLUMN_SET;
   BuildColumnSetIfNeeded(layout, column_set_id);
@@ -248,7 +247,7 @@ void ManagePasswordItemsView::NotifyPasswordFormStatusChanged(
 }
 
 void ManagePasswordItemsView::Refresh() {
-  DCHECK(!password_manager::ui::IsPendingState(model_->state()));
+  DCHECK_NE(password_manager::ui::PENDING_PASSWORD_STATE, model_->state());
   RemoveAllChildViews(true);
   AddRows();
 }

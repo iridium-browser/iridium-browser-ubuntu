@@ -282,7 +282,7 @@ WebInspector.CPUProfileView.prototype = {
         var script = target.debuggerModel.scriptForId(node.scriptId);
         if (!script)
             return;
-        var location = /** @type {!WebInspector.DebuggerModel.Location} */ (script.target().debuggerModel.createRawLocation(script, node.lineNumber, 0));
+        var location = /** @type {!WebInspector.DebuggerModel.Location} */ (script.target().debuggerModel.createRawLocation(script, node.lineNumber, node.columnNumber));
         WebInspector.Revealer.reveal(WebInspector.debuggerWorkspaceBinding.rawLocationToUILocation(location));
     },
 
@@ -535,13 +535,14 @@ WebInspector.CPUProfileType.prototype = {
             return;
 
         /**
-         * @param {!ProfilerAgent.CPUProfile} profile
+         * @param {?ProfilerAgent.CPUProfile} profile
          * @this {WebInspector.CPUProfileType}
          */
         function didStopProfiling(profile)
         {
             if (!this._profileBeingRecorded)
                 return;
+            console.assert(profile);
             this._profileBeingRecorded.setProtocolProfile(profile);
             this._profileBeingRecorded.updateStatus("");
             var recordedProfile = this._profileBeingRecorded;
@@ -603,7 +604,7 @@ WebInspector.CPUProfileHeader.prototype = {
      */
     onChunkTransferred: function(reader)
     {
-        this.updateStatus(WebInspector.UIString("Loading\u2026 %d\%", Number.bytesToString(this._jsonifiedProfile.length)));
+        this.updateStatus(WebInspector.UIString("Loading\u2026 %d%%", Number.bytesToString(this._jsonifiedProfile.length)));
     },
 
     /**

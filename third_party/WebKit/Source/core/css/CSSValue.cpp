@@ -33,7 +33,6 @@
 #include "core/css/CSSContentDistributionValue.h"
 #include "core/css/CSSCrossfadeValue.h"
 #include "core/css/CSSCursorImageValue.h"
-#include "core/css/CSSFilterValue.h"
 #include "core/css/CSSFontFaceSrcValue.h"
 #include "core/css/CSSFontFeatureValue.h"
 #include "core/css/CSSFontValue.h"
@@ -52,7 +51,6 @@
 #include "core/css/CSSSVGDocumentValue.h"
 #include "core/css/CSSShadowValue.h"
 #include "core/css/CSSTimingFunctionValue.h"
-#include "core/css/CSSTransformValue.h"
 #include "core/css/CSSUnicodeRangeValue.h"
 #include "core/css/CSSUnsetValue.h"
 #include "core/css/CSSValueList.h"
@@ -145,16 +143,12 @@ bool CSSValue::equals(const CSSValue& other) const
             return compareCSSValues<CSSUnicodeRangeValue>(*this, other);
         case ValueListClass:
             return compareCSSValues<CSSValueList>(*this, other);
-        case CSSTransformClass:
-            return compareCSSValues<CSSTransformValue>(*this, other);
         case LineBoxContainClass:
             return compareCSSValues<CSSLineBoxContainValue>(*this, other);
         case CalculationClass:
             return compareCSSValues<CSSCalcValue>(*this, other);
         case ImageSetClass:
             return compareCSSValues<CSSImageSetValue>(*this, other);
-        case CSSFilterClass:
-            return compareCSSValues<CSSFilterValue>(*this, other);
         case CSSSVGDocumentClass:
             return compareCSSValues<CSSSVGDocumentValue>(*this, other);
         case CSSContentDistributionClass:
@@ -163,10 +157,7 @@ bool CSSValue::equals(const CSSValue& other) const
             ASSERT_NOT_REACHED();
             return false;
         }
-    } else if (m_classType == ValueListClass && other.m_classType != ValueListClass)
-        return toCSSValueList(this)->equals(other);
-    else if (m_classType != ValueListClass && other.m_classType == ValueListClass)
-        return static_cast<const CSSValueList&>(other).equals(*this);
+    }
     return false;
 }
 
@@ -221,16 +212,12 @@ String CSSValue::cssText() const
         return toCSSUnicodeRangeValue(this)->customCSSText();
     case ValueListClass:
         return toCSSValueList(this)->customCSSText();
-    case CSSTransformClass:
-        return toCSSTransformValue(this)->customCSSText();
     case LineBoxContainClass:
         return toCSSLineBoxContainValue(this)->customCSSText();
     case CalculationClass:
         return toCSSCalcValue(this)->customCSSText();
     case ImageSetClass:
         return toCSSImageSetValue(this)->customCSSText();
-    case CSSFilterClass:
-        return toCSSFilterValue(this)->customCSSText();
     case CSSSVGDocumentClass:
         return toCSSSVGDocumentValue(this)->customCSSText();
     case CSSContentDistributionClass:
@@ -315,9 +302,6 @@ void CSSValue::destroy()
     case ValueListClass:
         delete toCSSValueList(this);
         return;
-    case CSSTransformClass:
-        delete toCSSTransformValue(this);
-        return;
     case LineBoxContainClass:
         delete toCSSLineBoxContainValue(this);
         return;
@@ -326,9 +310,6 @@ void CSSValue::destroy()
         return;
     case ImageSetClass:
         delete toCSSImageSetValue(this);
-        return;
-    case CSSFilterClass:
-        delete toCSSFilterValue(this);
         return;
     case CSSSVGDocumentClass:
         delete toCSSSVGDocumentValue(this);
@@ -415,9 +396,6 @@ void CSSValue::finalizeGarbageCollectedObject()
     case ValueListClass:
         toCSSValueList(this)->~CSSValueList();
         return;
-    case CSSTransformClass:
-        toCSSTransformValue(this)->~CSSTransformValue();
-        return;
     case LineBoxContainClass:
         toCSSLineBoxContainValue(this)->~CSSLineBoxContainValue();
         return;
@@ -426,9 +404,6 @@ void CSSValue::finalizeGarbageCollectedObject()
         return;
     case ImageSetClass:
         toCSSImageSetValue(this)->~CSSImageSetValue();
-        return;
-    case CSSFilterClass:
-        toCSSFilterValue(this)->~CSSFilterValue();
         return;
     case CSSSVGDocumentClass:
         toCSSSVGDocumentValue(this)->~CSSSVGDocumentValue();
@@ -440,7 +415,7 @@ void CSSValue::finalizeGarbageCollectedObject()
     ASSERT_NOT_REACHED();
 }
 
-void CSSValue::trace(Visitor* visitor)
+DEFINE_TRACE(CSSValue)
 {
     switch (classType()) {
     case BorderImageSliceClass:
@@ -515,9 +490,6 @@ void CSSValue::trace(Visitor* visitor)
     case ValueListClass:
         toCSSValueList(this)->traceAfterDispatch(visitor);
         return;
-    case CSSTransformClass:
-        toCSSTransformValue(this)->traceAfterDispatch(visitor);
-        return;
     case LineBoxContainClass:
         toCSSLineBoxContainValue(this)->traceAfterDispatch(visitor);
         return;
@@ -526,9 +498,6 @@ void CSSValue::trace(Visitor* visitor)
         return;
     case ImageSetClass:
         toCSSImageSetValue(this)->traceAfterDispatch(visitor);
-        return;
-    case CSSFilterClass:
-        toCSSFilterValue(this)->traceAfterDispatch(visitor);
         return;
     case CSSSVGDocumentClass:
         toCSSSVGDocumentValue(this)->traceAfterDispatch(visitor);

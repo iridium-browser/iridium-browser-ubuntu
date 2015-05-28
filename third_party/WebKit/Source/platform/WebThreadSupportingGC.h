@@ -27,14 +27,14 @@ public:
     static PassOwnPtr<WebThreadSupportingGC> create(const char*);
     ~WebThreadSupportingGC();
 
-    void postTask(WebThread::Task* task)
+    void postTask(const WebTraceLocation& location, WebThread::Task* task)
     {
-        m_thread->postTask(task);
+        m_thread->postTask(location, task);
     }
 
-    void postDelayedTask(WebThread::Task* task, long long delayMs)
+    void postDelayedTask(const WebTraceLocation& location, WebThread::Task* task, long long delayMs)
     {
-        m_thread->postDelayedTask(task, delayMs);
+        m_thread->postDelayedTask(location, task, delayMs);
     }
 
     bool isCurrentThread() const

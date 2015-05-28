@@ -22,7 +22,6 @@
 #define SVGPatternElement_h
 
 #include "core/SVGNames.h"
-#include "core/svg/SVGAnimatedBoolean.h"
 #include "core/svg/SVGAnimatedEnumeration.h"
 #include "core/svg/SVGAnimatedLength.h"
 #include "core/svg/SVGAnimatedTransformList.h"
@@ -61,7 +60,7 @@ public:
     const SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>* patternUnits() const { return m_patternUnits.get(); }
     const SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>* patternContentUnits() const { return m_patternContentUnits.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGPatternElement(Document&);
@@ -70,11 +69,10 @@ private:
     virtual bool needsPendingResourceHandling() const override { return false; }
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
     virtual void childrenChanged(const ChildrenChange&) override;
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
 
     virtual bool selfHasRelativeLengths() const override;
 
@@ -83,8 +81,8 @@ private:
     RefPtrWillBeMember<SVGAnimatedLength> m_width;
     RefPtrWillBeMember<SVGAnimatedLength> m_height;
     RefPtrWillBeMember<SVGAnimatedTransformList> m_patternTransform;
-    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType> > m_patternUnits;
-    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType> > m_patternContentUnits;
+    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>> m_patternUnits;
+    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>> m_patternContentUnits;
 };
 
 } // namespace blink

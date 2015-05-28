@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,12 +8,10 @@ from __future__ import print_function
 
 import base64
 import cStringIO
+import mock
 import os
-import sys
 from textwrap import dedent
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                                '..', '..'))
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_test_lib
@@ -23,13 +20,6 @@ from chromite.lib import gob_util
 from chromite.lib import osutils
 from chromite.lib import portage_util
 from chromite.scripts import cros_mark_chrome_as_stable
-
-# TODO(build): Finish test wrapper (http://crosbug.com/37517).
-# Until then, this has to be after the chromite imports.
-import mock
-
-
-# pylint: disable=W0212
 
 
 unstable_data = 'KEYWORDS=~x86 ~arm'
@@ -77,6 +67,7 @@ class CrosMarkChromeAsStable(cros_test_lib.MockTempDirTestCase):
     osutils.WriteFile(self.sticky, stable_data)
     osutils.WriteFile(self.sticky_rc, stable_data)
     osutils.WriteFile(self.latest_stable, stable_data)
+    # pylint: disable=protected-access
     osutils.WriteFile(
         self.tot_stable,
         '\n'.join((stable_data,
@@ -153,6 +144,7 @@ class CrosMarkChromeAsStable(cros_test_lib.MockTempDirTestCase):
         D=0''')
     result = cStringIO.StringIO(base64.b64encode(TEST_VERSION_CONTENTS))
     self.PatchObject(gob_util, 'FetchUrl', return_value=result)
+    # pylint: disable=protected-access
     version = cros_mark_chrome_as_stable._GetSpecificVersionUrl(
         TEST_URL, 'test-revision')
     self.assertEquals(version, '8.0.256.0')
@@ -223,6 +215,7 @@ class CrosMarkChromeAsStable(cros_test_lib.MockTempDirTestCase):
 
   def testStickyEBuild(self):
     """Tests if we can find the sticky ebuild from our mock directories."""
+    # pylint: disable=protected-access
     stable_ebuilds = self._GetStableEBuilds()
     sticky_ebuild = cros_mark_chrome_as_stable._GetStickyEBuild(
         stable_ebuilds)
@@ -288,7 +281,3 @@ class CrosMarkChromeAsStable(cros_test_lib.MockTempDirTestCase):
         constants.CHROME_REV_TOT,
         self.tot_new_version, self.tot_stable,
         self.tot_new, 'tot')
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()

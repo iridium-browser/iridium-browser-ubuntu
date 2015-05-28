@@ -99,7 +99,8 @@ TEST_F(CaptureControllerTest, ResetMouseEventHandlerOnCapture) {
   // Make a synthesized mouse down event. Ensure that the WindowEventDispatcher
   // will dispatch further mouse events to |w1|.
   ui::MouseEvent mouse_pressed_event(ui::ET_MOUSE_PRESSED, gfx::Point(5, 5),
-                                     gfx::Point(5, 5), 0, 0);
+                                     gfx::Point(5, 5), ui::EventTimeForNow(), 0,
+                                     0);
   DispatchEventUsingWindowDispatcher(&mouse_pressed_event);
   EXPECT_EQ(w1.get(), host()->dispatcher()->mouse_pressed_handler());
 
@@ -159,11 +160,6 @@ TEST_F(CaptureControllerTest, TouchTargetResetOnCaptureChange) {
   w2->ReleaseCapture();
   EXPECT_EQ(static_cast<aura::Window*>(NULL), GetCaptureWindow());
   EXPECT_EQ(static_cast<aura::Window*>(NULL), GetSecondCaptureWindow());
-  ui::TouchEvent touch_event(
-      ui::ET_TOUCH_PRESSED, gfx::Point(), 0, 0, ui::EventTimeForNow(), 1.0f,
-      1.0f, 1.0f, 1.0f);
-  EXPECT_EQ(static_cast<ui::GestureConsumer*>(w2.get()),
-            ui::GestureRecognizer::Get()->GetTouchLockedTarget(touch_event));
 }
 
 // Test that native capture is released properly when the window with capture

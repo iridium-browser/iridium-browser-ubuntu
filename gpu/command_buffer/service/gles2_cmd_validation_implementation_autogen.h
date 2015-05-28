@@ -28,6 +28,11 @@ static const GLenum valid_blit_filter_table[] = {
     GL_LINEAR,
 };
 
+static const GLenum valid_buffer_mode_table[] = {
+    GL_INTERLEAVED_ATTRIBS,
+    GL_SEPARATE_ATTRIBS,
+};
+
 static const GLenum valid_buffer_parameter_table[] = {
     GL_BUFFER_SIZE,
     GL_BUFFER_USAGE,
@@ -38,10 +43,37 @@ static const GLenum valid_buffer_target_table[] = {
     GL_ELEMENT_ARRAY_BUFFER,
 };
 
+static const GLenum valid_buffer_target_table_es3[] = {
+    GL_COPY_READ_BUFFER,
+    GL_COPY_WRITE_BUFFER,
+    GL_PIXEL_PACK_BUFFER,
+    GL_PIXEL_UNPACK_BUFFER,
+    GL_TRANSFORM_FEEDBACK_BUFFER,
+    GL_UNIFORM_BUFFER,
+};
+
 static const GLenum valid_buffer_usage_table[] = {
     GL_STREAM_DRAW,
     GL_STATIC_DRAW,
     GL_DYNAMIC_DRAW,
+};
+
+static const GLenum valid_bufferfi_table[] = {
+    GL_DEPTH_STENCIL,
+};
+
+static const GLenum valid_bufferfv_table[] = {
+    GL_COLOR,
+    GL_DEPTH,
+};
+
+static const GLenum valid_bufferiv_table[] = {
+    GL_COLOR,
+    GL_STENCIL,
+};
+
+static const GLenum valid_bufferuiv_table[] = {
+    GL_COLOR,
 };
 
 static const GLenum valid_capability_table[] = {
@@ -54,6 +86,10 @@ static const GLenum valid_capability_table[] = {
     GL_SAMPLE_COVERAGE,
     GL_SCISSOR_TEST,
     GL_STENCIL_TEST,
+};
+
+static const GLenum valid_capability_table_es3[] = {
+    GL_RASTERIZER_DISCARD,
 };
 
 static const GLenum valid_cmp_function_table[] = {
@@ -214,6 +250,7 @@ static const GLenum valid_g_l_state_table[] = {
     GL_SAMPLE_COVERAGE,
     GL_SCISSOR_TEST,
     GL_STENCIL_TEST,
+    GL_RASTERIZER_DISCARD,
 };
 
 static const GLenum valid_get_max_index_type_table[] = {
@@ -257,6 +294,15 @@ static const GLenum valid_indexed_buffer_target_table[] = {
     GL_UNIFORM_BUFFER,
 };
 
+static const GLenum valid_map_buffer_access_table[] = {
+    GL_MAP_READ_BIT,
+    GL_MAP_WRITE_BIT,
+    GL_MAP_INVALIDATE_RANGE_BIT,
+    GL_MAP_INVALIDATE_BUFFER_BIT,
+    GL_MAP_FLUSH_EXPLICIT_BIT,
+    GL_MAP_UNSYNCHRONIZED_BIT,
+};
+
 static const GLenum valid_matrix_mode_table[] = {
     GL_PATH_PROJECTION_CHROMIUM,
     GL_PATH_MODELVIEW_CHROMIUM,
@@ -282,6 +328,21 @@ static const GLenum valid_pixel_type_table[] = {
     GL_UNSIGNED_SHORT_5_6_5,
     GL_UNSIGNED_SHORT_4_4_4_4,
     GL_UNSIGNED_SHORT_5_5_5_1,
+};
+
+static const GLenum valid_pixel_type_table_es3[] = {
+    GL_BYTE,
+    GL_UNSIGNED_SHORT,
+    GL_SHORT,
+    GL_UNSIGNED_INT,
+    GL_INT,
+    GL_HALF_FLOAT,
+    GL_FLOAT,
+    GL_UNSIGNED_INT_2_10_10_10_REV,
+    GL_UNSIGNED_INT_10F_11F_11F_REV,
+    GL_UNSIGNED_INT_5_9_9_9_REV,
+    GL_UNSIGNED_INT_24_8,
+    GL_FLOAT_32_UNSIGNED_INT_24_8_REV,
 };
 
 static const GLenum valid_program_parameter_table[] = {
@@ -434,6 +495,18 @@ static const GLenum valid_subscription_target_table[] = {
     GL_MOUSE_POSITION_CHROMIUM,
 };
 
+static const GLbitfield valid_sync_flush_flags_table[] = {
+    GL_SYNC_FLUSH_COMMANDS_BIT,
+    0,
+};
+
+static const GLenum valid_sync_parameter_table[] = {
+    GL_SYNC_STATUS,
+    GL_OBJECT_TYPE,
+    GL_SYNC_CONDITION,
+    GL_SYNC_FLAGS,
+};
+
 static const GLenum valid_texture_3_d_target_table[] = {
     GL_TEXTURE_3D,
     GL_TEXTURE_2D_ARRAY,
@@ -444,6 +517,11 @@ static const GLenum valid_texture_bind_target_table[] = {
     GL_TEXTURE_CUBE_MAP,
 };
 
+static const GLenum valid_texture_bind_target_table_es3[] = {
+    GL_TEXTURE_3D,
+    GL_TEXTURE_2D_ARRAY,
+};
+
 static const GLenum valid_texture_format_table[] = {
     GL_ALPHA,
     GL_LUMINANCE,
@@ -452,12 +530,80 @@ static const GLenum valid_texture_format_table[] = {
     GL_RGBA,
 };
 
+static const GLenum valid_texture_format_table_es3[] = {
+    GL_RED,
+    GL_RED_INTEGER,
+    GL_RG,
+    GL_RG_INTEGER,
+    GL_RGB_INTEGER,
+    GL_RGBA_INTEGER,
+    GL_DEPTH_COMPONENT,
+    GL_DEPTH_STENCIL,
+};
+
 static const GLenum valid_texture_internal_format_table[] = {
     GL_ALPHA,
     GL_LUMINANCE,
     GL_LUMINANCE_ALPHA,
     GL_RGB,
     GL_RGBA,
+};
+
+static const GLenum valid_texture_internal_format_table_es3[] = {
+    GL_R8,
+    GL_R8_SNORM,
+    GL_R16F,
+    GL_R32F,
+    GL_R8UI,
+    GL_R8I,
+    GL_R16UI,
+    GL_R16I,
+    GL_R32UI,
+    GL_R32I,
+    GL_RG8,
+    GL_RG8_SNORM,
+    GL_RG16F,
+    GL_RG32F,
+    GL_RG8UI,
+    GL_RG8I,
+    GL_RG16UI,
+    GL_RG16I,
+    GL_RG32UI,
+    GL_RG32I,
+    GL_RGB8,
+    GL_SRGB8,
+    GL_RGB565,
+    GL_RGB8_SNORM,
+    GL_R11F_G11F_B10F,
+    GL_RGB9_E5,
+    GL_RGB16F,
+    GL_RGB32F,
+    GL_RGB8UI,
+    GL_RGB8I,
+    GL_RGB16UI,
+    GL_RGB16I,
+    GL_RGB32UI,
+    GL_RGB32I,
+    GL_RGBA8,
+    GL_SRGB8_ALPHA8,
+    GL_RGBA8_SNORM,
+    GL_RGB5_A1,
+    GL_RGBA4,
+    GL_RGB10_A2,
+    GL_RGBA16F,
+    GL_RGBA32F,
+    GL_RGBA8UI,
+    GL_RGBA8I,
+    GL_RGB10_A2UI,
+    GL_RGBA16UI,
+    GL_RGBA16I,
+    GL_RGBA32UI,
+    GL_RGBA32I,
+    GL_DEPTH_COMPONENT16,
+    GL_DEPTH_COMPONENT24,
+    GL_DEPTH_COMPONENT32F,
+    GL_DEPTH24_STENCIL8,
+    GL_DEPTH32F_STENCIL8,
 };
 
 static const GLenum valid_texture_internal_format_storage_table[] = {
@@ -469,6 +615,80 @@ static const GLenum valid_texture_internal_format_storage_table[] = {
     GL_LUMINANCE8_ALPHA8_EXT,
     GL_RGB8_OES,
     GL_RGBA8_OES,
+};
+
+static const GLenum valid_texture_internal_format_storage_table_es3[] = {
+    GL_R8,
+    GL_R8_SNORM,
+    GL_R16F,
+    GL_R32F,
+    GL_R8UI,
+    GL_R8I,
+    GL_R16UI,
+    GL_R16I,
+    GL_R32UI,
+    GL_R32I,
+    GL_RG8,
+    GL_RG8_SNORM,
+    GL_RG16F,
+    GL_RG32F,
+    GL_RG8UI,
+    GL_RG8I,
+    GL_RG16UI,
+    GL_RG16I,
+    GL_RG32UI,
+    GL_RG32I,
+    GL_SRGB8,
+    GL_RGB8_SNORM,
+    GL_R11F_G11F_B10F,
+    GL_RGB9_E5,
+    GL_RGB16F,
+    GL_RGB32F,
+    GL_RGB8UI,
+    GL_RGB8I,
+    GL_RGB16UI,
+    GL_RGB16I,
+    GL_RGB32UI,
+    GL_RGB32I,
+    GL_SRGB8_ALPHA8,
+    GL_RGBA8_SNORM,
+    GL_RGB10_A2,
+    GL_RGBA16F,
+    GL_RGBA32F,
+    GL_RGBA8UI,
+    GL_RGBA8I,
+    GL_RGB10_A2UI,
+    GL_RGBA16UI,
+    GL_RGBA16I,
+    GL_RGBA32UI,
+    GL_RGBA32I,
+    GL_DEPTH_COMPONENT16,
+    GL_DEPTH_COMPONENT24,
+    GL_DEPTH_COMPONENT32F,
+    GL_DEPTH24_STENCIL8,
+    GL_DEPTH32F_STENCIL8,
+    GL_COMPRESSED_R11_EAC,
+    GL_COMPRESSED_SIGNED_R11_EAC,
+    GL_COMPRESSED_RG11_EAC,
+    GL_COMPRESSED_SIGNED_RG11_EAC,
+    GL_COMPRESSED_RGB8_ETC2,
+    GL_COMPRESSED_SRGB8_ETC2,
+    GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2,
+    GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2,
+    GL_COMPRESSED_RGBA8_ETC2_EAC,
+    GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC,
+};
+
+static const GLenum deprecated_texture_internal_format_storage_table_es3[] = {
+    GL_ALPHA8_EXT,
+    GL_LUMINANCE8_EXT,
+    GL_LUMINANCE8_ALPHA8_EXT,
+    GL_ALPHA16F_EXT,
+    GL_LUMINANCE16F_EXT,
+    GL_LUMINANCE_ALPHA16F_EXT,
+    GL_ALPHA32F_EXT,
+    GL_LUMINANCE32F_EXT,
+    GL_LUMINANCE_ALPHA32F_EXT,
 };
 
 static const GLenum valid_texture_mag_filter_mode_table[] = {
@@ -529,6 +749,27 @@ static const GLenum valid_transform_feedback_primitive_mode_table[] = {
     GL_TRIANGLES,
 };
 
+static const GLenum valid_uniform_block_parameter_table[] = {
+    GL_UNIFORM_BLOCK_BINDING,
+    GL_UNIFORM_BLOCK_DATA_SIZE,
+    GL_UNIFORM_BLOCK_NAME_LENGTH,
+    GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS,
+    GL_UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES,
+    GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER,
+    GL_UNIFORM_BLOCK_REFERENCED_BY_FRAGMENT_SHADER,
+};
+
+static const GLenum valid_uniform_parameter_table[] = {
+    GL_UNIFORM_SIZE,
+    GL_UNIFORM_TYPE,
+    GL_UNIFORM_NAME_LENGTH,
+    GL_UNIFORM_BLOCK_INDEX,
+    GL_UNIFORM_OFFSET,
+    GL_UNIFORM_ARRAY_STRIDE,
+    GL_UNIFORM_MATRIX_STRIDE,
+    GL_UNIFORM_IS_ROW_MAJOR,
+};
+
 static const GLenum valid_value_buffer_target_table[] = {
     GL_SUBSCRIBED_VALUES_BUFFER_CHROMIUM,
 };
@@ -567,12 +808,17 @@ Validators::Validators()
       backbuffer_attachment(valid_backbuffer_attachment_table,
                             arraysize(valid_backbuffer_attachment_table)),
       blit_filter(valid_blit_filter_table, arraysize(valid_blit_filter_table)),
+      buffer_mode(valid_buffer_mode_table, arraysize(valid_buffer_mode_table)),
       buffer_parameter(valid_buffer_parameter_table,
                        arraysize(valid_buffer_parameter_table)),
       buffer_target(valid_buffer_target_table,
                     arraysize(valid_buffer_target_table)),
       buffer_usage(valid_buffer_usage_table,
                    arraysize(valid_buffer_usage_table)),
+      bufferfi(valid_bufferfi_table, arraysize(valid_bufferfi_table)),
+      bufferfv(valid_bufferfv_table, arraysize(valid_bufferfv_table)),
+      bufferiv(valid_bufferiv_table, arraysize(valid_bufferiv_table)),
+      bufferuiv(valid_bufferuiv_table, arraysize(valid_bufferuiv_table)),
       capability(valid_capability_table, arraysize(valid_capability_table)),
       cmp_function(valid_cmp_function_table,
                    arraysize(valid_cmp_function_table)),
@@ -600,6 +846,8 @@ Validators::Validators()
       index_type(valid_index_type_table, arraysize(valid_index_type_table)),
       indexed_buffer_target(valid_indexed_buffer_target_table,
                             arraysize(valid_indexed_buffer_target_table)),
+      map_buffer_access(valid_map_buffer_access_table,
+                        arraysize(valid_map_buffer_access_table)),
       matrix_mode(valid_matrix_mode_table, arraysize(valid_matrix_mode_table)),
       pixel_store(valid_pixel_store_table, arraysize(valid_pixel_store_table)),
       pixel_store_alignment(valid_pixel_store_alignment_table,
@@ -639,6 +887,10 @@ Validators::Validators()
       string_type(valid_string_type_table, arraysize(valid_string_type_table)),
       subscription_target(valid_subscription_target_table,
                           arraysize(valid_subscription_target_table)),
+      sync_flush_flags(valid_sync_flush_flags_table,
+                       arraysize(valid_sync_flush_flags_table)),
+      sync_parameter(valid_sync_parameter_table,
+                     arraysize(valid_sync_parameter_table)),
       texture_3_d_target(valid_texture_3_d_target_table,
                          arraysize(valid_texture_3_d_target_table)),
       texture_bind_target(valid_texture_bind_target_table,
@@ -670,6 +922,10 @@ Validators::Validators()
       transform_feedback_primitive_mode(
           valid_transform_feedback_primitive_mode_table,
           arraysize(valid_transform_feedback_primitive_mode_table)),
+      uniform_block_parameter(valid_uniform_block_parameter_table,
+                              arraysize(valid_uniform_block_parameter_table)),
+      uniform_parameter(valid_uniform_parameter_table,
+                        arraysize(valid_uniform_parameter_table)),
       value_buffer_target(valid_value_buffer_target_table,
                           arraysize(valid_value_buffer_target_table)),
       vertex_attrib_size(valid_vertex_attrib_size_table,
@@ -680,6 +936,28 @@ Validators::Validators()
                        arraysize(valid_vertex_attribute_table)),
       vertex_pointer(valid_vertex_pointer_table,
                      arraysize(valid_vertex_pointer_table)) {
+}
+
+void Validators::UpdateValuesES3() {
+  buffer_target.AddValues(valid_buffer_target_table_es3,
+                          arraysize(valid_buffer_target_table_es3));
+  capability.AddValues(valid_capability_table_es3,
+                       arraysize(valid_capability_table_es3));
+  pixel_type.AddValues(valid_pixel_type_table_es3,
+                       arraysize(valid_pixel_type_table_es3));
+  texture_bind_target.AddValues(valid_texture_bind_target_table_es3,
+                                arraysize(valid_texture_bind_target_table_es3));
+  texture_format.AddValues(valid_texture_format_table_es3,
+                           arraysize(valid_texture_format_table_es3));
+  texture_internal_format.AddValues(
+      valid_texture_internal_format_table_es3,
+      arraysize(valid_texture_internal_format_table_es3));
+  texture_internal_format_storage.RemoveValues(
+      deprecated_texture_internal_format_storage_table_es3,
+      arraysize(deprecated_texture_internal_format_storage_table_es3));
+  texture_internal_format_storage.AddValues(
+      valid_texture_internal_format_storage_table_es3,
+      arraysize(valid_texture_internal_format_storage_table_es3));
 }
 
 #endif  // GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_VALIDATION_IMPLEMENTATION_AUTOGEN_H_

@@ -23,6 +23,8 @@
 #include "config.h"
 #include "core/events/KeyboardEvent.h"
 
+#include "bindings/core/v8/DOMWrapperWorld.h"
+#include "bindings/core/v8/ScriptState.h"
 #include "platform/PlatformKeyboardEvent.h"
 #include "platform/WindowsKeyboardCodes.h"
 
@@ -85,6 +87,13 @@ static inline KeyboardEvent::KeyLocationCode keyLocationCode(const PlatformKeybo
     }
 }
 
+PassRefPtrWillBeRawPtr<KeyboardEvent> KeyboardEvent::create(ScriptState* scriptState, const AtomicString& type, const KeyboardEventInit& initializer)
+{
+    if (scriptState->world().isIsolatedWorld())
+        UIEventWithKeyState::didCreateEventInIsolatedWorld(initializer.ctrlKey(), initializer.altKey(), initializer.shiftKey(), initializer.metaKey());
+    return adoptRefWillBeNoop(new KeyboardEvent(type, initializer));
+}
+
 KeyboardEvent::KeyboardEvent()
     : m_location(DOM_KEY_LOCATION_STANDARD)
     , m_isAutoRepeat(false)
@@ -96,6 +105,7 @@ KeyboardEvent::KeyboardEvent(const PlatformKeyboardEvent& key, AbstractView* vie
                           true, true, view, 0, key.ctrlKey(), key.altKey(), key.shiftKey(), key.metaKey())
     , m_keyEvent(adoptPtr(new PlatformKeyboardEvent(key)))
     , m_keyIdentifier(key.keyIdentifier())
+    , m_code(key.code())
     , m_location(keyLocationCode(key))
     , m_isAutoRepeat(key.isAutoRepeat())
 {
@@ -111,10 +121,10 @@ KeyboardEvent::KeyboardEvent(const AtomicString& eventType, const KeyboardEventI
 }
 
 KeyboardEvent::KeyboardEvent(const AtomicString& eventType, bool canBubble, bool cancelable, AbstractView *view,
-                             const String &keyIdentifier,  unsigned location,
-                             bool ctrlKey, bool altKey, bool shiftKey, bool metaKey)
+    const String& keyIdentifier, const String& code, unsigned location, bool ctrlKey, bool altKey, bool shiftKey, bool metaKey)
     : UIEventWithKeyState(eventType, canBubble, cancelable, view, 0, ctrlKey, altKey, shiftKey, metaKey)
     , m_keyIdentifier(keyIdentifier)
+    , m_code(code)
     , m_location(location)
     , m_isAutoRepeat(false)
 {
@@ -124,12 +134,14 @@ KeyboardEvent::~KeyboardEvent()
 {
 }
 
-void KeyboardEvent::initKeyboardEvent(const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view,
-                                      const String &keyIdentifier, unsigned location,
-                                      bool ctrlKey, bool altKey, bool shiftKey, bool metaKey)
+void KeyboardEvent::initKeyboardEvent(ScriptState* scriptState, const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view,
+    const String& keyIdentifier, unsigned location, bool ctrlKey, bool altKey, bool shiftKey, bool metaKey)
 {
     if (dispatched())
         return;
+
+    if (scriptState->world().isIsolatedWorld())
+        UIEventWithKeyState::didCreateEventInIsolatedWorld(ctrlKey, altKey, shiftKey, metaKey);
 
     initUIEvent(type, canBubble, cancelable, view, 0);
 
@@ -206,7 +218,7 @@ int KeyboardEvent::which() const
     return keyCode();
 }
 
-void KeyboardEvent::trace(Visitor* visitor)
+DEFINE_TRACE(KeyboardEvent)
 {
     UIEventWithKeyState::trace(visitor);
 }

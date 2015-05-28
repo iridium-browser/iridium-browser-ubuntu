@@ -10,7 +10,9 @@
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/metrics/chrome_metrics_service_client.h"
+#include "chrome/browser/metrics/metrics_reporting_state.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/chrome_switches.h"
@@ -19,14 +21,25 @@
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/metrics_state_manager.h"
 #include "components/rappor/rappor_service.h"
+#include "content/public/browser/browser_thread.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #endif
 
+// Posts |GoogleUpdateSettings::StoreMetricsClientInfo| on blocking pool thread
+// because it needs access to IO and cannot work from UI thread.
+void PostStoreMetricsClientInfo(const metrics::ClientInfo& client_info) {
+  content::BrowserThread::GetBlockingPool()->PostTask(FROM_HERE,
+      base::Bind(&GoogleUpdateSettings::StoreMetricsClientInfo, client_info));
+}
+
 MetricsServicesManager::MetricsServicesManager(PrefService* local_state)
-    : local_state_(local_state) {
+    : local_state_(local_state),
+      may_upload_(false),
+      may_record_(false) {
   DCHECK(local_state);
+  pref_change_registrar_.Init(local_state);
 }
 
 MetricsServicesManager::~MetricsServicesManager() {
@@ -78,9 +91,8 @@ metrics::MetricsStateManager* MetricsServicesManager::GetMetricsStateManager() {
   if (!metrics_state_manager_) {
     metrics_state_manager_ = metrics::MetricsStateManager::Create(
         local_state_,
-        base::Bind(&MetricsServicesManager::IsMetricsReportingEnabled,
-                   base::Unretained(this)),
-        base::Bind(&GoogleUpdateSettings::StoreMetricsClientInfo),
+        base::Bind(&ChromeMetricsServiceAccessor::IsMetricsReportingEnabled),
+        base::Bind(&PostStoreMetricsClientInfo),
         base::Bind(&GoogleUpdateSettings::LoadMetricsClientInfo));
   }
   return metrics_state_manager_.get();
@@ -88,6 +100,13 @@ metrics::MetricsStateManager* MetricsServicesManager::GetMetricsStateManager() {
 
 void MetricsServicesManager::UpdatePermissions(bool may_record,
                                                bool may_upload) {
+  // Stash the current permissions so that we can update the RapporService
+  // correctly when the Rappor preference changes.  The metrics recording
+  // preference partially determines the initial rappor setting, and also
+  // controls whether FINE metrics are sent.
+  may_record_ = may_record;
+  may_upload_ = may_upload;
+
   metrics::MetricsService* metrics = GetMetricsService();
 
   const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
@@ -114,29 +133,15 @@ void MetricsServicesManager::UpdatePermissions(bool may_record,
     metrics->Stop();
   }
 
-  rappor::RecordingLevel recording_level = may_record ?
-      rappor::FINE_LEVEL : rappor::RECORDING_DISABLED;
+  rappor::RecordingLevel recording_level = rappor::RECORDING_DISABLED;
+#if defined(GOOGLE_CHROME_BUILD)
+  if (may_record)
+    recording_level = rappor::FINE_LEVEL;
+#endif  // defined(GOOGLE_CHROME_BUILD)
   GetRapporService()->Update(recording_level, may_upload);
 }
 
-// TODO(asvitkine): This function does not report the correct value on Android,
-// see http://crbug.com/362192.
-bool MetricsServicesManager::IsMetricsReportingEnabled() const {
-  // If the user permits metrics reporting with the checkbox in the
-  // prefs, we turn on recording.  We disable metrics completely for
-  // non-official builds, or when field trials are forced.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kForceFieldTrials))
-    return false;
-
-  bool enabled = false;
-#if defined(GOOGLE_CHROME_BUILD)
-#if defined(OS_CHROMEOS)
-  chromeos::CrosSettings::Get()->GetBoolean(chromeos::kStatsReportingPref,
-                                            &enabled);
-#else
-  enabled = local_state_->GetBoolean(prefs::kMetricsReportingEnabled);
-#endif  // #if defined(OS_CHROMEOS)
-#endif  // defined(GOOGLE_CHROME_BUILD)
-  return enabled;
+void MetricsServicesManager::UpdateUploadPermissions(bool may_upload) {
+  return UpdatePermissions(
+      ChromeMetricsServiceAccessor::IsMetricsReportingEnabled(), may_upload);
 }

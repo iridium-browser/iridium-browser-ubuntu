@@ -37,12 +37,28 @@ CHECK_INTERVAL = 5
 DEFAULT_SSH_PORT = 22
 SSH_ERROR_CODE = 255
 
+# SSH default known_hosts filepath.
+KNOWN_HOSTS_PATH = os.path.expanduser('~/.ssh/known_hosts')
+
 # Dev/test packages are installed in these paths.
 DEV_BIN_PATHS = '/usr/local/bin:/usr/local/sbin'
 
 
 class SSHConnectionError(Exception):
   """Raised when SSH connection has failed."""
+
+  def IsKnownHostsMismatch(self):
+    """Returns True if this error was caused by a known_hosts mismatch.
+
+    Will only check for a mismatch, this will return False if the host
+    didn't exist in known_hosts at all.
+    """
+    # Checking for string output is brittle, but there's no exit code that
+    # indicates why SSH failed so this might be the best we can do.
+    # RemoteAccess.RemoteSh() sets LC_MESSAGES=C so we only need to check for
+    # the English error message.
+    # Verified for OpenSSH_6.6.1p1.
+    return 'REMOTE HOST IDENTIFICATION HAS CHANGED' in str(self)
 
 
 class DeviceNotPingable(Exception):
@@ -135,15 +151,63 @@ def RunCommandFuncWrapper(func, msg, *args, **kwargs):
     logging.warning(msg)
 
 
-def CompileSSHConnectSettings(ConnectTimeout=30, ConnectionAttempts=4):
-  return ['-o', 'ConnectTimeout=%s' % ConnectTimeout,
-          '-o', 'ConnectionAttempts=%s' % ConnectionAttempts,
-          '-o', 'NumberOfPasswordPrompts=0',
-          '-o', 'Protocol=2',
-          '-o', 'ServerAliveInterval=10',
-          '-o', 'ServerAliveCountMax=3',
-          '-o', 'StrictHostKeyChecking=no',
-          '-o', 'UserKnownHostsFile=/dev/null', ]
+def CompileSSHConnectSettings(**kwargs):
+  """Creates a list of SSH connection options.
+
+  Any ssh_config option can be specified in |kwargs|, in addition,
+  several options are set to default values if not specified. Any
+  option can be set to None to prevent this function from assigning
+  a value so that the SSH default value will be used.
+
+  This function doesn't check to make sure the |kwargs| options are
+  valid, so a typo or invalid setting won't be caught until the
+  resulting arguments are passed into an SSH call.
+
+  Args:
+    kwargs: A dictionary of ssh_config settings.
+
+  Returns:
+    A list of arguments to pass to SSH.
+  """
+  settings = {
+      'ConnectTimeout': 30,
+      'ConnectionAttempts': 4,
+      'NumberOfPasswordPrompts': 0,
+      'Protocol': 2,
+      'ServerAliveInterval': 10,
+      'ServerAliveCountMax': 3,
+      'StrictHostKeyChecking': 'no',
+      'UserKnownHostsFile': '/dev/null',
+  }
+  settings.update(kwargs)
+  return ['-o%s=%s' % (k, v) for k, v in settings.items() if v is not None]
+
+
+def RemoveKnownHost(host, known_hosts_path=KNOWN_HOSTS_PATH):
+  """Removes |host| from a known_hosts file.
+
+  `ssh-keygen -R` doesn't work on bind mounted files as they can only
+  be updated in place. Since we bind mount the default known_hosts file
+  when entering the chroot, this function provides an alternate way
+  to remove hosts from the file.
+
+  Args:
+    host: The host name to remove from the known_hosts file.
+    known_hosts_path: Path to the known_hosts file to change. Defaults
+                      to the standard SSH known_hosts file path.
+
+  Raises:
+    cros_build_lib.RunCommandError if ssh-keygen fails.
+  """
+  with tempfile.NamedTemporaryFile() as f:
+    try:
+      shutil.copyfile(known_hosts_path, f.name)
+    except IOError:
+      # If |known_hosts_path| doesn't exist neither does |host| so we're done.
+      return
+    cros_build_lib.RunCommand(['ssh-keygen', '-R', host, '-f', f.name],
+                              quiet=True)
+    shutil.copyfile(f.name, known_hosts_path)
 
 
 class RemoteAccess(object):
@@ -200,7 +264,8 @@ class RemoteAccess(object):
     """Run a sh command on the remote device through ssh.
 
     Args:
-      cmd: The command string or list to run.
+      cmd: The command string or list to run. None will start an interactive
+           session.
       connect_settings: The SSH connect settings to use.
       error_code_ok: Does not throw an exception when the command exits with a
                      non-zero returncode.  This does not cover the case where
@@ -224,18 +289,24 @@ class RemoteAccess(object):
     """
     kwargs.setdefault('capture_output', True)
     kwargs.setdefault('debug_level', self.debug_level)
+    # Force English SSH messages. SSHConnectionError.IsKnownHostsMismatch()
+    # requires English errors to detect a known_hosts key mismatch error.
+    kwargs.setdefault('extra_env', {})['LC_MESSAGES'] = 'C'
 
     ssh_cmd = self._GetSSHCmd(connect_settings)
-    ssh_cmd += [self.target_ssh_url, '--']
+    ssh_cmd.append(self.target_ssh_url)
 
-    if remote_sudo and self.username != ROOT_ACCOUNT:
-      # Prepend sudo to cmd.
-      ssh_cmd.append('sudo')
+    if cmd is not None:
+      ssh_cmd.append('--')
 
-    if isinstance(cmd, basestring):
-      ssh_cmd += [cmd]
-    else:
-      ssh_cmd += cmd
+      if remote_sudo and self.username != ROOT_ACCOUNT:
+        # Prepend sudo to cmd.
+        ssh_cmd.append('sudo')
+
+      if isinstance(cmd, basestring):
+        ssh_cmd += [cmd]
+      else:
+        ssh_cmd += cmd
 
     try:
       return cros_build_lib.RunCommand(ssh_cmd, **kwargs)
@@ -517,7 +588,7 @@ class RemoteDevice(object):
     return RemoteAccess(self.hostname, self.tempdir.tempdir, port=self.port,
                         username=self.username, private_key=self.private_key)
 
-  def _HasRsync(self):
+  def HasRsync(self):
     """Checks if rsync exists on the device."""
     result = self.agent.RemoteSh(['PATH=%s:$PATH rsync' % DEV_BIN_PATHS,
                                   '--version'], error_code_ok=True)
@@ -547,7 +618,7 @@ class RemoteDevice(object):
     msg = 'Could not copy %s to device.' % src
     if mode is None:
       # Use rsync by default if it exists.
-      mode = 'rsync' if self._HasRsync() else 'scp'
+      mode = 'rsync' if self.HasRsync() else 'scp'
 
     if mode == 'scp':
       # scp always follow symlinks
@@ -563,7 +634,7 @@ class RemoteDevice(object):
     msg = 'Could not copy %s from device.' % src
     if mode is None:
       # Use rsync by default if it exists.
-      mode = 'rsync' if self._HasRsync() else 'scp'
+      mode = 'rsync' if self.HasRsync() else 'scp'
 
     if mode == 'scp':
       # scp always follow symlinks
@@ -598,6 +669,21 @@ class RemoteDevice(object):
     self.agent.RemoteSh(['rm', tmp_file], error_code_ok=True, remote_sudo=True)
 
     return True
+
+  def IsFileExecutable(self, path):
+    """Check if the given file is executable on the device.
+
+    Args:
+      path: full path to the file on the device to check.
+
+    Returns:
+      True if the file is executable, and false if the file does not exist or is
+      not executable.
+    """
+    cmd = ['test', '-f', path, '-a', '-x', path,]
+    result = self.agent.RemoteSh(cmd, remote_sudo=True, error_code_ok=True,
+                                 capture_output=True)
+    return result.returncode == 0
 
   def PipeOverSSH(self, filepath, cmd, **kwargs):
     """Cat a file and pipe over SSH."""
@@ -670,6 +756,8 @@ class ChromiumOSDevice(RemoteDevice):
     self.path = self._GetPath()
     self.lsb_release = self._GetLSBRelease()
     self.board = self.lsb_release.get('CHROMEOS_RELEASE_BOARD', '')
+    # TODO(garnold) Use the actual SDK version field, once known (brillo:280).
+    self.sdk_version = self.lsb_release.get('CHROMEOS_RELEASE_VERSION', '')
 
   def _GetPath(self):
     """Gets $PATH on the device and prepend it with DEV_BIN_PATHS."""

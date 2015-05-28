@@ -8,34 +8,15 @@
 
 #include "libANGLE/renderer/SurfaceImpl.h"
 
-#include "libANGLE/Config.h"
-
 namespace rx
 {
 
-SurfaceImpl::SurfaceImpl(egl::Display *display, const egl::Config *config, EGLint width, EGLint height,
-                         EGLint fixedSize, EGLint postSubBufferSupported, EGLenum textureFormat,
-                         EGLenum textureType, EGLClientBuffer shareHandle)
-    : mDisplay(display),
-      mConfig(config),
-      mWidth(width),
-      mHeight(height),
-      mFixedSize(fixedSize),
-      mSwapInterval(-1),
-      mPostSubBufferSupported(postSubBufferSupported),
-      mTextureFormat(textureFormat),
-      mTextureTarget(textureType),
-      mShareHandle(shareHandle)
+SurfaceImpl::SurfaceImpl()
 {
 }
 
 SurfaceImpl::~SurfaceImpl()
 {
-}
-
-EGLenum SurfaceImpl::getFormat() const
-{
-    return mConfig->mRenderTargetFormat;
 }
 
 }

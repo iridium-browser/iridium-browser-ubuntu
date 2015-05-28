@@ -41,22 +41,27 @@ class WorkerGlobalScope;
 class WorkerScriptDebugServer final : public ScriptDebugServer {
     WTF_MAKE_NONCOPYABLE(WorkerScriptDebugServer);
 public:
-    explicit WorkerScriptDebugServer(WorkerGlobalScope*);
-    ~WorkerScriptDebugServer() override { }
+    static PassOwnPtrWillBeRawPtr<WorkerScriptDebugServer> create(WorkerGlobalScope* workerGlobalScope)
+    {
+        return adoptPtrWillBeNoop(new WorkerScriptDebugServer(workerGlobalScope));
+    }
 
+    ~WorkerScriptDebugServer() override { }
+    DECLARE_VIRTUAL_TRACE();
+
+    static void setContextDebugData(v8::Local<v8::Context>);
     void addListener(ScriptDebugListener*);
     void removeListener(ScriptDebugListener*);
 
-    void interruptAndRunTask(PassOwnPtr<Task>);
-
 private:
-    ScriptDebugListener* getDebugListenerForContext(v8::Handle<v8::Context>) override;
-    void runMessageLoopOnPause(v8::Handle<v8::Context>) override;
+    explicit WorkerScriptDebugServer(WorkerGlobalScope*);
+
+    ScriptDebugListener* getDebugListenerForContext(v8::Local<v8::Context>) override;
+    void runMessageLoopOnPause(v8::Local<v8::Context>) override;
     void quitMessageLoopOnPause() override;
 
-    typedef HashMap<WorkerGlobalScope*, ScriptDebugListener*> ListenersMap;
     ScriptDebugListener* m_listener;
-    WorkerGlobalScope* m_workerGlobalScope;
+    RawPtrWillBeMember<WorkerGlobalScope> m_workerGlobalScope;
 };
 
 } // namespace blink

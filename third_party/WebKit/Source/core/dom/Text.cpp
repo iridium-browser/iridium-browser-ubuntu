@@ -27,28 +27,63 @@
 #include "core/SVGNames.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/ExceptionCode.h"
-#include "core/dom/NodeRenderStyle.h"
+#include "core/dom/LayoutTreeBuilder.h"
+#include "core/dom/NodeComputedStyle.h"
 #include "core/dom/NodeRenderingTraversal.h"
 #include "core/dom/NodeTraversal.h"
-#include "core/dom/RenderTreeBuilder.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/events/ScopedEventQueue.h"
-#include "core/rendering/RenderCombineText.h"
-#include "core/rendering/RenderText.h"
-#include "core/rendering/svg/RenderSVGInlineText.h"
+#include "core/layout/LayoutText.h"
+#include "core/layout/LayoutTextCombine.h"
+#include "core/layout/svg/LayoutSVGInlineText.h"
 #include "core/svg/SVGForeignObjectElement.h"
 #include "wtf/text/CString.h"
 #include "wtf/text/StringBuilder.h"
 
 namespace blink {
 
+#if ENABLE(OILPAN)
+namespace {
+// If the external string kept by a Text node exceed this threshold length,
+// Oilpan is informed. External allocation amounts owned by heap objects are
+// taken into account when scheduling urgent Oilpan GCs.
+//
+// FIXME: having only Text nodes with strings above an ad-hoc local threshold
+// influence Oilpan's GC behavior isn't a satisfactory long-term solution.
+// But code that allocates a lot of Text nodes in tight loops, and not much more,
+// we do have to trigger Oilpan GCs to avoid PartitionAlloc OOMs. The accounting
+// does add overhead on the allocation of every Text node however, so for now, only
+// register those above the given threshold. TBC.
+const size_t stringLengthThreshold = 256;
+
+void increaseExternallyAllocatedBytesIfNeeded(size_t length)
+{
+    if (length > stringLengthThreshold)
+        Heap::increaseExternallyAllocatedBytes(length);
+}
+
+void increaseExternallyAllocatedBytesAliveIfNeeded(size_t length)
+{
+    if (length > stringLengthThreshold)
+        Heap::increaseExternallyAllocatedBytesAlive(length);
+}
+
+} // namespace
+#endif
+
 PassRefPtrWillBeRawPtr<Text> Text::create(Document& document, const String& data)
 {
+#if ENABLE(OILPAN)
+    increaseExternallyAllocatedBytesIfNeeded(data.length());
+#endif
     return adoptRefWillBeNoop(new Text(document, data, CreateText));
 }
 
 PassRefPtrWillBeRawPtr<Text> Text::createEditingText(Document& document, const String& data)
 {
+#if ENABLE(OILPAN)
+    increaseExternallyAllocatedBytesIfNeeded(data.length());
+#endif
     return adoptRefWillBeNoop(new Text(document, data, CreateEditingText));
 }
 
@@ -123,8 +158,8 @@ PassRefPtrWillBeRawPtr<Text> Text::splitText(unsigned offset, ExceptionState& ex
     if (exceptionState.hadException())
         return nullptr;
 
-    if (renderer())
-        renderer()->setTextWithOffset(dataImpl(), 0, oldStr.length());
+    if (layoutObject())
+        layoutObject()->setTextWithOffset(dataImpl(), 0, oldStr.length());
 
     if (parentNode())
         document().didSplitTextNode(*this);
@@ -237,15 +272,15 @@ PassRefPtrWillBeRawPtr<Node> Text::cloneNode(bool /*deep*/)
     return cloneWithData(data());
 }
 
-static inline bool canHaveWhitespaceChildren(const RenderObject& parent)
+static inline bool canHaveWhitespaceChildren(const LayoutObject& parent)
 {
-    // <button> should allow whitespace even though RenderFlexibleBox doesn't.
-    if (parent.isRenderButton())
+    // <button> should allow whitespace even though LayoutFlexibleBox doesn't.
+    if (parent.isLayoutButton())
         return true;
 
     if (parent.isTable() || parent.isTableRow() || parent.isTableSection()
-        || parent.isRenderTableCol() || parent.isFrameSet()
-        || parent.isFlexibleBox() || parent.isRenderGrid()
+        || parent.isLayoutTableCol() || parent.isFrameSet()
+        || parent.isFlexibleBox() || parent.isLayoutGrid()
         || parent.isSVGRoot()
         || parent.isSVGContainer()
         || parent.isSVGImage()
@@ -254,7 +289,7 @@ static inline bool canHaveWhitespaceChildren(const RenderObject& parent)
     return true;
 }
 
-bool Text::textRendererIsNeeded(const RenderStyle& style, const RenderObject& parent)
+bool Text::textRendererIsNeeded(const ComputedStyle& style, const LayoutObject& parent)
 {
     if (!parent.canHaveChildren())
         return false;
@@ -277,26 +312,30 @@ bool Text::textRendererIsNeeded(const RenderStyle& style, const RenderObject& pa
     if (style.preserveNewline()) // pre/pre-wrap/pre-line always make renderers.
         return true;
 
-    const RenderObject* prev = NodeRenderingTraversal::previousSiblingRenderer(*this);
+    // childNeedsDistributionRecalc() here is rare, only happens JS calling surroundContents() etc. from DOMNodeInsertedIntoDocument etc.
+    if (document().childNeedsDistributionRecalc())
+        return true;
+
+    const LayoutObject* prev = NodeRenderingTraversal::previousSiblingRenderer(*this);
     if (prev && prev->isBR()) // <span><br/> <br/></span>
         return false;
 
-    if (parent.isRenderInline()) {
+    if (parent.isLayoutInline()) {
         // <span><div/> <div/></span>
         if (prev && !prev->isInline())
             return false;
     } else {
-        if (parent.isRenderBlock() && !parent.childrenInline() && (!prev || !prev->isInline()))
+        if (parent.isLayoutBlock() && !parent.childrenInline() && (!prev || !prev->isInline()))
             return false;
 
         // Avoiding creation of a Renderer for the text node is a non-essential memory optimization.
         // So to avoid blowing up on very wide DOMs, we limit the number of siblings to visit.
         unsigned maxSiblingsToVisit = 50;
 
-        RenderObject* first = parent.slowFirstChild();
+        LayoutObject* first = parent.slowFirstChild();
         while (first && first->isFloatingOrOutOfFlowPositioned() && maxSiblingsToVisit--)
             first = first->nextSibling();
-        if (!first || first == renderer() || NodeRenderingTraversal::nextSiblingRenderer(*this) == first)
+        if (!first || first == layoutObject() || NodeRenderingTraversal::nextSiblingRenderer(*this) == first)
             // Whitespace at the start of a block just goes away.  Don't even
             // make a render object for this text.
             return false;
@@ -311,23 +350,23 @@ static bool isSVGText(Text* text)
     return parentOrShadowHostNode->isSVGElement() && !isSVGForeignObjectElement(*parentOrShadowHostNode);
 }
 
-RenderText* Text::createTextRenderer(RenderStyle* style)
+LayoutText* Text::createTextRenderer(const ComputedStyle& style)
 {
     if (isSVGText(this))
-        return new RenderSVGInlineText(this, dataImpl());
+        return new LayoutSVGInlineText(this, dataImpl());
 
-    if (style->hasTextCombine())
-        return new RenderCombineText(this, dataImpl());
+    if (style.hasTextCombine())
+        return new LayoutTextCombine(this, dataImpl());
 
-    return new RenderText(this, dataImpl());
+    return new LayoutText(this, dataImpl());
 }
 
 void Text::attach(const AttachContext& context)
 {
     if (ContainerNode* renderingParent = NodeRenderingTraversal::parent(*this)) {
-        if (RenderObject* parentRenderer = renderingParent->renderer()) {
+        if (LayoutObject* parentRenderer = renderingParent->layoutObject()) {
             if (textRendererIsNeeded(*parentRenderer->style(), *parentRenderer))
-                RenderTreeBuilderForText(*this, parentRenderer).createRenderer();
+                LayoutTreeBuilderForText(*this, parentRenderer).createLayoutObject();
         }
     }
     CharacterData::attach(context);
@@ -335,16 +374,16 @@ void Text::attach(const AttachContext& context)
 
 void Text::reattachIfNeeded(const AttachContext& context)
 {
-    bool rendererIsNeeded = false;
+    bool layoutObjectIsNeeded = false;
     ContainerNode* renderingParent = NodeRenderingTraversal::parent(*this);
     if (renderingParent) {
-        if (RenderObject* parentRenderer = renderingParent->renderer()) {
+        if (LayoutObject* parentRenderer = renderingParent->layoutObject()) {
             if (textRendererIsNeeded(*parentRenderer->style(), *parentRenderer))
-                rendererIsNeeded = true;
+                layoutObjectIsNeeded = true;
         }
     }
 
-    if (rendererIsNeeded == !!renderer())
+    if (layoutObjectIsNeeded == !!layoutObject())
         return;
 
     // The following is almost the same as Node::reattach() except that we create renderer only if needed.
@@ -354,14 +393,14 @@ void Text::reattachIfNeeded(const AttachContext& context)
 
     if (styleChangeType() < NeedsReattachStyleChange)
         detach(reattachContext);
-    if (rendererIsNeeded)
-        RenderTreeBuilderForText(*this, renderingParent->renderer()).createRenderer();
+    if (layoutObjectIsNeeded)
+        LayoutTreeBuilderForText(*this, renderingParent->layoutObject()).createLayoutObject();
     CharacterData::attach(reattachContext);
 }
 
 void Text::recalcTextStyle(StyleRecalcChange change, Text* nextTextSibling)
 {
-    if (RenderText* renderer = this->renderer()) {
+    if (LayoutText* renderer = this->layoutObject()) {
         if (change != NoChange || needsStyleRecalc())
             renderer->setStyle(document().ensureStyleResolver().styleForText(this));
         if (needsStyleRecalc())
@@ -369,7 +408,7 @@ void Text::recalcTextStyle(StyleRecalcChange change, Text* nextTextSibling)
         clearNeedsStyleRecalc();
     } else if (needsStyleRecalc() || needsWhitespaceRenderer()) {
         reattach();
-        if (this->renderer())
+        if (this->layoutObject())
             reattachWhitespaceSiblingsIfNeeded(nextTextSibling);
     }
 }
@@ -378,8 +417,8 @@ void Text::recalcTextStyle(StyleRecalcChange change, Text* nextTextSibling)
 // need to create one if the parent style now has white-space: pre.
 bool Text::needsWhitespaceRenderer()
 {
-    ASSERT(!renderer());
-    if (RenderStyle* style = parentRenderStyle())
+    ASSERT(!layoutObject());
+    if (const ComputedStyle* style = parentComputedStyle())
         return style->preserveNewline();
     return false;
 }
@@ -388,7 +427,7 @@ void Text::updateTextRenderer(unsigned offsetOfReplacedData, unsigned lengthOfRe
 {
     if (!inActiveDocument())
         return;
-    RenderText* textRenderer = renderer();
+    LayoutText* textRenderer = layoutObject();
     if (!textRenderer || !textRendererIsNeeded(*textRenderer->style(), *textRenderer->parent())) {
         lazyReattachIfAttached();
         // FIXME: Editing should be updated so this is not neccesary.
@@ -402,6 +441,14 @@ void Text::updateTextRenderer(unsigned offsetOfReplacedData, unsigned lengthOfRe
 PassRefPtrWillBeRawPtr<Text> Text::cloneWithData(const String& data)
 {
     return create(document(), data);
+}
+
+DEFINE_TRACE(Text)
+{
+#if ENABLE(OILPAN)
+    increaseExternallyAllocatedBytesAliveIfNeeded(m_data.length());
+#endif
+    CharacterData::trace(visitor);
 }
 
 #ifndef NDEBUG

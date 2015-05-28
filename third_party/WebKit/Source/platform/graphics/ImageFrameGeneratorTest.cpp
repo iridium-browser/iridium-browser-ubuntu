@@ -32,6 +32,7 @@
 #include "platform/graphics/test/MockImageDecoder.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebThread.h"
+#include "public/platform/WebTraceLocation.h"
 #include <gtest/gtest.h>
 
 namespace blink {
@@ -52,7 +53,7 @@ class ImageFrameGeneratorTest : public ::testing::Test, public MockImageDecoderC
 public:
     virtual void SetUp() override
     {
-        ImageDecodingStore::instance()->setCacheLimitInBytes(1024 * 1024);
+        ImageDecodingStore::instance().setCacheLimitInBytes(1024 * 1024);
         m_data = SharedBuffer::create();
         m_generator = ImageFrameGenerator::create(fullSize(), m_data, false);
         useMockImageDecoderFactory();
@@ -64,7 +65,7 @@ public:
 
     virtual void TearDown() override
     {
-        ImageDecodingStore::instance()->clear();
+        ImageDecodingStore::instance().clear();
     }
 
     virtual void decoderBeingDestroyed() override
@@ -175,7 +176,7 @@ TEST_F(ImageFrameGeneratorTest, incompleteDecodeBecomesCompleteMultiThreaded)
     setFrameStatus(ImageFrame::FrameComplete);
     addNewData();
     OwnPtr<WebThread> thread = adoptPtr(Platform::current()->createThread("DecodeThread"));
-    thread->postTask(new Task(WTF::bind(&decodeThreadMain, m_generator.get())));
+    thread->postTask(FROM_HERE, new Task(WTF::bind(&decodeThreadMain, m_generator.get())));
     thread.clear();
     EXPECT_EQ(2, m_frameBufferRequestCount);
     EXPECT_EQ(1, m_decodersDestroyed);
@@ -195,10 +196,10 @@ TEST_F(ImageFrameGeneratorTest, frameHasAlpha)
     EXPECT_EQ(1, m_frameBufferRequestCount);
 
     ImageDecoder* tempDecoder = 0;
-    EXPECT_TRUE(ImageDecodingStore::instance()->lockDecoder(m_generator.get(), fullSize(), &tempDecoder));
+    EXPECT_TRUE(ImageDecodingStore::instance().lockDecoder(m_generator.get(), fullSize(), &tempDecoder));
     ASSERT_TRUE(tempDecoder);
     static_cast<MockImageDecoder*>(tempDecoder)->setFrameHasAlpha(false);
-    ImageDecodingStore::instance()->unlockDecoder(m_generator.get(), tempDecoder);
+    ImageDecodingStore::instance().unlockDecoder(m_generator.get(), tempDecoder);
 
     setFrameStatus(ImageFrame::FrameComplete);
     m_generator->decodeAndScale(imageInfo(), 0, buffer, 100 * 4);

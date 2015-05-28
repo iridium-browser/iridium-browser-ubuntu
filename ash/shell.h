@@ -42,12 +42,6 @@ class FocusClient;
 }
 }
 
-#if defined(OS_CHROMEOS)
-namespace chromeos {
-class AccelerometerReader;
-}
-#endif
-
 namespace gfx {
 class ImageSkia;
 class Point;
@@ -115,6 +109,7 @@ class MruWindowTracker;
 class NewWindowDelegate;
 class OverlayEventFilter;
 class PartialMagnificationController;
+class PartialScreenshotController;
 class PowerButtonController;
 class PowerEventObserver;
 class ProjectingObserver;
@@ -123,7 +118,7 @@ class ResolutionNotificationController;
 class RootWindowController;
 class ScopedTargetRootWindow;
 class ScreenAsh;
-class ScreenOrientationDelegate;
+class ScreenOrientationController;
 class ScreenPositionController;
 class SessionStateDelegate;
 class Shelf;
@@ -304,9 +299,8 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   // get re-arranged).
   void OnOverviewModeStarting();
 
-  // Called before the overview mode is ending (before the windows get arranged
-  // to their final position).
-  void OnOverviewModeEnding();
+  // Called after overview mode has ended.
+  void OnOverviewModeEnded();
 
   // Called after maximize mode has started, windows might still animate though.
   void OnMaximizeModeStarted();
@@ -387,10 +381,16 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
     return display_controller_.get();
   }
 #if defined(OS_CHROMEOS)
+  PowerEventObserver* power_event_observer() {
+    return power_event_observer_.get();
+  }
   TouchTransformerController* touch_transformer_controller() {
     return touch_transformer_controller_.get();
   }
 #endif  // defined(OS_CHROMEOS)
+  PartialScreenshotController* partial_screenshot_controller() {
+    return partial_screenshot_controller_.get();
+  }
   MouseCursorEventFilter* mouse_cursor_filter() {
     return mouse_cursor_filter_.get();
   }
@@ -517,10 +517,6 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   }
 
 #if defined(OS_CHROMEOS)
-  chromeos::AccelerometerReader* accelerometer_reader() {
-    return accelerometer_reader_.get();
-  }
-
   // TODO(oshima): Move these objects to DisplayController.
   ui::DisplayConfigurator* display_configurator() {
     return display_configurator_.get();
@@ -540,8 +536,8 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
     return logout_confirmation_controller_.get();
   }
 
-  ScreenOrientationDelegate* screen_orientation_delegate() {
-    return screen_orientation_delegate_.get();
+  ScreenOrientationController* screen_orientation_controller() {
+    return screen_orientation_controller_.get();
   }
 
   VirtualKeyboardController* virtual_keyboard_controller() {
@@ -683,6 +679,7 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   scoped_ptr<AutoclickController> autoclick_controller_;
   scoped_ptr<aura::client::FocusClient> focus_client_;
   aura::client::ActivationClient* activation_client_;
+  scoped_ptr<PartialScreenshotController> partial_screenshot_controller_;
 
   scoped_ptr<MouseCursorEventFilter> mouse_cursor_filter_;
   scoped_ptr<ScreenPositionController> screen_position_controller_;
@@ -714,7 +711,6 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   scoped_ptr<LocaleNotificationController> locale_notification_controller_;
 
 #if defined(OS_CHROMEOS)
-  scoped_ptr<chromeos::AccelerometerReader> accelerometer_reader_;
   scoped_ptr<PowerEventObserver> power_event_observer_;
   scoped_ptr<ui::UserActivityPowerManagerNotifier> user_activity_notifier_;
   scoped_ptr<VideoActivityNotifier> video_activity_notifier_;
@@ -736,8 +732,8 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   // Listens for output changes and updates the display manager.
   scoped_ptr<DisplayChangeObserver> display_change_observer_;
 
-  // Implements content::ScreenOrientationDelegate for ChromeOS
-  scoped_ptr<ScreenOrientationDelegate> screen_orientation_delegate_;
+  // Implements content::ScreenOrientationController for ChromeOS
+  scoped_ptr<ScreenOrientationController> screen_orientation_controller_;
 
   scoped_ptr<TouchTransformerController> touch_transformer_controller_;
 

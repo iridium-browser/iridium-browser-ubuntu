@@ -26,7 +26,6 @@ class NotificationUIManagerAndroid : public NotificationUIManager {
   bool OnNotificationClicked(JNIEnv* env,
                              jobject java_object,
                              jstring notification_id,
-                             jint platform_id,
                              jbyteArray serialized_notification_data);
 
   // Called by the Java implementation when a notification has been closed.
@@ -55,20 +54,33 @@ class NotificationUIManagerAndroid : public NotificationUIManager {
   // Closes the Notification as displayed on the Android system.
   void PlatformCloseNotification(const std::string& notification_id);
 
-  // Helpers that add/remove the notification from local map.
-  // The local map takes ownership of profile_notification object.
+  // Adds |profile_notification| to a private local map. The map takes ownership
+  // of the notification object.
   void AddProfileNotification(ProfileNotification* profile_notification);
-  void RemoveProfileNotification(ProfileNotification* profile_notification);
+
+  // Erases |profile_notification| from the private local map and deletes it.
+  // If |close| is true, also closes the notification.
+  void RemoveProfileNotification(ProfileNotification* profile_notification,
+                                 bool close);
 
   // Returns the ProfileNotification for the |id|, or NULL if no such
   // notification is found.
   ProfileNotification* FindProfileNotification(const std::string& id) const;
 
+  // Returns the ProfileNotification for |profile| that has the same origin and
+  // tag as |notification|. Returns NULL if no valid match is found.
+  ProfileNotification* FindNotificationToReplace(
+      const Notification& notification, Profile* profile) const;
+
   // Map from a notification id to the associated ProfileNotification*.
   std::map<std::string, ProfileNotification*> profile_notifications_;
 
-  // Map from notification id to the associated platform Id.
-  std::map<std::string, int> platform_notifications_;
+  // Holds the tag of a notification, and its origin.
+  using RegeneratedNotificationInfo = std::pair<std::string, std::string>;
+
+  // Map from notification id to RegeneratedNotificationInfo.
+  std::map<std::string, RegeneratedNotificationInfo>
+      regenerated_notification_infos_;
 
   base::android::ScopedJavaGlobalRef<jobject> java_object_;
 

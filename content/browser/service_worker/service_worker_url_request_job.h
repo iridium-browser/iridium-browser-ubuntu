@@ -108,8 +108,6 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
   // StreamRegisterObserver override:
   void OnStreamRegistered(Stream* stream) override;
 
-  const net::HttpResponseInfo* http_info() const;
-
   void GetExtraResponseInfo(
       bool* was_fetched_via_service_worker,
       bool* was_fallback_required_by_service_worker,
@@ -146,7 +144,8 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
   void DidPrepareFetchEvent();
   void DidDispatchFetchEvent(ServiceWorkerStatusCode status,
                              ServiceWorkerFetchEventResult fetch_result,
-                             const ServiceWorkerResponse& response);
+                             const ServiceWorkerResponse& response,
+                             scoped_refptr<ServiceWorkerVersion> version);
 
   // Populates |http_response_headers_|.
   void CreateResponseHeader(int status_code,
@@ -162,6 +161,8 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
 
   // Releases the resources for streaming.
   void ClearStream();
+
+  const net::HttpResponseInfo* http_info() const;
 
   base::WeakPtr<ServiceWorkerProviderHost> provider_host_;
 

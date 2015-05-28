@@ -54,19 +54,28 @@ void AsyncInitializationCallback(
     quit.Run();
 }
 
+bool CompareHashAndFilePath(const HashAndFilePath& a,
+                            const HashAndFilePath& b) {
+  const int result = a.hash.compare(b.hash);
+  if (result < 0)
+    return true;
+  if (result > 0)
+    return false;
+  return a.path.AsUTF8Unsafe().compare(b.path.AsUTF8Unsafe()) < 0;
+}
+
 // This class is used to record directory changes and examine them later.
 class MockDirectoryChangeObserver : public FileSystemObserver {
  public:
   MockDirectoryChangeObserver() {}
-  virtual ~MockDirectoryChangeObserver() {}
+  ~MockDirectoryChangeObserver() override {}
 
   // FileSystemObserver overrides.
-  virtual void OnDirectoryChanged(
-      const base::FilePath& directory_path) override {
+  void OnDirectoryChanged(const base::FilePath& directory_path) override {
     changed_directories_.push_back(directory_path);
   }
 
-  virtual void OnFileChanged(const FileChange& new_file_change) override {
+  void OnFileChanged(const FileChange& new_file_change) override {
     changed_files_.Apply(new_file_change);
   }
 
@@ -86,7 +95,7 @@ class MockDirectoryChangeObserver : public FileSystemObserver {
 
 class FileSystemTest : public testing::Test {
  protected:
-  virtual void SetUp() override {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     pref_service_.reset(new TestingPrefServiceSimple);
     test_util::RegisterDrivePrefs(pref_service_->registry());
@@ -134,7 +143,6 @@ class FileSystemTest : public testing::Test {
         pref_service_.get(),
         logger_.get(),
         cache_.get(),
-        fake_drive_service_.get(),
         scheduler_.get(),
         resource_metadata_.get(),
         base::MessageLoopProxy::current().get(),
@@ -251,7 +259,7 @@ class FileSystemTest : public testing::Test {
     file1.set_title("File1");
     file1.set_resource_id("resource_id:File1");
     file1.set_parent_local_id(root.local_id());
-    file1.mutable_file_specific_info()->set_md5("md5");
+    file1.mutable_file_specific_info()->set_md5("md5#1");
     file1.mutable_file_info()->set_is_directory(false);
     file1.mutable_file_info()->set_size(1048576);
     ASSERT_EQ(FILE_ERROR_OK, resource_metadata->AddEntry(file1, &local_id));
@@ -270,7 +278,7 @@ class FileSystemTest : public testing::Test {
     file2.set_title("File2");
     file2.set_resource_id("resource_id:File2");
     file2.set_parent_local_id(dir1_local_id);
-    file2.mutable_file_specific_info()->set_md5("md5");
+    file2.mutable_file_specific_info()->set_md5("md5#2");
     file2.mutable_file_info()->set_is_directory(false);
     file2.mutable_file_info()->set_size(555);
     ASSERT_EQ(FILE_ERROR_OK, resource_metadata->AddEntry(file2, &local_id));
@@ -289,7 +297,7 @@ class FileSystemTest : public testing::Test {
     file3.set_title("File3");
     file3.set_resource_id("resource_id:File3");
     file3.set_parent_local_id(dir2_local_id);
-    file3.mutable_file_specific_info()->set_md5("md5");
+    file3.mutable_file_specific_info()->set_md5("md5#2");
     file3.mutable_file_info()->set_is_directory(false);
     file3.mutable_file_info()->set_size(12345);
     ASSERT_EQ(FILE_ERROR_OK, resource_metadata->AddEntry(file3, &local_id));
@@ -318,6 +326,53 @@ class FileSystemTest : public testing::Test {
   scoped_ptr<FileSystem> file_system_;
 };
 
+TEST_F(FileSystemTest, SearchByHashes) {
+  ASSERT_NO_FATAL_FAILURE(SetUpTestFileSystem(USE_SERVER_TIMESTAMP));
+
+  std::set<std::string> hashes;
+  FileError error;
+  std::vector<HashAndFilePath> results;
+
+  hashes.insert("md5#1");
+  file_system_->SearchByHashes(
+      hashes,
+      google_apis::test_util::CreateCopyResultCallback(&error, &results));
+  content::RunAllBlockingPoolTasksUntilIdle();
+  EXPECT_EQ(FILE_ERROR_OK, error);
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(FILE_PATH_LITERAL("drive/root/File1"), results[0].path.value());
+
+  hashes.clear();
+  hashes.insert("md5#2");
+  file_system_->SearchByHashes(
+      hashes,
+      google_apis::test_util::CreateCopyResultCallback(&error, &results));
+  content::RunAllBlockingPoolTasksUntilIdle();
+  EXPECT_EQ(FILE_ERROR_OK, error);
+  ASSERT_EQ(2u, results.size());
+  std::sort(results.begin(), results.end(), &CompareHashAndFilePath);
+  EXPECT_EQ(FILE_PATH_LITERAL("drive/root/Dir1/File2"),
+            results[0].path.value());
+  EXPECT_EQ(FILE_PATH_LITERAL("drive/root/Dir1/SubDir2/File3"),
+            results[1].path.value());
+
+  hashes.clear();
+  hashes.insert("md5#1");
+  hashes.insert("md5#2");
+  file_system_->SearchByHashes(
+      hashes,
+      google_apis::test_util::CreateCopyResultCallback(&error, &results));
+  content::RunAllBlockingPoolTasksUntilIdle();
+  EXPECT_EQ(FILE_ERROR_OK, error);
+  ASSERT_EQ(3u, results.size());
+  std::sort(results.begin(), results.end(), &CompareHashAndFilePath);
+  EXPECT_EQ(FILE_PATH_LITERAL("drive/root/File1"), results[0].path.value());
+  EXPECT_EQ(FILE_PATH_LITERAL("drive/root/Dir1/File2"),
+            results[1].path.value());
+  EXPECT_EQ(FILE_PATH_LITERAL("drive/root/Dir1/SubDir2/File3"),
+            results[2].path.value());
+}
+
 TEST_F(FileSystemTest, Copy) {
   base::FilePath src_file_path(FILE_PATH_LITERAL("drive/root/File 1.txt"));
   base::FilePath dest_file_path(FILE_PATH_LITERAL("drive/root/Copied.txt"));
@@ -336,7 +391,7 @@ TEST_F(FileSystemTest, Copy) {
   scoped_ptr<ResourceEntry> entry = GetResourceEntrySync(dest_file_path);
   ASSERT_TRUE(entry);
 
-  google_apis::GDataErrorCode status = google_apis::GDATA_OTHER_ERROR;
+  google_apis::DriveApiErrorCode status = google_apis::DRIVE_OTHER_ERROR;
   scoped_ptr<google_apis::FileResource> server_entry;
   fake_drive_service_->GetFileResource(
       entry->resource_id(),
@@ -369,7 +424,7 @@ TEST_F(FileSystemTest, Move) {
   scoped_ptr<ResourceEntry> entry = GetResourceEntrySync(dest_file_path);
   ASSERT_TRUE(entry);
 
-  google_apis::GDataErrorCode status = google_apis::GDATA_OTHER_ERROR;
+  google_apis::DriveApiErrorCode status = google_apis::DRIVE_OTHER_ERROR;
   scoped_ptr<google_apis::FileResource> server_entry;
   fake_drive_service_->GetFileResource(
       entry->resource_id(),
@@ -397,7 +452,7 @@ TEST_F(FileSystemTest, Remove) {
   EXPECT_EQ(FILE_ERROR_OK, error);
 
   // Entry is removed on the server.
-  google_apis::GDataErrorCode status = google_apis::GDATA_OTHER_ERROR;
+  google_apis::DriveApiErrorCode status = google_apis::DRIVE_OTHER_ERROR;
   scoped_ptr<google_apis::FileResource> server_entry;
   fake_drive_service_->GetFileResource(
       entry->resource_id(),
@@ -425,7 +480,7 @@ TEST_F(FileSystemTest, CreateDirectory) {
   scoped_ptr<ResourceEntry> entry = GetResourceEntrySync(directory_path);
   ASSERT_TRUE(entry);
 
-  google_apis::GDataErrorCode status = google_apis::GDATA_OTHER_ERROR;
+  google_apis::DriveApiErrorCode status = google_apis::DRIVE_OTHER_ERROR;
   scoped_ptr<google_apis::FileResource> server_entry;
   fake_drive_service_->GetFileResource(
       entry->resource_id(),
@@ -454,7 +509,7 @@ TEST_F(FileSystemTest, CreateFile) {
   scoped_ptr<ResourceEntry> entry = GetResourceEntrySync(file_path);
   ASSERT_TRUE(entry);
 
-  google_apis::GDataErrorCode status = google_apis::GDATA_OTHER_ERROR;
+  google_apis::DriveApiErrorCode status = google_apis::DRIVE_OTHER_ERROR;
   scoped_ptr<google_apis::FileResource> server_entry;
   fake_drive_service_->GetFileResource(
       entry->resource_id(),
@@ -488,7 +543,7 @@ TEST_F(FileSystemTest, TouchFile) {
   EXPECT_EQ(FILE_ERROR_OK, error);
 
   // File is touched on the server.
-  google_apis::GDataErrorCode status = google_apis::GDATA_OTHER_ERROR;
+  google_apis::DriveApiErrorCode status = google_apis::DRIVE_OTHER_ERROR;
   scoped_ptr<google_apis::FileResource> server_entry;
   fake_drive_service_->GetFileResource(
       entry->resource_id(),
@@ -516,7 +571,7 @@ TEST_F(FileSystemTest, TruncateFile) {
   EXPECT_EQ(FILE_ERROR_OK, error);
 
   // File is touched on the server.
-  google_apis::GDataErrorCode status = google_apis::GDATA_OTHER_ERROR;
+  google_apis::DriveApiErrorCode status = google_apis::DRIVE_OTHER_ERROR;
   scoped_ptr<google_apis::FileResource> server_entry;
   fake_drive_service_->GetFileResource(
       entry->resource_id(),
@@ -788,11 +843,10 @@ TEST_F(FileSystemTest, ReadDirectoryAfterUpdateWhileLoading) {
   // On the fake server, create the test directory.
   scoped_ptr<google_apis::FileResource> parent;
   {
-    google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
+    google_apis::DriveApiErrorCode error = google_apis::DRIVE_OTHER_ERROR;
     fake_drive_service_->AddNewDirectory(
-        fake_drive_service_->GetRootResourceId(),
-        "UpdateWhileLoadingTestDir",
-        DriveServiceInterface::AddNewDirectoryOptions(),
+        fake_drive_service_->GetRootResourceId(), "UpdateWhileLoadingTestDir",
+        AddNewDirectoryOptions(),
         google_apis::test_util::CreateCopyResultCallback(&error, &parent));
     base::RunLoop().RunUntilIdle();
     ASSERT_EQ(google_apis::HTTP_CREATED, error);
@@ -807,7 +861,7 @@ TEST_F(FileSystemTest, ReadDirectoryAfterUpdateWhileLoading) {
   // Create a file in the test directory.
   scoped_ptr<google_apis::FileResource> entry;
   {
-    google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
+    google_apis::DriveApiErrorCode error = google_apis::DRIVE_OTHER_ERROR;
     fake_drive_service_->AddNewFile(
         "text/plain",
         "(dummy data)",
@@ -971,6 +1025,35 @@ TEST_F(FileSystemTest, GetShareUrl) {
   // Verify the share url to the sharing dialog.
   EXPECT_EQ(FILE_ERROR_OK, error);
   EXPECT_TRUE(share_url.is_valid());
+}
+
+TEST_F(FileSystemTest, FreeDiskSpaceIfNeededFor) {
+  ASSERT_TRUE(LoadFullResourceList());
+
+  base::FilePath file_in_root(FILE_PATH_LITERAL("drive/root/File 1.txt"));
+
+  // Make the file cached.
+  FileError error = FILE_ERROR_FAILED;
+  base::FilePath file_path;
+  scoped_ptr<ResourceEntry> entry;
+  file_system_->GetFile(file_in_root,
+                        google_apis::test_util::CreateCopyResultCallback(
+                            &error, &file_path, &entry));
+  content::RunAllBlockingPoolTasksUntilIdle();
+  EXPECT_EQ(FILE_ERROR_OK, error);
+  ASSERT_TRUE(entry);
+  EXPECT_TRUE(entry->file_specific_info().cache_state().is_present());
+
+  bool available;
+  file_system_->FreeDiskSpaceIfNeededFor(
+      512LL << 40,
+      google_apis::test_util::CreateCopyResultCallback(&available));
+  content::RunAllBlockingPoolTasksUntilIdle();
+  ASSERT_FALSE(available);
+
+  entry = GetResourceEntrySync(file_in_root);
+  ASSERT_TRUE(entry);
+  EXPECT_FALSE(entry->file_specific_info().cache_state().is_present());
 }
 
 }   // namespace drive

@@ -9,9 +9,11 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/interstitials/security_interstitial_page_test_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/malware_details.h"
@@ -32,12 +34,14 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_utils.h"
 
+using chrome_browser_interstitials::SecurityInterstitialIDNTest;
 using content::BrowserThread;
 using content::InterstitialPage;
 using content::NavigationController;
@@ -400,7 +404,8 @@ class SafeBrowsingBlockingPageBrowserTest
     return url;
   }
 
-  void SendCommand(const std::string& command) {
+  void SendCommand(
+      SecurityInterstitialPage::SecurityInterstitialCommands command) {
     WebContents* contents =
         browser()->tab_strip_model()->GetActiveWebContents();
     // We use InterstitialPage::GetInterstitialPage(tab) instead of
@@ -415,7 +420,7 @@ class SafeBrowsingBlockingPageBrowserTest
     ASSERT_TRUE(interstitial_page);
     ASSERT_EQ(SafeBrowsingBlockingPage::kTypeForTesting,
               interstitial_page->GetTypeForTesting());
-    interstitial_page->CommandReceived(command);
+    interstitial_page->CommandReceived(base::IntToString(command));
   }
 
   void DontProceedThroughInterstitial() {
@@ -500,7 +505,7 @@ class SafeBrowsingBlockingPageBrowserTest
     // below, and crbug.com/76460), we use SendCommand to trigger the callback
     // directly rather than using ClickAndWaitForDetach since there might not
     // be a notification to wait for.
-    SendCommand("\"proceed\"");
+    SendCommand(SecurityInterstitialPage::CMD_PROCEED);
   }
 
   content::RenderViewHost* GetRenderViewHost() {
@@ -512,20 +517,11 @@ class SafeBrowsingBlockingPageBrowserTest
   }
 
   bool WaitForReady() {
-    content::RenderViewHost* rvh = GetRenderViewHost();
-    if (!rvh)
+    InterstitialPage* interstitial = InterstitialPage::GetInterstitialPage(
+        browser()->tab_strip_model()->GetActiveWebContents());
+    if (!interstitial)
       return false;
-    // Wait until all <script> tags have executed, including jstemplate.
-    // TODO(joaodasilva): it would be nice to avoid the busy loop, though in
-    // practice it spins at most once or twice.
-    std::string ready_state;
-    do {
-      scoped_ptr<base::Value> value = content::ExecuteScriptAndGetValue(
-          rvh->GetMainFrame(), "document.readyState");
-      if (!value.get() || !value->GetAsString(&ready_state))
-        return false;
-    } while (ready_state != "complete");
-    return true;
+    return content::WaitForRenderFrameReady(interstitial->GetMainFrame());
   }
 
   Visibility GetVisibility(const std::string& node_id) {
@@ -697,7 +693,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
   if (expect_malware_details)
     fake_malware_details->WaitForDOM();
 
-  EXPECT_EQ(VISIBLE, GetVisibility("malware-opt-in"));
+  EXPECT_EQ(VISIBLE, GetVisibility("extended-reporting-opt-in"));
   EXPECT_TRUE(Click("opt-in-checkbox"));
   EXPECT_TRUE(ClickAndWaitForDetach("proceed-link"));
   AssertNoInterstitial(true);  // Assert the interstitial is gone
@@ -741,7 +737,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ProceedDisabled) {
   EXPECT_TRUE(Click("details-button"));
   EXPECT_EQ(HIDDEN, GetVisibility("proceed-link"));
   EXPECT_EQ(HIDDEN, GetVisibility("final-paragraph"));
-  SendCommand("proceed");
+  SendCommand(SecurityInterstitialPage::CMD_PROCEED);
 
   // The "proceed" command should go back instead, if proceeding is disabled.
   AssertNoInterstitial(true);
@@ -772,7 +768,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ReportingDisabled) {
   ui_test_utils::NavigateToURL(browser(), url);
   ASSERT_TRUE(WaitForReady());
 
-  EXPECT_EQ(HIDDEN, GetVisibility("malware-opt-in"));
+  EXPECT_EQ(HIDDEN, GetVisibility("extended-reporting-opt-in"));
   EXPECT_EQ(HIDDEN, GetVisibility("opt-in-checkbox"));
   EXPECT_EQ(HIDDEN, GetVisibility("proceed-link"));
   EXPECT_TRUE(Click("details-button"));
@@ -800,6 +796,42 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, LearnMore) {
 
 INSTANTIATE_TEST_CASE_P(SafeBrowsingBlockingPageBrowserTestWithThreatType,
                         SafeBrowsingBlockingPageBrowserTest,
+                        testing::Values(SB_THREAT_TYPE_URL_MALWARE,
+                                        SB_THREAT_TYPE_URL_PHISHING,
+                                        SB_THREAT_TYPE_URL_UNWANTED));
+
+// Test that SafeBrowsingBlockingPage properly decodes IDN URLs that are
+// displayed.
+class SafeBrowsingBlockingPageIDNTest
+    : public SecurityInterstitialIDNTest,
+      public testing::WithParamInterface<SBThreatType> {
+ protected:
+  // SecurityInterstitialIDNTest implementation
+  SecurityInterstitialPage* CreateInterstitial(
+      content::WebContents* contents,
+      const GURL& request_url) const override {
+    SafeBrowsingService* sb_service =
+        g_browser_process->safe_browsing_service();
+    SafeBrowsingBlockingPage::UnsafeResource resource;
+
+    resource.url = request_url;
+    resource.is_subresource = false;
+    resource.threat_type = GetParam();
+    resource.render_process_host_id = contents->GetRenderProcessHost()->GetID();
+    resource.render_view_id = contents->GetRenderViewHost()->GetRoutingID();
+
+    return SafeBrowsingBlockingPage::CreateBlockingPage(
+        sb_service->ui_manager().get(), contents, resource);
+  }
+};
+
+IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageIDNTest,
+                       SafeBrowsingBlockingPageDecodesIDN) {
+  EXPECT_TRUE(VerifyIDNDecoded());
+}
+
+INSTANTIATE_TEST_CASE_P(SafeBrowsingBlockingPageIDNTestWithThreatType,
+                        SafeBrowsingBlockingPageIDNTest,
                         testing::Values(SB_THREAT_TYPE_URL_MALWARE,
                                         SB_THREAT_TYPE_URL_PHISHING,
                                         SB_THREAT_TYPE_URL_UNWANTED));

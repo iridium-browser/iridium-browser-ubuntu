@@ -34,18 +34,15 @@
  */
 WebInspector.Section = function(title, subtitle)
 {
-    this.element = createElement("div");
-    this.element.className = "section";
+    this.element = createElementWithClass("div", "section");
     this.element._section = this;
+    this.registerRequiredCSS("ui/section.css");
 
-    this.headerElement = createElement("div");
-    this.headerElement.className = "header";
+    this.headerElement = createElementWithClass("div", "header monospace");
 
-    this.titleElement = createElement("div");
-    this.titleElement.className = "title";
+    this.titleElement = createElementWithClass("div", "title");
 
-    this.subtitleElement = createElement("div");
-    this.subtitleElement.className = "subtitle";
+    this.subtitleElement = createElementWithClass("div", "subtitle");
 
     this.headerElement.appendChild(this.subtitleElement);
     this.headerElement.appendChild(this.titleElement);
@@ -59,15 +56,6 @@ WebInspector.Section = function(title, subtitle)
         this.subtitleElement.textContent = subtitle;
     }
     this._expanded = false;
-
-    this.headerElement.classList.add("monospace");
-    this.propertiesElement = createElement("ol");
-    this.propertiesElement.className = "properties properties-tree monospace";
-    this.propertiesTreeOutline = new TreeOutline(this.propertiesElement, true);
-    this.propertiesTreeOutline.setFocusable(false);
-    this.propertiesTreeOutline.section = this;
-
-    this.element.appendChild(this.propertiesElement);
 }
 
 WebInspector.Section.prototype = {
@@ -92,18 +80,6 @@ WebInspector.Section.prototype = {
     get subtitle()
     {
         return this._subtitle;
-    },
-
-    get subtitleAsTextForTest()
-    {
-        var result = this.subtitleElement.textContent;
-        var child = this.subtitleElement.querySelector("[data-uncopyable]");
-        if (child) {
-            var linkData = child.getAttribute("data-uncopyable");
-            if (linkData)
-                result += linkData;
-        }
-        return result;
     },
 
     get expanded()
@@ -150,15 +126,55 @@ WebInspector.Section.prototype = {
     },
 
     /**
+     * @param {string} cssFile
+     */
+    registerRequiredCSS: function(cssFile)
+    {
+        this.element.insertBefore(WebInspector.View.createStyleElement(cssFile), this.headerElement);
+    },
+
+    /**
      * @param {!Event} event
      * @protected
      */
     handleClick: function(event)
     {
+        if (this._doNotExpandOnTitleClick)
+            return;
+
         if (this._expanded)
             this.collapse();
         else
             this.expand();
         event.consume();
+    },
+
+    doNotExpandOnTitleClick: function()
+    {
+        this._doNotExpandOnTitleClick = true;
     }
+}
+
+/**
+ * @constructor
+ * @extends {WebInspector.Section}
+ * @param {string|!Node} title
+ * @param {string=} subtitle
+ */
+WebInspector.PropertiesSection = function(title, subtitle)
+{
+    WebInspector.Section.call(this, title, subtitle);
+    this.registerRequiredCSS("ui/propertiesSection.css");
+
+    this.propertiesTreeOutline = new TreeOutline(true);
+    this.propertiesElement = this.propertiesTreeOutline.element;
+    this.propertiesElement.classList.add("properties", "properties-tree", "monospace");
+    this.propertiesTreeOutline.setFocusable(false);
+    this.propertiesTreeOutline.section = this;
+
+    this.element.appendChild(this.propertiesElement);
+}
+
+WebInspector.PropertiesSection.prototype = {
+    __proto__: WebInspector.Section.prototype
 }

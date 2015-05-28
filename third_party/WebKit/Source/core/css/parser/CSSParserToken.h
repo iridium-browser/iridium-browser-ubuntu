@@ -6,7 +6,7 @@
 #define CSSParserToken_h
 
 #include "core/css/CSSPrimitiveValue.h"
-#include "wtf/text/WTFString.h"
+#include "core/css/parser/CSSParserValues.h"
 
 namespace blink {
 
@@ -29,6 +29,8 @@ enum CSSParserTokenType {
     ColumnToken,
     UnicodeRangeToken,
     WhitespaceToken,
+    CDOToken,
+    CDCToken,
     ColonToken,
     SemicolonToken,
     CommaToken,
@@ -42,6 +44,12 @@ enum CSSParserTokenType {
     BadStringToken,
     EOFToken,
     CommentToken,
+};
+
+enum NumericSign {
+    NoSign,
+    PlusSign,
+    MinusSign,
 };
 
 enum NumericValueType {
@@ -63,50 +71,67 @@ public:
     };
 
     CSSParserToken(CSSParserTokenType, BlockType = NotBlock);
-    CSSParserToken(CSSParserTokenType, String value, BlockType = NotBlock);
+    CSSParserToken(CSSParserTokenType, CSSParserString, BlockType = NotBlock);
 
     CSSParserToken(CSSParserTokenType, UChar); // for DelimiterToken
-    CSSParserToken(CSSParserTokenType, double, NumericValueType); // for NumberToken
-    CSSParserToken(CSSParserTokenType, UChar32, UChar32); // for UnicodeRangeToken
+    CSSParserToken(CSSParserTokenType, double, NumericValueType, NumericSign); // for NumberToken
+    // FIXME: We shouldn't need to store a string
+    CSSParserToken(CSSParserTokenType, CSSParserString, UChar32, UChar32); // for UnicodeRangeToken
 
-    CSSParserToken(HashTokenType, String);
+    CSSParserToken(HashTokenType, CSSParserString);
 
     // Converts NumberToken to DimensionToken.
-    void convertToDimensionWithUnit(String);
+    void convertToDimensionWithUnit(CSSParserString);
 
     // Converts NumberToken to PercentageToken.
     void convertToPercentage();
 
-    CSSParserTokenType type() const { return m_type; }
-    String value() const { return m_value; }
+    CSSParserTokenType type() const { return static_cast<CSSParserTokenType>(m_type); }
+    CSSParserString value() const { return m_value; }
+    bool valueEqualsIgnoringCase(const char* str) const { return m_value.equalIgnoringCase(str); }
 
     UChar delimiter() const;
+    NumericSign numericSign() const;
     NumericValueType numericValueType() const;
     double numericValue() const;
     HashTokenType hashTokenType() const { ASSERT(m_type == HashToken); return m_hashTokenType; }
-    BlockType blockType() const { return m_blockType; }
-    CSSPrimitiveValue::UnitType unitType() const { return m_unit; }
-    UChar32 unicodeRangeStart() const { ASSERT(m_type == UnicodeRangeToken); return m_unicodeRangeStart; }
-    UChar32 unicodeRangeEnd() const { ASSERT(m_type == UnicodeRangeToken); return m_unicodeRangeEnd; }
+    BlockType blockType() const { return static_cast<BlockType>(m_blockType); }
+    CSSPrimitiveValue::UnitType unitType() const { return static_cast<CSSPrimitiveValue::UnitType>(m_unit); }
+    UChar32 unicodeRangeStart() const { ASSERT(m_type == UnicodeRangeToken); return m_unicodeRange.start; }
+    UChar32 unicodeRangeEnd() const { ASSERT(m_type == UnicodeRangeToken); return m_unicodeRange.end; }
 
     CSSPropertyID parseAsCSSPropertyID() const;
 
+    void serialize(StringBuilder&) const;
+
 private:
-    CSSParserTokenType m_type;
-    String m_value;
+    unsigned m_type : 6; // CSSParserTokenType
+    unsigned m_blockType : 2; // BlockType
+    unsigned m_numericValueType : 1; // NumericValueType
+    unsigned m_numericSign : 2; // NumericSign
+    unsigned m_unit : 7; // CSSPrimitiveValue::UnitType
 
-    // This could be a union to save space
-    UChar m_delimiter;
-    HashTokenType m_hashTokenType;
-    NumericValueType m_numericValueType;
-    double m_numericValue;
-    CSSPrimitiveValue::UnitType m_unit;
-    UChar32 m_unicodeRangeStart;
-    UChar32 m_unicodeRangeEnd;
+    CSSParserString m_value; // FIXME: Pack this better?
 
-    BlockType m_blockType;
+    union {
+        UChar m_delimiter;
+        HashTokenType m_hashTokenType;
+        double m_numericValue;
+
+        struct {
+            UChar32 start;
+            UChar32 end;
+        } m_unicodeRange;
+    };
 };
 
-} // namespace
+} // namespace blink
+
+namespace WTF {
+template <>
+struct IsTriviallyMoveAssignable<blink::CSSParserToken> {
+    static const bool value = true;
+};
+}
 
 #endif // CSSSParserToken_h

@@ -4,6 +4,7 @@
 
 #include "content/test/render_thread_impl_browser_test_ipc_helper.h"
 
+#include "content/common/mojo/channel_init.h"
 #include "ipc/mojo/ipc_channel_mojo_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -45,8 +46,11 @@ void RenderThreadImplBrowserIPCTestHelper::SetupIpcThread() {
 void RenderThreadImplBrowserIPCTestHelper::SetupMojo() {
   InitializeMojo();
 
+  ipc_support_.reset(new IPC::ScopedIPCSupport(ipc_thread_->task_runner()));
   mojo_host_.reset(new IPC::ChannelMojoHost(ipc_thread_->task_runner()));
   mojo_application_host_.reset(new MojoApplicationHost());
+  mojo_application_host_->OverrideIOTaskRunnerForTest(
+      ipc_thread_->task_runner());
 
   channel_ = IPC::ChannelProxy::Create(
       IPC::ChannelMojo::CreateServerFactory(mojo_host_->channel_delegate(),
@@ -57,6 +61,11 @@ void RenderThreadImplBrowserIPCTestHelper::SetupMojo() {
   mojo_application_host_->Activate(channel_.get(),
                                    base::GetCurrentProcessHandle());
   mojo_host_->OnClientLaunched(base::GetCurrentProcessHandle());
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+RenderThreadImplBrowserIPCTestHelper::GetIOTaskRunner() const {
+  return ipc_thread_->task_runner();
 }
 
 }  // namespace content

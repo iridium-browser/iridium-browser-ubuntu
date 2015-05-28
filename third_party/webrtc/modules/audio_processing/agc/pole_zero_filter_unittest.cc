@@ -14,9 +14,8 @@
 #include <stdio.h>
 
 #include "gtest/gtest.h"
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/audio_processing/agc/agc_audio_proc_internal.h"
-#include "webrtc/system_wrappers/interface/compile_assert.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/test/testsupport/fileutils.h"
 
 namespace webrtc {
@@ -54,7 +53,7 @@ class PoleZeroFilterTest : public ::testing::Test {
 
  private:
   void TestClean();
-  scoped_ptr<PoleZeroFilter> my_filter_;
+  rtc::scoped_ptr<PoleZeroFilter> my_filter_;
 };
 
 void PoleZeroFilterTest::FilterSubframes(int num_subframes) {

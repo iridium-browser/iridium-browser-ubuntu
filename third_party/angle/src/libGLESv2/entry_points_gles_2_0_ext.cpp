@@ -262,7 +262,7 @@ void GL_APIENTRY GetFenceivNV(GLuint fence, GLenum pname, GLint *params)
 
           case GL_FENCE_CONDITION_NV:
             {
-                *params = fenceObject->getCondition();
+                *params = static_cast<GLint>(fenceObject->getCondition());
                 break;
             }
 
@@ -518,7 +518,7 @@ void GL_APIENTRY RenderbufferStorageMultisampleANGLE(GLenum target, GLsizei samp
         }
 
         Renderbuffer *renderbuffer = context->getState().getCurrentRenderbuffer();
-        Error error = renderbuffer->setStorage(width, height, internalformat, samples);
+        Error error = renderbuffer->setStorageMultisample(samples, internalformat, width, height);
         if (error.isError())
         {
             context->recordError(error);

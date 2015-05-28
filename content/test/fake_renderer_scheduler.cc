@@ -22,6 +22,11 @@ FakeRendererScheduler::CompositorTaskRunner() {
   return nullptr;
 }
 
+scoped_refptr<base::SingleThreadTaskRunner>
+FakeRendererScheduler::LoadingTaskRunner() {
+  return nullptr;
+}
+
 scoped_refptr<SingleThreadIdleTaskRunner>
 FakeRendererScheduler::IdleTaskRunner() {
   return nullptr;
@@ -30,18 +35,37 @@ FakeRendererScheduler::IdleTaskRunner() {
 void FakeRendererScheduler::WillBeginFrame(const cc::BeginFrameArgs& args) {
 }
 
+void FakeRendererScheduler::BeginFrameNotExpectedSoon() {
+}
+
 void FakeRendererScheduler::DidCommitFrameToCompositor() {
 }
 
 void FakeRendererScheduler::DidReceiveInputEventOnCompositorThread(
-    blink::WebInputEvent::Type type) {
+    const blink::WebInputEvent& web_input_event) {
 }
 
 void FakeRendererScheduler::DidAnimateForInputOnCompositorThread() {
 }
 
+bool FakeRendererScheduler::IsHighPriorityWorkAnticipated() {
+  return false;
+}
+
 bool FakeRendererScheduler::ShouldYieldForHighPriorityWork() {
   return false;
+}
+
+bool FakeRendererScheduler::CanExceedIdleDeadlineIfRequired() const {
+  return false;
+}
+
+void FakeRendererScheduler::AddTaskObserver(
+    base::MessageLoop::TaskObserver* task_observer) {
+}
+
+void FakeRendererScheduler::RemoveTaskObserver(
+    base::MessageLoop::TaskObserver* task_observer) {
 }
 
 void FakeRendererScheduler::Shutdown() {

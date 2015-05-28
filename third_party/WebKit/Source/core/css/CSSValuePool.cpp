@@ -28,7 +28,7 @@
 
 #include "core/css/CSSValueList.h"
 #include "core/css/parser/CSSParser.h"
-#include "core/rendering/style/RenderStyle.h"
+#include "core/style/ComputedStyle.h"
 
 namespace blink {
 
@@ -121,7 +121,7 @@ PassRefPtrWillBeRawPtr<CSSPrimitiveValue> CSSValuePool::createValue(double value
     }
 }
 
-PassRefPtrWillBeRawPtr<CSSPrimitiveValue> CSSValuePool::createValue(const Length& value, const RenderStyle& style)
+PassRefPtrWillBeRawPtr<CSSPrimitiveValue> CSSValuePool::createValue(const Length& value, const ComputedStyle& style)
 {
     return CSSPrimitiveValue::create(value, style.effectiveZoom());
 }
@@ -130,7 +130,7 @@ PassRefPtrWillBeRawPtr<CSSPrimitiveValue> CSSValuePool::createFontFamilyValue(co
 {
     RefPtrWillBeMember<CSSPrimitiveValue>& value = m_fontFamilyValueCache.add(familyName, nullptr).storedValue->value;
     if (!value)
-        value = CSSPrimitiveValue::create(familyName, CSSPrimitiveValue::CSS_STRING);
+        value = CSSPrimitiveValue::create(familyName, CSSPrimitiveValue::CSS_CUSTOM_IDENT);
     return value;
 }
 
@@ -150,7 +150,7 @@ PassRefPtrWillBeRawPtr<CSSValueList> CSSValuePool::createFontFaceValue(const Ato
     return value;
 }
 
-void CSSValuePool::trace(Visitor* visitor)
+DEFINE_TRACE(CSSValuePool)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_inheritedValue);

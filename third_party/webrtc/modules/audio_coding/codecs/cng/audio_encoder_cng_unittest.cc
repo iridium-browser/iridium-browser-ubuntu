@@ -8,11 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <vector>
+
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/common_audio/vad/mock/mock_vad.h"
 #include "webrtc/modules/audio_coding/codecs/cng/include/audio_encoder_cng.h"
 #include "webrtc/modules/audio_coding/codecs/mock/mock_audio_encoder.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 using ::testing::Return;
 using ::testing::_;
@@ -23,7 +25,7 @@ using ::testing::Invoke;
 namespace webrtc {
 
 namespace {
-static const size_t kMaxEncodedBytes = 1000;
+static const size_t kMockMaxEncodedBytes = 1000;
 static const size_t kMaxNumSamples = 48 * 10 * 2;  // 10 ms @ 48 kHz stereo.
 static const size_t kMockReturnEncodedBytes = 17;
 static const int kCngPayloadType = 18;
@@ -34,18 +36,18 @@ class AudioEncoderCngTest : public ::testing::Test {
   AudioEncoderCngTest()
       : mock_vad_(new MockVad(Vad::kVadNormal)),
         timestamp_(4711),
-        num_audio_samples_10ms_(0) {
-    memset(encoded_, 0, kMaxEncodedBytes);
+        num_audio_samples_10ms_(0),
+        sample_rate_hz_(8000) {
     memset(audio_, 0, kMaxNumSamples * 2);
     config_.speech_encoder = &mock_encoder_;
-    EXPECT_CALL(mock_encoder_, num_channels()).WillRepeatedly(Return(1));
+    EXPECT_CALL(mock_encoder_, NumChannels()).WillRepeatedly(Return(1));
     // Let the AudioEncoderCng object use a MockVad instead of its internally
     // created Vad object.
     config_.vad = mock_vad_;
     config_.payload_type = kCngPayloadType;
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     EXPECT_CALL(*mock_vad_, Die()).Times(1);
     cng_.reset();
     // Don't expect the cng_ object to delete the AudioEncoder object. But it
@@ -57,22 +59,24 @@ class AudioEncoderCngTest : public ::testing::Test {
   void CreateCng() {
     // The config_ parameters may be changed by the TEST_Fs up until CreateCng()
     // is called, thus we cannot use the values until now.
-    num_audio_samples_10ms_ = 10 * config_.sample_rate_hz / 1000;
+    num_audio_samples_10ms_ = 10 * sample_rate_hz_ / 1000;
     ASSERT_LE(num_audio_samples_10ms_, kMaxNumSamples);
-    EXPECT_CALL(mock_encoder_, sample_rate_hz())
-        .WillRepeatedly(Return(config_.sample_rate_hz));
+    EXPECT_CALL(mock_encoder_, SampleRateHz())
+        .WillRepeatedly(Return(sample_rate_hz_));
     // Max10MsFramesInAPacket() is just used to verify that the SID frame period
     // is not too small. The return value does not matter that much, as long as
     // it is smaller than 10.
     EXPECT_CALL(mock_encoder_, Max10MsFramesInAPacket()).WillOnce(Return(1));
+    EXPECT_CALL(mock_encoder_, MaxEncodedBytes())
+        .WillRepeatedly(Return(kMockMaxEncodedBytes));
     cng_.reset(new AudioEncoderCng(config_));
+    encoded_.resize(cng_->MaxEncodedBytes(), 0);
   }
 
   void Encode() {
     ASSERT_TRUE(cng_) << "Must call CreateCng() first.";
-    encoded_info_ = AudioEncoder::EncodedInfo();
-    ASSERT_TRUE(cng_->Encode(timestamp_, audio_, num_audio_samples_10ms_,
-                             kMaxEncodedBytes, encoded_, &encoded_info_));
+    encoded_info_ = cng_->Encode(timestamp_, audio_, num_audio_samples_10ms_,
+                                 encoded_.size(), &encoded_[0]);
     timestamp_ += num_audio_samples_10ms_;
   }
 
@@ -87,24 +91,24 @@ class AudioEncoderCngTest : public ::testing::Test {
         .WillRepeatedly(Return(active_speech ? Vad::kActive : Vad::kPassive));
 
     // Don't expect any calls to the encoder yet.
-    EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _, _)).Times(0);
+    EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _)).Times(0);
     for (int i = 0; i < blocks_per_frame - 1; ++i) {
       Encode();
       EXPECT_EQ(0u, encoded_info_.encoded_bytes);
     }
-    AudioEncoder::EncodedInfo info;
     if (active_speech) {
       // Now expect |blocks_per_frame| calls to the encoder in sequence.
       // Let the speech codec mock return true and set the number of encoded
       // bytes to |kMockReturnEncodedBytes|.
       InSequence s;
+      AudioEncoder::EncodedInfo info;
       for (int j = 0; j < blocks_per_frame - 1; ++j) {
-        EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _, _))
-            .WillOnce(DoAll(SetArgPointee<4>(info), Return(true)));
+        EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _))
+            .WillOnce(Return(info));
       }
       info.encoded_bytes = kMockReturnEncodedBytes;
-      EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _, _))
-          .WillOnce(DoAll(SetArgPointee<4>(info), Return(true)));
+      EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _))
+          .WillOnce(Return(info));
     }
     Encode();
     if (active_speech) {
@@ -133,17 +137,16 @@ class AudioEncoderCngTest : public ::testing::Test {
 
     // Let the VAD decision be passive, since an active decision may lead to
     // early termination of the decision loop.
-    const int sample_rate_hz = config_.sample_rate_hz;
     InSequence s;
     EXPECT_CALL(
         *mock_vad_,
-        VoiceActivity(_, expected_first_block_size_ms * sample_rate_hz / 1000,
-                      sample_rate_hz)).WillOnce(Return(Vad::kPassive));
+        VoiceActivity(_, expected_first_block_size_ms * sample_rate_hz_ / 1000,
+                      sample_rate_hz_)).WillOnce(Return(Vad::kPassive));
     if (expected_second_block_size_ms > 0) {
       EXPECT_CALL(*mock_vad_,
                   VoiceActivity(
-                      _, expected_second_block_size_ms * sample_rate_hz / 1000,
-                      sample_rate_hz)).WillOnce(Return(Vad::kPassive));
+                      _, expected_second_block_size_ms * sample_rate_hz_ / 1000,
+                      sample_rate_hz_)).WillOnce(Return(Vad::kPassive));
     }
 
     // With this call to Encode(), |mock_vad_| should be called according to the
@@ -176,14 +179,15 @@ class AudioEncoderCngTest : public ::testing::Test {
   }
 
   AudioEncoderCng::Config config_;
-  scoped_ptr<AudioEncoderCng> cng_;
+  rtc::scoped_ptr<AudioEncoderCng> cng_;
   MockAudioEncoder mock_encoder_;
   MockVad* mock_vad_;  // Ownership is transferred to |cng_|.
   uint32_t timestamp_;
   int16_t audio_[kMaxNumSamples];
   size_t num_audio_samples_10ms_;
-  uint8_t encoded_[kMaxEncodedBytes];
+  std::vector<uint8_t> encoded_;
   AudioEncoder::EncodedInfo encoded_info_;
+  int sample_rate_hz_;
 };
 
 TEST_F(AudioEncoderCngTest, CreateAndDestroy) {
@@ -194,6 +198,18 @@ TEST_F(AudioEncoderCngTest, CheckFrameSizePropagation) {
   CreateCng();
   EXPECT_CALL(mock_encoder_, Num10MsFramesInNextPacket()).WillOnce(Return(17));
   EXPECT_EQ(17, cng_->Num10MsFramesInNextPacket());
+}
+
+TEST_F(AudioEncoderCngTest, CheckChangeBitratePropagation) {
+  CreateCng();
+  EXPECT_CALL(mock_encoder_, SetTargetBitrate(4711));
+  cng_->SetTargetBitrate(4711);
+}
+
+TEST_F(AudioEncoderCngTest, CheckProjectedPacketLossRatePropagation) {
+  CreateCng();
+  EXPECT_CALL(mock_encoder_, SetProjectedPacketLossRate(0.5));
+  cng_->SetProjectedPacketLossRate(0.5);
 }
 
 TEST_F(AudioEncoderCngTest, EncodeCallsVad) {
@@ -237,7 +253,7 @@ TEST_F(AudioEncoderCngTest, EncodePassive) {
   EXPECT_CALL(*mock_vad_, VoiceActivity(_, _, _))
       .WillRepeatedly(Return(Vad::kPassive));
   // Expect no calls at all to the speech encoder mock.
-  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _, _)).Times(0);
+  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _)).Times(0);
   uint32_t expected_timestamp = timestamp_;
   for (int i = 0; i < 100; ++i) {
     Encode();
@@ -248,6 +264,7 @@ TEST_F(AudioEncoderCngTest, EncodePassive) {
       if ((i % (config_.sid_frame_interval_ms / 10)) < kBlocksPerFrame) {
         // If so, verify that we got a CNG encoding.
         EXPECT_EQ(kCngPayloadType, encoded_info_.payload_type);
+        EXPECT_FALSE(encoded_info_.speech);
         EXPECT_EQ(static_cast<size_t>(config_.num_cng_coefficients) + 1,
                   encoded_info_.encoded_bytes);
         EXPECT_EQ(expected_timestamp, encoded_info_.encoded_timestamp);
@@ -266,25 +283,29 @@ TEST_F(AudioEncoderCngTest, MixedActivePassive) {
   CreateCng();
 
   // All of the frame is active speech.
-  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _, _))
+  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _))
       .Times(6)
-      .WillRepeatedly(Return(true));
+      .WillRepeatedly(Return(AudioEncoder::EncodedInfo()));
   EXPECT_TRUE(CheckMixedActivePassive(Vad::kActive, Vad::kActive));
+  EXPECT_TRUE(encoded_info_.speech);
 
   // First half of the frame is active speech.
-  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _, _))
+  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _))
       .Times(6)
-      .WillRepeatedly(Return(true));
+      .WillRepeatedly(Return(AudioEncoder::EncodedInfo()));
   EXPECT_TRUE(CheckMixedActivePassive(Vad::kActive, Vad::kPassive));
+  EXPECT_TRUE(encoded_info_.speech);
 
   // Second half of the frame is active speech.
-  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _, _))
+  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _))
       .Times(6)
-      .WillRepeatedly(Return(true));
+      .WillRepeatedly(Return(AudioEncoder::EncodedInfo()));
   EXPECT_TRUE(CheckMixedActivePassive(Vad::kPassive, Vad::kActive));
+  EXPECT_TRUE(encoded_info_.speech);
 
   // All of the frame is passive speech. Expect no calls to |mock_encoder_|.
   EXPECT_FALSE(CheckMixedActivePassive(Vad::kPassive, Vad::kPassive));
+  EXPECT_FALSE(encoded_info_.speech);
 }
 
 // These tests verify that the audio is partitioned into larger blocks before
@@ -317,23 +338,10 @@ TEST_F(AudioEncoderCngTest, VadInputSize60Ms) {
   CheckVadInputSize(60, 30, 30);
 }
 
-// Verifies that the EncodedInfo struct pointer passed to
-// AudioEncoderCng::Encode is propagated to the Encode call to the underlying
-// speech encoder.
-TEST_F(AudioEncoderCngTest, VerifyEncoderInfoPropagation) {
-  CreateCng();
-  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _, &encoded_info_))
-      .WillOnce(Return(true));
-  EXPECT_CALL(mock_encoder_, Num10MsFramesInNextPacket()).WillOnce(Return(1));
-  EXPECT_CALL(*mock_vad_, VoiceActivity(_, _, _))
-      .WillOnce(Return(Vad::kActive));
-  Encode();
-}
-
 // Verifies that the correct payload type is set when CNG is encoded.
 TEST_F(AudioEncoderCngTest, VerifyCngPayloadType) {
   CreateCng();
-  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _, _)).Times(0);
+  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _)).Times(0);
   EXPECT_CALL(mock_encoder_, Num10MsFramesInNextPacket()).WillOnce(Return(1));
   EXPECT_CALL(*mock_vad_, VoiceActivity(_, _, _))
       .WillOnce(Return(Vad::kPassive));
@@ -367,8 +375,7 @@ TEST_F(AudioEncoderCngTest, VerifySidFrameAfterSpeech) {
       .WillOnce(Return(Vad::kActive));
   AudioEncoder::EncodedInfo info;
   info.encoded_bytes = kMockReturnEncodedBytes;
-  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _, _))
-      .WillOnce(DoAll(SetArgPointee<4>(info), Return(true)));
+  EXPECT_CALL(mock_encoder_, EncodeInternal(_, _, _, _)).WillOnce(Return(info));
   Encode();
   EXPECT_EQ(kMockReturnEncodedBytes, encoded_info_.encoded_bytes);
 
@@ -398,7 +405,7 @@ class AudioEncoderCngDeathTest : public AudioEncoderCngTest {
   // Override AudioEncoderCngTest::TearDown, since that one expects a call to
   // the destructor of |mock_vad_|. In this case, that object is already
   // deleted.
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     cng_.reset();
     // Don't expect the cng_ object to delete the AudioEncoder object. But it
     // will be deleted with the test fixture. This is why we explicitly delete
@@ -413,20 +420,6 @@ TEST_F(AudioEncoderCngDeathTest, WrongFrameSize) {
   EXPECT_DEATH(Encode(), "");
   num_audio_samples_10ms_ = 0;  // Zero samples.
   EXPECT_DEATH(Encode(), "");
-}
-
-TEST_F(AudioEncoderCngDeathTest, WrongSampleRates) {
-  config_.sample_rate_hz = 32000;
-  EXPECT_DEATH(CreateCng(), "Invalid configuration");
-  config_.sample_rate_hz = 48000;
-  EXPECT_DEATH(CreateCng(), "Invalid configuration");
-  config_.sample_rate_hz = 0;
-  EXPECT_DEATH(CreateCng(), "Invalid configuration");
-  config_.sample_rate_hz = -8000;
-  // Don't use CreateCng() here, since the built-in sanity checks will prevent
-  // the test from reaching the expected point-of-death.
-  EXPECT_DEATH(cng_.reset(new AudioEncoderCng(config_)),
-               "Invalid configuration");
 }
 
 TEST_F(AudioEncoderCngDeathTest, WrongNumCoefficients) {
@@ -444,7 +437,7 @@ TEST_F(AudioEncoderCngDeathTest, NullSpeechEncoder) {
 }
 
 TEST_F(AudioEncoderCngDeathTest, Stereo) {
-  EXPECT_CALL(mock_encoder_, num_channels()).WillRepeatedly(Return(2));
+  EXPECT_CALL(mock_encoder_, NumChannels()).WillRepeatedly(Return(2));
   EXPECT_DEATH(CreateCng(), "Invalid configuration");
   config_.num_channels = 2;
   EXPECT_DEATH(CreateCng(), "Invalid configuration");

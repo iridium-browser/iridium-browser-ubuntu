@@ -37,19 +37,8 @@ EventInit::EventInit()
 {
 }
 
-
 Event::Event()
-    : m_canBubble(false)
-    , m_cancelable(false)
-    , m_propagationStopped(false)
-    , m_immediatePropagationStopped(false)
-    , m_defaultPrevented(false)
-    , m_defaultHandled(false)
-    , m_cancelBubble(false)
-    , m_eventPhase(0)
-    , m_currentTarget(nullptr)
-    , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
-    , m_uiCreateTime(0)
+    : Event("", false, false)
 {
 }
 
@@ -70,34 +59,12 @@ Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableAr
 }
 
 Event::Event(const AtomicString& eventType, const EventInit& initializer)
-    : m_type(eventType)
-    , m_canBubble(initializer.bubbles)
-    , m_cancelable(initializer.cancelable)
-    , m_propagationStopped(false)
-    , m_immediatePropagationStopped(false)
-    , m_defaultPrevented(false)
-    , m_defaultHandled(false)
-    , m_cancelBubble(false)
-    , m_eventPhase(0)
-    , m_currentTarget(nullptr)
-    , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
-    , m_uiCreateTime(0)
+    : Event(eventType, initializer.bubbles, initializer.cancelable)
 {
 }
 
 Event::Event(const AtomicString& eventType, const EventInitDictionary& initializer)
-    : m_type(eventType)
-    , m_canBubble(initializer.bubbles())
-    , m_cancelable(initializer.cancelable())
-    , m_propagationStopped(false)
-    , m_immediatePropagationStopped(false)
-    , m_defaultPrevented(false)
-    , m_defaultHandled(false)
-    , m_cancelBubble(false)
-    , m_eventPhase(0)
-    , m_currentTarget(nullptr)
-    , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
-    , m_uiCreateTime(0)
+    : Event(eventType, initializer.bubbles(), initializer.cancelable())
 {
 }
 
@@ -233,31 +200,43 @@ void Event::setUnderlyingEvent(PassRefPtrWillBeRawPtr<Event> ue)
 
 void Event::initEventPath(Node& node)
 {
-    m_eventPath = adoptPtrWillBeNoop(new EventPath(node, this));
+    if (!m_eventPath) {
+        m_eventPath = adoptPtrWillBeNoop(new EventPath(node, this));
+    } else {
+        m_eventPath->initializeWith(node, this);
+    }
 }
 
-PassRefPtrWillBeRawPtr<StaticNodeList> Event::path() const
+WillBeHeapVector<RefPtrWillBeMember<EventTarget>> Event::path() const
 {
     if (!m_currentTarget) {
         ASSERT(m_eventPhase == Event::NONE);
         if (!m_eventPath) {
             // Before dispatching the event
-            return StaticNodeList::createEmpty();
+            return WillBeHeapVector<RefPtrWillBeMember<EventTarget>>();
         }
         ASSERT(!m_eventPath->isEmpty());
         // After dispatching the event
         return m_eventPath->last().treeScopeEventContext().ensureEventPath(*m_eventPath);
     }
-    if (!m_currentTarget->toNode())
-        return StaticNodeList::createEmpty();
-    Node* node = m_currentTarget->toNode();
-    size_t eventPathSize = m_eventPath->size();
-    for (size_t i = 0; i < eventPathSize; ++i) {
-        if (node == (*m_eventPath)[i].node()) {
-            return (*m_eventPath)[i].treeScopeEventContext().ensureEventPath(*m_eventPath);
+
+    if (Node* node = m_currentTarget->toNode()) {
+        ASSERT(m_eventPath);
+        size_t eventPathSize = m_eventPath->size();
+        for (size_t i = 0; i < eventPathSize; ++i) {
+            if (node == (*m_eventPath)[i].node()) {
+                return (*m_eventPath)[i].treeScopeEventContext().ensureEventPath(*m_eventPath);
+            }
         }
+        ASSERT_NOT_REACHED();
     }
-    return StaticNodeList::createEmpty();
+
+    // Returns [window] for events that are directly dispatched to the window object;
+    // e.g., window.load, pageshow, etc.
+    if (LocalDOMWindow* window = m_currentTarget->toDOMWindow())
+        return WillBeHeapVector<RefPtrWillBeMember<EventTarget>>(1, window);
+
+    return WillBeHeapVector<RefPtrWillBeMember<EventTarget>>();
 }
 
 EventTarget* Event::currentTarget() const
@@ -272,7 +251,7 @@ EventTarget* Event::currentTarget() const
     return m_currentTarget.get();
 }
 
-void Event::trace(Visitor* visitor)
+DEFINE_TRACE(Event)
 {
     visitor->trace(m_currentTarget);
     visitor->trace(m_target);

@@ -9,16 +9,19 @@
 
 namespace password_manager {
 
-StubPasswordManagerClient::StubPasswordManagerClient() {}
+StubPasswordManagerClient::StubPasswordManagerClient() {
+}
 
-StubPasswordManagerClient::~StubPasswordManagerClient() {}
+StubPasswordManagerClient::~StubPasswordManagerClient() {
+}
 
 std::string StubPasswordManagerClient::GetSyncUsername() const {
   return std::string();
 }
 
 bool StubPasswordManagerClient::IsSyncAccountCredential(
-    const std::string& username, const std::string& origin) const {
+    const std::string& username,
+    const std::string& origin) const {
   return false;
 }
 
@@ -28,27 +31,33 @@ bool StubPasswordManagerClient::ShouldFilterAutofillResult(
 }
 
 bool StubPasswordManagerClient::PromptUserToSavePassword(
-    scoped_ptr<PasswordFormManager> form_to_save) {
+    scoped_ptr<PasswordFormManager> form_to_save,
+    password_manager::CredentialSourceType type) {
   return false;
 }
 
 bool StubPasswordManagerClient::PromptUserToChooseCredentials(
-    const std::vector<autofill::PasswordForm*>& local_forms,
-    const std::vector<autofill::PasswordForm*>& federated_forms,
+    ScopedVector<autofill::PasswordForm> local_forms,
+    ScopedVector<autofill::PasswordForm> federated_forms,
+    const GURL& origin,
     base::Callback<void(const password_manager::CredentialInfo&)> callback) {
-  // Take ownership of all the password form objects in the forms vectors.
-  ScopedVector<autofill::PasswordForm> local_entries;
-  local_entries.assign(local_forms.begin(), local_forms.end());
-  ScopedVector<autofill::PasswordForm> federated_entries;
-  federated_entries.assign(federated_forms.begin(), federated_forms.end());
   return false;
 }
 
+void StubPasswordManagerClient::NotifyUserAutoSignin(
+    ScopedVector<autofill::PasswordForm> local_forms) {
+}
+
 void StubPasswordManagerClient::AutomaticPasswordSave(
-    scoped_ptr<PasswordFormManager> saved_manager) {}
+    scoped_ptr<PasswordFormManager> saved_manager) {
+}
 
-PrefService* StubPasswordManagerClient::GetPrefs() { return NULL; }
+PrefService* StubPasswordManagerClient::GetPrefs() {
+  return nullptr;
+}
 
-PasswordStore* StubPasswordManagerClient::GetPasswordStore() { return NULL; }
+PasswordStore* StubPasswordManagerClient::GetPasswordStore() const {
+  return nullptr;
+}
 
 }  // namespace password_manager

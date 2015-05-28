@@ -210,24 +210,13 @@ TEST_F(SystemGestureEventFilterTest, LongPressAffordanceStateOnCaptureLoss) {
   timer->Stop();
   EXPECT_TRUE(GetLongPressAffordance()->is_animating());
 
-  // Change capture.
+  // Change capture, cancelling the active touch sequence.
   window2->SetCapture();
   EXPECT_TRUE(window2->HasCapture());
 
-  EXPECT_TRUE(GetLongPressAffordance()->is_animating());
-  EXPECT_EQ(window1, GetLongPressAffordanceTarget());
-
-  // Animate to completion.
-  GetLongPressAffordance()->End();  // end grow animation.
-  // Force timeout to start shrink animation.
-  EXPECT_TRUE(timer->IsRunning());
-  timer->user_task().Run();
-  timer->Stop();
-  EXPECT_TRUE(GetLongPressAffordance()->is_animating());
-  GetLongPressAffordance()->End();  // end shrink animation.
-
-  // Check if state has reset.
+  EXPECT_FALSE(GetLongPressAffordance()->is_animating());
   EXPECT_EQ(NULL, GetLongPressAffordanceTarget());
+  EXPECT_FALSE(timer->IsRunning());
   EXPECT_EQ(NULL, GetLongPressAffordanceView());
 }
 
@@ -542,7 +531,7 @@ TEST_F(SystemGestureEventFilterTest,
   delegate.set_window_component(HTCLIENT);
   scoped_ptr<aura::Window> child(new aura::Window(&delegate));
   child->SetType(ui::wm::WINDOW_TYPE_CONTROL);
-  child->Init(aura::WINDOW_LAYER_TEXTURED);
+  child->Init(ui::LAYER_TEXTURED);
   parent->AddChild(child.get());
   child->SetBounds(gfx::Rect(100, 100));
   child->Show();

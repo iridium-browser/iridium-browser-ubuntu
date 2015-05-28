@@ -82,12 +82,12 @@ class CONTENT_EXPORT NavigatorDelegate {
 
   // Notifies the Navigator embedder that it is beginning to navigate a frame.
   virtual void AboutToNavigateRenderFrame(
-      RenderFrameHostImpl* render_frame_host) {}
+      RenderFrameHostImpl* old_host,
+      RenderFrameHostImpl* new_host) {}
 
-  // Notifies the Navigator embedder that a navigation to pending
+  // Notifies the Navigator embedder that a navigation to the pending
   // NavigationEntry has started in the browser process.
   virtual void DidStartNavigationToPendingEntry(
-      RenderFrameHostImpl* render_frame_host,
       const GURL& url,
       NavigationController::ReloadType reload_type) {}
 

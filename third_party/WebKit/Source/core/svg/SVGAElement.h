@@ -31,22 +31,21 @@ namespace blink {
 class SVGAElement final : public SVGGraphicsElement,
                           public SVGURIReference {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SVGAElement);
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN_NESTED(SVGAElement, SVGGraphicsElement);
 public:
     DECLARE_NODE_FACTORY(SVGAElement);
     SVGAnimatedString* svgTarget() { return m_svgTarget.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGAElement(Document&);
 
     virtual String title() const override;
 
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
 
     virtual void defaultEventHandler(Event*) override;
 
@@ -54,7 +53,8 @@ private:
 
     virtual bool supportsFocus() const override;
     virtual bool shouldHaveFocusAppearance() const override final;
-    virtual void dispatchFocusEvent(Element* oldFocusedElement, FocusType) override;
+    virtual void dispatchFocusEvent(Element* oldFocusedElement, WebFocusType) override;
+    virtual void dispatchBlurEvent(Element* newFocusedElement, WebFocusType) override;
     virtual bool isMouseFocusable() const override;
     virtual bool isKeyboardFocusable() const override;
     virtual bool isURLAttribute(const Attribute&) const override;

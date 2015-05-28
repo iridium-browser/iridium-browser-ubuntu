@@ -15,11 +15,11 @@
 #include "chrome/browser/extensions/api/bookmark_manager_private/bookmark_manager_private_api.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
+#include "components/favicon/core/favicon_service.h"
 #include "components/favicon_base/favicon_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/navigation_controller.h"
@@ -80,7 +80,8 @@ void UnregisterAndReplaceOverrideForWebContents(const std::string& page,
   // Don't use Reload() since |url| isn't the same as the internal URL that
   // NavigationController has.
   web_contents->GetController().LoadURL(
-      url, content::Referrer(url, blink::WebReferrerPolicyDefault),
+      url, content::Referrer::SanitizeForRequest(
+               url, content::Referrer(url, blink::WebReferrerPolicyDefault)),
       ui::PAGE_TRANSITION_RELOAD, std::string());
 }
 
@@ -116,9 +117,8 @@ void RunFaviconCallbackAsync(
 
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
-      base::Bind(&FaviconService::FaviconResultsCallbackRunner,
-                 callback,
-                 base::Owned(favicon_bitmap_results)));
+      base::Bind(&favicon::FaviconService::FaviconResultsCallbackRunner,
+                 callback, base::Owned(favicon_bitmap_results)));
 }
 
 bool ValidateOverrideURL(const base::Value* override_url_value,

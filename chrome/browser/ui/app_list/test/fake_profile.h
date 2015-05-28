@@ -31,7 +31,7 @@ class FakeProfile : public Profile {
   FakeProfile(const std::string& name, const base::FilePath& path);
 
   // Profile overrides.
-  std::string GetProfileName() override;
+  std::string GetProfileUserName() const override;
   ProfileType GetProfileType() const override;
   base::FilePath GetPath() const override;
   scoped_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
@@ -51,6 +51,7 @@ class FakeProfile : public Profile {
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
+  content::PermissionManager* GetPermissionManager() override;
   scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() override;
   Profile* GetOffTheRecordProfile() override;
   void DestroyOffTheRecordProfile() override;
@@ -59,10 +60,9 @@ class FakeProfile : public Profile {
   bool IsSupervised() override;
   bool IsChild() override;
   bool IsLegacySupervised() override;
-  history::TopSites* GetTopSites() override;
-  history::TopSites* GetTopSitesWithoutCreating() override;
   ExtensionSpecialStoragePolicy* GetExtensionSpecialStoragePolicy() override;
   PrefService* GetPrefs() override;
+  const PrefService* GetPrefs() const override;
   PrefService* GetOffTheRecordPrefs() override;
   net::URLRequestContextGetter* GetRequestContext() override;
   net::URLRequestContextGetter* GetRequestContextForExtensions() override;
@@ -82,10 +82,10 @@ class FakeProfile : public Profile {
   void set_last_selected_directory(const base::FilePath& path) override;
 
 #if defined(OS_CHROMEOS)
-  virtual void ChangeAppLocale(
-      const std::string& locale, AppLocaleChangedVia via) override;
-  virtual void OnLogin() override;
-  virtual void InitChromeOSPreferences() override;
+  void ChangeAppLocale(const std::string& locale,
+                       AppLocaleChangedVia via) override;
+  void OnLogin() override;
+  void InitChromeOSPreferences() override;
 #endif  // defined(OS_CHROMEOS)
 
   PrefProxyConfigTracker* GetProxyConfigTracker() override;

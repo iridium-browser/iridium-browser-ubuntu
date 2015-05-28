@@ -38,7 +38,7 @@ namespace blink {
 
 namespace {
 
-typedef testing::StrictMock< testing::MockFunction<void(int)> > Checkpoint;
+typedef testing::StrictMock< testing::MockFunction<void(int)>> Checkpoint;
 
 class MockWebSocketChannelClient : public GarbageCollectedFinalized<MockWebSocketChannelClient>, public WebSocketChannelClient {
     USING_GARBAGE_COLLECTED_MIXIN(MockWebSocketChannelClient);
@@ -54,7 +54,7 @@ public:
 
     MOCK_METHOD2(didConnect, void(const String&, const String&));
     MOCK_METHOD1(didReceiveTextMessage, void(const String&));
-    virtual void didReceiveBinaryMessage(PassOwnPtr<Vector<char> > payload) override
+    virtual void didReceiveBinaryMessage(PassOwnPtr<Vector<char>> payload) override
     {
         didReceiveBinaryMessageMock(*payload);
     }
@@ -64,7 +64,7 @@ public:
     MOCK_METHOD0(didStartClosingHandshake, void());
     MOCK_METHOD3(didClose, void(ClosingHandshakeCompletionStatus, unsigned short, const String&));
 
-    virtual void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         WebSocketChannelClient::trace(visitor);
     }
@@ -139,7 +139,7 @@ public:
             EXPECT_CALL(*channelClient(), didConnect(String("a"), String("b")));
         }
         EXPECT_TRUE(channel()->connect(KURL(KURL(), "ws://localhost/"), "x"));
-        handleClient()->didConnect(handle(), false, WebString("a"), WebString("b"));
+        handleClient()->didConnect(handle(), WebString("a"), WebString("b"));
         ::testing::Mock::VerifyAndClearExpectations(this);
     }
 
@@ -173,7 +173,7 @@ TEST_F(DocumentWebSocketChannelTest, connectSuccess)
 
     EXPECT_TRUE(channel()->connect(KURL(KURL(), "ws://localhost/"), "x"));
     checkpoint.Call(1);
-    handleClient()->didConnect(handle(), false, WebString("a"), WebString("b"));
+    handleClient()->didConnect(handle(), WebString("a"), WebString("b"));
 }
 
 TEST_F(DocumentWebSocketChannelTest, sendText)

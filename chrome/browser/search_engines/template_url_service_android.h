@@ -52,11 +52,15 @@ class TemplateUrlServiceAndroid : public TemplateURLServiceObserver {
       jstring jquery,
       jstring jalternate_term,
       jboolean jshould_prefetch);
+  base::android::ScopedJavaLocalRef<jstring> GetSearchEngineUrlFromTemplateUrl(
+      JNIEnv* env,
+      jobject obj,
+      jint index);
 
   static bool Register(JNIEnv* env);
 
  private:
-  ~TemplateUrlServiceAndroid();
+  ~TemplateUrlServiceAndroid() override;
 
   bool IsPrepopulatedTemplate(TemplateURL* url);
 

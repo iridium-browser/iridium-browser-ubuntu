@@ -4,14 +4,15 @@
 // found in the LICENSE file.
 //
 
-// FramebufferImpl.h: Defines the abstract rx::DefaultAttachmentImpl class.
+// FramebufferImpl.h: Defines the abstract rx::FramebufferImpl class.
 
-#ifndef LIBANGLE_RENDERER_FRAMBUFFERIMPL_H_
-#define LIBANGLE_RENDERER_FRAMBUFFERIMPL_H_
-
-#include "libANGLE/Error.h"
+#ifndef LIBANGLE_RENDERER_FRAMEBUFFERIMPL_H_
+#define LIBANGLE_RENDERER_FRAMEBUFFERIMPL_H_
 
 #include "angle_gl.h"
+#include "common/angleutils.h"
+#include "libANGLE/Error.h"
+#include "libANGLE/Framebuffer.h"
 
 namespace gl
 {
@@ -24,24 +25,14 @@ struct Rectangle;
 namespace rx
 {
 
-class DefaultAttachmentImpl
+class FramebufferImpl : angle::NonCopyable
 {
   public:
-    virtual ~DefaultAttachmentImpl() {};
-
-    virtual GLsizei getWidth() const = 0;
-    virtual GLsizei getHeight() const = 0;
-    virtual GLenum getInternalFormat() const = 0;
-    virtual GLsizei getSamples() const = 0;
-};
-
-class FramebufferImpl
-{
-  public:
-    virtual ~FramebufferImpl() {};
+    explicit FramebufferImpl(const gl::Framebuffer::Data &data) : mData(data) { }
+    virtual ~FramebufferImpl() { }
 
     virtual void setColorAttachment(size_t index, const gl::FramebufferAttachment *attachment) = 0;
-    virtual void setDepthttachment(const gl::FramebufferAttachment *attachment) = 0;
+    virtual void setDepthAttachment(const gl::FramebufferAttachment *attachment) = 0;
     virtual void setStencilAttachment(const gl::FramebufferAttachment *attachment) = 0;
     virtual void setDepthStencilAttachment(const gl::FramebufferAttachment *attachment) = 0;
 
@@ -51,7 +42,7 @@ class FramebufferImpl
     virtual gl::Error invalidate(size_t count, const GLenum *attachments) = 0;
     virtual gl::Error invalidateSub(size_t count, const GLenum *attachments, const gl::Rectangle &area) = 0;
 
-    virtual gl::Error clear(const gl::State &state, GLbitfield mask) = 0;
+    virtual gl::Error clear(const gl::Data &data, GLbitfield mask) = 0;
     virtual gl::Error clearBufferfv(const gl::State &state, GLenum buffer, GLint drawbuffer, const GLfloat *values) = 0;
     virtual gl::Error clearBufferuiv(const gl::State &state, GLenum buffer, GLint drawbuffer, const GLuint *values) = 0;
     virtual gl::Error clearBufferiv(const gl::State &state, GLenum buffer, GLint drawbuffer, const GLint *values) = 0;
@@ -65,8 +56,13 @@ class FramebufferImpl
                            GLbitfield mask, GLenum filter, const gl::Framebuffer *sourceFramebuffer) = 0;
 
     virtual GLenum checkStatus() const = 0;
+
+    const gl::Framebuffer::Data &getData() const { return mData; }
+
+  protected:
+    const gl::Framebuffer::Data &mData;
 };
 
 }
 
-#endif // LIBANGLE_RENDERER_FRAMBUFFERIMPL_H_
+#endif // LIBANGLE_RENDERER_FRAMEBUFFERIMPL_H_

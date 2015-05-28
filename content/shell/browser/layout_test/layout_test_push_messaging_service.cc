@@ -4,6 +4,7 @@
 
 #include "content/shell/browser/layout_test/layout_test_push_messaging_service.h"
 
+#include "base/callback.h"
 #include "base/logging.h"
 
 namespace content {
@@ -34,18 +35,19 @@ void LayoutTestPushMessagingService::RegisterFromDocument(
     const std::string& sender_id,
     int renderer_id,
     int render_frame_id,
-    bool user_gesture,
+    bool user_visible,
     const PushMessagingService::RegisterCallback& callback) {
   RegisterFromWorker(requesting_origin, service_worker_registration_id,
-                     sender_id, callback);
+                     sender_id, user_visible, callback);
 }
 
 void LayoutTestPushMessagingService::RegisterFromWorker(
     const GURL& requesting_origin,
     int64 service_worker_registration_id,
     const std::string& sender_id,
+    bool user_visible,
     const PushMessagingService::RegisterCallback& callback) {
-  if (GetPermissionStatus(requesting_origin, requesting_origin) ==
+  if (GetPermissionStatus(requesting_origin, requesting_origin, user_visible) ==
       blink::WebPushPermissionStatusGranted) {
     callback.Run("layoutTestRegistrationId",
                  PUSH_REGISTRATION_STATUS_SUCCESS_FROM_PUSH_SERVICE);
@@ -57,7 +59,8 @@ void LayoutTestPushMessagingService::RegisterFromWorker(
 blink::WebPushPermissionStatus
 LayoutTestPushMessagingService::GetPermissionStatus(
     const GURL& requesting_origin,
-    const GURL& embedding_origin) {
+    const GURL& embedding_origin,
+    bool user_visible) {
   const auto& it = permission_map_.find(requesting_origin);
   if (it == permission_map_.end())
     return blink::WebPushPermissionStatusDefault;
@@ -67,8 +70,9 @@ LayoutTestPushMessagingService::GetPermissionStatus(
 void LayoutTestPushMessagingService::Unregister(
     const GURL& requesting_origin,
     int64 service_worker_registration_id,
+    const std::string& sender_id,
     const UnregisterCallback& callback) {
-  callback.Run(PUSH_UNREGISTRATION_STATUS_SUCCESS_UNREGISTER);
+  callback.Run(PUSH_UNREGISTRATION_STATUS_SUCCESS_UNREGISTERED);
 }
 
 }  // namespace content

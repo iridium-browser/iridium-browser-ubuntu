@@ -36,12 +36,9 @@
 #include "core/frame/FrameHost.h"
 #include "core/inspector/InspectorCSSAgent.h"
 #include "core/inspector/InspectorConsoleAgent.h"
-#include "core/inspector/InspectorController.h"
 #include "core/inspector/InspectorDebuggerAgent.h"
-#include "core/inspector/InspectorInspectorAgent.h"
 #include "core/inspector/InspectorProfilerAgent.h"
 #include "core/inspector/InspectorResourceAgent.h"
-#include "core/inspector/InspectorTimelineAgent.h"
 #include "core/inspector/InstrumentingAgents.h"
 #include "core/inspector/ScriptAsyncCallStack.h"
 #include "core/inspector/ScriptCallStack.h"
@@ -61,28 +58,23 @@ int FrontendCounter::s_frontendCounter = 0;
 
 InspectorInstrumentationCookie::InspectorInstrumentationCookie()
     : m_instrumentingAgents(nullptr)
-    , m_timelineAgentId(0)
 {
 }
 
-InspectorInstrumentationCookie::InspectorInstrumentationCookie(InstrumentingAgents* agents, int timelineAgentId)
+InspectorInstrumentationCookie::InspectorInstrumentationCookie(InstrumentingAgents* agents)
     : m_instrumentingAgents(agents)
-    , m_timelineAgentId(timelineAgentId)
 {
 }
 
 InspectorInstrumentationCookie::InspectorInstrumentationCookie(const InspectorInstrumentationCookie& other)
     : m_instrumentingAgents(other.m_instrumentingAgents)
-    , m_timelineAgentId(other.m_timelineAgentId)
 {
 }
 
 InspectorInstrumentationCookie& InspectorInstrumentationCookie::operator=(const InspectorInstrumentationCookie& other)
 {
-    if (this != &other) {
+    if (this != &other)
         m_instrumentingAgents = other.m_instrumentingAgents;
-        m_timelineAgentId = other.m_timelineAgentId;
-    }
     return *this;
 }
 
@@ -116,6 +108,7 @@ void continueWithPolicyIgnoreImpl(LocalFrame* frame, DocumentLoader* loader, uns
 
 void willDestroyResourceImpl(Resource* cachedResource)
 {
+    ASSERT(isMainThread());
     if (!instrumentingAgentsSet)
         return;
     for (InstrumentingAgents* instrumentingAgents: *instrumentingAgentsSet) {
@@ -126,23 +119,10 @@ void willDestroyResourceImpl(Resource* cachedResource)
 
 bool collectingHTMLParseErrorsImpl(InstrumentingAgents* instrumentingAgents)
 {
-    if (InspectorInspectorAgent* inspectorAgent = instrumentingAgents->inspectorInspectorAgent())
-        return inspectorAgent->hasFrontend();
-    return false;
-}
-
-PassOwnPtr<ScriptSourceCode> preprocessImpl(InstrumentingAgents* instrumentingAgents, LocalFrame* frame, const ScriptSourceCode& sourceCode)
-{
-    if (InspectorDebuggerAgent* debuggerAgent = instrumentingAgents->inspectorDebuggerAgent())
-        return debuggerAgent->preprocess(frame, sourceCode);
-    return PassOwnPtr<ScriptSourceCode>();
-}
-
-String preprocessEventListenerImpl(InstrumentingAgents* instrumentingAgents, LocalFrame* frame, const String& source, const String& url, const String& functionName)
-{
-    if (InspectorDebuggerAgent* debuggerAgent = instrumentingAgents->inspectorDebuggerAgent())
-        return debuggerAgent->preprocessEventListener(frame, source, url, functionName);
-    return source;
+    ASSERT(isMainThread());
+    if (!instrumentingAgentsSet)
+        return false;
+    return instrumentingAgentsSet->contains(instrumentingAgents);
 }
 
 void appendAsyncCallStack(ExecutionContext* executionContext, ScriptCallStack* callStack)
@@ -169,6 +149,7 @@ bool consoleAgentEnabled(ExecutionContext* executionContext)
 
 void registerInstrumentingAgents(InstrumentingAgents* instrumentingAgents)
 {
+    ASSERT(isMainThread());
     if (!instrumentingAgentsSet)
         instrumentingAgentsSet = new HashSet<InstrumentingAgents*>();
     instrumentingAgentsSet->add(instrumentingAgents);
@@ -176,6 +157,7 @@ void registerInstrumentingAgents(InstrumentingAgents* instrumentingAgents)
 
 void unregisterInstrumentingAgents(InstrumentingAgents* instrumentingAgents)
 {
+    ASSERT(isMainThread());
     if (!instrumentingAgentsSet)
         return;
     instrumentingAgentsSet->remove(instrumentingAgents);
@@ -185,21 +167,9 @@ void unregisterInstrumentingAgents(InstrumentingAgents* instrumentingAgents)
     }
 }
 
-InspectorTimelineAgent* retrieveTimelineAgent(const InspectorInstrumentationCookie& cookie)
+InstrumentingAgents* instrumentingAgentsFor(LocalFrame* frame)
 {
-    if (!cookie.instrumentingAgents())
-        return 0;
-    InspectorTimelineAgent* timelineAgent = cookie.instrumentingAgents()->inspectorTimelineAgent();
-    if (timelineAgent && cookie.hasMatchingTimelineAgentId(timelineAgent->id()))
-        return timelineAgent;
-    return 0;
-}
-
-InstrumentingAgents* instrumentingAgentsFor(Page* page)
-{
-    if (!page)
-        return 0;
-    return instrumentationForPage(page);
+    return frame ? frame->instrumentingAgents() : nullptr;
 }
 
 InstrumentingAgents* instrumentingAgentsFor(EventTarget* eventTarget)
@@ -209,7 +179,7 @@ InstrumentingAgents* instrumentingAgentsFor(EventTarget* eventTarget)
     return instrumentingAgentsFor(eventTarget->executionContext());
 }
 
-InstrumentingAgents* instrumentingAgentsFor(RenderObject* renderer)
+InstrumentingAgents* instrumentingAgentsFor(LayoutObject* renderer)
 {
     return instrumentingAgentsFor(renderer->frame());
 }
@@ -219,11 +189,6 @@ InstrumentingAgents* instrumentingAgentsFor(WorkerGlobalScope* workerGlobalScope
     if (!workerGlobalScope)
         return 0;
     return instrumentationForWorkerGlobalScope(workerGlobalScope);
-}
-
-InstrumentingAgents* instrumentingAgentsFor(FrameHost* host)
-{
-    return instrumentationForPage(&host->page());
 }
 
 InstrumentingAgents* instrumentingAgentsForNonDocumentContext(ExecutionContext* context)
@@ -253,12 +218,6 @@ const char LayerTreeId[] = "layerTreeId";
 const char PageId[] = "pageId";
 const char CallbackName[] = "callbackName";
 };
-
-InstrumentingAgents* instrumentationForPage(Page* page)
-{
-    ASSERT(isMainThread());
-    return page->inspectorController().m_instrumentingAgents.get();
-}
 
 InstrumentingAgents* instrumentationForWorkerGlobalScope(WorkerGlobalScope* workerGlobalScope)
 {

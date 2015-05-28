@@ -10,7 +10,7 @@
 
 #include "content/public/browser/push_messaging_service.h"
 #include "content/public/common/push_messaging_status.h"
-#include "third_party/WebKit/public/platform/WebPushPermissionStatus.h"
+#include "third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h"
 
 namespace content {
 
@@ -30,18 +30,21 @@ class LayoutTestPushMessagingService : public PushMessagingService {
       const std::string& sender_id,
       int renderer_id,
       int render_frame_id,
-      bool user_gesture,
+      bool user_visible,
       const PushMessagingService::RegisterCallback& callback) override;
   void RegisterFromWorker(
       const GURL& requesting_origin,
       int64 service_worker_registration_id,
       const std::string& sender_id,
+      bool user_visible,
       const PushMessagingService::RegisterCallback& callback) override;
   blink::WebPushPermissionStatus GetPermissionStatus(
       const GURL& requesting_origin,
-      const GURL& embedding_origin) override;
+      const GURL& embedding_origin,
+      bool user_visible) override;
   void Unregister(const GURL& requesting_origin,
                   int64 service_worker_registration_id,
+                  const std::string& sender_id,
                   const UnregisterCallback& callback) override;
 
  private:

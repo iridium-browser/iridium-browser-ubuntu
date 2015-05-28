@@ -47,7 +47,7 @@ PassRefPtrWillBeRawPtr<ImageData> ImageData::create(const IntSize& size)
     return adoptRefWillBeNoop(new ImageData(size));
 }
 
-PassRefPtrWillBeRawPtr<ImageData> ImageData::create(const IntSize& size, PassRefPtr<Uint8ClampedArray> byteArray)
+PassRefPtrWillBeRawPtr<ImageData> ImageData::create(const IntSize& size, PassRefPtr<DOMUint8ClampedArray> byteArray)
 {
     Checked<int, RecordOverflow> dataSize = 4;
     dataSize *= size.width();
@@ -59,7 +59,7 @@ PassRefPtrWillBeRawPtr<ImageData> ImageData::create(const IntSize& size, PassRef
         || static_cast<unsigned>(dataSize.unsafeGet()) > byteArray->length())
         return nullptr;
 
-    return adoptRefWillBeNoop(new ImageData(size, DOMUint8ClampedArray::create(byteArray)));
+    return adoptRefWillBeNoop(new ImageData(size, byteArray));
 }
 
 PassRefPtrWillBeRawPtr<ImageData> ImageData::create(unsigned width, unsigned height, ExceptionState& exceptionState)
@@ -81,9 +81,48 @@ PassRefPtrWillBeRawPtr<ImageData> ImageData::create(unsigned width, unsigned hei
         return nullptr;
     }
 
-    RefPtrWillBeRawPtr<ImageData> imageData = adoptRefWillBeNoop(new ImageData(IntSize(width, height)));
-    imageData->data()->zeroFill();
-    return imageData.release();
+    return adoptRefWillBeNoop(new ImageData(IntSize(width, height)));
+}
+
+bool ImageData::validateConstructorArguments(DOMUint8ClampedArray* data, unsigned width, unsigned& lengthInPixels, ExceptionState& exceptionState)
+{
+    if (!width) {
+        exceptionState.throwDOMException(IndexSizeError, "The source width is zero or not a number.");
+        return false;
+    }
+    ASSERT(data);
+    unsigned length = data->length();
+    if (!length) {
+        exceptionState.throwDOMException(IndexSizeError, "The input data has a zero byte length.");
+        return false;
+    }
+    if (length % 4) {
+        exceptionState.throwDOMException(IndexSizeError, "The input data byte length is not a multiple of 4.");
+        return false;
+    }
+    length /= 4;
+    if (length % width) {
+        exceptionState.throwDOMException(IndexSizeError, "The input data byte length is not a multiple of (4 * width).");
+        return false;
+    }
+    lengthInPixels = length;
+    return true;
+}
+
+PassRefPtrWillBeRawPtr<ImageData> ImageData::create(DOMUint8ClampedArray* data, unsigned width, ExceptionState& exceptionState)
+{
+    if (!RuntimeEnabledFeatures::imageDataConstructorEnabled()) {
+        exceptionState.throwTypeError("Illegal constructor");
+        return nullptr;
+    }
+    unsigned lengthInPixels = 0;
+    if (!validateConstructorArguments(data, width, lengthInPixels, exceptionState)) {
+        ASSERT(exceptionState.hadException());
+        return nullptr;
+    }
+    ASSERT(lengthInPixels && width);
+    unsigned height = lengthInPixels / width;
+    return adoptRefWillBeNoop(new ImageData(IntSize(width, height), data));
 }
 
 PassRefPtrWillBeRawPtr<ImageData> ImageData::create(DOMUint8ClampedArray* data, unsigned width, unsigned height, ExceptionState& exceptionState)
@@ -92,36 +131,16 @@ PassRefPtrWillBeRawPtr<ImageData> ImageData::create(DOMUint8ClampedArray* data, 
         exceptionState.throwTypeError("Illegal constructor");
         return nullptr;
     }
-    if (!data) {
-        exceptionState.throwTypeError("Expected a Uint8ClampedArray as first argument.");
+    unsigned lengthInPixels = 0;
+    if (!validateConstructorArguments(data, width, lengthInPixels, exceptionState)) {
+        ASSERT(exceptionState.hadException());
         return nullptr;
     }
-    if (!width) {
-        exceptionState.throwDOMException(IndexSizeError, "The source width is zero or not a number.");
-        return nullptr;
-    }
-
-    unsigned length = data->length();
-    if (!length) {
-        exceptionState.throwDOMException(IndexSizeError, "The input data has a zero byte length.");
-        return nullptr;
-    }
-    if (length % 4) {
-        exceptionState.throwDOMException(IndexSizeError, "The input data byte length is not a multiple of 4.");
-        return nullptr;
-    }
-    length /= 4;
-    if (length % width) {
-        exceptionState.throwDOMException(IndexSizeError, "The input data byte length is not a multiple of (4 * width).");
-        return nullptr;
-    }
-    if (!height) {
-        height = length / width;
-    } else if (height != length / width) {
+    ASSERT(lengthInPixels && width);
+    if (height != lengthInPixels / width) {
         exceptionState.throwDOMException(IndexSizeError, "The input data byte length is not equal to (4 * width * height).");
         return nullptr;
     }
-
     return adoptRefWillBeNoop(new ImageData(IntSize(width, height), data));
 }
 

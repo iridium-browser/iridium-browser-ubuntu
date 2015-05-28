@@ -10,7 +10,7 @@
 #include "content/child/thread_safe_sender.h"
 #include "content/child/webmessageportchannel_impl.h"
 #include "content/common/navigator_connect_messages.h"
-#include "content/common/navigator_connect_types.h"
+#include "content/public/common/navigator_connect_client.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 
 namespace content {
@@ -25,28 +25,6 @@ NavigatorConnectProvider* const kHasBeenDeleted =
 
 int CurrentWorkerId() {
   return WorkerTaskRunner::Instance()->CurrentWorkerId();
-}
-
-// Extracts the message_port_id from a message port, and queues messages for the
-// port. This is a separate method since while all of this can be done on any
-// thread, to get ordering right it is easiest to do both these things on the
-// main thread.
-int QueueMessagesAndGetMessagePortId(WebMessagePortChannelImpl* webchannel) {
-  int message_port_id = webchannel->message_port_id();
-  DCHECK(message_port_id != MSG_ROUTING_NONE);
-  webchannel->QueueMessages();
-  return message_port_id;
-}
-
-void SendConnectMessage(const scoped_refptr<ThreadSafeSender>& sender,
-                        int thread_id,
-                        int request_id,
-                        const GURL& target_url,
-                        const GURL& origin,
-                        int message_port_id) {
-  sender->Send(new NavigatorConnectHostMsg_Connect(
-      thread_id, request_id,
-      CrossOriginServiceWorkerClient(target_url, origin, message_port_id)));
 }
 
 }  // namespace
@@ -65,34 +43,12 @@ NavigatorConnectProvider::~NavigatorConnectProvider() {
 void NavigatorConnectProvider::connect(
     const blink::WebURL& target_url,
     const blink::WebString& origin,
-    blink::WebMessagePortChannel* port,
-    blink::WebNavigatorConnectCallbacks* callbacks) {
+    blink::WebNavigatorConnectPortCallbacks* callbacks) {
   int request_id = requests_.Add(callbacks);
 
-  WebMessagePortChannelImpl* webchannel =
-      static_cast<WebMessagePortChannelImpl*>(port);
-
-  if (main_loop_->BelongsToCurrentThread()) {
-    SendConnectMessage(thread_safe_sender_, CurrentWorkerId(), request_id,
-                       target_url, GURL(origin),
-                       QueueMessagesAndGetMessagePortId(webchannel));
-  } else {
-    // WebMessagePortChannelImpl is mostly thread safe, but is only fully
-    // initialized after a round-trip to the main thread. This means that at
-    // this point the class might not be fully initialized yet. To work around
-    // this, call QueueMessages and extract the message_port_id on the main
-    // thread.
-    // Furthermore the last reference to WebMessagePortChannelImpl has to be
-    // released on the main thread as well. To ensure this happens correctly,
-    // it is passed using base::Unretained. Without that the closure could
-    // hold the last reference, which would be deleted on the wrong thread.
-    PostTaskAndReplyWithResult(
-        main_loop_.get(), FROM_HERE,
-        base::Bind(&QueueMessagesAndGetMessagePortId,
-                   base::Unretained(webchannel)),
-        base::Bind(&SendConnectMessage, thread_safe_sender_, CurrentWorkerId(),
-                   request_id, target_url, GURL(origin)));
-  }
+  thread_safe_sender_->Send(new NavigatorConnectHostMsg_Connect(
+      CurrentWorkerId(), request_id,
+      NavigatorConnectClient(target_url, GURL(origin), MSG_ROUTING_NONE)));
 }
 
 void NavigatorConnectProvider::OnMessageReceived(const IPC::Message& msg) {
@@ -121,14 +77,20 @@ NavigatorConnectProvider* NavigatorConnectProvider::ThreadSpecificInstance(
   return provider;
 }
 
-void NavigatorConnectProvider::OnConnectResult(int thread_id,
-                                               int request_id,
-                                               bool allow_connect) {
-  ConnectCallback* callbacks = requests_.Lookup(request_id);
+void NavigatorConnectProvider::OnConnectResult(
+    int thread_id,
+    int request_id,
+    const TransferredMessagePort& message_port,
+    int message_port_route_id,
+    bool allow_connect) {
+  blink::WebNavigatorConnectPortCallbacks* callbacks =
+      requests_.Lookup(request_id);
   DCHECK(callbacks);
 
   if (allow_connect) {
-    callbacks->onSuccess();
+    WebMessagePortChannelImpl* channel = new WebMessagePortChannelImpl(
+        message_port_route_id, message_port, main_loop_);
+    callbacks->onSuccess(channel);
   } else {
     callbacks->onError();
   }

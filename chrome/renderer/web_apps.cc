@@ -143,12 +143,13 @@ void ParseWebAppFromWebDocument(WebFrame* frame,
       //   <http://en.wikipedia.org/wiki/Favicon>
       //   <http://dev.w3.org/html5/spec/Overview.html#rel-icon>
       //
-      // Streamlined Hosted Apps also support "apple-touch-icon" and
+      // Bookmark apps also support "apple-touch-icon" and
       // "apple-touch-icon-precomposed".
+      bool bookmark_apps_enabled = base::CommandLine::ForCurrentProcess()->
+          HasSwitch(switches::kEnableNewBookmarkApps);
       if (LowerCaseEqualsASCII(rel, "icon") ||
           LowerCaseEqualsASCII(rel, "shortcut icon") ||
-          (base::CommandLine::ForCurrentProcess()->HasSwitch(
-               switches::kEnableNewBookmarkApps) &&
+          (bookmark_apps_enabled &&
            (LowerCaseEqualsASCII(rel, "apple-touch-icon") ||
             LowerCaseEqualsASCII(rel, "apple-touch-icon-precomposed")))) {
         AddInstallIcon(elem, &app_info->icons);

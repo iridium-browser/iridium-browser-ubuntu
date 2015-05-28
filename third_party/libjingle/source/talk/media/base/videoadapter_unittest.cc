@@ -35,7 +35,6 @@
 #include "talk/media/base/testutils.h"
 #include "talk/media/base/videoadapter.h"
 #include "talk/media/devices/filevideocapturer.h"
-#include "talk/media/webrtc/webrtcvideoframe.h"
 #include "webrtc/base/gunit.h"
 #include "webrtc/base/logging.h"
 #include "webrtc/base/sigslot.h"
@@ -89,8 +88,6 @@ class VideoAdapterTest : public testing::Test {
 
     explicit VideoCapturerListener(VideoAdapter* adapter)
         : video_adapter_(adapter),
-          adapted_frame_(NULL),
-          copied_output_frame_(),
           captured_frames_(0),
           dropped_frames_(0),
           last_adapt_was_no_op_(false) {
@@ -98,22 +95,15 @@ class VideoAdapterTest : public testing::Test {
 
     void OnFrameCaptured(VideoCapturer* capturer,
                          const CapturedFrame* captured_frame) {
-      WebRtcVideoFrame temp_i420;
-      EXPECT_TRUE(temp_i420.Init(captured_frame,
-          captured_frame->width, abs(captured_frame->height)));
-      VideoFrame* out_frame = NULL;
       rtc::CritScope lock(&crit_);
-      EXPECT_TRUE(video_adapter_->AdaptFrame(&temp_i420, &out_frame));
-      if (out_frame) {
-        if (out_frame == &temp_i420) {
-          last_adapt_was_no_op_ = true;
-          copied_output_frame_.reset(temp_i420.Copy());
-          adapted_frame_ = copied_output_frame_.get();
-        } else {
-          last_adapt_was_no_op_ = false;
-          adapted_frame_ = out_frame;
-          copied_output_frame_.reset();
-        }
+      const int in_width = captured_frame->width;
+      const int in_height = abs(captured_frame->height);
+      const VideoFormat adapted_format =
+          video_adapter_->AdaptFrameResolution(in_width, in_height);
+      if (!adapted_format.IsSize0x0()) {
+        adapted_format_ = adapted_format;
+        last_adapt_was_no_op_ = (in_width == adapted_format.width &&
+                                 in_height == adapted_format.height);
       } else {
         ++dropped_frames_;
       }
@@ -126,9 +116,9 @@ class VideoAdapterTest : public testing::Test {
       stats.captured_frames = captured_frames_;
       stats.dropped_frames = dropped_frames_;
       stats.last_adapt_was_no_op = last_adapt_was_no_op_;
-      if (adapted_frame_ != NULL) {
-        stats.adapted_width = static_cast<int>(adapted_frame_->GetWidth());
-        stats.adapted_height = static_cast<int>(adapted_frame_->GetHeight());
+      if (!adapted_format_.IsSize0x0()) {
+        stats.adapted_width = adapted_format_.width;
+        stats.adapted_height = adapted_format_.height;
       } else {
         stats.adapted_width = stats.adapted_height = -1;
       }
@@ -136,19 +126,10 @@ class VideoAdapterTest : public testing::Test {
       return stats;
     }
 
-    VideoFrame* CopyAdaptedFrame() {
-      rtc::CritScope lock(&crit_);
-      if (adapted_frame_ == NULL) {
-        return NULL;
-      }
-      return adapted_frame_->Copy();
-    }
-
    private:
     rtc::CriticalSection crit_;
     VideoAdapter* video_adapter_;
-    const VideoFrame* adapted_frame_;
-    rtc::scoped_ptr<VideoFrame> copied_output_frame_;
+    VideoFormat adapted_format_;
     int captured_frames_;
     int dropped_frames_;
     bool last_adapt_was_no_op_;
@@ -410,64 +391,6 @@ TEST_F(VideoAdapterTest, AdaptResolutionOnTheFly) {
   // Verify resolution change after adaptation.
   VerifyAdaptedResolution(
       listener_->GetStats(), request_format.width, request_format.height);
-}
-
-// Black the output frame.
-TEST_F(VideoAdapterTest, BlackOutput) {
-  adapter_->SetOutputFormat(capture_format_);
-  EXPECT_EQ(CS_RUNNING, capturer_->Start(capture_format_));
-  EXPECT_TRUE_WAIT(!capturer_->IsRunning() ||
-                   listener_->GetStats().captured_frames >= 10, kWaitTimeout);
-  // Verify that the output frame is not black.
-  rtc::scoped_ptr<VideoFrame> adapted_frame(listener_->CopyAdaptedFrame());
-  EXPECT_NE(16, *adapted_frame->GetYPlane());
-  EXPECT_NE(128, *adapted_frame->GetUPlane());
-  EXPECT_NE(128, *adapted_frame->GetVPlane());
-
-  adapter_->SetBlackOutput(true);
-  int captured_frames = listener_->GetStats().captured_frames;
-  EXPECT_TRUE_WAIT(
-      !capturer_->IsRunning() ||
-          listener_->GetStats().captured_frames >= captured_frames + 10,
-      kWaitTimeout);
-  // Verify that the output frame is black.
-  adapted_frame.reset(listener_->CopyAdaptedFrame());
-  EXPECT_EQ(16, *adapted_frame->GetYPlane());
-  EXPECT_EQ(128, *adapted_frame->GetUPlane());
-  EXPECT_EQ(128, *adapted_frame->GetVPlane());
-
-  // Verify that the elapsed time and timestamp of the black frame increase.
-  int64 elapsed_time = adapted_frame->GetElapsedTime();
-  int64 timestamp = adapted_frame->GetTimeStamp();
-  captured_frames = listener_->GetStats().captured_frames;
-  EXPECT_TRUE_WAIT(
-      !capturer_->IsRunning() ||
-          listener_->GetStats().captured_frames >= captured_frames + 10,
-      kWaitTimeout);
-
-  adapted_frame.reset(listener_->CopyAdaptedFrame());
-  EXPECT_GT(adapted_frame->GetElapsedTime(), elapsed_time);
-  EXPECT_GT(adapted_frame->GetTimeStamp(), timestamp);
-
-  // Change the output size
-  VideoFormat request_format = capture_format_;
-  request_format.width /= 2;
-  request_format.height /= 2;
-  adapter_->SetOutputFormat(request_format);
-  captured_frames = listener_->GetStats().captured_frames;
-  EXPECT_TRUE_WAIT(
-      !capturer_->IsRunning() ||
-          listener_->GetStats().captured_frames >= captured_frames + 10,
-      kWaitTimeout);
-
-  // Verify resolution change after adaptation.
-  VerifyAdaptedResolution(
-      listener_->GetStats(), request_format.width, request_format.height);
-  // Verify that the output frame is black.
-  adapted_frame.reset(listener_->CopyAdaptedFrame());
-  EXPECT_EQ(16, *adapted_frame->GetYPlane());
-  EXPECT_EQ(128, *adapted_frame->GetUPlane());
-  EXPECT_EQ(128, *adapted_frame->GetVPlane());
 }
 
 // Drop all frames.
@@ -870,12 +793,9 @@ TEST(CoordinatedVideoAdapterTest, TestViewRequestPlusCameraSwitch) {
 
   // Now, the camera reopens at VGA.
   // Both the frame and the output format should be 640x360.
-  WebRtcVideoFrame in_frame;
-  in_frame.InitToBlack(640, 360, 1, 1, 33, 33);
-  VideoFrame* out_frame;
-  adapter.AdaptFrame(&in_frame, &out_frame);
-  EXPECT_EQ(640u, out_frame->GetWidth());
-  EXPECT_EQ(360u, out_frame->GetHeight());
+  const VideoFormat out_format = adapter.AdaptFrameResolution(640, 360);
+  EXPECT_EQ(640, out_format.width);
+  EXPECT_EQ(360, out_format.height);
   // At this point, the view is no longer adapted, since the input has resized
   // small enough to fit the last view request.
   EXPECT_EQ(0, adapter.adapt_reason());
@@ -911,13 +831,9 @@ TEST(CoordinatedVideoAdapterTest, TestVGAWidth) {
 
   // But if frames come in at 640x360, we shouldn't adapt them down.
   // Fake a 640x360 frame.
-  WebRtcVideoFrame in_frame;
-  in_frame.InitToBlack(640, 360, 1, 1, 33, 33);
-  VideoFrame* out_frame;
-  adapter.AdaptFrame(&in_frame, &out_frame);
-
-  EXPECT_EQ(640u, out_frame->GetWidth());
-  EXPECT_EQ(360u, out_frame->GetHeight());
+  VideoFormat out_format = adapter.AdaptFrameResolution(640, 360);
+  EXPECT_EQ(640, out_format.width);
+  EXPECT_EQ(360, out_format.height);
 
   // Similarly, no-op adapt requests for other reasons shouldn't change
   // adaptation state (before a previous bug, the previous EXPECTs would
@@ -925,10 +841,10 @@ TEST(CoordinatedVideoAdapterTest, TestVGAWidth) {
   // fix the adaptation state).
   adapter.set_cpu_adaptation(true);
   UpdateCpuLoad(&adapter, 1, 1, 0.7f, 0.7f);
-  adapter.AdaptFrame(&in_frame, &out_frame);
+  out_format = adapter.AdaptFrameResolution(640, 360);
 
-  EXPECT_EQ(640u, out_frame->GetWidth());
-  EXPECT_EQ(360u, out_frame->GetHeight());
+  EXPECT_EQ(640, out_format.width);
+  EXPECT_EQ(360, out_format.height);
 }
 
 // When adapting resolution for CPU or GD, the quantity of pixels that the

@@ -23,20 +23,19 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/third_party/valgrind/valgrind.h"
-#include "sandbox/linux/bpf_dsl/dump_bpf.h"
+#include "sandbox/linux/bpf_dsl/codegen.h"
 #include "sandbox/linux/bpf_dsl/policy.h"
 #include "sandbox/linux/bpf_dsl/policy_compiler.h"
-#include "sandbox/linux/seccomp-bpf/codegen.h"
+#include "sandbox/linux/bpf_dsl/seccomp_macros.h"
+#include "sandbox/linux/bpf_dsl/syscall_set.h"
 #include "sandbox/linux/seccomp-bpf/die.h"
-#include "sandbox/linux/seccomp-bpf/errorcode.h"
-#include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
 #include "sandbox/linux/seccomp-bpf/syscall.h"
-#include "sandbox/linux/seccomp-bpf/syscall_iterator.h"
 #include "sandbox/linux/seccomp-bpf/trap.h"
-#include "sandbox/linux/seccomp-bpf/verifier.h"
-#include "sandbox/linux/services/linux_syscalls.h"
+#include "sandbox/linux/services/proc_util.h"
 #include "sandbox/linux/services/syscall_wrappers.h"
 #include "sandbox/linux/services/thread_helpers.h"
+#include "sandbox/linux/system_headers/linux_seccomp.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 
 namespace sandbox {
 
@@ -44,8 +43,8 @@ namespace {
 
 bool IsRunningOnValgrind() { return RUNNING_ON_VALGRIND; }
 
-bool IsSingleThreaded(int proc_task_fd) {
-  return ThreadHelpers::IsSingleThreaded(proc_task_fd);
+bool IsSingleThreaded(int proc_fd) {
+  return ThreadHelpers::IsSingleThreaded(proc_fd);
 }
 
 // Check if the kernel supports seccomp-filter (a.k.a. seccomp mode 2) via
@@ -77,10 +76,18 @@ bool KernelSupportsSeccompTsync() {
   }
 }
 
+uint64_t EscapePC() {
+  intptr_t rv = Syscall::Call(-1);
+  if (rv == -1 && errno == ENOSYS) {
+    return 0;
+  }
+  return static_cast<uint64_t>(static_cast<uintptr_t>(rv));
+}
+
 }  // namespace
 
 SandboxBPF::SandboxBPF(bpf_dsl::Policy* policy)
-    : proc_task_fd_(), sandbox_has_started_(false), policy_(policy) {
+    : proc_fd_(), sandbox_has_started_(false), policy_(policy) {
 }
 
 SandboxBPF::~SandboxBPF() {
@@ -116,15 +123,18 @@ bool SandboxBPF::StartSandbox(SeccompLevel seccomp_level) {
     return false;
   }
 
+  if (!proc_fd_.is_valid()) {
+    SetProcFd(ProcUtil::OpenProc());
+  }
+
   const bool supports_tsync = KernelSupportsSeccompTsync();
 
   if (seccomp_level == SeccompLevel::SINGLE_THREADED) {
-    if (!IsSingleThreaded(proc_task_fd_.get())) {
-      SANDBOX_DIE("Cannot start sandbox; process is already multi-threaded");
-      return false;
-    }
+    // Wait for /proc/self/task/ to update if needed and assert the
+    // process is single threaded.
+    ThreadHelpers::AssertSingleThreaded(proc_fd_.get());
   } else if (seccomp_level == SeccompLevel::MULTI_THREADED) {
-    if (IsSingleThreaded(proc_task_fd_.get())) {
+    if (IsSingleThreaded(proc_fd_.get())) {
       SANDBOX_DIE("Cannot start sandbox; "
                   "process may be single-threaded when reported as not");
       return false;
@@ -139,8 +149,8 @@ bool SandboxBPF::StartSandbox(SeccompLevel seccomp_level) {
   // We no longer need access to any files in /proc. We want to do this
   // before installing the filters, just in case that our policy denies
   // close().
-  if (proc_task_fd_.is_valid()) {
-    proc_task_fd_.reset();
+  if (proc_fd_.is_valid()) {
+    proc_fd_.reset();
   }
 
   // Install the filters.
@@ -150,8 +160,8 @@ bool SandboxBPF::StartSandbox(SeccompLevel seccomp_level) {
   return true;
 }
 
-void SandboxBPF::SetProcTaskFd(base::ScopedFD proc_task_fd) {
-  proc_task_fd_.swap(proc_task_fd);
+void SandboxBPF::SetProcFd(base::ScopedFD proc_fd) {
+  proc_fd_.swap(proc_fd);
 }
 
 // static
@@ -179,25 +189,12 @@ scoped_ptr<CodeGen::Program> SandboxBPF::AssembleFilter(
   force_verification = true;
 #endif
   DCHECK(policy_);
+
   bpf_dsl::PolicyCompiler compiler(policy_.get(), Trap::Registry());
-  scoped_ptr<CodeGen::Program> program = compiler.Compile();
-
-  // Make sure compilation resulted in a BPF program that executes
-  // correctly. Otherwise, there is an internal error in our BPF compiler.
-  // There is really nothing the caller can do until the bug is fixed.
-  if (force_verification) {
-    // Verification is expensive. We only perform this step, if we are
-    // compiled in debug mode, or if the caller explicitly requested
-    // verification.
-
-    const char* err = NULL;
-    if (!Verifier::VerifyBPF(&compiler, *program, *policy_, &err)) {
-      bpf_dsl::DumpBPF::PrintProgram(*program);
-      SANDBOX_DIE(err);
-    }
+  if (Trap::SandboxDebuggingAllowedByUser()) {
+    compiler.DangerousSetEscapePC(EscapePC());
   }
-
-  return program.Pass();
+  return compiler.Compile(force_verification);
 }
 
 void SandboxBPF::InstallFilter(bool must_sync_threads) {

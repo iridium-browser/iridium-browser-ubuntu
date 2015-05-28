@@ -24,12 +24,6 @@ enum State {
 };
 
 State GetProcessState() {
-  // Disables the new avatar menu if the web-based signin is turned on, because
-  // the new avatar menu always uses the inline signin, which may break some
-  // SAML users.
-  if (switches::IsEnableWebBasedSignin())
-    return STATE_OLD_AVATAR_MENU;
-
   // Find the state of both command line args.
   bool is_new_avatar_menu = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableNewAvatarMenu);
@@ -91,7 +85,7 @@ State GetProcessState() {
   }
 
   // Set the default state
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
   State state = STATE_ACCOUNT_CONSISTENCY;
 #else
   State state = STATE_OLD_AVATAR_MENU;
@@ -126,12 +120,6 @@ namespace switches {
 
 bool IsEnableAccountConsistency() {
   return GetProcessState() >= STATE_ACCOUNT_CONSISTENCY;
-}
-
-bool IsEnableWebBasedSignin() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kEnableWebBasedSignin) &&
-         !IsEnableWebviewBasedSignin();
 }
 
 bool IsEnableWebviewBasedSignin() {

@@ -18,14 +18,18 @@
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_chromeos.h"
 #include "chrome/browser/ui/ash/multi_user/user_switch_animator_chromeos.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/user_manager/fake_user_manager.h"
 #include "components/user_manager/user_info.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/wm/core/window_modality_controller.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
 
@@ -38,10 +42,12 @@ class MultiUserWindowManagerChromeOSTest : public AshTestBase {
  public:
   MultiUserWindowManagerChromeOSTest()
       : multi_user_window_manager_(NULL),
-        session_state_delegate_(NULL) {}
+        session_state_delegate_(NULL),
+        fake_user_manager_(new user_manager::FakeUserManager),
+        user_manager_enabler_(fake_user_manager_) {}
 
-  virtual void SetUp() override;
-  virtual void TearDown() override;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   // Set up the test environment for this many windows.
@@ -130,8 +136,7 @@ class MultiUserWindowManagerChromeOSTest : public AshTestBase {
 
   // Returns true if the given window covers the screen.
   bool CoversScreen(aura::Window* window) {
-    return chrome::UserSwichAnimatorChromeOS::CoversScreen(
-        window);
+    return chrome::UserSwitchAnimatorChromeOS::CoversScreen(window);
   }
 
   // Create a maximize mode window manager.
@@ -156,6 +161,10 @@ class MultiUserWindowManagerChromeOSTest : public AshTestBase {
 
   // The session state delegate.
   ash::test::TestSessionStateDelegate* session_state_delegate_;
+
+  user_manager::FakeUserManager* fake_user_manager_;  // Not owned.
+
+  chromeos::ScopedUserManagerEnabler user_manager_enabler_;
 
   // The maximized window manager (if enabled).
   scoped_ptr<MaximizeModeWindowManager> maximize_mode_window_manager_;
@@ -186,6 +195,7 @@ void MultiUserWindowManagerChromeOSTest::SetUpForThisManyWindows(int windows) {
   chrome::MultiUserWindowManager::SetInstanceForTest(multi_user_window_manager_,
         chrome::MultiUserWindowManager::MULTI_PROFILE_MODE_SEPARATED);
   EXPECT_TRUE(multi_user_window_manager_);
+  chromeos::WallpaperManager::Initialize();
 }
 
 void MultiUserWindowManagerChromeOSTest::TearDown() {
@@ -198,6 +208,7 @@ void MultiUserWindowManagerChromeOSTest::TearDown() {
 
   chrome::MultiUserWindowManager::DeleteInstance();
   AshTestBase::TearDown();
+  chromeos::WallpaperManager::Shutdown();
 }
 
 std::string MultiUserWindowManagerChromeOSTest::GetStatus() {
@@ -1044,11 +1055,11 @@ TEST_F(MultiUserWindowManagerChromeOSTest, ShowForUserSwitchesDesktop) {
 class TestWindowObserver : public aura::WindowObserver {
  public:
   TestWindowObserver(): resize_calls_(0) {}
-  virtual ~TestWindowObserver() {};
+  ~TestWindowObserver() override{};
 
-  virtual void OnWindowBoundsChanged(aura::Window* window,
-                                     const gfx::Rect& old_bounds,
-                                     const gfx::Rect& new_bounds) override {
+  void OnWindowBoundsChanged(aura::Window* window,
+                             const gfx::Rect& old_bounds,
+                             const gfx::Rect& new_bounds) override {
     resize_calls_++;
   }
 
@@ -1120,6 +1131,56 @@ TEST_F(MultiUserWindowManagerChromeOSTest, TestBlackBarCover) {
   window(1)->RemoveObserver(&window_observer);
   // No resize should have been done to the window.
   EXPECT_EQ(0, window_observer.resize_calls());
+}
+
+// Test that switching between different user won't change the activated windows
+// and the property of transient windows.
+TEST_F(MultiUserWindowManagerChromeOSTest, TransientWindowActivationTest) {
+  SetUpForThisManyWindows(3);
+
+  // Create a window hierarchy like this:
+  // 0 (A)          - The normal windows
+  // |
+  // 1              - Transient child of the normal windows.
+  // |
+  // 2              - A transient child of a transient child.
+
+  multi_user_window_manager()->SetWindowOwner(window(0), "A");
+
+  ::wm::AddTransientChild(window(0), window(1));
+  window(1)->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_WINDOW);
+
+  ::wm::AddTransientChild(window(1), window(2));
+  window(2)->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_WINDOW);
+
+  aura::client::ActivationClient* activation_client =
+      aura::client::GetActivationClient(window(0)->GetRootWindow());
+
+  // Activate window #0 will activate its deepest transient child window #2.
+  activation_client->ActivateWindow(window(0));
+  EXPECT_EQ(window(2), activation_client->GetActiveWindow());
+  EXPECT_FALSE(::wm::CanActivateWindow(window(0)));
+  EXPECT_FALSE(::wm::CanActivateWindow(window(1)));
+
+  // Change active user to User B.
+  multi_user_window_manager()->ActiveUserChanged("B");
+
+  // Change active user back to User A.
+  multi_user_window_manager()->ActiveUserChanged("A");
+  EXPECT_EQ(window(2), activation_client->GetActiveWindow());
+  EXPECT_FALSE(::wm::CanActivateWindow(window(0)));
+  EXPECT_FALSE(::wm::CanActivateWindow(window(1)));
+
+  // Test that switching user doesn't change the property of the windows.
+  EXPECT_EQ(ui::MODAL_TYPE_NONE,
+            window(0)->GetProperty(aura::client::kModalKey));
+  EXPECT_EQ(ui::MODAL_TYPE_WINDOW,
+            window(1)->GetProperty(aura::client::kModalKey));
+  EXPECT_EQ(ui::MODAL_TYPE_WINDOW,
+            window(2)->GetProperty(aura::client::kModalKey));
+
+  ::wm::RemoveTransientChild(window(0), window(1));
+  ::wm::RemoveTransientChild(window(1), window(2));
 }
 
 }  // namespace test

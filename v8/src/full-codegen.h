@@ -29,8 +29,9 @@ class JumpPatchSite;
 // debugger to piggybag on.
 class BreakableStatementChecker: public AstVisitor {
  public:
-  explicit BreakableStatementChecker(Zone* zone) : is_breakable_(false) {
-    InitializeAstVisitor(zone);
+  BreakableStatementChecker(Isolate* isolate, Zone* zone)
+      : is_breakable_(false) {
+    InitializeAstVisitor(isolate, zone);
   }
 
   void Check(Statement* stmt);
@@ -101,23 +102,21 @@ class FullCodeGenerator: public AstVisitor {
   // Platform-specific code size multiplier.
 #if V8_TARGET_ARCH_IA32 || V8_TARGET_ARCH_X87
   static const int kCodeSizeMultiplier = 105;
-  static const int kBootCodeSizeMultiplier = 100;
 #elif V8_TARGET_ARCH_X64
   static const int kCodeSizeMultiplier = 170;
-  static const int kBootCodeSizeMultiplier = 140;
 #elif V8_TARGET_ARCH_ARM
   static const int kCodeSizeMultiplier = 149;
-  static const int kBootCodeSizeMultiplier = 110;
 #elif V8_TARGET_ARCH_ARM64
 // TODO(all): Copied ARM value. Check this is sensible for ARM64.
   static const int kCodeSizeMultiplier = 149;
-  static const int kBootCodeSizeMultiplier = 110;
+#elif V8_TARGET_ARCH_PPC64
+  static const int kCodeSizeMultiplier = 200;
+#elif V8_TARGET_ARCH_PPC
+  static const int kCodeSizeMultiplier = 200;
 #elif V8_TARGET_ARCH_MIPS
   static const int kCodeSizeMultiplier = 149;
-  static const int kBootCodeSizeMultiplier = 120;
 #elif V8_TARGET_ARCH_MIPS64
   static const int kCodeSizeMultiplier = 149;
-  static const int kBootCodeSizeMultiplier = 120;
 #else
 #error Unsupported target architecture.
 #endif
@@ -154,6 +153,11 @@ class FullCodeGenerator: public AstVisitor {
     // number of context chain links to unwind as we traverse the nesting
     // stack from an exit to its target.
     virtual NestedStatement* Exit(int* stack_depth, int* context_length) {
+      return previous_;
+    }
+
+    // Like the Exit() method above, but limited to accumulating stack depth.
+    virtual NestedStatement* AccumulateDepth(int* stack_depth) {
       return previous_;
     }
 
@@ -226,22 +230,36 @@ class FullCodeGenerator: public AstVisitor {
   // The try block of a try/catch statement.
   class TryCatch : public NestedStatement {
    public:
-    explicit TryCatch(FullCodeGenerator* codegen) : NestedStatement(codegen) {
-    }
+    static const int kElementCount = TryBlockConstant::kElementCount;
+
+    explicit TryCatch(FullCodeGenerator* codegen) : NestedStatement(codegen) {}
     virtual ~TryCatch() {}
 
-    virtual NestedStatement* Exit(int* stack_depth, int* context_length);
+    virtual NestedStatement* Exit(int* stack_depth, int* context_length) {
+      *stack_depth += kElementCount;
+      return previous_;
+    }
+    virtual NestedStatement* AccumulateDepth(int* stack_depth) {
+      *stack_depth += kElementCount;
+      return previous_;
+    }
   };
 
   // The try block of a try/finally statement.
   class TryFinally : public NestedStatement {
    public:
+    static const int kElementCount = TryBlockConstant::kElementCount;
+
     TryFinally(FullCodeGenerator* codegen, Label* finally_entry)
         : NestedStatement(codegen), finally_entry_(finally_entry) {
     }
     virtual ~TryFinally() {}
 
     virtual NestedStatement* Exit(int* stack_depth, int* context_length);
+    virtual NestedStatement* AccumulateDepth(int* stack_depth) {
+      *stack_depth += kElementCount;
+      return previous_;
+    }
 
    private:
     Label* finally_entry_;
@@ -250,12 +268,16 @@ class FullCodeGenerator: public AstVisitor {
   // The finally block of a try/finally statement.
   class Finally : public NestedStatement {
    public:
-    static const int kElementCount = 5;
+    static const int kElementCount = 3;
 
-    explicit Finally(FullCodeGenerator* codegen) : NestedStatement(codegen) { }
+    explicit Finally(FullCodeGenerator* codegen) : NestedStatement(codegen) {}
     virtual ~Finally() {}
 
     virtual NestedStatement* Exit(int* stack_depth, int* context_length) {
+      *stack_depth += kElementCount;
+      return previous_;
+    }
+    virtual NestedStatement* AccumulateDepth(int* stack_depth) {
       *stack_depth += kElementCount;
       return previous_;
     }
@@ -275,6 +297,10 @@ class FullCodeGenerator: public AstVisitor {
       *stack_depth += kElementCount;
       return previous_;
     }
+    virtual NestedStatement* AccumulateDepth(int* stack_depth) {
+      *stack_depth += kElementCount;
+      return previous_;
+    }
   };
 
 
@@ -291,11 +317,6 @@ class FullCodeGenerator: public AstVisitor {
       return previous_;
     }
   };
-
-  // Type of a member function that generates inline code for a native function.
-  typedef void (FullCodeGenerator::*InlineFunctionGenerator)(CallRuntime* expr);
-
-  static const InlineFunctionGenerator kInlineFunctionGenerators[];
 
   // A platform-specific utility to overwrite the accumulator register
   // with a GC-safe value.
@@ -330,12 +351,15 @@ class FullCodeGenerator: public AstVisitor {
              Label* if_true,
              Label* if_false,
              Label* fall_through);
-#else  // All non-mips arch.
+#elif V8_TARGET_ARCH_PPC
+  void Split(Condition cc, Label* if_true, Label* if_false, Label* fall_through,
+             CRegister cr = cr7);
+#else  // All other arch.
   void Split(Condition cc,
              Label* if_true,
              Label* if_false,
              Label* fall_through);
-#endif  // V8_TARGET_ARCH_MIPS
+#endif
 
   // Load the value of a known (PARAMETER, LOCAL, or CONTEXT) variable into
   // a register.  Emits a context chain walk if if necessary (so does
@@ -487,20 +511,58 @@ class FullCodeGenerator: public AstVisitor {
 
   // Platform-specific code sequences for calls
   void EmitCall(Call* expr, CallICState::CallType = CallICState::FUNCTION);
+  void EmitSuperConstructorCall(Call* expr);
   void EmitCallWithLoadIC(Call* expr);
   void EmitSuperCallWithLoadIC(Call* expr);
   void EmitKeyedCallWithLoadIC(Call* expr, Expression* key);
   void EmitKeyedSuperCallWithLoadIC(Call* expr);
 
-  // Platform-specific code for inline runtime calls.
-  InlineFunctionGenerator FindInlineFunctionGenerator(Runtime::FunctionId id);
+#define FOR_EACH_FULL_CODE_INTRINSIC(F)   \
+  F(IsSmi)                                \
+  F(IsNonNegativeSmi)                     \
+  F(IsArray)                              \
+  F(IsRegExp)                             \
+  F(IsJSProxy)                            \
+  F(IsConstructCall)                      \
+  F(CallFunction)                         \
+  F(DefaultConstructorCallSuper)          \
+  F(ArgumentsLength)                      \
+  F(Arguments)                            \
+  F(ValueOf)                              \
+  F(SetValueOf)                           \
+  F(DateField)                            \
+  F(StringCharFromCode)                   \
+  F(StringCharAt)                         \
+  F(OneByteSeqStringSetChar)              \
+  F(TwoByteSeqStringSetChar)              \
+  F(ObjectEquals)                         \
+  F(IsObject)                             \
+  F(IsFunction)                           \
+  F(IsUndetectableObject)                 \
+  F(IsSpecObject)                         \
+  F(IsStringWrapperSafeForDefaultValueOf) \
+  F(MathPow)                              \
+  F(IsMinusZero)                          \
+  F(HasCachedArrayIndex)                  \
+  F(GetCachedArrayIndex)                  \
+  F(FastOneByteArrayJoin)                 \
+  F(GeneratorNext)                        \
+  F(GeneratorThrow)                       \
+  F(DebugBreakInOptimizedCode)            \
+  F(ClassOf)                              \
+  F(StringCharCodeAt)                     \
+  F(StringAdd)                            \
+  F(SubString)                            \
+  F(StringCompare)                        \
+  F(RegExpExec)                           \
+  F(RegExpConstructResult)                \
+  F(GetFromCache)                         \
+  F(NumberToString)                       \
+  F(DebugIsActive)
 
-  void EmitInlineRuntimeCall(CallRuntime* expr);
-
-#define EMIT_INLINE_RUNTIME_CALL(name, x, y) \
-  void Emit##name(CallRuntime* expr);
-  INLINE_FUNCTION_LIST(EMIT_INLINE_RUNTIME_CALL)
-#undef EMIT_INLINE_RUNTIME_CALL
+#define GENERATOR_DECLARATION(Name) void Emit##Name(CallRuntime* call);
+  FOR_EACH_FULL_CODE_INTRINSIC(GENERATOR_DECLARATION)
+#undef GENERATOR_DECLARATION
 
   // Platform-specific code for resuming generators.
   void EmitGeneratorResume(Expression *generator,
@@ -568,36 +630,23 @@ class FullCodeGenerator: public AstVisitor {
   // in the accumulator after installing all the properties.
   void EmitClassDefineProperties(ClassLiteral* lit);
 
+  // Pushes the property key as a Name on the stack.
+  void EmitPropertyKey(ObjectLiteralProperty* property, BailoutId bailout_id);
+
   // Apply the compound assignment operator. Expects the left operand on top
   // of the stack and the right one in the accumulator.
-  void EmitBinaryOp(BinaryOperation* expr,
-                    Token::Value op,
-                    OverwriteMode mode);
+  void EmitBinaryOp(BinaryOperation* expr, Token::Value op);
 
   // Helper functions for generating inlined smi code for certain
   // binary operations.
   void EmitInlineSmiBinaryOp(BinaryOperation* expr,
                              Token::Value op,
-                             OverwriteMode mode,
                              Expression* left,
                              Expression* right);
 
   // Assign to the given expression as if via '='. The right-hand-side value
   // is expected in the accumulator.
   void EmitAssignment(Expression* expr);
-
-  // Shall an error be thrown if assignment with 'op' operation is perfomed
-  // on this variable in given language mode?
-  static bool IsSignallingAssignmentToConst(Variable* var, Token::Value op,
-                                            StrictMode strict_mode) {
-    if (var->mode() == CONST) return op != Token::INIT_CONST;
-
-    if (var->mode() == CONST_LEGACY) {
-      return strict_mode == STRICT && op != Token::INIT_CONST_LEGACY;
-    }
-
-    return false;
-  }
 
   // Complete a variable assignment.  The right-hand-side value is expected
   // in the accumulator.
@@ -636,13 +685,14 @@ class FullCodeGenerator: public AstVisitor {
   // |offset| is the offset in the stack where the home object can be found.
   void EmitSetHomeObjectIfNeeded(Expression* initializer, int offset);
 
-  void EmitLoadSuperConstructor(SuperReference* expr);
+  void EmitLoadSuperConstructor();
 
   void CallIC(Handle<Code> code,
               TypeFeedbackId id = TypeFeedbackId::None());
 
   void CallLoadIC(ContextualMode mode,
                   TypeFeedbackId id = TypeFeedbackId::None());
+  void CallGlobalLoadIC(Handle<String> name);
   void CallStoreIC(TypeFeedbackId id = TypeFeedbackId::None());
 
   void SetFunctionPosition(FunctionLiteral* fun);
@@ -652,6 +702,8 @@ class FullCodeGenerator: public AstVisitor {
   void SetSourcePosition(int pos);
 
   // Non-local control flow support.
+  void EnterTryBlock(int handler_index, Label* handler);
+  void ExitTryBlock(int handler_index);
   void EnterFinallyBlock();
   void ExitFinallyBlock();
 
@@ -672,7 +724,8 @@ class FullCodeGenerator: public AstVisitor {
   Handle<Script> script() { return info_->script(); }
   bool is_eval() { return info_->is_eval(); }
   bool is_native() { return info_->is_native(); }
-  StrictMode strict_mode() { return function()->strict_mode(); }
+  LanguageMode language_mode() { return function()->language_mode(); }
+  bool is_simple_parameter_list() { return info_->is_simple_parameter_list(); }
   FunctionLiteral* function() { return info_->function(); }
   Scope* scope() { return scope_; }
 
@@ -706,7 +759,7 @@ class FullCodeGenerator: public AstVisitor {
   void PopulateDeoptimizationData(Handle<Code> code);
   void PopulateTypeFeedbackInfo(Handle<Code> code);
 
-  Handle<FixedArray> handler_table() { return handler_table_; }
+  Handle<HandlerTable> handler_table() { return handler_table_; }
 
   struct BailoutEntry {
     BailoutId id;
@@ -924,7 +977,7 @@ class FullCodeGenerator: public AstVisitor {
   ZoneList<BailoutEntry> bailout_entries_;
   ZoneList<BackEdgeEntry> back_edges_;
   int ic_total_count_;
-  Handle<FixedArray> handler_table_;
+  Handle<HandlerTable> handler_table_;
   Handle<Cell> profiling_counter_;
   bool generate_debug_code_;
 

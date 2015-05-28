@@ -78,7 +78,7 @@ WorkerDebuggerAgent::~WorkerDebuggerAgent()
 {
 }
 
-void WorkerDebuggerAgent::trace(Visitor* visitor)
+DEFINE_TRACE(WorkerDebuggerAgent)
 {
     visitor->trace(m_inspectedWorkerGlobalScope);
     InspectorDebuggerAgent::trace(visitor);
@@ -86,7 +86,7 @@ void WorkerDebuggerAgent::trace(Visitor* visitor)
 
 void WorkerDebuggerAgent::interruptAndDispatchInspectorCommands()
 {
-    scriptDebugServer().interruptAndRunTask(adoptPtr(new RunInspectorCommandsTask(m_inspectedWorkerGlobalScope->thread())));
+    scriptDebugServer().interruptAndRun(adoptPtr(new RunInspectorCommandsTask(m_inspectedWorkerGlobalScope->thread())));
 }
 
 void WorkerDebuggerAgent::startListeningScriptDebugServer()

@@ -20,7 +20,7 @@ MutableStylePropertySet* SVGElementRareData::ensureAnimatedSMILStyleProperties()
     return m_animatedSMILStyleProperties.get();
 }
 
-RenderStyle* SVGElementRareData::overrideComputedStyle(Element* element, RenderStyle* parentStyle)
+ComputedStyle* SVGElementRareData::overrideComputedStyle(Element* element, ComputedStyle* parentStyle)
 {
     ASSERT(element);
     if (!m_useOverrideComputedStyle)
@@ -34,7 +34,7 @@ RenderStyle* SVGElementRareData::overrideComputedStyle(Element* element, RenderS
     return m_overrideComputedStyle.get();
 }
 
-void SVGElementRareData::trace(Visitor* visitor)
+DEFINE_TRACE(SVGElementRareData)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_outgoingReferences);
@@ -43,7 +43,7 @@ void SVGElementRareData::trace(Visitor* visitor)
     visitor->trace(m_elementInstances);
     visitor->trace(m_correspondingElement);
     visitor->trace(m_owner);
-    visitor->registerWeakMembers<SVGElementRareData, &SVGElementRareData::processWeakMembers>(this);
+    visitor->template registerWeakMembers<SVGElementRareData, &SVGElementRareData::processWeakMembers>(this);
 #endif
 }
 

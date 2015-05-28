@@ -4,9 +4,9 @@
 
 #include "content/browser/message_port_service.h"
 
-#include "content/browser/message_port_delegate.h"
 #include "content/common/message_port_messages.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/message_port_delegate.h"
 
 namespace content {
 
@@ -63,7 +63,7 @@ MessagePortService::~MessagePortService() {
 void MessagePortService::UpdateMessagePort(int message_port_id,
                                            MessagePortDelegate* delegate,
                                            int routing_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!message_ports_.count(message_port_id)) {
     NOTREACHED();
     return;
@@ -76,6 +76,7 @@ void MessagePortService::UpdateMessagePort(int message_port_id,
 
 void MessagePortService::OnMessagePortDelegateClosing(
     MessagePortDelegate* delegate) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   // Check if the (possibly) crashed process had any message ports.
   for (MessagePorts::iterator iter = message_ports_.begin();
        iter != message_ports_.end();) {
@@ -89,7 +90,7 @@ void MessagePortService::OnMessagePortDelegateClosing(
 void MessagePortService::Create(int route_id,
                                 MessagePortDelegate* delegate,
                                 int* message_port_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   *message_port_id = ++next_message_port_id_;
 
   MessagePort port;
@@ -104,6 +105,7 @@ void MessagePortService::Create(int route_id,
 }
 
 void MessagePortService::Destroy(int message_port_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!message_ports_.count(message_port_id)) {
     NOTREACHED();
     return;
@@ -116,6 +118,7 @@ void MessagePortService::Destroy(int message_port_id) {
 
 void MessagePortService::Entangle(int local_message_port_id,
                                   int remote_message_port_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!message_ports_.count(local_message_port_id) ||
       !message_ports_.count(remote_message_port_id)) {
     NOTREACHED();
@@ -130,8 +133,9 @@ void MessagePortService::Entangle(int local_message_port_id,
 
 void MessagePortService::PostMessage(
     int sender_message_port_id,
-    const base::string16& message,
-    const std::vector<int>& sent_message_port_ids) {
+    const MessagePortMessage& message,
+    const std::vector<TransferredMessagePort>& sent_message_ports) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!message_ports_.count(sender_message_port_id)) {
     NOTREACHED();
     return;
@@ -147,40 +151,35 @@ void MessagePortService::PostMessage(
     return;
   }
 
-  PostMessageTo(entangled_message_port_id, message, sent_message_port_ids);
+  PostMessageTo(entangled_message_port_id, message, sent_message_ports);
 }
 
 void MessagePortService::PostMessageTo(
     int message_port_id,
-    const base::string16& message,
-    const std::vector<int>& sent_message_port_ids) {
+    const MessagePortMessage& message,
+    const std::vector<TransferredMessagePort>& sent_message_ports) {
   if (!message_ports_.count(message_port_id)) {
     NOTREACHED();
     return;
   }
-  for (size_t i = 0; i < sent_message_port_ids.size(); ++i) {
-    if (!message_ports_.count(sent_message_port_ids[i])) {
+  for (size_t i = 0; i < sent_message_ports.size(); ++i) {
+    if (!message_ports_.count(sent_message_ports[i].id)) {
       NOTREACHED();
       return;
     }
   }
 
   MessagePort& entangled_port = message_ports_[message_port_id];
-
-  std::vector<MessagePort*> sent_ports(sent_message_port_ids.size());
-  for (size_t i = 0; i < sent_message_port_ids.size(); ++i)
-    sent_ports[i] = &message_ports_[sent_message_port_ids[i]];
-
   if (entangled_port.queue_messages()) {
     // If the target port is currently holding messages because the destination
     // renderer isn't available yet, all message ports being sent should also be
     // put in this state.
     if (entangled_port.hold_messages_for_destination) {
-      for (int sent_message_port_id : sent_message_port_ids)
-        HoldMessages(sent_message_port_id);
+      for (const auto& port : sent_message_ports)
+        HoldMessages(port.id);
     }
     entangled_port.queued_messages.push_back(
-        std::make_pair(message, sent_message_port_ids));
+        std::make_pair(message, sent_message_ports));
     return;
   }
 
@@ -191,10 +190,11 @@ void MessagePortService::PostMessageTo(
 
   // Now send the message to the entangled port.
   entangled_port.delegate->SendMessage(entangled_port.route_id, message,
-                                       sent_message_port_ids);
+                                       sent_message_ports);
 }
 
 void MessagePortService::QueueMessages(int message_port_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!message_ports_.count(message_port_id)) {
     NOTREACHED();
     return;
@@ -211,6 +211,7 @@ void MessagePortService::QueueMessages(int message_port_id) {
 void MessagePortService::SendQueuedMessages(
     int message_port_id,
     const QueuedMessages& queued_messages) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!message_ports_.count(message_port_id)) {
     NOTREACHED();
     return;
@@ -225,8 +226,8 @@ void MessagePortService::SendQueuedMessages(
   // all ports in messages being sent to the port should also be put on hold.
   if (port.hold_messages_for_destination) {
     for (const auto& message : queued_messages)
-      for (int sent_message_port_id : message.second)
-        HoldMessages(sent_message_port_id);
+      for (const TransferredMessagePort& sent_port : message.second)
+        HoldMessages(sent_port.id);
   }
 
   port.queued_messages.insert(port.queued_messages.begin(),
@@ -240,6 +241,7 @@ void MessagePortService::SendQueuedMessages(
 }
 
 void MessagePortService::SendQueuedMessagesIfPossible(int message_port_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!message_ports_.count(message_port_id)) {
     NOTREACHED();
     return;
@@ -257,6 +259,7 @@ void MessagePortService::SendQueuedMessagesIfPossible(int message_port_id) {
 }
 
 void MessagePortService::HoldMessages(int message_port_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!message_ports_.count(message_port_id)) {
     NOTREACHED();
     return;
@@ -264,13 +267,14 @@ void MessagePortService::HoldMessages(int message_port_id) {
 
   // Any ports in messages currently in the queue should also be put on hold.
   for (const auto& message : message_ports_[message_port_id].queued_messages)
-    for (int sent_message_port_id : message.second)
-      HoldMessages(sent_message_port_id);
+    for (const TransferredMessagePort& sent_port : message.second)
+      HoldMessages(sent_port.id);
 
   message_ports_[message_port_id].hold_messages_for_destination = true;
 }
 
 void MessagePortService::ClosePort(int message_port_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!message_ports_.count(message_port_id)) {
     NOTREACHED();
     return;
@@ -283,13 +287,14 @@ void MessagePortService::ClosePort(int message_port_id) {
 
   // First close any message ports in the queue for this message port.
   for (const auto& message : message_ports_[message_port_id].queued_messages)
-    for (int sent_message_port_id : message.second)
-      ClosePort(sent_message_port_id);
+    for (const TransferredMessagePort& sent_port : message.second)
+      ClosePort(sent_port.id);
 
   Erase(message_port_id);
 }
 
 void MessagePortService::ReleaseMessages(int message_port_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!message_ports_.count(message_port_id)) {
     NOTREACHED();
     return;

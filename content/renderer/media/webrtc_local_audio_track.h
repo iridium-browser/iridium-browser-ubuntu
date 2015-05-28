@@ -67,6 +67,11 @@ class CONTENT_EXPORT WebRtcLocalAudioTrack
 
   webrtc::AudioTrackInterface* GetAudioAdapter() override;
 
+  // Returns the output format of the capture source. May return an invalid
+  // AudioParameters if the format is not yet available.
+  // Called on the main render thread.
+  media::AudioParameters GetOutputFormat() const;
+
   // Method called by the capturer to deliver the capture data.
   // Called on the capture audio thread.
   void Capture(const media::AudioBus& audio_bus,
@@ -103,8 +108,6 @@ class CONTENT_EXPORT WebRtcLocalAudioTrack
   // has changed.
   SinkList sinks_;
 
-  // Used to DCHECK that some methods are called on the main render thread.
-  base::ThreadChecker main_render_thread_checker_;
   // Tests that methods are called on libjingle's signaling thread.
   base::ThreadChecker signal_thread_checker_;
 

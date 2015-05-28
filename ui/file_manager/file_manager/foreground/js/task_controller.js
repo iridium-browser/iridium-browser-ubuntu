@@ -5,7 +5,7 @@
 /**
  * @param {DialogType} dialogType
  * @param {!FileManagerUI} ui
- * @param {!MetadataCache} metadataCache
+ * @param {!MetadataModel} metadataModel
  * @param {!FileSelectionHandler} selectionHandler
  * @param {!MetadataUpdateController} metadataUpdateController
  * @param {function():!FileTasks} createTask
@@ -13,8 +13,8 @@
  * @struct
  */
 function TaskController(
-    dialogType, ui, metadataCache, selectionHandler, metadataUpdateController,
-    createTask) {
+    dialogType, ui, metadataModel, selectionHandler,
+    metadataUpdateController, createTask) {
   /**
    * @type {DialogType}
    * @const
@@ -30,11 +30,11 @@ function TaskController(
   this.ui_ = ui;
 
   /**
-   * @type {!MetadataCache}
+   * @type {!MetadataModel}
    * @const
    * @private
    */
-  this.metadataCache_ = metadataCache;
+  this.metadataModel_ = metadataModel;
 
   /**
    * @type {!FileSelectionHandler}
@@ -134,35 +134,42 @@ TaskController.prototype.onTaskItemClicked_ = function(event) {
   if (!selection.tasks)
     return;
 
-  if (event.item.task) {
-    // Task field doesn't exist on change-default dropdown item.
-    selection.tasks.execute(event.item.task.taskId);
-  } else {
-    var extensions = [];
+  switch (event.item.action) {
+    case FileTasks.TaskMenuButtonActions.ShowMenu:
+      this.ui_.taskMenuButton.showMenu(false);
+      break;
+    case FileTasks.TaskMenuButtonActions.RunTask:
+      selection.tasks.execute(event.item.task.taskId);
+      break;
+    case FileTasks.TaskMenuButtonActions.ChangeDefaultAction:
+      var extensions = [];
 
-    for (var i = 0; i < selection.entries.length; i++) {
-      var match = /\.(\w+)$/g.exec(selection.entries[i].toURL());
-      if (match) {
-        var ext = match[1].toUpperCase();
-        if (extensions.indexOf(ext) == -1) {
-          extensions.push(ext);
+      for (var i = 0; i < selection.entries.length; i++) {
+        var match = /\.(\w+)$/g.exec(selection.entries[i].toURL());
+        if (match) {
+          var ext = match[1].toUpperCase();
+          if (extensions.indexOf(ext) == -1) {
+            extensions.push(ext);
+          }
         }
       }
-    }
 
-    var format = '';
+      var format = '';
 
-    if (extensions.length == 1) {
-      format = extensions[0];
-    }
+      if (extensions.length == 1) {
+        format = extensions[0];
+      }
 
-    // Change default was clicked. We should open "change default" dialog.
-    selection.tasks.showTaskPicker(
-        this.ui_.defaultTaskPicker,
-        loadTimeData.getString('CHANGE_DEFAULT_MENU_ITEM'),
-        strf('CHANGE_DEFAULT_CAPTION', format),
-        this.changeDefaultTask_.bind(this, selection),
-        true);
+      // Change default was clicked. We should open "change default" dialog.
+      selection.tasks.showTaskPicker(
+          this.ui_.defaultTaskPicker,
+          loadTimeData.getString('CHANGE_DEFAULT_MENU_ITEM'),
+          strf('CHANGE_DEFAULT_CAPTION', format),
+          this.changeDefaultTask_.bind(this, selection),
+          true);
+      break;
+    default:
+      assertNotReached('Unknown action.');
   }
 };
 
@@ -212,30 +219,23 @@ TaskController.prototype.onActionMenuItemActivated_ = function() {
  */
 TaskController.prototype.openSuggestAppsDialog =
     function(entry, onSuccess, onCancelled, onFailure) {
-  if (!url) {
+  if (!entry) {
     onFailure();
     return;
   }
 
-  this.metadataCache_.getOne(entry, 'external', function(prop) {
-    if (!prop || !prop.contentMimeType) {
-      onFailure();
-      return;
-    }
-
+  this.getMimeType_(entry).then(function(mimeType) {
     var basename = entry.name;
     var splitted = util.splitExtension(basename);
-    var filename = splitted[0];
     var extension = splitted[1];
-    var mime = prop.contentMimeType;
 
-    // Returns with failure if the file has neither extension nor mime.
-    if (!extension || !mime) {
+    // Returns with failure if the file has neither extension nor MIME type.
+    if (!extension || !mimeType) {
       onFailure();
       return;
     }
 
-    var onDialogClosed = function(result) {
+    var onDialogClosed = function(result, itemId) {
       switch (result) {
         case SuggestAppsDialog.Result.INSTALL_SUCCESSFUL:
           onSuccess();
@@ -248,13 +248,35 @@ TaskController.prototype.openSuggestAppsDialog =
       }
     };
 
-    if (FileTasks.EXECUTABLE_EXTENSIONS.indexOf(extension) !== -1) {
-      this.ui_.suggestAppsDialog.showByFilename(filename, onDialogClosed);
-    } else {
-      this.ui_.suggestAppsDialog.showByExtensionAndMime(
-          extension, mime, onDialogClosed);
-    }
+    this.ui_.suggestAppsDialog.showByExtensionAndMime(
+        extension, mimeType, onDialogClosed);
   }.bind(this));
+};
+
+/**
+ * Get MIME type for an entry. This method first tries to obtain the MIME type
+ * from metadata. If it fails, this falls back to obtain the MIME type from its
+ * content or name.
+ *
+ * @param {Entry} entry An entry to obtain its mime type.
+ * @return {!Promise}
+ * @private
+ */
+TaskController.prototype.getMimeType_ = function(entry) {
+  return this.metadataModel_.get([entry], ['contentMimeType']).then(
+      function(properties) {
+        if (properties[0].contentMimeType)
+          return properties[0].contentMimeType;
+        return new Promise(function(fulfill, reject) {
+          chrome.fileManagerPrivate.getMimeType(
+              entry.toURL(), function(mimeType) {
+                if (!chrome.runtime.lastError)
+                  fulfill(mimeType);
+                else
+                  reject(chrome.runtime.lastError);
+              });
+        });
+      });
 };
 
 /**
@@ -345,11 +367,12 @@ TaskController.prototype.updateContextMenuActionItems_ = function(items) {
  */
 TaskController.prototype.doEntryAction = function(entry) {
   if (this.dialogType_ == DialogType.FULL_PAGE) {
-    this.metadataCache_.get([entry], 'external', function(props) {
-      var tasks = this.createTask_();
-      tasks.init([entry], [props[0].contentMimeType || '']);
-      tasks.executeDefault();
-    }.bind(this));
+    this.metadataModel_.get([entry], ['contentMimeType']).then(
+        function(props) {
+          var tasks = this.createTask_();
+          tasks.init([entry], [props[0].contentMimeType || '']);
+          tasks.executeDefault();
+        }.bind(this));
   } else {
     var selection = this.selectionHandler_.selection;
     if (selection.entries.length === 1 &&

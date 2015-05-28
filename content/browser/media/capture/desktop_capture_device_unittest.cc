@@ -53,21 +53,30 @@ const uint8_t kFakePixelValueFirst = 2;
 
 class MockDeviceClient : public media::VideoCaptureDevice::Client {
  public:
-  MOCK_METHOD2(ReserveOutputBuffer,
-               scoped_refptr<Buffer>(media::VideoFrame::Format format,
-                                     const gfx::Size& dimensions));
-  MOCK_METHOD1(OnError, void(const std::string& reason));
   MOCK_METHOD5(OnIncomingCapturedData,
                void(const uint8* data,
                     int length,
                     const media::VideoCaptureFormat& frame_format,
                     int rotation,
-                    base::TimeTicks timestamp));
-  MOCK_METHOD4(OnIncomingCapturedVideoFrame,
+                    const base::TimeTicks& timestamp));
+  MOCK_METHOD9(OnIncomingCapturedYuvData,
+               void (const uint8* y_data,
+                     const uint8* u_data,
+                     const uint8* v_data,
+                     size_t y_stride,
+                     size_t u_stride,
+                     size_t v_stride,
+                     const media::VideoCaptureFormat& frame_format,
+                     int clockwise_rotation,
+                     const base::TimeTicks& timestamp));
+  MOCK_METHOD2(ReserveOutputBuffer,
+               scoped_refptr<Buffer>(media::VideoFrame::Format format,
+                                     const gfx::Size& dimensions));
+  MOCK_METHOD3(OnIncomingCapturedVideoFrame,
                void(const scoped_refptr<Buffer>& buffer,
-                    const media::VideoCaptureFormat& buffer_format,
                     const scoped_refptr<media::VideoFrame>& frame,
-                    base::TimeTicks timestamp));
+                    const base::TimeTicks& timestamp));
+  MOCK_METHOD1(OnError, void(const std::string& reason));
 };
 
 // Creates a DesktopFrame that has the first pixel bytes set to

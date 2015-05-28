@@ -47,10 +47,12 @@ class PepperVideoRenderer2D : public PepperVideoRenderer,
                                 const ClientContext& context,
                                 EventHandler* event_handler) override;
   void OnViewChanged(const pp::View& view) override;
+  void EnableDebugDirtyRegion(bool enable) override;
+
+  // VideoRenderer interface.
   void OnSessionConfig(const protocol::SessionConfig& config) override;
   ChromotingStats* GetStats() override;
-  void ProcessVideoPacket(scoped_ptr<VideoPacket> video_packet,
-                          const base::Closure& done) override;
+  protocol::VideoStub* GetVideoStub() override;
 
  private:
   // FrameConsumer implementation.
@@ -129,6 +131,9 @@ class PepperVideoRenderer2D : public PepperVideoRenderer,
 
   // True after the first call to ApplyBuffer().
   bool frame_received_;
+
+  // True if dirty regions are to be sent to |event_handler_| for debugging.
+  bool debug_dirty_region_;
 
   pp::CompletionCallbackFactory<PepperVideoRenderer2D> callback_factory_;
   base::WeakPtrFactory<PepperVideoRenderer2D> weak_factory_;

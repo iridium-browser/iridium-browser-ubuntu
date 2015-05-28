@@ -37,7 +37,7 @@ namespace blink {
 
 class WebGLExtensionScopedContext : public NoBaseWillBeGarbageCollectedFinalized<WebGLExtensionScopedContext> {
     WTF_MAKE_NONCOPYABLE(WebGLExtensionScopedContext);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(WebGLExtensionScopedContext);
 public:
     WebGLExtensionScopedContext(WebGLExtension*);
     virtual ~WebGLExtensionScopedContext();
@@ -45,14 +45,14 @@ public:
     bool isLost() { return !m_context; }
     WebGLRenderingContextBase* context() const { return m_context.get(); }
 
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     RefPtrWillBeMember<WebGLRenderingContextBase> m_context;
 };
 
 class WebGLExtension : public RefCountedWillBeGarbageCollectedFinalized<WebGLExtension>, public ScriptWrappable {
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(WebGLExtension);
 public:
     virtual ~WebGLExtension();
     virtual WebGLExtensionName name() const = 0;
@@ -67,7 +67,7 @@ public:
 
     bool isLost() { return !m_context; }
 
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
     // For use by V8 bindings only.
     HTMLCanvasElement* canvas() const

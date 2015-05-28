@@ -25,6 +25,36 @@ void InputHandler::SetRenderViewHost(RenderViewHostImpl* host) {
   host_ = host;
 }
 
+void InputHandler::SetClient(scoped_ptr<DevToolsProtocolClient> client) {
+}
+
+Response InputHandler::DispatchKeyEvent(
+    const std::string& type,
+    const int* modifiers,
+    const double* timestamp,
+    const std::string* text,
+    const std::string* unmodified_text,
+    const std::string* key_identifier,
+    const std::string* code,
+    const int* windows_virtual_key_code,
+    const int* native_virtual_key_code,
+    const bool* auto_repeat,
+    const bool* is_keypad,
+    const bool* is_system_key) {
+  return Response::FallThrough();
+}
+
+Response InputHandler::DispatchMouseEvent(
+    const std::string& type,
+    int x,
+    int y,
+    const int* modifiers,
+    const double* timestamp,
+    const std::string* button,
+    const int* click_count) {
+  return Response::FallThrough();
+}
+
 Response InputHandler::EmulateTouchFromMouseEvent(const std::string& type,
                                                   int x,
                                                   int y,
@@ -104,6 +134,40 @@ Response InputHandler::EmulateTouchFromMouseEvent(const std::string& type,
   else
     host_->ForwardMouseEvent(mouse_event);
   return Response::OK();
+}
+
+Response InputHandler::SynthesizePinchGesture(
+    DevToolsCommandId command_id,
+    int x,
+    int y,
+    double scale_factor,
+    const int* relative_speed,
+    const std::string* gesture_source_type) {
+  return Response::InternalError("Not yet implemented");
+}
+
+Response InputHandler::SynthesizeScrollGesture(
+    DevToolsCommandId command_id,
+    int x,
+    int y,
+    const int* x_distance,
+    const int* y_distance,
+    const int* x_overscroll,
+    const int* y_overscroll,
+    const bool* prevent_fling,
+    const int* speed,
+    const std::string* gesture_source_type) {
+  return Response::InternalError("Not yet implemented");
+}
+
+Response InputHandler::SynthesizeTapGesture(
+    DevToolsCommandId command_id,
+    int x,
+    int y,
+    const int* duration,
+    const int* tap_count,
+    const std::string* gesture_source_type) {
+  return Response::InternalError("Not yet implemented");
 }
 
 }  // namespace input

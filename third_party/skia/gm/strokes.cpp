@@ -39,19 +39,16 @@ public:
     StrokesGM() {}
 
 protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("strokes_round");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(W, H*2);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         SkPaint paint;
         paint.setStyle(SkPaint::kStroke_Style);
         paint.setStrokeWidth(SkIntToScalar(9)/2);
@@ -83,8 +80,8 @@ private:
 
 class Strokes2GM : public skiagm::GM {
     SkPath fPath;
-public:
-    Strokes2GM() {
+protected:
+    void onOnceBeforeDraw() override {
         SkRandom rand;
         fPath.moveTo(0, 0);
         for (int i = 0; i < 13; i++) {
@@ -94,16 +91,12 @@ public:
         }
     }
 
-protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("strokes_poly");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(W, H*2);
     }
 
@@ -113,7 +106,7 @@ protected:
         canvas->concat(matrix);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         canvas->drawColor(SK_ColorWHITE);
 
         SkPaint paint;
@@ -196,19 +189,16 @@ public:
     Strokes3GM() {}
 
 protected:
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
 
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("strokes3");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
-        return SkISize::Make(W, H*2);
+    SkISize onISize() override {
+        return SkISize::Make(1500, 1500);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         SkPaint origPaint;
         origPaint.setAntiAlias(true);
         origPaint.setStyle(SkPaint::kStroke_Style);
@@ -221,7 +211,7 @@ protected:
             make0, make1, make2, make3, make4, make5
         };
 
-        canvas->translate(SkIntToScalar(20), SkIntToScalar(20));
+        canvas->translate(SkIntToScalar(20), SkIntToScalar(80));
 
         SkRect bounds = SkRect::MakeWH(SkIntToScalar(50), SkIntToScalar(50));
         SkScalar dx = bounds.width() * 4/3;

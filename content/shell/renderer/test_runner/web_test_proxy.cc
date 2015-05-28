@@ -8,11 +8,11 @@
 
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "content/public/common/content_switches.h"
 #include "content/shell/renderer/test_runner/accessibility_controller.h"
 #include "content/shell/renderer/test_runner/event_sender.h"
@@ -238,6 +238,34 @@ const char* WebNavigationTypeToString(blink::WebNavigationType type) {
   return kIllegalString;
 }
 
+const char* kPolicyIgnore = "Ignore";
+const char* kPolicyDownload = "download";
+const char* kPolicyCurrentTab = "current tab";
+const char* kPolicyNewBackgroundTab = "new background tab";
+const char* kPolicyNewForegroundTab = "new foreground tab";
+const char* kPolicyNewWindow = "new window";
+const char* kPolicyNewPopup = "new popup";
+
+const char* WebNavigationPolicyToString(blink::WebNavigationPolicy policy) {
+  switch (policy) {
+    case blink::WebNavigationPolicyIgnore:
+      return kPolicyIgnore;
+    case blink::WebNavigationPolicyDownload:
+      return kPolicyDownload;
+    case blink::WebNavigationPolicyCurrentTab:
+      return kPolicyCurrentTab;
+    case blink::WebNavigationPolicyNewBackgroundTab:
+      return kPolicyNewBackgroundTab;
+    case blink::WebNavigationPolicyNewForegroundTab:
+      return kPolicyNewForegroundTab;
+    case blink::WebNavigationPolicyNewWindow:
+      return kPolicyNewWindow;
+    case blink::WebNavigationPolicyNewPopup:
+      return kPolicyNewPopup;
+  }
+  return kIllegalString;
+}
+
 std::string DumpFrameHeaderIfNeeded(blink::WebFrame* frame) {
   std::string result;
 
@@ -295,7 +323,7 @@ std::string DumpFramesAsPrintedText(blink::WebFrame* frame, bool recursive) {
 
   std::string result = DumpFrameHeaderIfNeeded(frame);
   result.append(
-      frame->renderTreeAsText(blink::WebFrame::RenderAsTextPrinting).utf8());
+      frame->layoutTreeAsText(blink::WebFrame::LayoutAsTextPrinting).utf8());
   result.append("\n");
 
   if (recursive) {
@@ -375,6 +403,7 @@ blink::WebView* WebTestProxyBase::GetWebView() const {
 }
 
 void WebTestProxyBase::Reset() {
+  drag_image_.reset();
   animate_scheduled_ = false;
   resource_identifier_map_.clear();
   log_console_output_ = true;
@@ -438,13 +467,13 @@ std::string WebTestProxyBase::CaptureTree(bool debug_render_tree) {
   } else {
     bool recursive = test_interfaces_->GetTestRunner()
                          ->shouldDumpChildFrameScrollPositions();
-    blink::WebFrame::RenderAsTextControls render_text_behavior =
-        blink::WebFrame::RenderAsTextNormal;
+    blink::WebFrame::LayoutAsTextControls layout_text_behavior =
+        blink::WebFrame::LayoutAsTextNormal;
     if (should_dump_as_printed)
-      render_text_behavior |= blink::WebFrame::RenderAsTextPrinting;
+      layout_text_behavior |= blink::WebFrame::LayoutAsTextPrinting;
     if (debug_render_tree)
-      render_text_behavior |= blink::WebFrame::RenderAsTextDebug;
-    data_utf8 = frame->renderTreeAsText(render_text_behavior).utf8();
+      layout_text_behavior |= blink::WebFrame::LayoutAsTextDebug;
+    data_utf8 = frame->layoutTreeAsText(layout_text_behavior).utf8();
     data_utf8 += DumpFrameScrollPosition(frame, recursive);
   }
 
@@ -565,6 +594,24 @@ void WebTestProxyBase::CapturePixelsAsync(
   TRACE_EVENT0("shell", "WebTestProxyBase::CapturePixelsAsync");
   DCHECK(!callback.is_null());
 
+  if (test_interfaces_->GetTestRunner()->shouldDumpDragImage()) {
+    if (drag_image_.isNull()) {
+      // This means the test called dumpDragImage but did not initiate a drag.
+      // Return a blank image so that the test fails.
+      SkBitmap bitmap;
+      bitmap.allocN32Pixels(1, 1);
+      {
+        SkAutoLockPixels lock(bitmap);
+        bitmap.eraseColor(0);
+      }
+      callback.Run(bitmap);
+      return;
+    }
+
+    callback.Run(drag_image_.getSkBitmap());
+    return;
+  }
+
   if (test_interfaces_->GetTestRunner()->isPrinting()) {
     base::MessageLoopProxy::current()->PostTask(
         FROM_HERE,
@@ -669,7 +716,7 @@ void WebTestProxyBase::AnimateNow() {
     web_widget_->beginFrame(blink::WebBeginFrameArgs(0.0, 0.0, 0.0));
     web_widget_->layout();
     if (blink::WebPagePopup* popup = web_widget_->pagePopup()) {
-      popup->animate(0.0);
+      popup->beginFrame(blink::WebBeginFrameArgs(0.0, 0.0, 0.0));
       popup->layout();
     }
   }
@@ -735,6 +782,9 @@ void WebTestProxyBase::PostAccessibilityEvent(const blink::WebAXObject& obj,
       break;
     case blink::WebAXEventMenuListItemSelected:
       event_name = "MenuListItemSelected";
+      break;
+    case blink::WebAXEventMenuListItemUnselected:
+      event_name = "MenuListItemUnselected";
       break;
     case blink::WebAXEventMenuListValueChanged:
       event_name = "MenuListValueChanged";
@@ -806,6 +856,10 @@ void WebTestProxyBase::StartDragging(blink::WebLocalFrame* frame,
                                      blink::WebDragOperationsMask mask,
                                      const blink::WebImage& image,
                                      const blink::WebPoint& point) {
+  if (test_interfaces_->GetTestRunner()->shouldDumpDragImage()) {
+    if (drag_image_.isNull())
+      drag_image_ = image;
+  }
   // When running a test, we need to fake a drag drop operation otherwise
   // Windows waits for real mouse events to know when the drag is over.
   test_interfaces_->GetEventSender()->DoDragDrop(data, mask);
@@ -972,8 +1026,10 @@ void WebTestProxyBase::DidReceiveServerRedirectForProvisionalLoad(
   }
 }
 
-bool WebTestProxyBase::DidFailProvisionalLoad(blink::WebLocalFrame* frame,
-                                              const blink::WebURLError& error) {
+bool WebTestProxyBase::DidFailProvisionalLoad(
+    blink::WebLocalFrame* frame,
+    const blink::WebURLError& error,
+    blink::WebHistoryCommitType commit_type) {
   if (test_interfaces_->GetTestRunner()->shouldDumpFrameLoadCallbacks()) {
     PrintFrameDescription(delegate_, frame);
     delegate_->PrintMessage(" - didFailProvisionalLoadWithError\n");
@@ -1038,7 +1094,8 @@ void WebTestProxyBase::DidHandleOnloadEvents(blink::WebLocalFrame* frame) {
 }
 
 void WebTestProxyBase::DidFailLoad(blink::WebLocalFrame* frame,
-                                   const blink::WebURLError& error) {
+                                   const blink::WebURLError& error,
+                                   blink::WebHistoryCommitType commit_type) {
   if (test_interfaces_->GetTestRunner()->shouldDumpFrameLoadCallbacks()) {
     PrintFrameDescription(delegate_, frame);
     delegate_->PrintMessage(" - didFailLoadWithError\n");
@@ -1270,6 +1327,13 @@ void WebTestProxyBase::CheckDone(blink::WebLocalFrame* frame,
 
 blink::WebNavigationPolicy WebTestProxyBase::DecidePolicyForNavigation(
     const blink::WebFrameClient::NavigationPolicyInfo& info) {
+  if (test_interfaces_->GetTestRunner()->shouldDumpNavigationPolicy()) {
+    delegate_->PrintMessage("Default policy for navigation to '" +
+                            URLDescription(info.urlRequest.url()) + "' is '" +
+                            WebNavigationPolicyToString(info.defaultPolicy) +
+                            "'\n");
+  }
+
   blink::WebNavigationPolicy result;
   if (!test_interfaces_->GetTestRunner()->policyDelegateEnabled())
     return info.defaultPolicy;

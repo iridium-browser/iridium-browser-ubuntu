@@ -1,9 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/signin/core/browser/mutable_profile_oauth2_token_service.h"
 
+#include "base/profiler/scoped_tracker.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/browser/webdata/token_web_data.h"
@@ -11,8 +12,8 @@
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
-#include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher_impl.h"
+#include "google_apis/gaia/oauth2_access_token_fetcher_permanent_error.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace {
@@ -125,13 +126,16 @@ MutableProfileOAuth2TokenService::AccountInfo::GetAuthStatus() const {
 
 MutableProfileOAuth2TokenService::MutableProfileOAuth2TokenService()
     : web_data_service_request_(0)  {
+  VLOG(1) << "MutablePO2TS::MutablePO2TS";
 }
 
 MutableProfileOAuth2TokenService::~MutableProfileOAuth2TokenService() {
+  VLOG(1) << "MutablePO2TS::~MutablePO2TS";
   DCHECK(server_revokes_.empty());
 }
 
 void MutableProfileOAuth2TokenService::Shutdown() {
+  VLOG(1) << "MutablePO2TS::Shutdown";
   server_revokes_.clear();
   CancelWebTokenFetch();
   CancelAllRequests();
@@ -153,12 +157,21 @@ std::string MutableProfileOAuth2TokenService::GetRefreshToken(
   return std::string();
 }
 
+bool MutableProfileOAuth2TokenService::HasPermanentError(
+    const std::string& account_id) {
+  return refresh_tokens_[account_id]->GetAuthStatus().IsPersistentError();
+}
+
 OAuth2AccessTokenFetcher*
 MutableProfileOAuth2TokenService::CreateAccessTokenFetcher(
     const std::string& account_id,
     net::URLRequestContextGetter* getter,
     OAuth2AccessTokenConsumer* consumer) {
   ValidateAccountId(account_id);
+  if (HasPermanentError(account_id)) {
+    return new OAuth2AccessTokenFetcherPermanentError(
+        consumer, refresh_tokens_[account_id]->GetAuthStatus());
+  }
   std::string refresh_token = GetRefreshToken(account_id);
   DCHECK(!refresh_token.empty());
   return new OAuth2AccessTokenFetcherImpl(consumer, getter, refresh_token);
@@ -187,6 +200,15 @@ void MutableProfileOAuth2TokenService::LoadCredentials(
 void MutableProfileOAuth2TokenService::OnWebDataServiceRequestDone(
     WebDataServiceBase::Handle handle,
     const WDTypedResult* result) {
+  VLOG(1) << "MutablePO2TS::OnWebDataServiceRequestDone. Result type: "
+          << (result == nullptr ? -1 : (int)result->GetType());
+
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 MutableProfileOAuth2Token...::OnWebDataServiceRequestDone"));
+
   DCHECK_EQ(web_data_service_request_, handle);
   web_data_service_request_ = 0;
 
@@ -231,6 +253,8 @@ void MutableProfileOAuth2TokenService::LoadAllCredentialsIntoMemory(
   {
     ScopedBatchChange batch(this);
 
+    VLOG(1) << "MutablePO2TS::LoadAllCredentialsIntoMemory; "
+            << db_tokens.size() << " Credential(s).";
     for (std::map<std::string, std::string>::const_iterator iter =
              db_tokens.begin();
          iter != db_tokens.end();
@@ -276,13 +300,13 @@ void MutableProfileOAuth2TokenService::LoadAllCredentialsIntoMemory(
 void MutableProfileOAuth2TokenService::UpdateAuthError(
     const std::string& account_id,
     const GoogleServiceAuthError& error) {
+  VLOG(1) << "MutablePO2TS::UpdateAuthError. Error: " << error.state();
   ValidateAccountId(account_id);
 
   // Do not report connection errors as these are not actually auth errors.
   // We also want to avoid masking a "real" auth error just because we
   // subsequently get a transient network error.
-  if (error.state() == GoogleServiceAuthError::CONNECTION_FAILED ||
-      error.state() == GoogleServiceAuthError::SERVICE_UNAVAILABLE)
+  if (error.IsTransientError())
     return;
 
   if (refresh_tokens_.count(account_id) == 0) {
@@ -322,6 +346,8 @@ void MutableProfileOAuth2TokenService::UpdateCredentials(
     // If token present, and different from the new one, cancel its requests,
     // and clear the entries in cache related to that account.
     if (refresh_token_present) {
+      VLOG(1) << "MutablePO2TS::UpdateCredentials; Refresh Token was present. "
+              << "account_id=" << account_id;
       std::string revoke_reason = refresh_token_present ? "token differs" :
                                                           "token is missing";
       LOG(WARNING) << "Revoking refresh token on server. "
@@ -331,6 +357,8 @@ void MutableProfileOAuth2TokenService::UpdateCredentials(
       ClearCacheForAccount(account_id);
       refresh_tokens_[account_id]->set_refresh_token(refresh_token);
     } else {
+      VLOG(1) << "MutablePO2TS::UpdateCredentials; Refresh Token was absent. "
+              << "account_id=" << account_id;
       refresh_tokens_[account_id].reset(
           new AccountInfo(signin_error_controller(),
                           account_id,
@@ -351,6 +379,7 @@ void MutableProfileOAuth2TokenService::RevokeCredentials(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (refresh_tokens_.count(account_id) > 0) {
+    VLOG(1) << "MutablePO2TS::RevokeCredentials for account_id=" << account_id;
     ScopedBatchChange batch(this);
     RevokeCredentialsOnServer(refresh_tokens_[account_id]->refresh_token());
     CancelRequestsForAccount(account_id);
@@ -366,6 +395,7 @@ void MutableProfileOAuth2TokenService::PersistCredentials(
     const std::string& refresh_token) {
   scoped_refptr<TokenWebData> token_web_data = client()->GetDatabase();
   if (token_web_data.get()) {
+    VLOG(1) << "MutablePO2TS::PersistCredentials for account_id=" << account_id;
     token_web_data->SetTokenForService(ApplyAccountIdPrefix(account_id),
                                        refresh_token);
   }
@@ -374,8 +404,11 @@ void MutableProfileOAuth2TokenService::PersistCredentials(
 void MutableProfileOAuth2TokenService::ClearPersistedCredentials(
     const std::string& account_id) {
   scoped_refptr<TokenWebData> token_web_data = client()->GetDatabase();
-  if (token_web_data.get())
+  if (token_web_data.get()) {
+    VLOG(1) << "MutablePO2TS::ClearPersistedCredentials for account_id="
+            << account_id;
     token_web_data->RemoveTokenForService(ApplyAccountIdPrefix(account_id));
+  }
 }
 
 void MutableProfileOAuth2TokenService::RevokeAllCredentials() {
@@ -385,6 +418,7 @@ void MutableProfileOAuth2TokenService::RevokeAllCredentials() {
 
   ScopedBatchChange batch(this);
 
+  VLOG(1) << "MutablePO2TS::RevokeAllCredentials";
   CancelWebTokenFetch();
   CancelAllRequests();
   ClearCache();

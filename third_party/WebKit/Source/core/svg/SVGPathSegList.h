@@ -35,7 +35,6 @@
 #include "core/svg/SVGPathSeg.h"
 #include "core/svg/properties/SVGAnimatedProperty.h"
 #include "core/svg/properties/SVGListPropertyHelper.h"
-#include "wtf/WeakPtr.h"
 
 namespace blink {
 
@@ -146,7 +145,7 @@ public:
 
     static AnimatedPropertyType classType() { return AnimatedPath; }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGPathSegList(SVGPathElement*);

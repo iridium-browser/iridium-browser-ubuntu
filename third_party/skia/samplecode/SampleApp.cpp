@@ -11,6 +11,7 @@
 #include "Resources.h"
 #include "SampleCode.h"
 #include "SamplePipeControllers.h"
+#include "SkAnimTimer.h"
 #include "SkCanvas.h"
 #include "SkCommandLineFlags.h"
 #include "SkData.h"
@@ -20,8 +21,6 @@
 #include "SkGraphics.h"
 #include "SkImageEncoder.h"
 #include "SkOSFile.h"
-//#include "SkPDFDevice.h"
-//#include "SkPDFDocument.h"
 #include "SkPaint.h"
 #include "SkPicture.h"
 #include "SkPictureRecorder.h"
@@ -31,7 +30,6 @@
 #include "SkTime.h"
 #include "SkTypeface.h"
 #include "SkWindow.h"
-#include "TransitionView.h"
 #include "sk_tool_utils.h"
 
 #if SK_SUPPORT_GPU
@@ -50,7 +48,7 @@ class PictFileFactory : public SkViewFactory {
     SkString fFilename;
 public:
     PictFileFactory(const SkString& filename) : fFilename(filename) {}
-    virtual SkView* operator() () const SK_OVERRIDE {
+    SkView* operator() () const override {
         return CreateSamplePictFileView(fFilename.c_str());
     }
 };
@@ -62,7 +60,7 @@ class PdfFileViewerFactory : public SkViewFactory {
     SkString fFilename;
 public:
     PdfFileViewerFactory(const SkString& filename) : fFilename(filename) {}
-    virtual SkView* operator() () const SK_OVERRIDE {
+    SkView* operator() () const override {
         return CreateSamplePdfFileViewer(fFilename.c_str());
     }
 };
@@ -78,8 +76,6 @@ public:
 #include "SkSockets.h"
 SkTCPServer gServer;
 #endif
-
-#define USE_ARROWS_FOR_ZOOM true
 
 #if SK_ANGLE
 //#define DEFAULT_TO_ANGLE 1
@@ -104,6 +100,8 @@ static bool gShowGMBounds;
 static void post_event_to_sink(SkEvent* evt, SkEventSink* sink) {
     evt->setTargetID(sink->getSinkID())->post();
 }
+
+static SkAnimTimer gAnimTimer;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -188,8 +186,6 @@ public:
             case kPicture_DeviceType:
                 // fallthrough
             case kGPU_DeviceType:
-                // fallthrough
-            case kNullGPU_DeviceType:
                 // all these guys use the native backend
                 fBackend = kNativeGL_BackEndType;
                 break;
@@ -227,9 +223,6 @@ public:
                 glInterface.reset(GrGLCreateANGLEInterface());
                 break;
 #endif // SK_ANGLE
-            case kNullGPU_DeviceType:
-                glInterface.reset(GrGLCreateNullInterface());
-                break;
             default:
                 SkASSERT(false);
                 break;
@@ -277,7 +270,7 @@ public:
     }
 
     virtual SkSurface* createSurface(SampleWindow::DeviceType dType,
-                                     SampleWindow* win) SK_OVERRIDE {
+                                     SampleWindow* win) override {
 #if SK_SUPPORT_GPU
         if (IsGpuDeviceType(dType) && fCurContext) {
             SkSurfaceProps props(win->getSurfaceProps());
@@ -297,7 +290,6 @@ public:
 
             if (!IsGpuDeviceType(dType)) {
                 // need to send the raster bits to the (gpu) window
-                fCurContext->setRenderTarget(fCurRenderTarget);
                 const SkBitmap& bm = win->getBitmap();
                 fCurRenderTarget->writePixels(0, 0, bm.width(), bm.height(),
                                              SkImageInfo2GrPixelConfig(bm.colorType(),
@@ -318,20 +310,8 @@ public:
         if (fCurContext) {
             AttachmentInfo attachmentInfo;
             win->attach(fBackend, fMSAASampleCount, &attachmentInfo);
-
-            GrBackendRenderTargetDesc desc;
-            desc.fWidth = SkScalarRoundToInt(win->width());
-            desc.fHeight = SkScalarRoundToInt(win->height());
-            desc.fConfig = kSkia8888_GrPixelConfig;
-            desc.fOrigin = kBottomLeft_GrSurfaceOrigin;
-            desc.fSampleCnt = attachmentInfo.fSampleCount;
-            desc.fStencilBits = attachmentInfo.fStencilBits;
-            GrGLint buffer;
-            GR_GL_GetIntegerv(fCurIntf, GR_GL_FRAMEBUFFER_BINDING, &buffer);
-            desc.fRenderTargetHandle = buffer;
-
             SkSafeUnref(fCurRenderTarget);
-            fCurRenderTarget = fCurContext->wrapBackendRenderTarget(desc);
+            fCurRenderTarget = win->renderTarget(attachmentInfo, fCurIntf, fCurContext);
         }
 #endif
     }
@@ -344,7 +324,7 @@ public:
 #endif
     }
 
-    virtual GrRenderTarget* getGrRenderTarget() SK_OVERRIDE {
+    GrRenderTarget* getGrRenderTarget() override {
 #if SK_SUPPORT_GPU
         return fCurRenderTarget;
 #else
@@ -471,30 +451,30 @@ static HintingState gHintingStates[] = {
     {SkPaint::kFull_Hinting, "Full", "Hf " },
 };
 
-struct FilterLevelState {
-    SkPaint::FilterLevel    fLevel;
-    const char*             fName;
-    const char*             fLabel;
+struct FilterQualityState {
+    SkFilterQuality fQuality;
+    const char*     fName;
+    const char*     fLabel;
 };
-static FilterLevelState gFilterLevelStates[] = {
-    { SkPaint::kNone_FilterLevel,   "Mixed",    NULL    },
-    { SkPaint::kNone_FilterLevel,   "None",     "F0 "   },
-    { SkPaint::kLow_FilterLevel,    "Low",      "F1 "   },
-    { SkPaint::kMedium_FilterLevel, "Medium",   "F2 "   },
-    { SkPaint::kHigh_FilterLevel,   "High",     "F3 "   },
+static FilterQualityState gFilterQualityStates[] = {
+    { kNone_SkFilterQuality,   "Mixed",    NULL    },
+    { kNone_SkFilterQuality,   "None",     "F0 "   },
+    { kLow_SkFilterQuality,    "Low",      "F1 "   },
+    { kMedium_SkFilterQuality, "Medium",   "F2 "   },
+    { kHigh_SkFilterQuality,   "High",     "F3 "   },
 };
 
 class FlagsDrawFilter : public SkDrawFilter {
 public:
     FlagsDrawFilter(SkOSMenu::TriState lcd, SkOSMenu::TriState aa,
-                    SkOSMenu::TriState subpixel, int hinting, int filterlevel)
+                    SkOSMenu::TriState subpixel, int hinting, int filterQuality)
         : fLCDState(lcd)
         , fAAState(aa)
         , fSubpixelState(subpixel)
         , fHintingState(hinting)
-        , fFilterLevelIndex(filterlevel)
+        , fFilterQualityIndex(filterQuality)
     {
-        SkASSERT((unsigned)filterlevel < SK_ARRAY_COUNT(gFilterLevelStates));
+        SkASSERT((unsigned)filterQuality < SK_ARRAY_COUNT(gFilterQualityStates));
     }
 
     virtual bool filter(SkPaint* paint, Type t) {
@@ -504,8 +484,8 @@ public:
         if (SkOSMenu::kMixedState != fAAState) {
             paint->setAntiAlias(SkOSMenu::kOnState == fAAState);
         }
-        if (0 != fFilterLevelIndex) {
-            paint->setFilterLevel(gFilterLevelStates[fFilterLevelIndex].fLevel);
+        if (0 != fFilterQualityIndex) {
+            paint->setFilterQuality(gFilterQualityStates[fFilterQualityIndex].fQuality);
         }
         if (SkOSMenu::kMixedState != fSubpixelState) {
             paint->setSubpixelText(SkOSMenu::kOnState == fSubpixelState);
@@ -521,7 +501,7 @@ private:
     SkOSMenu::TriState  fAAState;
     SkOSMenu::TriState  fSubpixelState;
     int fHintingState;
-    int fFilterLevelIndex;
+    int fFilterQualityIndex;
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -592,39 +572,6 @@ bool SampleCode::FastTextQ(const SkEvent& evt) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static SkMSec gAnimTime;
-static SkMSec gAnimTimePrev;
-
-SkMSec SampleCode::GetAnimTime() { return gAnimTime; }
-SkMSec SampleCode::GetAnimTimeDelta() { return gAnimTime - gAnimTimePrev; }
-SkScalar SampleCode::GetAnimSecondsDelta() {
-    return SkDoubleToScalar(GetAnimTimeDelta() / 1000.0);
-}
-
-SkScalar SampleCode::GetAnimScalar(SkScalar speed, SkScalar period) {
-    // since gAnimTime can be up to 32 bits, we can't convert it to a float
-    // or we'll lose the low bits. Hence we use doubles for the intermediate
-    // calculations
-    double seconds = (double)gAnimTime / 1000.0;
-    double value = SkScalarToDouble(speed) * seconds;
-    if (period) {
-        value = ::fmod(value, SkScalarToDouble(period));
-    }
-    return SkDoubleToScalar(value);
-}
-
-SkScalar SampleCode::GetAnimSinScalar(SkScalar amplitude,
-                                      SkScalar periodInSec,
-                                      SkScalar phaseInSec) {
-    if (!periodInSec) {
-        return 0;
-    }
-    double t = (double)gAnimTime / 1000.0 + phaseInSec;
-    t *= SkScalarToFloat(2 * SK_ScalarPI) / periodInSec;
-    amplitude = SK_ScalarHalf * amplitude;
-    return SkScalarMul(amplitude, SkDoubleToScalar(sin(t))) + amplitude;
-}
-
 enum TilingMode {
     kNo_Tiling,
     kAbs_128x128_Tiling,
@@ -677,6 +624,14 @@ static bool curr_title(SkWindow* wind, SkString* title) {
     return false;
 }
 
+bool SampleWindow::sendAnimatePulse() {
+    SkView* view = curr_view(this);
+    if (SampleView::IsSampleView(view)) {
+        return ((SampleView*)view)->animate(gAnimTimer);
+    }
+    return false;
+}
+
 void SampleWindow::setZoomCenter(float x, float y)
 {
     fZoomCenterX = x;
@@ -717,7 +672,6 @@ static inline SampleWindow::DeviceType cycle_devicetype(SampleWindow::DeviceType
 #if SK_ANGLE
         SampleWindow::kANGLE_DeviceType,
 #endif // SK_ANGLE
-        SampleWindow::kRaster_DeviceType, // skip the null gpu device in normal cycling
 #endif // SK_SUPPORT_GPU
         SampleWindow::kRaster_DeviceType
     };
@@ -839,12 +793,9 @@ SampleWindow::SampleWindow(void* hwnd, int argc, char** argv, DeviceManager* dev
 #endif
 
     fUseClip = false;
-    fNClip = false;
     fAnimating = false;
     fRotate = false;
-    fRotateAnimTime = 0;
     fPerspAnim = false;
-    fPerspAnimTime = 0;
     fRequestGrabImage = false;
     fPipeState = SkOSMenu::kOffState;
     fTilingMode = kNo_Tiling;
@@ -853,7 +804,7 @@ SampleWindow::SampleWindow(void* hwnd, int argc, char** argv, DeviceManager* dev
     fAAState = SkOSMenu::kMixedState;
     fSubpixelState = SkOSMenu::kMixedState;
     fHintingState = 0;
-    fFilterLevelIndex = 0;
+    fFilterQualityIndex = 0;
     fFlipAxis = 0;
     fScrollTestX = fScrollTestY = 0;
 
@@ -888,12 +839,12 @@ SampleWindow::SampleWindow(void* hwnd, int argc, char** argv, DeviceManager* dev
     fAppMenu->assignKeyEquivalentToItem(itemID, 'b');
     itemID = fAppMenu->appendTriState("LCD", "LCD", sinkID, fLCDState);
     fAppMenu->assignKeyEquivalentToItem(itemID, 'l');
-    itemID = fAppMenu->appendList("FilterLevel", "FilterLevel", sinkID, fFilterLevelIndex,
-                                  gFilterLevelStates[0].fName,
-                                  gFilterLevelStates[1].fName,
-                                  gFilterLevelStates[2].fName,
-                                  gFilterLevelStates[3].fName,
-                                  gFilterLevelStates[4].fName,
+    itemID = fAppMenu->appendList("FilterQuality", "FilterQuality", sinkID, fFilterQualityIndex,
+                                  gFilterQualityStates[0].fName,
+                                  gFilterQualityStates[1].fName,
+                                  gFilterQualityStates[2].fName,
+                                  gFilterQualityStates[3].fName,
+                                  gFilterQualityStates[4].fName,
                                   NULL);
     fAppMenu->assignKeyEquivalentToItem(itemID, 'n');
     itemID = fAppMenu->appendTriState("Subpixel", "Subpixel", sinkID, fSubpixelState);
@@ -950,7 +901,6 @@ SampleWindow::SampleWindow(void* hwnd, int argc, char** argv, DeviceManager* dev
     fSlideMenu = new SkOSMenu;
     this->addMenu(fSlideMenu);
 
-    this->setColorType(kN32_SkColorType);
     this->setVisibleP(true);
     this->setClipToBounds(false);
 
@@ -975,6 +925,8 @@ SampleWindow::SampleWindow(void* hwnd, int argc, char** argv, DeviceManager* dev
     // constructor first. Hence we post an event to ourselves.
 //    this->updateTitle();
     post_event_to_sink(new SkEvent(gUpdateWindowTitleEvtName), this);
+
+    gAnimTimer.run();
 }
 
 SampleWindow::~SampleWindow() {
@@ -1009,30 +961,11 @@ static SkBitmap capture_bitmap(SkCanvas* canvas) {
     return bm;
 }
 
-static bool bitmap_diff(SkCanvas* canvas, const SkBitmap& orig,
-                        SkBitmap* diff) {
-    SkBitmap src = capture_bitmap(canvas);
-
-    SkAutoLockPixels alp0(src);
-    SkAutoLockPixels alp1(orig);
-    for (int y = 0; y < src.height(); y++) {
-        const void* srcP = src.getAddr(0, y);
-        const void* origP = orig.getAddr(0, y);
-        size_t bytes = src.width() * src.bytesPerPixel();
-        if (memcmp(srcP, origP, bytes)) {
-            SkDebugf("---------- difference on line %d\n", y);
-            return true;
-        }
-    }
-    return false;
-}
-
-static void drawText(SkCanvas* canvas, SkString string, SkScalar left, SkScalar top, SkPaint& paint)
-{
+static void drawText(SkCanvas* canvas, SkString str, SkScalar left, SkScalar top, SkPaint& paint) {
     SkColor desiredColor = paint.getColor();
     paint.setColor(SK_ColorWHITE);
-    const char* c_str = string.c_str();
-    size_t size = string.size();
+    const char* c_str = str.c_str();
+    size_t size = str.size();
     SkRect bounds;
     paint.measureText(c_str, size, &bounds);
     bounds.offset(left, top);
@@ -1051,15 +984,7 @@ static void drawText(SkCanvas* canvas, SkString string, SkScalar left, SkScalar 
 #define YCLIP_N  8
 
 void SampleWindow::draw(SkCanvas* canvas) {
-    // update the animation time
-    if (!gAnimTimePrev && !gAnimTime) {
-        // first time make delta be 0
-        gAnimTime = SkTime::GetMSecs();
-        gAnimTimePrev = gAnimTime;
-    } else {
-        gAnimTimePrev = gAnimTime;
-        gAnimTime = SkTime::GetMSecs();
-    }
+    gAnimTimer.updateTime();
 
     if (fGesture.isActive()) {
         this->updateMatrix();
@@ -1069,70 +994,39 @@ void SampleWindow::draw(SkCanvas* canvas) {
         fMeasureFPS_Time = 0;
     }
 
-    if (fNClip) {
-        this->INHERITED::draw(canvas);
-        SkBitmap orig = capture_bitmap(canvas);
+    SkSize tile = this->tileSize();
 
-        const SkScalar w = this->width();
-        const SkScalar h = this->height();
-        const SkScalar cw = w / XCLIP_N;
-        const SkScalar ch = h / YCLIP_N;
-        for (int y = 0; y < YCLIP_N; y++) {
-            SkRect r;
-            r.fTop = y * ch;
-            r.fBottom = (y + 1) * ch;
-            if (y == YCLIP_N - 1) {
-                r.fBottom = h;
-            }
-            for (int x = 0; x < XCLIP_N; x++) {
-                SkAutoCanvasRestore acr(canvas, true);
-                r.fLeft = x * cw;
-                r.fRight = (x + 1) * cw;
-                if (x == XCLIP_N - 1) {
-                    r.fRight = w;
-                }
-                canvas->clipRect(r);
-                this->INHERITED::draw(canvas);
-            }
-        }
-
-        SkBitmap diff;
-        if (bitmap_diff(canvas, orig, &diff)) {
-        }
+    if (kNo_Tiling == fTilingMode) {
+        this->INHERITED::draw(canvas); // no looping or surfaces needed
     } else {
-        SkSize tile = this->tileSize();
+        const int w = SkScalarRoundToInt(tile.width());
+        const int h = SkScalarRoundToInt(tile.height());
+        SkImageInfo info = SkImageInfo::MakeN32Premul(w, h);
+        SkAutoTUnref<SkSurface> surface(canvas->newSurface(info));
+        SkCanvas* tileCanvas = surface->getCanvas();
 
-        if (kNo_Tiling == fTilingMode) {
-            this->INHERITED::draw(canvas); // no looping or surfaces needed
-        } else {
-            const int w = SkScalarRoundToInt(tile.width());
-            const int h = SkScalarRoundToInt(tile.height());
-            SkImageInfo info = SkImageInfo::MakeN32Premul(w, h);
-            SkAutoTUnref<SkSurface> surface(canvas->newSurface(info));
-            SkCanvas* tileCanvas = surface->getCanvas();
-
-            for (SkScalar y = 0; y < height(); y += tile.height()) {
-                for (SkScalar x = 0; x < width(); x += tile.width()) {
-                    SkAutoCanvasRestore acr(tileCanvas, true);
-                    tileCanvas->translate(-x, -y);
-                    tileCanvas->clear(0);
-                    this->INHERITED::draw(tileCanvas);
-                    surface->draw(canvas, x, y, NULL);
-                }
+        for (SkScalar y = 0; y < height(); y += tile.height()) {
+            for (SkScalar x = 0; x < width(); x += tile.width()) {
+                SkAutoCanvasRestore acr(tileCanvas, true);
+                tileCanvas->translate(-x, -y);
+                tileCanvas->clear(0);
+                this->INHERITED::draw(tileCanvas);
+                surface->draw(canvas, x, y, NULL);
             }
+        }
 
-            // for drawing the borders between tiles
-            SkPaint paint;
-            paint.setColor(0x60FF00FF);
-            paint.setStyle(SkPaint::kStroke_Style);
+        // for drawing the borders between tiles
+        SkPaint paint;
+        paint.setColor(0x60FF00FF);
+        paint.setStyle(SkPaint::kStroke_Style);
 
-            for (SkScalar y = 0; y < height(); y += tile.height()) {
-                for (SkScalar x = 0; x < width(); x += tile.width()) {
-                    canvas->drawRect(SkRect::MakeXYWH(x, y, tile.width(), tile.height()), paint);
-                }
+        for (SkScalar y = 0; y < height(); y += tile.height()) {
+            for (SkScalar x = 0; x < width(); x += tile.width()) {
+                canvas->drawRect(SkRect::MakeXYWH(x, y, tile.width(), tile.height()), paint);
             }
         }
     }
+
     if (fShowZoomer && !fSaveToPdf) {
         showZoomer(canvas);
     }
@@ -1143,6 +1037,10 @@ void SampleWindow::draw(SkCanvas* canvas) {
     if (fMeasureFPS && fMeasureFPS_Time) {
         this->updateTitle();
         this->postInvalDelay();
+    }
+
+    if (this->sendAnimatePulse()) {
+        this->inval(NULL);
     }
 
     // do this last
@@ -1299,12 +1197,7 @@ SkCanvas* SampleWindow::beforeChildren(SkCanvas* canvas) {
     } else if (kPicture_DeviceType == fDeviceType) {
         canvas = fRecorder.beginRecording(9999, 9999, NULL, 0);
     } else {
-#if SK_SUPPORT_GPU
-        if (kNullGPU_DeviceType != fDeviceType)
-#endif
-        {
-            canvas = this->INHERITED::beforeChildren(canvas);
-        }
+        canvas = this->INHERITED::beforeChildren(canvas);
     }
 
     if (fUseClip) {
@@ -1365,6 +1258,7 @@ void SampleWindow::afterChildren(SkCanvas* orig) {
                             SkCanvas* c = surfs[index]->getCanvas();
                             c->translate(SkIntToScalar(-x * n.width()),
                                          SkIntToScalar(-y * n.height()));
+                            c->concat(orig->getTotalMatrix());
                             md.add(c, picture, NULL, NULL);
                             index++;
                         }
@@ -1400,22 +1294,20 @@ void SampleWindow::afterChildren(SkCanvas* orig) {
 
 void SampleWindow::beforeChild(SkView* child, SkCanvas* canvas) {
     if (fRotate) {
-        fRotateAnimTime += SampleCode::GetAnimSecondsDelta();
-
         SkScalar cx = this->width() / 2;
         SkScalar cy = this->height() / 2;
         canvas->translate(cx, cy);
-        canvas->rotate(fRotateAnimTime * 10);
+        canvas->rotate(gAnimTimer.scaled(10));
         canvas->translate(-cx, -cy);
     }
 
     if (fPerspAnim) {
-        fPerspAnimTime += SampleCode::GetAnimSecondsDelta();
+        SkScalar secs = gAnimTimer.scaled(1);
 
         static const SkScalar gAnimPeriod = 10 * SK_Scalar1;
         static const SkScalar gAnimMag = SK_Scalar1 / 1000;
-        SkScalar t = SkScalarMod(fPerspAnimTime, gAnimPeriod);
-        if (SkScalarFloorToInt(SkScalarDiv(fPerspAnimTime, gAnimPeriod)) & 0x1) {
+        SkScalar t = SkScalarMod(secs, gAnimPeriod);
+        if (SkScalarFloorToInt(SkScalarDiv(secs, gAnimPeriod)) & 0x1) {
             t = gAnimPeriod - t;
         }
         t = 2 * t - gAnimPeriod;
@@ -1448,20 +1340,6 @@ void SampleWindow::beforeChild(SkView* child, SkCanvas* canvas) {
 
 void SampleWindow::afterChild(SkView* child, SkCanvas* canvas) {
     canvas->setDrawFilter(NULL);
-}
-
-static SkColorType gColorTypeCycle[] = {
-    kUnknown_SkColorType,           // none -> none
-    kUnknown_SkColorType,           // a8 -> none
-    kN32_SkColorType,               // 565 -> 8888
-    kN32_SkColorType,               // 4444 -> 8888
-    kRGB_565_SkColorType,           // 8888 -> 565
-    kRGB_565_SkColorType,           // 8888 -> 565
-    kUnknown_SkColorType,           // index8 -> none
-};
-
-static SkColorType cycle_colortypes(SkColorType c) {
-    return gColorTypeCycle[c];
 }
 
 void SampleWindow::changeZoomLevel(float delta) {
@@ -1515,21 +1393,19 @@ void SampleWindow::updateMatrix(){
 }
 bool SampleWindow::previousSample() {
     fCurrIndex = (fCurrIndex - 1 + fSamples.count()) % fSamples.count();
-    this->loadView(create_transition(curr_view(this), (*fSamples[fCurrIndex])(),
-                                     fTransitionPrev));
+    this->loadView((*fSamples[fCurrIndex])());
     return true;
 }
 
 bool SampleWindow::nextSample() {
     fCurrIndex = (fCurrIndex + 1) % fSamples.count();
-    this->loadView(create_transition(curr_view(this), (*fSamples[fCurrIndex])(),
-                                     fTransitionNext));
+    this->loadView((*fSamples[fCurrIndex])());
     return true;
 }
 
 bool SampleWindow::goToSample(int i) {
     fCurrIndex = (i) % fSamples.count();
-    this->loadView(create_transition(curr_view(this),(*fSamples[fCurrIndex])(), 6));
+    this->loadView((*fSamples[fCurrIndex])());
     return true;
 }
 
@@ -1542,14 +1418,12 @@ int SampleWindow::sampleCount() {
 }
 
 void SampleWindow::showOverview() {
-    this->loadView(create_transition(curr_view(this),
-                                     create_overview(fSamples.count(), fSamples.begin()),
-                                     4));
+    this->loadView(create_overview(fSamples.count(), fSamples.begin()));
 }
 
 void SampleWindow::installDrawFilter(SkCanvas* canvas) {
     canvas->setDrawFilter(new FlagsDrawFilter(fLCDState, fAAState, fSubpixelState,
-                                              fHintingState, fFilterLevelIndex))->unref();
+                                              fHintingState, fFilterQualityIndex))->unref();
 }
 
 void SampleWindow::postAnimatingEvent() {
@@ -1568,10 +1442,6 @@ bool SampleWindow::onEvent(const SkEvent& evt) {
             this->nextSample();
             this->postAnimatingEvent();
         }
-        return true;
-    }
-    if (evt.isType("replace-transition-view")) {
-        this->loadView((SkView*)SkEventSink::FindSink(evt.getFast32()));
         return true;
     }
     if (evt.isType("set-curr-index")) {
@@ -1603,7 +1473,7 @@ bool SampleWindow::onEvent(const SkEvent& evt) {
     }
     if (SkOSMenu::FindTriState(evt, "AA", &fAAState) ||
         SkOSMenu::FindTriState(evt, "LCD", &fLCDState) ||
-        SkOSMenu::FindListIndex(evt, "FilterLevel", &fFilterLevelIndex) ||
+        SkOSMenu::FindListIndex(evt, "FilterQuality", &fFilterQualityIndex) ||
         SkOSMenu::FindTriState(evt, "Subpixel", &fSubpixelState) ||
         SkOSMenu::FindListIndex(evt, "Hinting", &fHintingState) ||
         SkOSMenu::FindSwitchState(evt, "Clip", &fUseClip) ||
@@ -1665,20 +1535,6 @@ bool SampleWindow::onQuery(SkEvent* query) {
     return this->INHERITED::onQuery(query);
 }
 
-#if 0 // UNUSED
-static void cleanup_for_filename(SkString* name) {
-    char* str = name->writable_str();
-    for (size_t i = 0; i < name->size(); i++) {
-        switch (str[i]) {
-            case ':': str[i] = '-'; break;
-            case '/': str[i] = '-'; break;
-            case ' ': str[i] = '_'; break;
-            default: break;
-        }
-    }
-}
-#endif
-
 DECLARE_bool(portableFonts);
 
 bool SampleWindow::onHandleChar(SkUnichar uni) {
@@ -1723,6 +1579,18 @@ bool SampleWindow::onHandleChar(SkUnichar uni) {
     }
 
     switch (uni) {
+        case 27:    // ESC
+            gAnimTimer.stop();
+            if (this->sendAnimatePulse()) {
+                this->inval(NULL);
+            }
+            break;
+        case ' ':
+            gAnimTimer.togglePauseResume();
+            if (this->sendAnimatePulse()) {
+                this->inval(NULL);
+            }
+            break;
         case 'B':
             post_event_to_sink(SkNEW_ARGS(SkEvent, ("PictFileView::toggleBBox")), curr_view(this));
             // Cannot call updateTitle() synchronously, because the toggleBBox event is still in
@@ -1759,7 +1627,6 @@ bool SampleWindow::onHandleChar(SkUnichar uni) {
             break;
         case 'r':
             fRotate = !fRotate;
-            fRotateAnimTime = 0;
             this->inval(NULL);
             this->updateTitle();
             return true;
@@ -1769,11 +1636,6 @@ bool SampleWindow::onHandleChar(SkUnichar uni) {
             this->updateTitle();
             return true;
 #if SK_SUPPORT_GPU
-        case '\\':
-            this->setDeviceType(kNullGPU_DeviceType);
-            this->inval(NULL);
-            this->updateTitle();
-            return true;
         case 'p':
             {
                 GrContext* grContext = this->getGrContext();
@@ -1864,21 +1726,10 @@ bool SampleWindow::onHandleKey(SkKey key) {
             }
             return true;
         case kUp_SkKey:
-            if (USE_ARROWS_FOR_ZOOM) {
-                this->changeZoomLevel(1.f / 32.f);
-            } else {
-                fNClip = !fNClip;
-                this->inval(NULL);
-                this->updateTitle();
-            }
+            this->changeZoomLevel(1.f / 32.f);
             return true;
         case kDown_SkKey:
-            if (USE_ARROWS_FOR_ZOOM) {
-                this->changeZoomLevel(-1.f / 32.f);
-            } else {
-                this->setColorType(cycle_colortypes(this->getBitmap().colorType()));
-                this->updateTitle();
-            }
+            this->changeZoomLevel(-1.f / 32.f);
             return true;
         case kOK_SkKey: {
             SkString title;
@@ -2006,7 +1857,6 @@ static const char* gDeviceTypePrefix[] = {
 #if SK_ANGLE
     "angle: ",
 #endif // SK_ANGLE
-    "null-gl: "
 #endif // SK_SUPPORT_GPU
 };
 SK_COMPILE_ASSERT(SK_ARRAY_COUNT(gDeviceTypePrefix) == SampleWindow::kDeviceTypeCnt,
@@ -2046,9 +1896,6 @@ void SampleWindow::updateTitle() {
     if (fRotate) {
         title.prepend("<R> ");
     }
-    if (fNClip) {
-        title.prepend("<C> ");
-    }
     if (fPerspAnim) {
         title.prepend("<K> ");
     }
@@ -2058,7 +1905,7 @@ void SampleWindow::updateTitle() {
 
     title.prepend(trystate_str(fLCDState, "LCD ", "lcd "));
     title.prepend(trystate_str(fAAState, "AA ", "aa "));
-    title.prepend(gFilterLevelStates[fFilterLevelIndex].fLabel);
+    title.prepend(gFilterQualityStates[fFilterQualityIndex].fLabel);
     title.prepend(trystate_str(fSubpixelState, "S ", "s "));
     title.prepend(fFlipAxis & kFlipAxis_X ? "X " : NULL);
     title.prepend(fFlipAxis & kFlipAxis_Y ? "Y " : NULL);
@@ -2288,6 +2135,10 @@ void SampleView::draw(SkCanvas* canvas) {
 }
 
 void SampleView::onDraw(SkCanvas* canvas) {
+    if (!fHaveCalledOnceBeforeDraw) {
+        fHaveCalledOnceBeforeDraw = true;
+        this->onOnceBeforeDraw();
+    }
     this->onDrawBackground(canvas);
 
     for (int i = 0; i < fRepeatCount; i++) {

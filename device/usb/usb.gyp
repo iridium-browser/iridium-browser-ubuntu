@@ -11,6 +11,7 @@
       'target_name': 'device_usb',
       'type': 'static_library',
       'dependencies': [
+        '../../components/components.gyp:device_event_log_component',
         '../../net/net.gyp:net',
         '../../third_party/libusb/libusb.gyp:libusb',
       ],
@@ -34,8 +35,10 @@
         'usb_error.h',
         'usb_ids.cc',
         'usb_ids.h',
+        'usb_service.cc',
         'usb_service.h',
         'usb_service_impl.cc',
+        'usb_service_impl.h',
       ],
       'actions': [
         {

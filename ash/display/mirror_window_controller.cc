@@ -109,7 +109,7 @@ void MirrorWindowController::UpdateWindow(const DisplayInfo& display_info) {
 
     // TODO(oshima): Start mirroring.
     aura::Window* mirror_window = new aura::Window(NULL);
-    mirror_window->Init(aura::WINDOW_LAYER_SOLID_COLOR);
+    mirror_window->Init(ui::LAYER_SOLID_COLOR);
     host->window()->AddChild(mirror_window);
     mirror_window->SetBounds(host->window()->bounds());
     mirror_window->Show();
@@ -144,8 +144,9 @@ void MirrorWindowController::UpdateWindow() {
 void MirrorWindowController::Close() {
   if (ash_host_.get()) {
     aura::WindowTreeHost* host = ash_host_->AsWindowTreeHost();
-    aura::Env::GetInstance()->context_factory()->RemoveReflector(reflector_);
-    reflector_ = NULL;
+    aura::Env::GetInstance()->context_factory()->RemoveReflector(
+        reflector_.get());
+    reflector_ = nullptr;
     NoneCaptureClient* capture_client = static_cast<NoneCaptureClient*>(
         aura::client::GetCaptureClient(host->window()));
     aura::client::SetCaptureClient(host->window(), NULL);

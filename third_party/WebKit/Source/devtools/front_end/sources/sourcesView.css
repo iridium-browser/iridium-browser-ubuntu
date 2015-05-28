@@ -54,12 +54,6 @@
     background-color: rgba(255, 225, 205, 0.40);
 }
 
-.editor-container-unsaved-committed-changes-icon {
-    background-image: url(Images/statusbarButtonGlyphs.png);
-    background-size: 320px 144px;
-    background-position: -202px -107px;
-}
-
 .source-frame-infobar {
     border-bottom: 1px solid rgb(187, 187, 187);
     display: flex;
@@ -148,4 +142,24 @@
 
 .source-frame-infobar-details-url {
     flex: 0 1000 auto;
+}
+
+@-webkit-keyframes source-frame-value-update-highlight-animation {
+    from {
+        background-color: inherit;
+        color: inherit;
+    }
+    10% {
+        background-color: rgb(158, 54, 153);
+        color: white;
+    }
+    to {
+        background-color: inherit;
+        color: inherit;
+    }
+}
+
+.source-frame-value-update-highlight {
+    -webkit-animation: source-frame-value-update-highlight-animation 0.8s 1 cubic-bezier(0, 0, 0.2, 1);
+    border-radius: 2px;
 }

@@ -627,7 +627,7 @@ TEST_F(VideoProcessorIntegrationTest, Process5PercentPacketLossVP9) {
                      false, true, false);
   // Metrics for expected quality.
   QualityMetrics quality_metrics;
-  SetQualityMetrics(&quality_metrics, 17.0, 14.0, 0.45, 0.37);
+  SetQualityMetrics(&quality_metrics, 17.0, 14.0, 0.45, 0.36);
   // Metrics for rate control.
   RateControlMetrics rc_metrics[1];
   SetRateControlMetrics(rc_metrics, 0, 0, 40, 20, 10, 20, 0);
@@ -656,10 +656,10 @@ TEST_F(VideoProcessorIntegrationTest, ProcessNoLossChangeBitRateVP9) {
                      false, true, false);
   // Metrics for expected quality.
   QualityMetrics quality_metrics;
-  SetQualityMetrics(&quality_metrics, 35.9, 32.0, 0.90, 0.85);
+  SetQualityMetrics(&quality_metrics, 35.9, 30.0, 0.90, 0.85);
   // Metrics for rate control.
   RateControlMetrics rc_metrics[3];
-  SetRateControlMetrics(rc_metrics, 0, 0, 30, 20, 20, 20, 0);
+  SetRateControlMetrics(rc_metrics, 0, 0, 30, 20, 20, 30, 0);
   SetRateControlMetrics(rc_metrics, 1, 2, 0, 20, 20, 60, 0);
   SetRateControlMetrics(rc_metrics, 2, 0, 0, 25, 20, 40, 0);
   ProcessFramesAndVerify(quality_metrics,
@@ -680,9 +680,9 @@ TEST_F(VideoProcessorIntegrationTest,
   config_.networking_config.packet_loss_probability = 0;
   // Bitrate and frame rate profile.
   RateProfile rate_profile;
-  SetRateProfilePars(&rate_profile, 0, 80, 24, 0);
-  SetRateProfilePars(&rate_profile, 1, 80, 15, 100);
-  SetRateProfilePars(&rate_profile, 2, 80, 10, 200);
+  SetRateProfilePars(&rate_profile, 0, 100, 24, 0);
+  SetRateProfilePars(&rate_profile, 1, 100, 15, 100);
+  SetRateProfilePars(&rate_profile, 2, 100, 10, 200);
   rate_profile.frame_index_rate_update[3] = kNbrFramesLong + 1;
   rate_profile.num_frames = kNbrFramesLong;
   // Codec/network settings.
@@ -691,11 +691,11 @@ TEST_F(VideoProcessorIntegrationTest,
                      false, true, false);
   // Metrics for expected quality.
   QualityMetrics quality_metrics;
-  SetQualityMetrics(&quality_metrics, 31.5, 19.0, 0.80, 0.45);
+  SetQualityMetrics(&quality_metrics, 31.5, 18.0, 0.80, 0.44);
   // Metrics for rate control.
   RateControlMetrics rc_metrics[3];
-  SetRateControlMetrics(rc_metrics, 0, 20, 50, 50, 15, 45, 0);
-  SetRateControlMetrics(rc_metrics, 1, 10, 0, 30, 10, 30, 0);
+  SetRateControlMetrics(rc_metrics, 0, 35, 50, 70, 15, 45, 0);
+  SetRateControlMetrics(rc_metrics, 1, 10, 0, 40, 10, 30, 0);
   SetRateControlMetrics(rc_metrics, 2, 5, 0, 30, 5, 20, 0);
   ProcessFramesAndVerify(quality_metrics,
                          rate_profile,
@@ -703,6 +703,28 @@ TEST_F(VideoProcessorIntegrationTest,
                          rc_metrics);
 }
 
+// VP9: Run with no packet loss and denoiser on. One key frame (first frame).
+TEST_F(VideoProcessorIntegrationTest, ProcessNoLossDenoiserOnVP9) {
+  // Bitrate and frame rate profile.
+  RateProfile rate_profile;
+  SetRateProfilePars(&rate_profile, 0, 500, 30, 0);
+  rate_profile.frame_index_rate_update[1] = kNbrFramesShort + 1;
+  rate_profile.num_frames = kNbrFramesShort;
+  // Codec/network settings.
+  CodecConfigPars process_settings;
+  SetCodecParameters(&process_settings, kVideoCodecVP9, 0.0f, -1, 1, false,
+                     true, true, false);
+  // Metrics for expected quality.
+  QualityMetrics quality_metrics;
+  SetQualityMetrics(&quality_metrics, 36.8, 35.8, 0.92, 0.91);
+  // Metrics for rate control.
+  RateControlMetrics rc_metrics[1];
+  SetRateControlMetrics(rc_metrics, 0, 0, 40, 20, 10, 20, 0);
+  ProcessFramesAndVerify(quality_metrics,
+                         rate_profile,
+                         process_settings,
+                         rc_metrics);
+}
 
 // TODO(marpan): Add temporal layer test for VP9, once changes are in
 // vp9 wrapper for this.

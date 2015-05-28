@@ -50,7 +50,7 @@ class ContentAutofillDriver : public AutofillDriver {
                               RendererFormDataAction action,
                               const FormData& data) override;
   void PingRenderer() override;
-  void DetectAccountCreationForms(
+  void PropagateAutofillPredictions(
       const std::vector<autofill::FormStructure*>& forms) override;
   void SendAutofillTypePredictionsToRenderer(
       const std::vector<FormStructure*>& forms) override;
@@ -61,6 +61,7 @@ class ContentAutofillDriver : public AutofillDriver {
   void RendererShouldFillFieldWithValue(const base::string16& value) override;
   void RendererShouldPreviewFieldWithValue(
       const base::string16& value) override;
+  void PopupHidden() override;
 
   // Handles a message that came from the associated render frame.
   bool HandleMessage(const IPC::Message& message);

@@ -34,8 +34,8 @@ class TestSearchResult : public SearchResult {
   // SearchResult overrides:
   void Open(int event_flags) override {}
   void InvokeAction(int action_index, int event_flags) override {}
-  scoped_ptr<SearchResult> Duplicate() override {
-    return scoped_ptr<SearchResult>(new TestSearchResult(id(), relevance()));
+  scoped_ptr<SearchResult> Duplicate() const override {
+    return make_scoped_ptr(new TestSearchResult(id(), relevance()));
   }
 
   // For reference equality testing. (Addresses cannot be used to test reference
@@ -57,7 +57,7 @@ int TestSearchResult::instantiation_count = 0;
 class TestSearchProvider : public SearchProvider {
  public:
   explicit TestSearchProvider(const std::string& prefix)
-      : prefix_(prefix), count_(0) {}
+      : prefix_(prefix), count_(0), bad_relevance_range_(false) {}
   ~TestSearchProvider() override {}
 
   // SearchProvider overrides:
@@ -66,7 +66,11 @@ class TestSearchProvider : public SearchProvider {
     for (size_t i = 0; i < count_; ++i) {
       const std::string id =
           base::StringPrintf("%s%d", prefix_.c_str(), static_cast<int>(i));
-      const double relevance = 1.0 - i / 10.0;
+      double relevance = 1.0 - i / 10.0;
+      // If bad_relevance_range_, change the relevances to give results outside
+      // of the canonical [0.0, 1.0] range.
+      if (bad_relevance_range_)
+        relevance = 10.0 - i * 10;
       TestSearchResult* result = new TestSearchResult(id, relevance);
       if (voice_result_indices.find(i) != voice_result_indices.end())
         result->set_voice_result(true);
@@ -78,10 +82,12 @@ class TestSearchProvider : public SearchProvider {
   void set_prefix(const std::string& prefix) { prefix_ = prefix; }
   void set_count(size_t count) { count_ = count; }
   void set_as_voice_result(size_t index) { voice_result_indices.insert(index); }
+  void set_bad_relevance_range() { bad_relevance_range_ = true; }
 
  private:
   std::string prefix_;
   size_t count_;
+  bool bad_relevance_range_;
   // Indices of results that will have the |voice_result| flag set.
   std::set<size_t> voice_result_indices;
 
@@ -120,7 +126,7 @@ class MixerTest : public testing::Test {
       providers_[i]->Stop();
     }
 
-    mixer_->MixAndPublish(is_voice_query_, KnownResults());
+    mixer_->MixAndPublish(is_voice_query_, known_results_);
   }
 
   std::string GetResults() const {
@@ -146,9 +152,14 @@ class MixerTest : public testing::Test {
     is_voice_query_ = is_voice_query;
   }
 
+  void AddKnownResult(const std::string& id, KnownResultType type) {
+    known_results_[id] = type;
+  }
+
  private:
   scoped_ptr<Mixer> mixer_;
   scoped_ptr<AppListModel::SearchResults> results_;
+  KnownResults known_results_;
 
   bool is_voice_query_;
 
@@ -218,6 +229,25 @@ TEST_F(MixerTest, RemoveDuplicates) {
   EXPECT_EQ("dup0,dup1,dup2", GetResults());
 }
 
+// Tests that "known results" have priority over others.
+TEST_F(MixerTest, KnownResultsPriority) {
+  // This gives omnibox 0 -- 5.
+  omnibox_provider()->set_count(6);
+
+  // omnibox 1 -- 4 are "known results".
+  AddKnownResult("omnibox1", PREFIX_SECONDARY);
+  AddKnownResult("omnibox2", PERFECT_SECONDARY);
+  AddKnownResult("omnibox3", PREFIX_PRIMARY);
+  AddKnownResult("omnibox4", PERFECT_PRIMARY);
+
+  RunQuery();
+
+  // omnibox 1 -- 4 should be prioritised over the others. They should be
+  // ordered 4, 3, 2, 1 (in order of match quality).
+  EXPECT_EQ("omnibox4,omnibox3,omnibox2,omnibox1,omnibox0,omnibox5",
+            GetResults());
+}
+
 TEST_F(MixerTest, VoiceQuery) {
   omnibox_provider()->set_count(3);
   RunQuery();
@@ -238,6 +268,25 @@ TEST_F(MixerTest, VoiceQuery) {
   omnibox_provider()->set_as_voice_result(2);
   RunQuery();
   EXPECT_EQ("omnibox1,omnibox2,omnibox0", GetResults());
+}
+
+TEST_F(MixerTest, BadRelevanceRange) {
+  // This gives relevance scores: (10.0, 0.0). Even though providers are
+  // supposed to give scores within the range [0.0, 1.0], we cannot rely on
+  // providers to do this, since they retrieve results from disparate and
+  // unreliable sources (like the Google+ API).
+  people_provider()->set_bad_relevance_range();
+  people_provider()->set_count(2);
+
+  // Give a massive boost to the second result.
+  AddKnownResult("people1", PERFECT_PRIMARY);
+
+  RunQuery();
+
+  // If the results are correctly clamped to the range [0.0, 1.0], the boost to
+  // "people1" will push it over the first result. If not, the massive base
+  // score of "people0" will erroneously keep it on top.
+  EXPECT_EQ("people1,people0", GetResults());
 }
 
 TEST_F(MixerTest, Publish) {

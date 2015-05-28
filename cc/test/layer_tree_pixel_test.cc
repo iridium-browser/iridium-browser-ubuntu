@@ -11,6 +11,7 @@
 #include "cc/layers/texture_layer.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/output/copy_output_result.h"
+#include "cc/output/direct_renderer.h"
 #include "cc/resources/texture_mailbox.h"
 #include "cc/test/paths.h"
 #include "cc/test/pixel_comparator.h"
@@ -52,7 +53,8 @@ scoped_ptr<OutputSurface> LayerTreePixelTest::CreateOutputSurface() {
     case PIXEL_TEST_GL: {
       bool flipped_output_surface = false;
       output_surface = make_scoped_ptr(new PixelTestOutputSurface(
-          new TestInProcessContextProvider, flipped_output_surface));
+          new TestInProcessContextProvider, new TestInProcessContextProvider,
+          flipped_output_surface));
       break;
     }
   }
@@ -61,11 +63,12 @@ scoped_ptr<OutputSurface> LayerTreePixelTest::CreateOutputSurface() {
   return output_surface.Pass();
 }
 
-void LayerTreePixelTest::CommitCompleteOnThread(LayerTreeHostImpl* impl) {
-  LayerTreeImpl* commit_tree =
-      impl->pending_tree() ? impl->pending_tree() : impl->active_tree();
-  if (commit_tree->source_frame_number() != 0)
+void LayerTreePixelTest::WillActivateTreeOnThread(LayerTreeHostImpl* impl) {
+  if (impl->sync_tree()->source_frame_number() != 0)
     return;
+
+  DirectRenderer* renderer = static_cast<DirectRenderer*>(impl->renderer());
+  renderer->SetEnlargePassTextureAmountForTesting(enlarge_texture_amount_);
 
   gfx::Rect viewport = impl->DeviceViewport();
   // The viewport has a 0,0 origin without external influence.

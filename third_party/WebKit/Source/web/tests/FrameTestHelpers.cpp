@@ -31,7 +31,8 @@
 #include "config.h"
 #include "web/tests/FrameTestHelpers.h"
 
-#include "core/testing/URLTestHelpers.h"
+#include "platform/testing/URLTestHelpers.h"
+#include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebData.h"
 #include "public/platform/WebString.h"
@@ -69,23 +70,6 @@ TestWebFrameClient* testClientForFrame(WebFrame* frame)
     return static_cast<TestWebFrameClient*>(toWebLocalFrameImpl(frame)->client());
 }
 
-class QuitTask : public WebThread::Task {
-public:
-    void PostThis(Timer<QuitTask>*)
-    {
-        // We don't just quit here because the SharedTimer may be part-way
-        // through the current queue of tasks when runPendingTasks was called,
-        // and we can't miss the tasks that were behind it.
-        // Takes ownership of |this|.
-        Platform::current()->currentThread()->postTask(this);
-    }
-
-    virtual void run()
-    {
-        Platform::current()->currentThread()->exitRunLoop();
-    }
-};
-
 class ServeAsyncRequestsTask : public WebThread::Task {
 public:
     explicit ServeAsyncRequestsTask(TestWebFrameClient* client)
@@ -97,7 +81,7 @@ public:
     {
         Platform::current()->unitTestSupport()->serveAsynchronousMockedRequests();
         if (m_client->isLoading())
-            Platform::current()->currentThread()->postTask(new ServeAsyncRequestsTask(m_client));
+            Platform::current()->currentThread()->postTask(FROM_HERE, new ServeAsyncRequestsTask(m_client));
         else
             Platform::current()->currentThread()->exitRunLoop();
     }
@@ -108,7 +92,7 @@ private:
 
 void pumpPendingRequests(WebFrame* frame)
 {
-    Platform::current()->currentThread()->postTask(new ServeAsyncRequestsTask(testClientForFrame(frame)));
+    Platform::current()->currentThread()->postTask(FROM_HERE, new ServeAsyncRequestsTask(testClientForFrame(frame)));
     Platform::current()->currentThread()->enterRunLoop();
 }
 
@@ -210,46 +194,37 @@ void loadFrame(WebFrame* frame, const std::string& url)
     urlRequest.initialize();
     urlRequest.setURL(URLTestHelpers::toKURL(url));
 
-    Platform::current()->currentThread()->postTask(new LoadTask(frame, urlRequest));
+    Platform::current()->currentThread()->postTask(FROM_HERE, new LoadTask(frame, urlRequest));
     pumpPendingRequests(frame);
 }
 
 void loadHTMLString(WebFrame* frame, const std::string& html, const WebURL& baseURL)
 {
-    Platform::current()->currentThread()->postTask(new LoadHTMLStringTask(frame, html, baseURL));
+    Platform::current()->currentThread()->postTask(FROM_HERE, new LoadHTMLStringTask(frame, html, baseURL));
     pumpPendingRequests(frame);
 }
 
 void loadHistoryItem(WebFrame* frame, const WebHistoryItem& item, WebHistoryLoadType loadType, WebURLRequest::CachePolicy cachePolicy)
 {
-    Platform::current()->currentThread()->postTask(new LoadHistoryItemTask(frame, item, loadType, cachePolicy));
+    Platform::current()->currentThread()->postTask(FROM_HERE, new LoadHistoryItemTask(frame, item, loadType, cachePolicy));
     pumpPendingRequests(frame);
 }
 
 void reloadFrame(WebFrame* frame)
 {
-    Platform::current()->currentThread()->postTask(new ReloadTask(frame, false));
+    Platform::current()->currentThread()->postTask(FROM_HERE, new ReloadTask(frame, false));
     pumpPendingRequests(frame);
 }
 
 void reloadFrameIgnoringCache(WebFrame* frame)
 {
-    Platform::current()->currentThread()->postTask(new ReloadTask(frame, true));
+    Platform::current()->currentThread()->postTask(FROM_HERE, new ReloadTask(frame, true));
     pumpPendingRequests(frame);
 }
 
 void pumpPendingRequestsDoNotUse(WebFrame* frame)
 {
     pumpPendingRequests(frame);
-}
-
-// FIXME: There's a duplicate implementation in UnitTestHelpers.cpp. Remove one.
-void runPendingTasks()
-{
-    // Pending tasks include Timers that have been scheduled.
-    Timer<QuitTask> quitOnTimeout(new QuitTask, &QuitTask::PostThis);
-    quitOnTimeout.startOneShot(0, FROM_HERE);
-    Platform::current()->currentThread()->enterRunLoop();
 }
 
 WebViewHelper::WebViewHelper()
@@ -277,6 +252,7 @@ WebViewImpl* WebViewHelper::initialize(bool enableJavascript, TestWebFrameClient
     else
         m_webView->settings()->setDeviceSupportsMouse(false);
 
+    m_webView->setDefaultPageScaleLimits(1, 4);
     m_webView->setMainFrame(WebLocalFrameImpl::create(webFrameClient));
 
     return m_webView;
@@ -304,7 +280,7 @@ TestWebFrameClient::TestWebFrameClient() : m_loadsInProgress(0)
 {
 }
 
-WebFrame* TestWebFrameClient::createChildFrame(WebLocalFrame* parent, const WebString& frameName)
+WebFrame* TestWebFrameClient::createChildFrame(WebLocalFrame* parent, const WebString& frameName, WebSandboxFlags sandboxFlags)
 {
     WebFrame* frame = WebLocalFrame::create(this);
     parent->appendChild(frame);
@@ -336,7 +312,7 @@ void TestWebFrameClient::waitForLoadToComplete()
         // runPendingTasks may not be enough.
         // runPendingTasks only ensures that main thread task queue is empty,
         // and asynchronous parsing make use of off main thread HTML parser.
-        FrameTestHelpers::runPendingTasks();
+        testing::runPendingTasks();
         if (!isLoading())
             break;
 

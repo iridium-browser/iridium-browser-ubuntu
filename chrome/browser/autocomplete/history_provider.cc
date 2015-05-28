@@ -8,24 +8,27 @@
 
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/in_memory_url_index_types.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_model.h"
-#include "components/history/core/browser/in_memory_url_index_types.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/omnibox/autocomplete_input.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "url/url_util.h"
+
+using bookmarks::BookmarkModel;
 
 void HistoryProvider::DeleteMatch(const AutocompleteMatch& match) {
   DCHECK(done_);
   DCHECK(profile_);
   DCHECK(match.deletable);
 
-  HistoryService* const history_service =
-      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
+  history::HistoryService* const history_service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
 
   // Delete the underlying URL along with all its visits from the history DB.
   // The resulting HISTORY_URLS_DELETED notification will also cause all caches
@@ -78,7 +81,7 @@ void HistoryProvider::DeleteMatchFromMatches(const AutocompleteMatch& match) {
 
 // static
 ACMatchClassifications HistoryProvider::SpansFromTermMatch(
-    const history::TermMatches& matches,
+    const TermMatches& matches,
     size_t text_length,
     bool is_url) {
   ACMatchClassification::Style url_style =

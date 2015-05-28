@@ -13,11 +13,10 @@
 #include "components/sessions/session_id.h"
 #include "components/web_modal/popup_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "extensions/browser/extension_icon_image.h"
+#include "extensions/browser/extension_registry_observer.h"
 #include "ui/base/ui_base_types.h"  // WindowShowState
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image.h"
@@ -43,6 +42,7 @@ namespace extensions {
 class AppDelegate;
 class AppWebContentsHelper;
 class Extension;
+class ExtensionRegistry;
 class NativeAppWindow;
 class PlatformAppBrowserTest;
 class WindowController;
@@ -82,11 +82,11 @@ class AppWindowContents {
 
 // AppWindow is the type of window used by platform apps. App windows
 // have a WebContents but none of the chrome of normal browser windows.
-class AppWindow : public content::NotificationObserver,
-                  public content::WebContentsDelegate,
+class AppWindow : public content::WebContentsDelegate,
                   public content::WebContentsObserver,
                   public web_modal::WebContentsModalDialogManagerDelegate,
-                  public IconImage::Observer {
+                  public IconImage::Observer,
+                  public ExtensionRegistryObserver {
  public:
   enum WindowType {
     WINDOW_TYPE_DEFAULT = 1 << 0,   // Default app window.
@@ -351,6 +351,12 @@ class AppWindow : public content::NotificationObserver,
   // Whether the app window wants to be alpha enabled.
   bool requested_alpha_enabled() const { return requested_alpha_enabled_; }
 
+  // Whether the app window is created by IME extensions.
+  // TODO(bshe): rename to hide_app_window_in_launcher if it is not used
+  // anywhere other than app_window_launcher_controller after M45. Otherwise,
+  // remove this TODO.
+  bool is_ime_window() const { return is_ime_window_; }
+
   void SetAppWindowContentsForTesting(scoped_ptr<AppWindowContents> contents) {
     app_window_contents_ = contents.Pass();
   }
@@ -376,8 +382,9 @@ class AppWindow : public content::NotificationObserver,
                     const gfx::Rect& pos) override;
   void NavigationStateChanged(content::WebContents* source,
                               content::InvalidateTypes changed_flags) override;
-  void ToggleFullscreenModeForTab(content::WebContents* source,
-                                  bool enter_fullscreen) override;
+  void EnterFullscreenModeForTab(content::WebContents* source,
+                                 const GURL& origin) override;
+  void ExitFullscreenModeForTab(content::WebContents* source) override;
   bool IsFullscreenForTabOrPending(
       const content::WebContents* source) const override;
   void RequestMediaAccessPermission(
@@ -393,7 +400,7 @@ class AppWindow : public content::NotificationObserver,
   void AddNewContents(content::WebContents* source,
                       content::WebContents* new_contents,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_pos,
+                      const gfx::Rect& initial_rect,
                       bool user_gesture,
                       bool* was_blocked) override;
   bool PreHandleKeyboardEvent(content::WebContents* source,
@@ -409,17 +416,26 @@ class AppWindow : public content::NotificationObserver,
                              const blink::WebGestureEvent& event) override;
 
   // content::WebContentsObserver implementation.
+  void RenderViewCreated(content::RenderViewHost* render_view_host) override;
   void DidFirstVisuallyNonEmptyPaint() override;
 
-  // content::NotificationObserver implementation.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // ExtensionRegistryObserver implementation.
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const Extension* extension,
+                           UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionWillBeInstalled(content::BrowserContext* browser_context,
+                                  const Extension* extension,
+                                  bool is_update,
+                                  bool from_ephemeral,
+                                  const std::string& old_name) override;
 
   // web_modal::WebContentsModalDialogManagerDelegate implementation.
   void SetWebContentsBlocked(content::WebContents* web_contents,
                              bool blocked) override;
   bool IsWebContentsVisible(content::WebContents* web_contents) override;
+
+  void ToggleFullscreenModeForTab(content::WebContents* source,
+                                  bool enter_fullscreen);
 
   // Saves the window geometry/position/screen bounds.
   void SaveWindowPosition();
@@ -483,7 +499,6 @@ class AppWindow : public content::NotificationObserver,
 
   const SessionID session_id_;
   WindowType window_type_;
-  content::NotificationRegistrar registrar_;
 
   // Icon shown in the task bar.
   gfx::Image app_icon_;
@@ -549,6 +564,9 @@ class AppWindow : public content::NotificationObserver,
 
   // Whether |alpha_enabled| was set in the CreateParams.
   bool requested_alpha_enabled_;
+
+  // Whether |is_ime_window| was set in the CreateParams.
+  bool is_ime_window_;
 
   base::WeakPtrFactory<AppWindow> image_loader_ptr_factory_;
 

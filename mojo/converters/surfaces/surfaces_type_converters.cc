@@ -18,6 +18,7 @@
 #include "cc/quads/yuv_video_draw_quad.h"
 #include "cc/surfaces/surface_id_allocator.h"
 #include "mojo/converters/geometry/geometry_type_converters.h"
+#include "mojo/converters/transform/transform_type_converters.h"
 
 namespace mojo {
 
@@ -42,10 +43,8 @@ COMPILE_ASSERT(
     cc::YUVVideoDrawQuad::REC_601 ==
         static_cast<cc::YUVVideoDrawQuad::ColorSpace>(YUV_COLOR_SPACE_REC_601),
     rec_601_enum_matches);
-COMPILE_ASSERT(cc::YUVVideoDrawQuad::REC_601_JPEG ==
-                   static_cast<cc::YUVVideoDrawQuad::ColorSpace>(
-                       YUV_COLOR_SPACE_REC_601_JPEG),
-               rec_601_jpeg_enum_matches);
+// TODO(jamesr): Add REC_709 and JPEG to the YUVColorSpace enum upstream in
+// mojo.
 
 namespace {
 
@@ -175,6 +174,8 @@ bool ConvertDrawQuad(const QuadPtr& input,
                        input->visible_rect.To<gfx::Rect>(),
                        input->needs_blending,
                        yuv_state->tex_coord_rect.To<gfx::RectF>(),
+                       gfx::Size(),  // TODO(jamesr): ya texture size
+                       gfx::Size(),  // TODO(jamesr): uv texture size
                        yuv_state->y_plane_resource_id,
                        yuv_state->u_plane_resource_id,
                        yuv_state->v_plane_resource_id,

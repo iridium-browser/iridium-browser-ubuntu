@@ -18,6 +18,7 @@
 #include "cc/test/fake_tile_manager_client.h"
 #include "cc/test/impl_side_painting_settings.h"
 #include "cc/test/test_shared_bitmap_manager.h"
+#include "cc/test/test_task_graph_runner.h"
 #include "cc/test/test_tile_priorities.h"
 #include "cc/trees/layer_tree_impl.h"
 
@@ -64,6 +65,9 @@ class FakeTileTaskRunnerImpl : public TileTaskRunner, public TileTaskClient {
     }
     completed_tasks_.clear();
   }
+  ResourceFormat GetResourceFormat() override {
+    return RGBA_8888;
+  }
 
   // Overridden from TileTaskClient:
   scoped_ptr<RasterBuffer> AcquireBufferForRaster(
@@ -87,7 +91,8 @@ class TileManagerPerfTest : public testing::Test {
         proxy_(base::MessageLoopProxy::current()),
         host_impl_(ImplSidePaintingSettings(10000),
                    &proxy_,
-                   &shared_bitmap_manager_),
+                   &shared_bitmap_manager_,
+                   &task_graph_runner_),
         timer_(kWarmupRuns,
                base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
                kTimeCheckInterval) {}
@@ -176,12 +181,12 @@ class TileManagerPerfTest : public testing::Test {
     std::vector<FakePictureLayerImpl*> layers = CreateLayers(layer_count, 10);
     bool resourceless_software_draw = false;
     for (const auto& layer : layers)
-      layer->UpdateTiles(Occlusion(), resourceless_software_draw);
+      layer->UpdateTiles(resourceless_software_draw);
 
     timer_.Reset();
     do {
-      RasterTilePriorityQueue queue;
-      host_impl_.BuildRasterQueue(&queue, priorities[priority_count]);
+      scoped_ptr<RasterTilePriorityQueue> queue(host_impl_.BuildRasterQueue(
+          priorities[priority_count], RasterTilePriorityQueue::Type::ALL));
       priority_count = (priority_count + 1) % arraysize(priorities);
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
@@ -204,18 +209,18 @@ class TileManagerPerfTest : public testing::Test {
     std::vector<FakePictureLayerImpl*> layers = CreateLayers(layer_count, 100);
     bool resourceless_software_draw = false;
     for (const auto& layer : layers)
-      layer->UpdateTiles(Occlusion(), resourceless_software_draw);
+      layer->UpdateTiles(resourceless_software_draw);
 
     int priority_count = 0;
     timer_.Reset();
     do {
       int count = tile_count;
-      RasterTilePriorityQueue queue;
-      host_impl_.BuildRasterQueue(&queue, priorities[priority_count]);
+      scoped_ptr<RasterTilePriorityQueue> queue(host_impl_.BuildRasterQueue(
+          priorities[priority_count], RasterTilePriorityQueue::Type::ALL));
       while (count--) {
-        ASSERT_FALSE(queue.IsEmpty());
-        ASSERT_TRUE(queue.Top() != NULL);
-        queue.Pop();
+        ASSERT_FALSE(queue->IsEmpty());
+        ASSERT_TRUE(queue->Top() != NULL);
+        queue->Pop();
       }
       priority_count = (priority_count + 1) % arraysize(priorities);
       timer_.NextLap();
@@ -240,7 +245,7 @@ class TileManagerPerfTest : public testing::Test {
     std::vector<FakePictureLayerImpl*> layers = CreateLayers(layer_count, 10);
     bool resourceless_software_draw = false;
     for (const auto& layer : layers) {
-      layer->UpdateTiles(Occlusion(), resourceless_software_draw);
+      layer->UpdateTiles(resourceless_software_draw);
       for (size_t i = 0; i < layer->num_tilings(); ++i) {
         tile_manager()->InitializeTilesWithResourcesForTesting(
             layer->tilings()->tiling_at(i)->AllTilesForTesting());
@@ -249,8 +254,8 @@ class TileManagerPerfTest : public testing::Test {
 
     timer_.Reset();
     do {
-      EvictionTilePriorityQueue queue;
-      host_impl_.BuildEvictionQueue(&queue, priorities[priority_count]);
+      scoped_ptr<EvictionTilePriorityQueue> queue(
+          host_impl_.BuildEvictionQueue(priorities[priority_count]));
       priority_count = (priority_count + 1) % arraysize(priorities);
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
@@ -275,7 +280,7 @@ class TileManagerPerfTest : public testing::Test {
         CreateLayers(layer_count, tile_count);
     bool resourceless_software_draw = false;
     for (const auto& layer : layers) {
-      layer->UpdateTiles(Occlusion(), resourceless_software_draw);
+      layer->UpdateTiles(resourceless_software_draw);
       for (size_t i = 0; i < layer->num_tilings(); ++i) {
         tile_manager()->InitializeTilesWithResourcesForTesting(
             layer->tilings()->tiling_at(i)->AllTilesForTesting());
@@ -285,12 +290,12 @@ class TileManagerPerfTest : public testing::Test {
     timer_.Reset();
     do {
       int count = tile_count;
-      EvictionTilePriorityQueue queue;
-      host_impl_.BuildEvictionQueue(&queue, priorities[priority_count]);
+      scoped_ptr<EvictionTilePriorityQueue> queue(
+          host_impl_.BuildEvictionQueue(priorities[priority_count]));
       while (count--) {
-        ASSERT_FALSE(queue.IsEmpty());
-        ASSERT_TRUE(queue.Top() != NULL);
-        queue.Pop();
+        ASSERT_FALSE(queue->IsEmpty());
+        ASSERT_TRUE(queue->Top() != NULL);
+        queue->Pop();
       }
       priority_count = (priority_count + 1) % arraysize(priorities);
       timer_.NextLap();
@@ -352,7 +357,8 @@ class TileManagerPerfTest : public testing::Test {
       ++next_id;
     }
 
-    host_impl_.pending_tree()->UpdateDrawProperties();
+    bool update_lcd_text = false;
+    host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
     for (FakePictureLayerImpl* layer : layers)
       layer->CreateAllTiles();
 
@@ -384,7 +390,7 @@ class TileManagerPerfTest : public testing::Test {
           CreateBeginFrameArgsForTesting(BEGINFRAME_FROM_HERE);
       host_impl_.UpdateCurrentBeginFrameArgs(args);
       for (const auto& layer : layers)
-        layer->UpdateTiles(Occlusion(), resourceless_software_draw);
+        layer->UpdateTiles(resourceless_software_draw);
 
       GlobalStateThatImpactsTilePriority global_state(GlobalStateForTest());
       tile_manager()->PrepareTiles(global_state);
@@ -403,6 +409,7 @@ class TileManagerPerfTest : public testing::Test {
   GlobalStateThatImpactsTilePriority global_state_;
 
   TestSharedBitmapManager shared_bitmap_manager_;
+  TestTaskGraphRunner task_graph_runner_;
   TileMemoryLimitPolicy memory_limit_policy_;
   int max_tiles_;
   int id_;

@@ -16,6 +16,7 @@
 namespace blink {
 
 class DOMWindow;
+class Dictionary;
 class EventTarget;
 class WorkerGlobalScope;
 
@@ -182,6 +183,14 @@ inline v8::Handle<v8::Value> toV8(const ScriptValue& value, v8::Handle<v8::Objec
     return value.v8Value();
 }
 
+// Dictionary
+
+inline v8::Handle<v8::Value> toV8(const Dictionary& value, v8::Handle<v8::Object> creationContext, v8::Isolate*)
+{
+    ASSERT_NOT_REACHED();
+    return v8::Handle<v8::Value>();
+}
+
 // Array
 
 template<typename Sequence>
@@ -205,6 +214,15 @@ template<typename T, size_t inlineCapacity>
 inline v8::Handle<v8::Value> toV8(const HeapVector<T, inlineCapacity>& value, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
     return toV8SequenceInternal(value, creationContext, isolate);
+}
+
+template<typename T>
+inline v8::Handle<v8::Value> toV8(const Vector<std::pair<String, T>>& value, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
+{
+    v8::Local<v8::Object> object = v8::Object::New(isolate);
+    for (unsigned i = 0; i < value.size(); ++i)
+        object->Set(v8String(isolate, value[i].first), toV8(value[i].second, creationContext, isolate));
+    return object;
 }
 
 } // namespace blink
