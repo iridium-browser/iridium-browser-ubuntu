@@ -4,7 +4,7 @@ debian-bug: http://bugs.debian.org/750361
 
 --- a/build/common.gypi
 +++ b/build/common.gypi
-@@ -3771,8 +3771,6 @@
+@@ -3817,8 +3817,6 @@
                  # http://crbug.com/313032 for an example where this has "bit"
                  # us in the past.
                  'cflags': [
@@ -24,7 +24,7 @@ debian-bug: http://bugs.debian.org/750361
  #include <xmmintrin.h>
  #define CONVOLVE_FUNC Convolve_SSE
  #elif defined(ARCH_CPU_ARM_FAMILY) && defined(USE_NEON)
-@@ -334,7 +334,7 @@ float SincResampler::Convolve_C(const fl
+@@ -342,7 +342,7 @@
        kernel_interpolation_factor * sum2);
  }
  
@@ -35,7 +35,7 @@ debian-bug: http://bugs.debian.org/750361
                                    double kernel_interpolation_factor) {
 --- a/media/base/sinc_resampler.h
 +++ b/media/base/sinc_resampler.h
-@@ -89,7 +89,7 @@ class MEDIA_EXPORT SincResampler {
+@@ -94,7 +94,7 @@
    // ARM, NEON support is chosen at compile time based on compilation flags.
    static float Convolve_C(const float* input_ptr, const float* k1,
                            const float* k2, double kernel_interpolation_factor);
@@ -46,7 +46,7 @@ debian-bug: http://bugs.debian.org/750361
                              double kernel_interpolation_factor);
 --- a/media/base/sinc_resampler_perftest.cc
 +++ b/media/base/sinc_resampler_perftest.cc
-@@ -21,7 +21,7 @@ static const double kKernelInterpolation
+@@ -21,7 +21,7 @@
  static void DoNothing(int frames, float* destination) {}
  
  // Define platform independent function name for Convolve* tests.
@@ -57,7 +57,7 @@ debian-bug: http://bugs.debian.org/750361
  #define CONVOLVE_FUNC Convolve_NEON
 --- a/media/base/sinc_resampler_unittest.cc
 +++ b/media/base/sinc_resampler_unittest.cc
-@@ -151,7 +151,7 @@ TEST(SincResamplerTest, DISABLED_SetRati
+@@ -150,7 +150,7 @@
  
  
  // Define platform independent function name for Convolve* tests.
@@ -77,7 +77,7 @@ debian-bug: http://bugs.debian.org/750361
  #include <xmmintrin.h>
  // Don't use custom SSE versions where the auto-vectorized C version performs
  // better, which is anywhere clang is used.
-@@ -89,7 +89,7 @@ std::pair<float, float> EWMAAndMaxPower_
+@@ -89,7 +89,7 @@
    return result;
  }
  
@@ -88,7 +88,7 @@ debian-bug: http://bugs.debian.org/750361
    const int last_index = len - rem;
 --- a/media/base/vector_math_perftest.cc
 +++ b/media/base/vector_math_perftest.cc
-@@ -80,7 +80,7 @@ class VectorMathPerfTest : public testin
+@@ -80,7 +80,7 @@
  };
  
  // Define platform dependent function names for SIMD optimized methods.
@@ -99,7 +99,7 @@ debian-bug: http://bugs.debian.org/750361
  #define EWMAAndMaxPower_FUNC EWMAAndMaxPower_SSE
 --- a/media/base/vector_math_testing.h
 +++ b/media/base/vector_math_testing.h
-@@ -19,7 +19,7 @@ MEDIA_EXPORT void FMUL_C(const float src
+@@ -19,7 +19,7 @@
  MEDIA_EXPORT std::pair<float, float> EWMAAndMaxPower_C(
      float initial_value, const float src[], int len, float smoothing_factor);
  
@@ -110,7 +110,7 @@ debian-bug: http://bugs.debian.org/750361
  MEDIA_EXPORT void FMUL_SSE(const float src[], float scale, int len,
 --- a/media/base/vector_math_unittest.cc
 +++ b/media/base/vector_math_unittest.cc
-@@ -73,7 +73,7 @@ TEST_F(VectorMathTest, FMAC) {
+@@ -73,7 +73,7 @@
      VerifyOutput(kResult);
    }
  
@@ -119,7 +119,7 @@ debian-bug: http://bugs.debian.org/750361
    {
      SCOPED_TRACE("FMAC_SSE");
      FillTestVectors(kInputFillValue, kOutputFillValue);
-@@ -114,7 +114,7 @@ TEST_F(VectorMathTest, FMUL) {
+@@ -114,7 +114,7 @@
      VerifyOutput(kResult);
    }
  
@@ -128,7 +128,7 @@ debian-bug: http://bugs.debian.org/750361
    {
      SCOPED_TRACE("FMUL_SSE");
      FillTestVectors(kInputFillValue, kOutputFillValue);
-@@ -222,7 +222,7 @@ class EWMATestScenario {
+@@ -222,7 +222,7 @@
        EXPECT_NEAR(expected_max_, result.second, 0.0000001f);
      }
  
@@ -139,9 +139,9 @@ debian-bug: http://bugs.debian.org/750361
        const std::pair<float, float>& result = vector_math::EWMAAndMaxPower_SSE(
 --- a/media/base/yuv_convert.cc
 +++ b/media/base/yuv_convert.cc
-@@ -27,7 +27,7 @@
+@@ -29,7 +29,7 @@
+ #include "media/base/simd/convert_yuv_to_rgb.h"
  #include "media/base/simd/filter_yuv.h"
- #include "media/base/simd/yuv_to_rgb_table.h"
  
 -#if defined(ARCH_CPU_X86_FAMILY)
 +#if defined(__x86_64__)
@@ -150,7 +150,7 @@ debian-bug: http://bugs.debian.org/750361
  #else
 --- a/media/base/yuv_convert.h
 +++ b/media/base/yuv_convert.h
-@@ -15,7 +15,7 @@
+@@ -14,7 +14,7 @@
  // hide the versions implemented with heavy use of MMX intrinsics.
  // TODO(wolenetz): Use MMX intrinsics when compiling win64 with Visual
  // Studio 2012? http://crbug.com/173450
@@ -161,7 +161,7 @@ debian-bug: http://bugs.debian.org/750361
  #endif
 --- a/media/base/yuv_convert_unittest.cc
 +++ b/media/base/yuv_convert_unittest.cc
-@@ -886,6 +886,6 @@ TEST(YUVConvertTest, LinearScaleYUVToRGB
+@@ -887,6 +887,6 @@
  
  #endif  // defined(ARCH_CPU_X86_64)
  
@@ -180,7 +180,7 @@ debian-bug: http://bugs.debian.org/750361
  #include <emmintrin.h>
  #endif
  
-@@ -102,7 +102,7 @@ void DirectConvolver::process(AudioFloat
+@@ -102,7 +102,7 @@
  #endif // CPU(X86)
  #else
      size_t i = 0;
@@ -189,7 +189,7 @@ debian-bug: http://bugs.debian.org/750361
      // Convolution using SSE2. Currently only do this if both |kernelSize| and |framesToProcess|
      // are multiples of 4. If not, use the straightforward loop below.
  
-@@ -412,7 +412,7 @@ void DirectConvolver::process(AudioFloat
+@@ -412,7 +412,7 @@
          }
          destP[i++] = sum;
      }
@@ -209,7 +209,7 @@ debian-bug: http://bugs.debian.org/750361
  #include <emmintrin.h>
  #endif
  
-@@ -261,7 +261,7 @@ void SincResampler::process(AudioSourceP
+@@ -261,7 +261,7 @@
              {
                  float input;
  
@@ -229,7 +229,7 @@ debian-bug: http://bugs.debian.org/750361
  #include <emmintrin.h>
  #endif
  
-@@ -125,7 +125,7 @@ void vsma(const float* sourceP, int sour
+@@ -125,7 +125,7 @@
  {
      int n = framesToProcess;
  
@@ -238,7 +238,7 @@ debian-bug: http://bugs.debian.org/750361
      if ((sourceStride == 1) && (destStride == 1)) {
          float k = *scale;
  
-@@ -198,7 +198,7 @@ void vsmul(const float* sourceP, int sou
+@@ -198,7 +198,7 @@
  {
      int n = framesToProcess;
  
@@ -247,7 +247,7 @@ debian-bug: http://bugs.debian.org/750361
      if ((sourceStride == 1) && (destStride == 1)) {
          float k = *scale;
  
-@@ -269,7 +269,7 @@ void vsmul(const float* sourceP, int sou
+@@ -269,7 +269,7 @@
          sourceP += sourceStride;
          destP += destStride;
      }
@@ -256,7 +256,7 @@ debian-bug: http://bugs.debian.org/750361
      }
  #endif
  }
-@@ -278,7 +278,7 @@ void vadd(const float* source1P, int sou
+@@ -278,7 +278,7 @@
  {
      int n = framesToProcess;
  
@@ -265,7 +265,7 @@ debian-bug: http://bugs.debian.org/750361
      if ((sourceStride1 ==1) && (sourceStride2 == 1) && (destStride == 1)) {
          // If the sourceP address is not 16-byte aligned, the first several frames (at most three) should be processed separately.
          while ((reinterpret_cast<size_t>(source1P) & 0x0F) && n) {
-@@ -381,7 +381,7 @@ void vadd(const float* source1P, int sou
+@@ -381,7 +381,7 @@
          source2P += sourceStride2;
          destP += destStride;
      }
@@ -274,7 +274,7 @@ debian-bug: http://bugs.debian.org/750361
      }
  #endif
  }
-@@ -391,7 +391,7 @@ void vmul(const float* source1P, int sou
+@@ -391,7 +391,7 @@
  
      int n = framesToProcess;
  
@@ -283,7 +283,7 @@ debian-bug: http://bugs.debian.org/750361
      if ((sourceStride1 == 1) && (sourceStride2 == 1) && (destStride == 1)) {
          // If the source1P address is not 16-byte aligned, the first several frames (at most three) should be processed separately.
          while ((reinterpret_cast<uintptr_t>(source1P) & 0x0F) && n) {
-@@ -464,7 +464,7 @@ void vmul(const float* source1P, int sou
+@@ -464,7 +464,7 @@
  void zvmul(const float* real1P, const float* imag1P, const float* real2P, const float* imag2P, float* realDestP, float* imagDestP, size_t framesToProcess)
  {
      unsigned i = 0;
@@ -292,7 +292,7 @@ debian-bug: http://bugs.debian.org/750361
      // Only use the SSE optimization in the very common case that all addresses are 16-byte aligned.
      // Otherwise, fall through to the scalar code below.
      if (!(reinterpret_cast<uintptr_t>(real1P) & 0x0F)
-@@ -522,7 +522,7 @@ void vsvesq(const float* sourceP, int so
+@@ -522,7 +522,7 @@
      int n = framesToProcess;
      float sum = 0;
  
@@ -301,7 +301,7 @@ debian-bug: http://bugs.debian.org/750361
      if (sourceStride == 1) {
          // If the sourceP address is not 16-byte aligned, the first several frames (at most three) should be processed separately.
          while ((reinterpret_cast<uintptr_t>(sourceP) & 0x0F) && n) {
-@@ -587,7 +587,7 @@ void vmaxmgv(const float* sourceP, int s
+@@ -587,7 +587,7 @@
      int n = framesToProcess;
      float max = 0;
  
