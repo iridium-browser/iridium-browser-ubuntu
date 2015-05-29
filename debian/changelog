@@ -1,3 +1,12 @@
+iridium-browser (43.0.2357.85-0iridium43.1+1) precise; urgency=low
+
+  * Imported Upstream version 43.0.2357.85
+  * Removed patch no longer needed.
+  * Updated iridium-browser patch to 43.1
+  * Updated patches for new version. Also no longer apply some Ubuntu-specific ones.
+
+ -- Joachim Bauch <bauch@struktur.de>  Fri, 29 May 2015 10:51:47 +0200
+
 iridium-browser (41.0.2272.118-0iridium41.2+2) precise; urgency=low
 
   * Renamed app to "Iridium Browser" in dock (fixes #5).
