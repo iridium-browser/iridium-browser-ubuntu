@@ -1,3 +1,25 @@
+--- a/.DEPS.git
++++ b/.DEPS.git
+@@ -7,7 +7,7 @@
+     'eyes-free':
+          'http://eyes-free.googlecode.com/svn',
+     'webkit_rev':
+-         '@87b96f34af3b082d894a133e11a89e2b585c2963',
++         '@df1831922f8898d4617b7469f0a0da3f4f09f1ad',
+     'blink':
+          'http://src.chromium.org/blink',
+     'skia':
+--- a/DEPS
++++ b/DEPS
+@@ -137,7 +137,7 @@
+   'src/testing/gtest':
+     (Var("git.chromium.org")) + '/external/googletest.git@be1868139ffe0ccd0e8e3b37292b84c821d9c8ad',
+   'src/third_party/WebKit':
+-    (Var("git.chromium.org")) + '/chromium/blink.git@87b96f34af3b082d894a133e11a89e2b585c2963',
++    (Var("git.chromium.org")) + '/chromium/blink.git@df1831922f8898d4617b7469f0a0da3f4f09f1ad',
+   'src/third_party/angle':
+     (Var("git.chromium.org")) + '/angle/angle.git@99f075dade7cfb0b56e80a065de3218745e4c177',
+   'src/third_party/bidichecker':
 --- a/android_webview/common/aw_version_info_values.h.version
 +++ b/android_webview/common/aw_version_info_values.h.version
 @@ -5,6 +5,6 @@
@@ -184,9 +206,482 @@
 -MINOR=0
 -BUILD=2357
 -PATCH=85
-+MINOR=1
++MINOR=2
 +BUILD=0
 +PATCH=0
+--- a/chrome/android/java/strings/translations/android_chrome_strings_am.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_am.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">በአድራሻ አሞሌው ላይ እየተየቡ ሳለ ተዛማጅ መጠይቆችን ለማሳየት እና ታዋቂ ድር ጣቢያዎችን ለማሳየት የመገመቻ አገልግሎት ይጠቀሙ</translation>
+ <translation id="3303414029551471755">ይዘቱን ማውረድ ይቀጥል?</translation>
+ <translation id="6698801883190606802">የተመሳሰለ ውሂብ ያስተዳድሩ</translation>
+-<translation id="1657479659644194568">Chrome ያቀናብሩ</translation>
++<translation id="1657479659644194568">Iridium ያቀናብሩ</translation>
+ <translation id="6448273550210938826">የፍለጋ እና ዩአርኤል ጥቆማዎች</translation>
+ <translation id="7998918019931843664">የተዘጋውን ትር ዳግም ይክፈቱ</translation>
+ <translation id="8425213833346101688">ለውጥ</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_ar.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_ar.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">يمكنك استخدام خدمة التوقعات لعرض طلبات البحث ذات الصلة ومواقع الويب الشائعة أثناء الكتابة في شريط العناوين</translation>
+ <translation id="3303414029551471755">هل ترغب في الاستمرار في تنزيل المحتوى؟</translation>
+ <translation id="6698801883190606802">إدارة البيانات المتزامنة</translation>
+-<translation id="1657479659644194568">‏إعداد Chrome</translation>
++<translation id="1657479659644194568">‏إعداد Iridium</translation>
+ <translation id="6448273550210938826">‏اقتراحات البحث وعناوين URL</translation>
+ <translation id="7998918019931843664">إعادة فتح علامة التبويب المغلقة</translation>
+ <translation id="8425213833346101688">تغيير</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_bg.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_bg.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Използване на услуга за предвиждания за показване на сродни заявки и популярни уебсайтове, докато пишете в адресната лента</translation>
+ <translation id="3303414029551471755">Искате ли да продължите с изтеглянето на съдържанието?</translation>
+ <translation id="6698801883190606802">Управление на синхронизираните данни</translation>
+-<translation id="1657479659644194568">Настройване на Chrome</translation>
++<translation id="1657479659644194568">Настройване на Iridium</translation>
+ <translation id="6448273550210938826">Предложения за търсене и за URL адреси</translation>
+ <translation id="7998918019931843664">Повторно отваряне на затворения раздел</translation>
+ <translation id="8425213833346101688">Промяна</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_ca.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_ca.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Utilitza un servei de predicció per mostrar consultes relacionades i llocs web populars mentre escriviu a la barra d'adreces</translation>
+ <translation id="3303414029551471755">Voleu baixar el contingut?</translation>
+ <translation id="6698801883190606802">Gestioneu les dades sincronitzades</translation>
+-<translation id="1657479659644194568">Configurar Chrome</translation>
++<translation id="1657479659644194568">Configurar Iridium</translation>
+ <translation id="6448273550210938826">Suggeriments de cerca i d'URL</translation>
+ <translation id="7998918019931843664">Torna a obrir la pestanya tancada</translation>
+ <translation id="8425213833346101688">Canvia</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_cs.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_cs.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Používat službu předpovídání k zobrazení souvisejících dotazů a oblíbených webových stránek</translation>
+ <translation id="3303414029551471755">Chcete pokračovat ke stažení obsahu?</translation>
+ <translation id="6698801883190606802">Správa synchronizovaných dat</translation>
+-<translation id="1657479659644194568">Nastavení Chromu</translation>
++<translation id="1657479659644194568">Nastavení Iridium</translation>
+ <translation id="6448273550210938826">Vyhledávání a návrhy adres URL</translation>
+ <translation id="7998918019931843664">Znovu otevřít zavřenou kartu</translation>
+ <translation id="8425213833346101688">Změnit</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_da.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_da.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Brug en forudsigelsestjeneste til at få vist relaterede forespørgsler og populære websites, mens du skriver på adresselinjen</translation>
+ <translation id="3303414029551471755">Vil du fortsætte og downloade indholdet?</translation>
+ <translation id="6698801883190606802">Administrer synkroniserede data</translation>
+-<translation id="1657479659644194568">Konfigurer Chrome</translation>
++<translation id="1657479659644194568">Konfigurer Iridium</translation>
+ <translation id="6448273550210938826">Forslag til søgning og webadresser</translation>
+ <translation id="7998918019931843664">Åbn lukket fane igen</translation>
+ <translation id="8425213833346101688">Skift</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_de.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_de.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Während der Eingabe in die Adressleiste mithilfe einer Vervollständigungsfunktion verwandte Suchanfragen und beliebte Websites einblenden</translation>
+ <translation id="3303414029551471755">Inhalt herunterladen?</translation>
+ <translation id="6698801883190606802">Synchronisierte Daten verwalten</translation>
+-<translation id="1657479659644194568">Chrome einrichten</translation>
++<translation id="1657479659644194568">Iridium einrichten</translation>
+ <translation id="6448273550210938826">Such- und URL-Vorschläge</translation>
+ <translation id="7998918019931843664">Geschlossenen Tab wieder öffnen</translation>
+ <translation id="8425213833346101688">Ändern</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_el.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_el.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Χρήση υπηρεσίας προβλέψεων για την εμφάνιση σχετικών ερωτημάτων και δημοφιλών ιστότοπων, καθώς πληκτρολογείτε στη γραμμή διευθύνσεων</translation>
+ <translation id="3303414029551471755">Συνέχεια για λήψη του περιεχομένου;</translation>
+ <translation id="6698801883190606802">Διαχείριση συγχρονισμένων δεδομένων</translation>
+-<translation id="1657479659644194568">Ρύθμιση του Chrome</translation>
++<translation id="1657479659644194568">Ρύθμιση του Iridium</translation>
+ <translation id="6448273550210938826">Αναζήτηση και προτάσεις διευθύνσεων URL</translation>
+ <translation id="7998918019931843664">Εκ νέου άνοιγμα κλειστής καρτέλας</translation>
+ <translation id="8425213833346101688">Αλλαγή</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_en-GB.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_en-GB.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Use a prediction service to show related queries and popular websites as you type in the address bar</translation>
+ <translation id="3303414029551471755">Proceed to download the content?</translation>
+ <translation id="6698801883190606802">Manage synced data</translation>
+-<translation id="1657479659644194568">Set up Chrome</translation>
++<translation id="1657479659644194568">Set up Iridium</translation>
+ <translation id="6448273550210938826">Search and URL suggestions</translation>
+ <translation id="7998918019931843664">Re-open closed tab</translation>
+ <translation id="8425213833346101688">Change</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_es-419.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_es-419.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Usar un servicio de predicción para ver consultas relacionadas y sitios web populares a medida que escribes en la barra de direcciones.</translation>
+ <translation id="3303414029551471755">¿Deseas descargar el contenido?</translation>
+ <translation id="6698801883190606802">Administrar datos sincronizados</translation>
+-<translation id="1657479659644194568">Configurar Chrome</translation>
++<translation id="1657479659644194568">Configurar Iridium</translation>
+ <translation id="6448273550210938826">Sugerencias de URL y de búsqueda</translation>
+ <translation id="7998918019931843664">Volver a abrir la pestaña cerrada</translation>
+ <translation id="8425213833346101688">Cambiar</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_es.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_es.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Utiliza un servicio de predicciones para mostrar consultas relacionadas y sitios web populares a medida que escribes en la barra de direcciones</translation>
+ <translation id="3303414029551471755">¿Quieres continuar para descargar el contenido?</translation>
+ <translation id="6698801883190606802">Administrar datos sincronizados</translation>
+-<translation id="1657479659644194568">Configurar Chrome</translation>
++<translation id="1657479659644194568">Configurar Iridium</translation>
+ <translation id="6448273550210938826">Sugerencias de URL y de búsqueda</translation>
+ <translation id="7998918019931843664">Volver a abrir pestaña cerrada</translation>
+ <translation id="8425213833346101688">Cambiar</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_fa.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_fa.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">از یک سرویس پیش‌بینی استفاده می‌شود تا هم‌زمان با تایپ کردن شما در نوار آدرس، عبارت‌های جستجوی مرتبط و وب‌سایت‌های محبوب نشان داده شوند</translation>
+ <translation id="3303414029551471755">ادامه می‌دهید و محتوا را دانلود می‌کنید؟</translation>
+ <translation id="6698801883190606802">مدیریت اطلاعات همگام‌سازی شده</translation>
+-<translation id="1657479659644194568">‏راه‌اندازی Chrome</translation>
++<translation id="1657479659644194568">‏راه‌اندازی Iridium</translation>
+ <translation id="6448273550210938826">پیشنهادات جستجو و نشانی اینترنتی</translation>
+ <translation id="7998918019931843664">بازکردن مجدد برگه‌های بسته شده</translation>
+ <translation id="8425213833346101688">تغییر</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_fi.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_fi.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Käytä ennakointipalvelua, joka näyttää sinulle aiheeseen liittyviä kyselyitä sekä suosittuja verkkosivustoja kirjoittaessasi osoitepalkkiin.</translation>
+ <translation id="3303414029551471755">Jatketaanko sisällön lataamiseen?</translation>
+ <translation id="6698801883190606802">Hallinnoi synkronoituja tietoja</translation>
+-<translation id="1657479659644194568">Chromen asentaminen</translation>
++<translation id="1657479659644194568">Iridiumen asentaminen</translation>
+ <translation id="6448273550210938826">Haku ja URL-ehdotukset</translation>
+ <translation id="7998918019931843664">Avaa suljettu välilehti uudelleen</translation>
+ <translation id="8425213833346101688">Vaihda</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_fil.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_fil.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Gumamit ng serbisyo sa paghula upang magpakita ng mga nauugnay na query at sikat na website habang nagta-type ka sa address bar</translation>
+ <translation id="3303414029551471755">Magpatuloy na i-download ang content?</translation>
+ <translation id="6698801883190606802">Pamahalaan ang na-sync na data</translation>
+-<translation id="1657479659644194568">I-set up ang Chrome</translation>
++<translation id="1657479659644194568">I-set up ang Iridium</translation>
+ <translation id="6448273550210938826">Mga suhestyon sa paghahanap at URL</translation>
+ <translation id="7998918019931843664">Muling buksan ang isinarang tab</translation>
+ <translation id="8425213833346101688">Baguhin</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_fr.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_fr.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Utiliser un service de prédiction pour suggérer des requêtes associées et des sites populaires lorsque vous saisissez des termes dans la barre d'adresse</translation>
+ <translation id="3303414029551471755">Poursuivre et télécharger le contenu ?</translation>
+ <translation id="6698801883190606802">Gérer les données synchronisées</translation>
+-<translation id="1657479659644194568">Configurer Chrome</translation>
++<translation id="1657479659644194568">Configurer Iridium</translation>
+ <translation id="6448273550210938826">Suggestions de recherche et d'URL</translation>
+ <translation id="7998918019931843664">Rouvrir un onglet fermé</translation>
+ <translation id="8425213833346101688">Modifier</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_hi.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_hi.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">आपके द्वारा पता बार में लिखते ही संबंधित क्‍वेरी और लोकप्रिय वेबसाइटें दिखाने के लिए पूर्वानुमान सेवा का उपयोग करें</translation>
+ <translation id="3303414029551471755">सामग्री डाउनलोड करने के लिए आगे बढ़ें?</translation>
+ <translation id="6698801883190606802">समन्वयित डेटा प्रबंधित करें</translation>
+-<translation id="1657479659644194568">Chrome सेट करें</translation>
++<translation id="1657479659644194568">Iridium सेट करें</translation>
+ <translation id="6448273550210938826">खोज और URL सुझाव</translation>
+ <translation id="7998918019931843664">बंद टैब फिर से खोलें</translation>
+ <translation id="8425213833346101688">बदलें</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_hr.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_hr.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Upotrijebi uslugu predviđanja za prikaz srodnih upita i popularnih web-lokacija prilikom upisivanja u adresnu traku</translation>
+ <translation id="3303414029551471755">Želite li nastaviti s preuzimanjem sadržaja?</translation>
+ <translation id="6698801883190606802">Upravljanje sinkroniziranim podacima</translation>
+-<translation id="1657479659644194568">Postavljanje Chromea</translation>
++<translation id="1657479659644194568">Postavljanje Iridiuma</translation>
+ <translation id="6448273550210938826">Prijedlozi za pretraživanje i URL</translation>
+ <translation id="7998918019931843664">Ponovno otvaranje zatvorene kartice</translation>
+ <translation id="8425213833346101688">Promijeni</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_hu.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_hu.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">„Várható kifejezések” szolgáltatás használata a kapcsolódó lekérdezések és népszerű webhelyek megjelenítéséhez a címsávba történő gépelés során.</translation>
+ <translation id="3303414029551471755">Biztosan letölti a tartalmat?</translation>
+ <translation id="6698801883190606802">Szinkronizálás kezelése</translation>
+-<translation id="1657479659644194568">A Chrome beállítása</translation>
++<translation id="1657479659644194568">A Iridium beállítása</translation>
+ <translation id="6448273550210938826">Keresési és URL-javaslatok</translation>
+ <translation id="7998918019931843664">Bezárt lap megnyitása</translation>
+ <translation id="8425213833346101688">Módosítás</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_id.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_id.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Gunakan layanan prediksi untuk menunjukkan kueri terkait dan situs web populer saat Anda mengetik di bilah alamat</translation>
+ <translation id="3303414029551471755">Lanjutkan untuk mengunduh konten?</translation>
+ <translation id="6698801883190606802">Kelola data yang disinkronkan</translation>
+-<translation id="1657479659644194568">Menyiapkan Chrome</translation>
++<translation id="1657479659644194568">Menyiapkan Iridium</translation>
+ <translation id="6448273550210938826">Penelusuran dan saran URL</translation>
+ <translation id="7998918019931843664">Buka kembali tab yang ditutup</translation>
+ <translation id="8425213833346101688">Ubah</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_it.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_it.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Utilizza un servizio di previsione per visualizzare query correlate e siti web popolari durante la digitazione nella barra degli indirizzi</translation>
+ <translation id="3303414029551471755">Procedere al download dei contenuti?</translation>
+ <translation id="6698801883190606802">Gestisci dati sincronizzati</translation>
+-<translation id="1657479659644194568">Configura Chrome</translation>
++<translation id="1657479659644194568">Configura Iridium</translation>
+ <translation id="6448273550210938826">Suggerimenti di ricerca e URL</translation>
+ <translation id="7998918019931843664">Riapri la scheda chiusa</translation>
+ <translation id="8425213833346101688">Cambia</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_iw.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_iw.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">השתמש בשירות חיזוי כדי להציג שאילתות קשורות ואתרים פופולריים תוך כדי ההקלדה בסרגל הכתובות</translation>
+ <translation id="3303414029551471755">האם להוריד את התוכן?</translation>
+ <translation id="6698801883190606802">נהל נתונים מסונכרנים</translation>
+-<translation id="1657479659644194568">‏הגדרת Chrome</translation>
++<translation id="1657479659644194568">‏הגדרת Iridium</translation>
+ <translation id="6448273550210938826">הצעות חיפוש וכתובות אתר</translation>
+ <translation id="7998918019931843664">פתח מחדש כרטיסייה שנסגרה</translation>
+ <translation id="8425213833346101688">שנה</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_ja.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_ja.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">予測サービスを使用し、アドレスバーへの入力時に関連性の高い検索キーワードや人気のウェブサイトを表示します</translation>
+ <translation id="3303414029551471755">コンテンツのダウンロードに進みますか？</translation>
+ <translation id="6698801883190606802">同期データを管理</translation>
+-<translation id="1657479659644194568">Chrome を設定する</translation>
++<translation id="1657479659644194568">Iridium を設定する</translation>
+ <translation id="6448273550210938826">検索と URL 候補</translation>
+ <translation id="7998918019931843664">閉じたタブを開く</translation>
+ <translation id="8425213833346101688">変更</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_ko.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_ko.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">예상 검색어 서비스를 사용하여 검색주소창에 입력할 때 관련 검색어 및 인기 웹사이트를 표시합니다.</translation>
+ <translation id="3303414029551471755">콘텐츠를 다운로드하시겠습니까?</translation>
+ <translation id="6698801883190606802">동기화된 데이터 관리</translation>
+-<translation id="1657479659644194568">Chrome 설정</translation>
++<translation id="1657479659644194568">Iridium 설정</translation>
+ <translation id="6448273550210938826">추천 검색어 및 추천 URL</translation>
+ <translation id="7998918019931843664">닫은 탭 다시 열기</translation>
+ <translation id="8425213833346101688">변경</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_lt.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_lt.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Naudoti numatymo paslaugą, kad adreso juostoje įvedant tekstą būtų rodomos susijusios užklausos ir populiarios svetainės</translation>
+ <translation id="3303414029551471755">Tęsti turinio atsisiuntimo procesą?</translation>
+ <translation id="6698801883190606802">Tvarkykite sinchronizuotus duomenis</translation>
+-<translation id="1657479659644194568">„Chrome“ nustatymas</translation>
++<translation id="1657479659644194568">„Iridium“ nustatymas</translation>
+ <translation id="6448273550210938826">Paieškos ir URL pasiūlymai</translation>
+ <translation id="7998918019931843664">Iš naujo atidarykite uždarytą skirtuko lapą</translation>
+ <translation id="8425213833346101688">Keisti</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_lv.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_lv.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Izmantojiet ieteikumus, lai skatītu saistītos vaicājumus un populāras vietnes, kad rakstāt adreses joslā.</translation>
+ <translation id="3303414029551471755">Vai turpināt ar satura lejupielādi?</translation>
+ <translation id="6698801883190606802">Pārvaldīt sinhronizētos datus</translation>
+-<translation id="1657479659644194568">Chrome iestatīšana</translation>
++<translation id="1657479659644194568">Iridium iestatīšana</translation>
+ <translation id="6448273550210938826">Meklēšana un URL ieteikumi</translation>
+ <translation id="7998918019931843664">Vēlreiz atvērt aizvērto cilni</translation>
+ <translation id="8425213833346101688">Mainīt</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_nl.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_nl.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Een voorspellingsservice gebruiken om gerelateerde zoekopdrachten en populaire websites te tonen terwijl je in de adresbalk typt</translation>
+ <translation id="3303414029551471755">Doorgaan met het downloaden van de inhoud?</translation>
+ <translation id="6698801883190606802">Gesynchroniseerde gegevens beheren</translation>
+-<translation id="1657479659644194568">Chrome instellen</translation>
++<translation id="1657479659644194568">Iridium instellen</translation>
+ <translation id="6448273550210938826">Zoek- en URL-suggesties</translation>
+ <translation id="7998918019931843664">Gesloten tabblad opnieuw openen</translation>
+ <translation id="8425213833346101688">Wijzigen</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_no.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_no.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Bruk en forslagstjeneste for å vise relaterte søkeord og populære nettsteder mens du skriver i adressefeltet</translation>
+ <translation id="3303414029551471755">Vil du gå videre med å laste ned innholdet?</translation>
+ <translation id="6698801883190606802">Administrer synkroniserte data</translation>
+-<translation id="1657479659644194568">Konfigurer Chrome</translation>
++<translation id="1657479659644194568">Konfigurer Iridium</translation>
+ <translation id="6448273550210938826">Nettadresse- og søkeforslag</translation>
+ <translation id="7998918019931843664">Åpne lukkede faner igjen</translation>
+ <translation id="8425213833346101688">Endre</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_pl.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_pl.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Gdy piszesz na pasku adresu, korzystaj z usługi przewidywania, by wyświetlać podobne zapytania i adresy popularnych stron</translation>
+ <translation id="3303414029551471755">Przejść do pobrania treści?</translation>
+ <translation id="6698801883190606802">Zarządzaj synchronizowanymi danymi</translation>
+-<translation id="1657479659644194568">Konfigurowanie Chrome</translation>
++<translation id="1657479659644194568">Konfigurowanie Iridium</translation>
+ <translation id="6448273550210938826">Podpowiedzi wyszukiwania i adresów URL</translation>
+ <translation id="7998918019931843664">Otwórz ponownie zamkniętą kartę</translation>
+ <translation id="8425213833346101688">Zmień</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_pt-BR.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_pt-BR.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Usar um serviço de previsão para mostrar consultas relacionadas e sites populares quando você digitar na barra de endereços</translation>
+ <translation id="3303414029551471755">Continuar com o download do conteúdo?</translation>
+ <translation id="6698801883190606802">Gerenciar dados sincronizados</translation>
+-<translation id="1657479659644194568">Configurar o Google Chrome</translation>
++<translation id="1657479659644194568">Configurar o Iridium</translation>
+ <translation id="6448273550210938826">Sugestões de pesquisa e URL</translation>
+ <translation id="7998918019931843664">Reabrir guia fechada</translation>
+ <translation id="8425213833346101688">Alterar</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_pt-PT.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_pt-PT.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Utilizar um serviço de previsão para mostrar consultas relacionadas e Websites populares à medida que escreve na barra de endereço</translation>
+ <translation id="3303414029551471755">Pretende transferir o conteúdo?</translation>
+ <translation id="6698801883190606802">Gerir dados sincronizados</translation>
+-<translation id="1657479659644194568">Configurar o Chrome</translation>
++<translation id="1657479659644194568">Configurar o Iridium</translation>
+ <translation id="6448273550210938826">Pesquisa e sugestões de URL</translation>
+ <translation id="7998918019931843664">Reabrir separador fechado</translation>
+ <translation id="8425213833346101688">Alterar</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_ro.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_ro.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Folosește un serviciu de predicții pentru a afișa interogări similare și site-uri populare în timp ce introduci text în bara de adrese.</translation>
+ <translation id="3303414029551471755">Continui pentru descărcarea conținutului?</translation>
+ <translation id="6698801883190606802">Gestionează datele sincronizate</translation>
+-<translation id="1657479659644194568">Configurează Chrome</translation>
++<translation id="1657479659644194568">Configurează Iridium</translation>
+ <translation id="6448273550210938826">Sugestii de căutare și pentru adrese URL</translation>
+ <translation id="7998918019931843664">Redeschideți fila închisă</translation>
+ <translation id="8425213833346101688">Modificați</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_ru.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_ru.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Показывать подсказки с похожими запросами и часто посещаемыми сайтами по мере ввода в адресную строку</translation>
+ <translation id="3303414029551471755">Скачать?</translation>
+ <translation id="6698801883190606802">Управление синхронизированными данными</translation>
+-<translation id="1657479659644194568">Настройка Chrome</translation>
++<translation id="1657479659644194568">Настройка Iridium</translation>
+ <translation id="6448273550210938826">Поиск и предложения URL</translation>
+ <translation id="7998918019931843664">Восстановить закрытую вкладку</translation>
+ <translation id="8425213833346101688">Изменить</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_sk.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_sk.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Použite službu predpovedí na zobrazovanie súvisiacich dopytov a populárnych webových stránok počas zadávania textu do panela s adresou</translation>
+ <translation id="3303414029551471755">Pokračovať a stiahnuť obsah?</translation>
+ <translation id="6698801883190606802">Spravovať synchronizované údaje</translation>
+-<translation id="1657479659644194568">Nastavenie prehliadača Chrome</translation>
++<translation id="1657479659644194568">Nastavenie prehliadača Iridium</translation>
+ <translation id="6448273550210938826">Návrhy pre vyhľadávanie a webové adresy</translation>
+ <translation id="7998918019931843664">Znova otvoriť zavretú kartu</translation>
+ <translation id="8425213833346101688">Zmeniť</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_sl.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_sl.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">S storitvijo predvidevanja lahko med vnašanjem v naslovno vrstico prikažete povezane poizvedbe in priljubljena spletna mesta</translation>
+ <translation id="3303414029551471755">Ali želite prenesti vsebino?</translation>
+ <translation id="6698801883190606802">Upravljanje sinhroniziranih podatkov</translation>
+-<translation id="1657479659644194568">Nastavitev Chroma</translation>
++<translation id="1657479659644194568">Nastavitev Iridiuma</translation>
+ <translation id="6448273550210938826">Predlogi za iskanje in URL-je</translation>
+ <translation id="7998918019931843664">Vnovično odpiranje zaprtega zavihka</translation>
+ <translation id="8425213833346101688">Spremeni</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_sr.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_sr.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Коришћење услуге предвиђања за приказивање сродних упита и популарних веб-сајтова док куцате у траци за адресу</translation>
+ <translation id="3303414029551471755">Желите ли да наставите са преузимањем садржаја?</translation>
+ <translation id="6698801883190606802">Управљајте синхронизованим подацима</translation>
+-<translation id="1657479659644194568">Подесите Chrome</translation>
++<translation id="1657479659644194568">Подесите Iridium</translation>
+ <translation id="6448273550210938826">Предлози за претрагу и URL-ове</translation>
+ <translation id="7998918019931843664">Поново отворите затворену картицу</translation>
+ <translation id="8425213833346101688">Промени</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_sv.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_sv.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Använd en tjänst som ger förslag på relaterade sökfrågor och populära webbplatser när du skriver i adressfältet</translation>
+ <translation id="3303414029551471755">Vill du hämta innehållet?</translation>
+ <translation id="6698801883190606802">Hantera synkroniserad data</translation>
+-<translation id="1657479659644194568">Konfigurera Chrome</translation>
++<translation id="1657479659644194568">Konfigurera Iridium</translation>
+ <translation id="6448273550210938826">Sökning och webbadressförslag</translation>
+ <translation id="7998918019931843664">Öppna en stängd flik på nytt</translation>
+ <translation id="8425213833346101688">Ändra</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_sw.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_sw.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Tumia huduma ya ubashiri ili kuonyesha hoja zinazohusiana na tovuti maarufu unapocharaza katika sehemu ya anwani</translation>
+ <translation id="3303414029551471755">Ungependa kuendelea kupakua maudhui?</translation>
+ <translation id="6698801883190606802">Dhibiti data iliyosawazishwa</translation>
+-<translation id="1657479659644194568">Sanidi Chrome</translation>
++<translation id="1657479659644194568">Sanidi Iridium</translation>
+ <translation id="6448273550210938826">Mapendekezo ya utafutaji na URL</translation>
+ <translation id="7998918019931843664">Fungua tena kichupo kilichofungwa</translation>
+ <translation id="8425213833346101688">Badilisha</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_th.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_th.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">ใช้บริการการคาดคะเนเพื่อแสดงคำค้นหาที่เกี่ยวข้องและเว็บไซต์ยอดนิยมขณะที่คุณพิมพ์ในแถบที่อยู่เว็บ</translation>
+ <translation id="3303414029551471755">ต้องการดำเนินการดาวน์โหลดเนื้อหานี้ไหม</translation>
+ <translation id="6698801883190606802">จัดการข้อมูลที่ซิงค์</translation>
+-<translation id="1657479659644194568">ตั้งค่า Chrome</translation>
++<translation id="1657479659644194568">ตั้งค่า Iridium</translation>
+ <translation id="6448273550210938826">การค้นหาและคำแนะนำ URL</translation>
+ <translation id="7998918019931843664">เปิดแท็บที่ปิดไปแล้วขึ้นใหม่</translation>
+ <translation id="8425213833346101688">เปลี่ยน</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_tr.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_tr.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Adres çubuğuna yazarken ilgili sorguları ve popüler siteleri göstermek için bir tahmin hizmeti kullan</translation>
+ <translation id="3303414029551471755">İçeriği indirme işlemine başlansın mı?</translation>
+ <translation id="6698801883190606802">Senkronize edilen verileri yönetme</translation>
+-<translation id="1657479659644194568">Chrome'u kurma</translation>
++<translation id="1657479659644194568">Iridium'u kurma</translation>
+ <translation id="6448273550210938826">Arama ve URL önerileri</translation>
+ <translation id="7998918019931843664">Kapatılan sekmeyi yeniden aç</translation>
+ <translation id="8425213833346101688">Değiştir</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_uk.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_uk.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Показувати підказки зі схожими запитами та популярними веб-сайтами під час введення запиту в адресному рядку</translation>
+ <translation id="3303414029551471755">Завантажити вміст?</translation>
+ <translation id="6698801883190606802">Керування синхронізованими даними</translation>
+-<translation id="1657479659644194568">Встановлення Chrome</translation>
++<translation id="1657479659644194568">Встановлення Iridium</translation>
+ <translation id="6448273550210938826">Пропозиції пошуку та URL-адрес</translation>
+ <translation id="7998918019931843664">Знову відкрити закриту вкладку</translation>
+ <translation id="8425213833346101688">Змінити</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_vi.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_vi.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">Sử dụng dịch vụ dự đoán để hiển thị các truy vấn có liên quan và các trang web phổ biến khi bạn nhập vào thanh địa chỉ</translation>
+ <translation id="3303414029551471755">Tiếp tục tải xuống nội dung?</translation>
+ <translation id="6698801883190606802">Quản lý dữ liệu được đồng bộ hóa</translation>
+-<translation id="1657479659644194568">Thiết lập Chrome</translation>
++<translation id="1657479659644194568">Thiết lập Iridium</translation>
+ <translation id="6448273550210938826">Đề xuất tìm kiếm và URL</translation>
+ <translation id="7998918019931843664">Mở lại tab đã đóng</translation>
+ <translation id="8425213833346101688">Thay đổi</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_zh-CN.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_zh-CN.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">当您在地址栏中输入查询内容时，使用联想查询服务显示相关查询和热门网站</translation>
+ <translation id="3303414029551471755">要开始下载该内容吗？</translation>
+ <translation id="6698801883190606802">管理已同步的数据</translation>
+-<translation id="1657479659644194568">设置 Chrome</translation>
++<translation id="1657479659644194568">设置 Iridium</translation>
+ <translation id="6448273550210938826">搜索和网址建议</translation>
+ <translation id="7998918019931843664">重新打开关闭的标签页</translation>
+ <translation id="8425213833346101688">更改</translation>
+--- a/chrome/android/java/strings/translations/android_chrome_strings_zh-TW.xtb
++++ b/chrome/android/java/strings/translations/android_chrome_strings_zh-TW.xtb
+@@ -4,7 +4,7 @@
+ <translation id="666268767214822976">啟用預測查詢字串服務，讓您在網址列中輸入查詢內容時，能夠即時看到相關查詢和熱門網站</translation>
+ <translation id="3303414029551471755">繼續下載這項內容？</translation>
+ <translation id="6698801883190606802">管理同步資料</translation>
+-<translation id="1657479659644194568">設定 Chrome</translation>
++<translation id="1657479659644194568">設定 Iridium</translation>
+ <translation id="6448273550210938826">搜尋與網址建議</translation>
+ <translation id="7998918019931843664">重新開啟先前關閉的分頁</translation>
+ <translation id="8425213833346101688">變更</translation>
 --- a/chrome/app/app-Info.plist
 +++ b/chrome/app/app-Info.plist
 @@ -244,6 +244,8 @@
@@ -1856,6 +2351,578 @@
  <translation id="5032989939245619637">在 Chromium 中儲存詳細資料</translation>
  </translationbundle>
 \ No newline at end of file
+--- a/chrome/app/resources/generated_resources_am.xtb
++++ b/chrome/app/resources/generated_resources_am.xtb
+@@ -536,7 +536,7 @@
+           <ph name="PRODUCT_NAME"/>ን
+           በስህተት በእርስዎ መሣሪያ ላይ ያለ ሰርጎ ገብ እንደሆነ ስላሰበውና ከበይነመረቡ ጋር እንዳይገናኝ እያገደው ስለሆነ ሊሆን ይችላል።</translation>
+ <translation id="3873139305050062481">አባል &amp;መርምር</translation>
+-<translation id="3076677906922146425">ማንም ሰው ግለሰብን ወደ Chrome እንዲያክል ይፍቀዱ</translation>
++<translation id="3076677906922146425">ማንም ሰው ግለሰብን ወደ Iridium እንዲያክል ይፍቀዱ</translation>
+ <translation id="7445762425076701745">የተገናኙት የአገልጋይ ማንነት ሙሉ ለሙሉ ሊረጋገጥ አልቻለም። ስሙ በአውታረ መረብዎ ውስጥ ብቻ ልክ ከሆነ አገልጋይ ጋር ነው የተገናኙት፣ እና ባለቤትነቱ በውጫዊ የእውቅና ማረጋገጫ ሊረጋገጥ አይችልም። አንዳንድ የእውቅና ማረጋገጫ ባለስልጣናት ይሁን ብለው ለእነዚህ ስሞች የእውቅና ማረጋገጫዎች መስጠታቸው የማይቀር እንደመሆኑ መጠን፣ ከአጥቂ ሳይሆን ከታሰበው ድር ጣቢያ ጋር መገናኘትዎን የሚረጋገጥበት ምንም መንገድ የለም።</translation>
+ <translation id="1556537182262721003">የቅጥያ ማውጫን ወደ መገለጫ መውሰድ አልተቻለም።</translation>
+ <translation id="2946640296642327832">ብሉቱዝን ያንቁ</translation>
+--- a/chrome/app/resources/generated_resources_ar.xtb
++++ b/chrome/app/resources/generated_resources_ar.xtb
+@@ -530,7 +530,7 @@
+           <ph name="PRODUCT_NAME"/>
+           دخيلاً على جهازك الجوال ويحول دون اتصاله بالإنترنت، وذلك على سبيل الخطأ.</translation>
+ <translation id="3873139305050062481">&amp;فحص عنصر</translation>
+-<translation id="3076677906922146425">‏السماح لأي شخص بإضافة أحد الأشخاص إلى Chrome</translation>
++<translation id="3076677906922146425">‏السماح لأي شخص بإضافة أحد الأشخاص إلى Iridium</translation>
+ <translation id="7445762425076701745">لا يمكن التحقق بصورة كاملة من صحة هوية الخادم الذي تتصل به. فأنت متصل بخادم باستخدام اسم صالح فقط ضمن شبكتك، والذي لن يتمكن المرجع المصدق الخارجي من التحقق من ملكيته. وحيث إن بعض المراجع المصدقة تُصدر الشهادات لهذه الأسماء على أي حال، فليست هناك طريقة للتأكد من أنك متصل بموقع الويب المقصود وليس بأحد المهاجمين.</translation>
+ <translation id="1556537182262721003">تعذر نقل دليل الإضافة إلى الملف الشخصي.</translation>
+ <translation id="2946640296642327832">تمكين البلوتوث</translation>
+--- a/chrome/app/resources/generated_resources_bg.xtb
++++ b/chrome/app/resources/generated_resources_bg.xtb
+@@ -526,7 +526,7 @@
+           <ph name="PRODUCT_NAME"/>
+           е нарушител в мобилното ви устройство, и блокират връзката му с интернет.</translation>
+ <translation id="3873139305050062481">П&amp;роверка на елемента</translation>
+-<translation id="3076677906922146425">Разрешаване на всички да добавят хора към Chrome</translation>
++<translation id="3076677906922146425">Разрешаване на всички да добавят хора към Iridium</translation>
+ <translation id="7445762425076701745">Идентичността на сървъра, към който сте свързани, не може да бъде потвърдена изцяло. Свързани сте към сървър чрез име, което е валидно само във вашата мрежа и чиято собственост няма начин да се потвърди от външен сертифициращ орган. Тъй като някои сертифициращи органи въпреки това издават сертификати за такива имена, не е възможно да се гарантира, че сте свързани към желания сайт, а не към атакуващ.</translation>
+ <translation id="1556537182262721003">Не можа да се премести директорията на разширението в потребителския профил.</translation>
+ <translation id="2946640296642327832">Активиране на Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_bn.xtb
++++ b/chrome/app/resources/generated_resources_bn.xtb
+@@ -532,7 +532,7 @@
+           <ph name="PRODUCT_NAME"/>
+          কে একটি অনুপ্রবেশকারী বলে সন্দেহ করছে এবং এটিকে ইন্টারনেটের সাথে সংযুক্ত হতে বাধা দিচ্ছে৷</translation>
+ <translation id="3873139305050062481">সং&amp;বীক্ষণ উপাদান</translation>
+-<translation id="3076677906922146425">সকলকে Chrome এ কোনো ব্যক্তিকে যোগ করার অনুমতি দিন</translation>
++<translation id="3076677906922146425">সকলকে Iridium এ কোনো ব্যক্তিকে যোগ করার অনুমতি দিন</translation>
+ <translation id="7445762425076701745">আপনি যে সার্ভারে সংযুক্ত রয়েছে সেটিকে সম্পূর্ণ যাচাই করতে পারা যায় না৷ আপনি নামগুলি দিয়ে এমন একটি সার্ভারে সংযুক্ত রয়েছেন যা আপনার নেটওয়ার্কে বৈধ, যেটি একটি বাহ্যিক শংসাকরণ কর্তৃপক্ষ যার এটির মালিকানা যাচাই করার কোনও উপায় নেই৷ কিছু শংসাপত্র কর্তৃপক্ষ এই নামগুলি নির্বিচারে শংসাপত্রগুলি ইস্যু করবে, আপনি উদ্দিষ্ট ওয়েবসাইটে সংযুক্ত রয়েছেন কোনও আক্রমণকারীতে নয় তা নিশ্চিত করার কোনও উপায় নেই৷</translation>
+ <translation id="1556537182262721003">প্রোফাইলে এক্সটেনশান ডিরেক্টরি সরানো যায়নি৷</translation>
+ <translation id="2946640296642327832">ব্লুটুথ সক্ষম করুন</translation>
+--- a/chrome/app/resources/generated_resources_ca.xtb
++++ b/chrome/app/resources/generated_resources_ca.xtb
+@@ -525,7 +525,7 @@
+           <ph name="PRODUCT_NAME"/>
+           és un intrús al vostre dispositiu i impedeixi que es connecti a Internet.</translation>
+ <translation id="3873139305050062481">I&amp;nspecciona l'element</translation>
+-<translation id="3076677906922146425">Permet que qualsevol persona pugui afegir una persona a Chrome</translation>
++<translation id="3076677906922146425">Permet que qualsevol persona pugui afegir una persona a Iridium</translation>
+ <translation id="7445762425076701745">La identitat del servidor al qual esteu connectat no es pot acabar de validar. Esteu connectat a un servidor que utilitza un nom que només és vàlid dins la vostra xarxa, de manera que una autoritat de certificació externa no en pot validar la propietat. Com que de tota manera algunes autoritats de certificació emetran certificats per a aquests noms, no es pot assegurar que estigueu connectat al lloc web previst i no a un atacant.</translation>
+ <translation id="1556537182262721003">No s'ha pogut desplaçar el directori d'extensions al perfil.</translation>
+ <translation id="2946640296642327832">Activa Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_cs.xtb
++++ b/chrome/app/resources/generated_resources_cs.xtb
+@@ -525,7 +525,7 @@
+ <translation id="8879284080359814990">Zobrazit jako &amp;kartu</translation>
+ <translation id="4314714876846249089"><ph name="PRODUCT_NAME"/> má potíže s přístupem do sítě.<ph name="PRODUCT_NAME"/> Příčinou může být brána firewall nebo antivirový software, které chybně považují aplikaci <ph name="LINE_BREAK"/> za útočníka v zařízení a zabraňují jí připojit se k internetu.</translation>
+ <translation id="3873139305050062481">Zko&amp;ntrolovat prvek</translation>
+-<translation id="3076677906922146425">Umožnit komukoli přidání uživatele do Chromu</translation>
++<translation id="3076677906922146425">Umožnit komukoli přidání uživatele do Iridiumu</translation>
+ <translation id="7445762425076701745">Totožnost serveru, k němuž jste připojeni, nelze plně ověřit. Jste připojeni k serveru, který používá název platný pouze v rámci vaší sítě. Externí certifikační autorita nemůže vlastnictví názvu nijak ověřit. Některé certifikační autority však vydají certifikát i pro takové názvy, a nelze tedy zaručit, že jste připojeni k požadovanému webu a nikoli k webu útočníka.</translation>
+ <translation id="1556537182262721003">Adresář rozšíření nelze přesunout do profilu.</translation>
+ <translation id="2946640296642327832">Zapnout Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_da.xtb
++++ b/chrome/app/resources/generated_resources_da.xtb
+@@ -535,7 +535,7 @@
+           <ph name="PRODUCT_NAME"/>
+           er en ubuden gæst på din enhed og derfor forhindrer den i at få forbindelse til internettet.</translation>
+ <translation id="3873139305050062481">K&amp;ontroller element</translation>
+-<translation id="3076677906922146425">Lad andre føje en person til Chrome</translation>
++<translation id="3076677906922146425">Lad andre føje en person til Iridium</translation>
+ <translation id="7445762425076701745">Identiteten på den server, som du er tilknyttet, kan ikke bekræftes. Du er tilknyttet en server via et navn, der kun er gyldigt i dit netværk, og som en ekstern certifikatautoritet derfor ikke har mulighed for at bekræfte ejerskabet på. Da enkelte certifikatautoriteter alligevel udsteder certifikater for disse navne, kan vi på ingen måde sikre, at du er tilknyttet det tilsigtede website og ikke til en forbryder.</translation>
+ <translation id="1556537182262721003">Udvidelsesmappen kunne ikke flyttes til profilen.</translation>
+ <translation id="2946640296642327832">Aktivér Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_de.xtb
++++ b/chrome/app/resources/generated_resources_de.xtb
+@@ -534,7 +534,7 @@
+           <ph name="PRODUCT_NAME"/>
+           eine Bedrohung für Ihr Gerät darstellt und es daher am Zugriff auf das Internet hindert.</translation>
+ <translation id="3873139305050062481">Eleme&amp;nt untersuchen</translation>
+-<translation id="3076677906922146425">Jeder darf Personen zu Chrome hinzufügen.</translation>
++<translation id="3076677906922146425">Jeder darf Personen zu Iridium hinzufügen.</translation>
+ <translation id="7445762425076701745">Die Identität des Servers, mit dem Sie verbunden sind, kann nicht vollständig überprüft werden. Sie sind mit einem Server verbunden, dessen Name nur innerhalb Ihres Netzwerks gültig ist und dessen Inhaberschaft von einer externen Zertifizierungsstelle nicht überprüft werden kann. Da einige Zertifizierungsstellen ungeachtet dessen dennoch Zertifikate für diese Namen ausstellen, gibt es keine Möglichkeit, sicherzustellen, dass Sie mit der gewünschten Website und nicht mit einem Angreifer verbunden sind.</translation>
+ <translation id="1556537182262721003">Erweiterungsverzeichnis konnte nicht in Profil verschoben werden.</translation>
+ <translation id="2946640296642327832">Bluetooth aktivieren</translation>
+--- a/chrome/app/resources/generated_resources_el.xtb
++++ b/chrome/app/resources/generated_resources_el.xtb
+@@ -536,7 +536,7 @@
+           <ph name="PRODUCT_NAME"/>
+           επιχειρεί να εισβάλει στη συσκευή σας και το εμποδίζει να συνδεθεί στο διαδίκτυο.</translation>
+ <translation id="3873139305050062481">Επι&amp;θεώρηση Στοιχείου</translation>
+-<translation id="3076677906922146425">Να επιτρέπεται σε όλους τους χρήστες να προσθέτουν άτομα στο Chrome</translation>
++<translation id="3076677906922146425">Να επιτρέπεται σε όλους τους χρήστες να προσθέτουν άτομα στο Iridium</translation>
+ <translation id="7445762425076701745">Η ταυτότητα του διακομιστή στον οποίο έχετε συνδεθεί δεν μπορεί να επικυρωθεί πλήρως. Είστε συδεδεμένοι σε ένα διακομιστή χρησιμοποιώντας ένα όνομα που είναι έγκυρο μόνο εντός του δικτύου σας, την κατοχή του οποίου δεν έχει τρόπο να επικυρώσει μια εξωτερική αρχή πιστοποίησης. Καθώς ορισμένες αρχές πιστοποιητικών εκδίδουν πιστοποιητικά για αυτά τα ονόματα ούτως ή άλλως, δεν υπάρχει τρόπος να βεβαιωθείτε ότι είστε συνδεδεμένοι στον ιστότοπο που επιθυμείτε και όχι σε έναν εισβολέα.</translation>
+ <translation id="1556537182262721003">Δεν ήταν δυνατή η μετακίνηση του καταλόγου επέκτασης στο προφίλ.</translation>
+ <translation id="2946640296642327832">Ενεργοποίηση Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_en-GB.xtb
++++ b/chrome/app/resources/generated_resources_en-GB.xtb
+@@ -534,7 +534,7 @@
+           <ph name="PRODUCT_NAME"/>
+           is an intruder on your device and is blocking it from connecting to the Internet.</translation>
+ <translation id="3873139305050062481">I&amp;nspect Element</translation>
+-<translation id="3076677906922146425">Let anyone add a person to Chrome</translation>
++<translation id="3076677906922146425">Let anyone add a person to Iridium</translation>
+ <translation id="7445762425076701745">The identity of the server to which you are connected cannot be fully validated. You are connected to a server using a name valid only within your network, and an external certificate authority has no way to validate ownership. As some certificate authorities will issue certificates for these names regardless, there is no way to ensure that you are connected to the intended website and not to an attacker.</translation>
+ <translation id="1556537182262721003">Could not move extension directory into profile.</translation>
+ <translation id="2946640296642327832">Enable Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_es-419.xtb
++++ b/chrome/app/resources/generated_resources_es-419.xtb
+@@ -527,7 +527,7 @@
+           <ph name="PRODUCT_NAME"/>
+           se trata de una aplicación intrusa en tu dispositivo y están impidiendo que se conecte a Internet.</translation>
+ <translation id="3873139305050062481">I&amp;nspeccionar elemento</translation>
+-<translation id="3076677906922146425">Permitir que cualquiera agregue una persona a Chrome</translation>
++<translation id="3076677906922146425">Permitir que cualquiera agregue una persona a Iridium</translation>
+ <translation id="7445762425076701745">La identidad del servidor al que estás conectado no se puede validar en su totalidad. Estás conectado a un servidor utilizando un nombre que sólo es válido dentro de tu red y cuya propiedad no puede validar una entidad externa de certificación. Debido a que algunas entidades emiten certificados aún para estos nombres, no hay manera de asegurar que estás conectado al sitio web que pretendías o a un atacante.</translation>
+ <translation id="1556537182262721003">No se pudo mover el directorio de extensiones al perfil</translation>
+ <translation id="2946640296642327832">Activar Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_es.xtb
++++ b/chrome/app/resources/generated_resources_es.xtb
+@@ -534,7 +534,7 @@
+ <ph name="LINE_BREAK"/>
+ Esto puede deberse a que tu cortafuegos o software antivirus haya considerado erróneamente que <ph name="PRODUCT_NAME"/> es una aplicación intrusa de tu dispositivo y esté impidiendo que se conecte a Internet.</translation>
+ <translation id="3873139305050062481">I&amp;nspeccionar elemento</translation>
+-<translation id="3076677906922146425">Dejar que cualquier pueda añadir a una persona a Chrome</translation>
++<translation id="3076677906922146425">Dejar que cualquier pueda añadir a una persona a Iridium</translation>
+ <translation id="7445762425076701745">La identidad del servidor al que estás conectado no se puede validar por completo. Estás conectado a un servidor con un nombre que solo es válido en tu red y cuya propiedad no puede validar en modo alguno una entidad emisora de certificados externa. A pesar de ello, algunas entidades emisoras emiten certificados para esos nombres, por lo que no es posible garantizar que estés conectado al sitio web deseado, en lugar de a un atacante.</translation>
+ <translation id="1556537182262721003">No se ha podido mover el directorio de la extensión al perfil.</translation>
+ <translation id="2946640296642327832">Habilitar Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_et.xtb
++++ b/chrome/app/resources/generated_resources_et.xtb
+@@ -535,7 +535,7 @@
+           <ph name="PRODUCT_NAME"/>
+           ekslikult sissetungijaks ja takistab sellel Internetiga ühenduse loomist.</translation>
+ <translation id="3873139305050062481">Inspe&amp;kteeri elementi</translation>
+-<translation id="3076677906922146425">Igaüks saab inimese Chrome'i lisada</translation>
++<translation id="3076677906922146425">Igaüks saab inimese Iridium'i lisada</translation>
+ <translation id="7445762425076701745">Serveri identiteeti, millega olete ühenduses, ei saa täielikult valideerida. Olete ühenduses serveriga nime abil, mis kehtib ainult teie võrgus, mistõttu ei saa väline sertifitseerimisorgan selle omandiõigust valideerida. Kuna mõni sertifitseerimisorgan väljastab sertifikaate hoolimata nende nimedest, puudub igasugune võimalus tagada, et olete ühenduses soovitud veebisaidi, mitte ründajaga.</translation>
+ <translation id="1556537182262721003">Laienduste kataloogi ei õnnestunud profiili teisaldada.</translation>
+ <translation id="2946640296642327832">Luba Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_fa.xtb
++++ b/chrome/app/resources/generated_resources_fa.xtb
+@@ -527,7 +527,7 @@
+           <ph name="PRODUCT_NAME"/>
+           را به عنوان مزاحم در دستگاه تلقی می‌کند و آن را از اتصال به اینترنت باز می‌دارد.</translation>
+ <translation id="3873139305050062481">&amp;بازرسی عنصر</translation>
+-<translation id="3076677906922146425">‏اجازه به همه برای افزودن شخصی به Chrome</translation>
++<translation id="3076677906922146425">‏اجازه به همه برای افزودن شخصی به Iridium</translation>
+ <translation id="7445762425076701745">هویت سروری که به آن متصل شده‌اید به طور کامل تأیید اعتبار نمی‌شود. با استفاده از نامی به سرور متصل شده‌اید که فقط در شبکه شما معتبر است و ارائه دهنده مجوز خارجی قادر به تأیید اعتبار مالکیت آن نیست. به دلیل آنکه برخی از ارائه دهندگان مجوز بدون توجه به هر موردی، مجوزهایی را برای این نام‌ها ارائه می‌کنند، روشی برای اطمینان از این امر وجود ندارد که آیا شما به سایت مورد نظر خود متصل شده‌اید یا یک سایت مضر.</translation>
+ <translation id="1556537182262721003">انتقال دایرکتوری برنامهٔ افزودنی به نمایه ممکن نیست.</translation>
+ <translation id="2946640296642327832">فعال کردن بلوتوث</translation>
+--- a/chrome/app/resources/generated_resources_fi.xtb
++++ b/chrome/app/resources/generated_resources_fi.xtb
+@@ -526,7 +526,7 @@
+           <ph name="PRODUCT_NAME"/>
+           olevan luvaton ja estää sitä muodostamasta internetyhteyttä.</translation>
+ <translation id="3873139305050062481">Tar&amp;kasta osa</translation>
+-<translation id="3076677906922146425">Anna kaikkien lisätä profiileja Chromeen</translation>
++<translation id="3076677906922146425">Anna kaikkien lisätä profiileja Iridiumen</translation>
+ <translation id="7445762425076701745">Palvelimen, johon olet muodostanut yhteyden, identiteettiä ei voi täysin todentaa. Tietokoneesi on yhdistetty palvelimeen sellaisen nimen avulla, joka on kelvollinen vain verkkosi sisällä ja jonka omistajaa ulkopuolinen varmenteen myöntäjä ei pysty todentamaan. Koska jotkin varmenteen myöntäjät kuitenkin myöntävät varmenteita tällaisille nimille, et voi varmistaa, että olet muodostanut yhteyden haluamaasi verkkosivustoon etkä hakkeriin.</translation>
+ <translation id="1556537182262721003">Laajennushakemiston siirtäminen profiiliin ei onnistunut.</translation>
+ <translation id="2946640296642327832">Ota Bluetooth käyttöön</translation>
+--- a/chrome/app/resources/generated_resources_fil.xtb
++++ b/chrome/app/resources/generated_resources_fil.xtb
+@@ -534,7 +534,7 @@
+           <ph name="PRODUCT_NAME"/>
+           ay nanghihimasok sa iyong device at bina-block nito ito sa pagkonekta sa Internet.</translation>
+ <translation id="3873139305050062481">S&amp;iyasatin ang Elemento</translation>
+-<translation id="3076677906922146425">Hayaan ang sinuman na magdagdag ng tao sa Chrome</translation>
++<translation id="3076677906922146425">Hayaan ang sinuman na magdagdag ng tao sa Iridium</translation>
+ <translation id="7445762425076701745">Hindi ganap na mapatunayan ang pagkakakilanlan ng server na konektado ka. Konektado ka sa server gamit ang pangalan na angkop lamang sa loob ng iyong network, na walang paraan ang panglabas na certificate authority na patunayan ang pagmamay-ari. Dahil magbibigay ang ilang kinauukulan sa certificate para sa mga pangalang ito, walang paraan upang matiyak na konektado ka sa nilayong website at hindi isang umaatake.</translation>
+ <translation id="1556537182262721003">Hindi maililipat ang direktoryo ng extension papunta sa profile.</translation>
+ <translation id="2946640296642327832">Paganahin ang Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_fr.xtb
++++ b/chrome/app/resources/generated_resources_fr.xtb
+@@ -530,7 +530,7 @@
+           <ph name="PRODUCT_NAME"/>
+           comme intrus sur votre appareil et bloque de ce fait la connexion à Internet.</translation>
+ <translation id="3873139305050062481">Procéder à l'i&amp;nspection de l'élément</translation>
+-<translation id="3076677906922146425">Autoriser tous les utilisateurs à ajouter une personne dans Chrome</translation>
++<translation id="3076677906922146425">Autoriser tous les utilisateurs à ajouter une personne dans Iridium</translation>
+ <translation id="7445762425076701745">Impossible de valider entièrement l'identité du serveur auquel vous êtes connecté. Le nom utilisé pour cette connexion n'est valide que sur votre réseau et aucune autorité de certification externe ne peut en vérifier la propriété. Certaines autorités de certification délivrent tout de même des certificats pour ces types de nom, par conséquent nous ne sommes pas en mesure de vérifier que vous êtes connecté au site voulu et non à un site malveillant.</translation>
+ <translation id="1556537182262721003">Impossible de déplacer le répertoire d'extensions dans le profil.</translation>
+ <translation id="2946640296642327832">Activer le Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_gu.xtb
++++ b/chrome/app/resources/generated_resources_gu.xtb
+@@ -538,7 +538,7 @@
+           <ph name="PRODUCT_NAME"/>
+           એ તમારા ઉપકરણ પર એક ઘુસણખોર છે અને તે તેને ઇન્ટરનેટથી કનેક્ટ થવાથી અવરોધિત કરી રહ્યું છે.</translation>
+ <translation id="3873139305050062481">ઘટકની ત&amp;પાસ કરો</translation>
+-<translation id="3076677906922146425">કોઇને પણ Chrome માં કોઇ વ્યક્તિ ઉમેરવા દો</translation>
++<translation id="3076677906922146425">કોઇને પણ Iridium માં કોઇ વ્યક્તિ ઉમેરવા દો</translation>
+ <translation id="7445762425076701745">તમે જે સર્વરથી કનેક્ટ છો તેની ઓળખ સંપૂર્ણ રૂપે માન્ય કરી શકાતી નથી. તમે જે નામનો ઉપયોગ કરીને સર્વરથી કનેક્ટ છો, તે ફક્ત તમારા નેટવર્કની અંતર્ગત જ માન્ય છે, જેના બાહ્ય પ્રમાણપત્ર અધિકારીને માલિકીને માન્ય કરવાની કોઈ રીત નથી. આના પર ધ્યાન આપ્યાં વગર કેટલાક પ્રમાણપત્ર અધિકારીઓ આ નામો માટે પ્રમાણપત્ર બહાર પાડશે, તેથી તમે ઇચ્છિત વેબસાઇટથી કનેક્ટ છો કોઈ હુમલાખોરથી નહીં, તેની ખાતરી કરવાની કોઈ રીત નથી.</translation>
+ <translation id="1556537182262721003">એક્સટેંશન નિર્દેશિકાને પ્રોફાઇલમાં ખસેડી શકાઈ નથી.</translation>
+ <translation id="2946640296642327832">Bluetooth સક્ષમ કરો</translation>
+--- a/chrome/app/resources/generated_resources_hi.xtb
++++ b/chrome/app/resources/generated_resources_hi.xtb
+@@ -532,7 +532,7 @@
+           <ph name="PRODUCT_NAME"/>
+           आपके डिवाइस पर घुसपैठिया है और उसे इंटरनेट से कनेक्ट होने से अवरुद्ध कर रहा है.</translation>
+ <translation id="3873139305050062481">तत्व की जां&amp;च करें</translation>
+-<translation id="3076677906922146425">किसी को भी Chrome में एक व्‍यक्‍ति जोड़ने दें</translation>
++<translation id="3076677906922146425">किसी को भी Iridium में एक व्‍यक्‍ति जोड़ने दें</translation>
+ <translation id="7445762425076701745">जिस सर्वर से आप कनेक्‍ट हैं उसकी पहचान पूर्णत: सत्‍यापित नहीं की जा सकती. आपने केवल आपके नेटवर्क में ही मान्‍य नाम का उपयोग कर किसी सर्वर से कनेक्‍ट किया है, जिसकी मान्‍यता का सत्‍यापन कोई बाह्य प्रमाणपत्र प्राधिकरण नहीं करता है. जैसा कि कुछ प्रमाणपत्र प्राधिकरण इन नामों के लिए प्रमाणपत्र जारी कर देंगे, और इस पर ध्यान नहीं दिया जाएगा कि यह सुनिश्‍चित करने का कोई तरीका नहीं है कि आप नियत वेबसाइट से कनेक्‍ट हैं, न कि किसी आक्रमणकर्ता से.</translation>
+ <translation id="1556537182262721003">एक्सटेंशन निर्देशिका को प्रोफ़ाइल में नहीं ले जा सका.</translation>
+ <translation id="2946640296642327832">ब्लूटूथ सक्षम करें</translation>
+--- a/chrome/app/resources/generated_resources_hr.xtb
++++ b/chrome/app/resources/generated_resources_hr.xtb
+@@ -526,7 +526,7 @@
+           <ph name="PRODUCT_NAME"/>
+           uljez na vašem uređaju i blokiraju povezivanje te usluge s internetom.</translation>
+ <translation id="3873139305050062481">P&amp;rovjeri element</translation>
+-<translation id="3076677906922146425">Dopusti svakome da doda osobu u Chrome</translation>
++<translation id="3076677906922146425">Dopusti svakome da doda osobu u Iridium</translation>
+ <translation id="7445762425076701745">Identitet poslužitelja s kojim ste se povezali ne može se u potpunosti potvrditi. Povezali ste se s poslužiteljem upotrebom imena koje je valjano samo unutar vaše mreže, a za koje vanjsko tijelo za izdavanje certifikata nikako ne može potvrditi vlasništvo. Budući da postoje tijela za izdavanje certifikata koja će izdati certifikat za ta imena bez obzira na sve, nema načina da budete sigurni da ste povezani sa željenom web-lokacijom, a ne s napadačem.</translation>
+ <translation id="1556537182262721003">Nije uspjelo premještanje direktorija proširenja na profil.</translation>
+ <translation id="2946640296642327832">Omogući Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_hu.xtb
++++ b/chrome/app/resources/generated_resources_hu.xtb
+@@ -527,7 +527,7 @@
+           <ph name="PRODUCT_NAME"/>
+           egy támadó az Ön eszközén, ezért megakadályozza, hogy csatlakozzon az internetre.</translation>
+ <translation id="3873139305050062481">E&amp;lem megtekintése</translation>
+-<translation id="3076677906922146425">Bárki hozzáadhat felhasználót a Chrome-ban</translation>
++<translation id="3076677906922146425">Bárki hozzáadhat felhasználót a Iridium-ban</translation>
+ <translation id="7445762425076701745">Nem sikerült teljesen ellenőrizni a szerver azonosságát, amelyhez kapcsolódik. Egy olyan névvel kapcsolódik a szerverhez, amelynek tulajdonjogát egy külső tanúsítványkibocsátó nem ellenőrizheti. Mivel egyes tanúsítványkibocsátók figyelmen kívül hagyják ezeket a neveket, így semmi nem biztosítja, hogy a kívánt webhelyhez kapcsolódik, és nem egy támadó webhelyhez.</translation>
+ <translation id="1556537182262721003">Nem sikerült áthelyezni a bővítménykönyvtárat a profilba.</translation>
+ <translation id="2946640296642327832">Bluetooth engedélyezése</translation>
+--- a/chrome/app/resources/generated_resources_id.xtb
++++ b/chrome/app/resources/generated_resources_id.xtb
+@@ -527,7 +527,7 @@
+           <ph name="PRODUCT_NAME"/>
+           sebagai penyusup di perangkat Anda dan mencekalnya untuk tersambung ke internet.</translation>
+ <translation id="3873139305050062481">Periksa Eleme&amp;n</translation>
+-<translation id="3076677906922146425">Izinkan siapa pun menambahkan orang ke Chrome</translation>
++<translation id="3076677906922146425">Izinkan siapa pun menambahkan orang ke Iridium</translation>
+ <translation id="7445762425076701745">Identitas server yang Anda sambungkan tidak dapat divalidasi sepenuhnya. Anda terhubung ke server menggunakan nama yang hanya valid dalam jaringan Anda, yang mana otoritas sertifikat eksternal sama sekali tidak dapat memvalidasi kepemilikannya. Karena sejumlah otoritas sertifikat akan tetap menerbitkan sertifikat untuk nama tersebut, tidak dapat dipastikan apakah Anda akan tersambung ke situs web yang dimaksudkan dan bahwa tidak akan ada penyerang.</translation>
+ <translation id="1556537182262721003">Tidak dapat memindah direktori ekstensi ke dalam profil.</translation>
+ <translation id="2946640296642327832">Aktifkan Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_it.xtb
++++ b/chrome/app/resources/generated_resources_it.xtb
+@@ -521,7 +521,7 @@
+ <translation id="8879284080359814990">Mostra come &amp;scheda</translation>
+ <translation id="4314714876846249089"><ph name="PRODUCT_NAME"/> ha difficoltà ad accedere alla rete. <ph name="LINE_BREAK"/> Il problema può essere dovuto al fatto che il firewall o il software antivirus considera erroneamente <ph name="PRODUCT_NAME"/> come un intruso sul dispositivo e impedisce la sua connessione a Internet.</translation>
+ <translation id="3873139305050062481">Ispezio&amp;na elemento</translation>
+-<translation id="3076677906922146425">Consenti a tutti di aggiungere una persona su Chrome</translation>
++<translation id="3076677906922146425">Consenti a tutti di aggiungere una persona su Iridium</translation>
+ <translation id="7445762425076701745">Impossibile convalidare completamente l'identità del server a cui sei collegato. Sei collegato a un server con un nome valido soltanto nella tua rete, di cui un'autorità di certificazione esterna non può convalidare in alcun modo la proprietà. Poiché alcune autorità di certificazione emettono comunque certificati per questi nomi, non è in alcun modo possibile garantire che tu sia collegato al sito web desiderato anziché a un sito dannoso.</translation>
+ <translation id="1556537182262721003">Impossibile spostare la directory dell'estensione nel profilo.</translation>
+ <translation id="2946640296642327832">Attiva Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_iw.xtb
++++ b/chrome/app/resources/generated_resources_iw.xtb
+@@ -529,7 +529,7 @@
+           <ph name="PRODUCT_NAME"/>
+           פורץ למכשיר שלך וחוסמות אותו להתחברות לאינטרנט.</translation>
+ <translation id="3873139305050062481">בדוק &amp;אלמנט</translation>
+-<translation id="3076677906922146425">‏אפשר לכולם להוסיף אדם ב-Chrome</translation>
++<translation id="3076677906922146425">‏אפשר לכולם להוסיף אדם ב-Iridium</translation>
+ <translation id="7445762425076701745">לא ניתן לאמת לגמרי את הזהות של השרת שאליו אתה מחובר. אתה מחובר לשרת באמצעות שם שקיים רק ברשת שלך, ושלרשות אישורים חיצונית אין דרך לאמת את בעלותך עליו. מכיוון שחלק מרשויות האישורים ינפיקו אישורים לשמות אלה ללא קשר, אין דרך להבטיח שאתה מחובר לאתר המיועד ואינך גורם תוקף.</translation>
+ <translation id="1556537182262721003">לא היתה אפשרות להעביר ספריית תוספים לפרופיל.</translation>
+ <translation id="2946640296642327832">‏הפעל Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_ja.xtb
++++ b/chrome/app/resources/generated_resources_ja.xtb
+@@ -528,7 +528,7 @@
+           <ph name="PRODUCT_NAME"/>
+           をこの端末への侵入者と判断し、インターネットへの接続をブロックしていることが考えられます。</translation>
+ <translation id="3873139305050062481">要素の検証(&amp;N)</translation>
+-<translation id="3076677906922146425">だれでも Chrome にユーザーを追加できるようにする</translation>
++<translation id="3076677906922146425">だれでも Iridium にユーザーを追加できるようにする</translation>
+ <translation id="7445762425076701745">接続してるサーバーの身元について、十分な検証ができません。接続しているサーバーは、そのネットワーク内でのみ有効な名前を使用しており、外部認証局がその所有権を検証する方法はありません。こうした名前で証明書を発行する認証局もあるので、接続先が意図したウェブサイトか、悪意のあるユーザーのサイトかは確認できません。</translation>
+ <translation id="1556537182262721003">拡張機能ディレクトリをプロフィールに移動できませんでした。</translation>
+ <translation id="2946640296642327832">Bluetooth を有効にする</translation>
+--- a/chrome/app/resources/generated_resources_kn.xtb
++++ b/chrome/app/resources/generated_resources_kn.xtb
+@@ -528,7 +528,7 @@
+               ಮಾಡುವುದಕ್ಕಾಗಿ ಬಂದಿದೆ ಮತ್ತು ಇದು ಇಂಟರ್ನೆಟ್‌ಗೆ ಸಂಪರ್ಕ ಒದಗಿಸಲು 
+               ನಿರ್ಬಂಧಿಸುತ್ತಿದೆ ಎಂದು ತಪ್ಪಾಗಿ ಭಾವಿಸುತ್ತದೆ.</translation>
+ <translation id="3873139305050062481">ಮೂಲಾಂಶವನ್ನು ಪರಿಶೀಲಿಸಿ</translation>
+-<translation id="3076677906922146425">Chrome ಗೆ ವ್ಯಕ್ತಿಯನ್ನು ಸೇರಿಸಲು ಯಾರಿಗಾದರೂ ಅನುಮತಿಸು</translation>
++<translation id="3076677906922146425">Iridium ಗೆ ವ್ಯಕ್ತಿಯನ್ನು ಸೇರಿಸಲು ಯಾರಿಗಾದರೂ ಅನುಮತಿಸು</translation>
+ <translation id="7445762425076701745">ನೀವು ಸಂಪರ್ಕ ಮಾಡಿರುವ ಸರ್ವರ್‌ನ ಗುರುತನ್ನು ಸಂಪೂರ್ಣವಾಗಿ ಮೌಲ್ಯೀಕರಿಸಲಾಗುವುದಿಲ್ಲ. ನೀವು ನಿಮ್ಮ ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿಯೇ ಮಾನ್ಯವಿರುವ ಹೆಸರನ್ನು ಮಾತ್ರ ಬಳಸಿಕೊಂಡು ಸಂಪರ್ಕ ಹೊಂದಿರುವಿರಿ, ಇದರ ಮಾಲಿಕತ್ವವನ್ನು ಮೌಲ್ಯೀಕರಿಸುವ ಯಾವ ಅವಕಾಶವನ್ನೂ ಬಾಹ್ಯ ಪ್ರಮಾಣಪತ್ರ ಪ್ರಾಧಿಕಾರವು ಹೊಂದಿಲ್ಲ. ಕೆಲವು ಪ್ರಮಾಣಪತ್ರ ಪ್ರಾಧಿಕಾರಗಳು, ಯಾವುದೇ ಹೆಸರನ್ನು ಪರಿಗಣಿಸದೇ, ಪ್ರಮಾಣಪತ್ರಗಳನ್ನು ಬಿಡುಗಡೆ ಮಾಡುವ ಕಾರಣದಿಂದಾಗಿ, ನೀವು ಉದ್ದೇಶಿತ ವೆಬ್‌ಸೈಟ್‌ಗೆ ಸಂಪರ್ಕಿಸಿರುವಿರೇ ಹೊರತು ದಾಳಿ ಮಾಡಲು ಅಲ್ಲ ಎಂದು ಖಚಿತಪಡಿಸಿಕೊಳ್ಳುವ ಯಾವ ಅವಕಾಶವೂ ಇಲ್ಲ.</translation>
+ <translation id="1556537182262721003">ಫ್ರೋಫೈಲ್‌ಗೆ ಎಕ್ಸ್‌ಟೆನ್ಷನ್ ಡೈರೆಕ್ಟರಿಯನ್ನು ಚಲಿಸಲಾಗುವುದಿಲ್ಲ.</translation>
+ <translation id="2946640296642327832">bluetooth ಸಕ್ರಿಯಗೊಳಿಸಿ</translation>
+--- a/chrome/app/resources/generated_resources_ko.xtb
++++ b/chrome/app/resources/generated_resources_ko.xtb
+@@ -535,7 +535,7 @@
+           <ph name="PRODUCT_NAME"/>에서
+           사용자의 기기에 침입하여 인터넷 연결을 차단하고 있다고 잘못 인식했기 때문일 수 있습니다.</translation>
+ <translation id="3873139305050062481">요소 검사(&amp;N)</translation>
+-<translation id="3076677906922146425">누구나 사용자를 Chrome에 추가할 수 있도록 합니다.</translation>
++<translation id="3076677906922146425">누구나 사용자를 Iridium에 추가할 수 있도록 합니다.</translation>
+ <translation id="7445762425076701745">연결하려는 서버 ID를 확인할 수 없습니다. 외부 인증 기관에서 소유권을 확인할 수 없으므로 네트워크에서 유효한 이름을 사용하여 서버에 연결됩니다. 일부 인증 기관에서는 이러한 이름에 대해 관계없이 인증서를 발급하기 때문에 공격자가 아니라 의도한 웹사이트에 연결되어 있는지 확인할 수 없습니다.</translation>
+ <translation id="1556537182262721003">확장 프로그램 디렉토리를 프로필로 이동하지 못했습니다.</translation>
+ <translation id="2946640296642327832">블루투스 사용</translation>
+--- a/chrome/app/resources/generated_resources_lt.xtb
++++ b/chrome/app/resources/generated_resources_lt.xtb
+@@ -533,7 +533,7 @@
+           „<ph name="PRODUCT_NAME"/>“
+           įsibrovėle į įrenginį ir neleidžia jai prisijungti prie interneto.</translation>
+ <translation id="3873139305050062481">Pati&amp;krinti elementą</translation>
+-<translation id="3076677906922146425">Leisti bet kam pridėti asmenį prie „Chrome“</translation>
++<translation id="3076677906922146425">Leisti bet kam pridėti asmenį prie „Iridium“</translation>
+ <translation id="7445762425076701745">Nepavyksta visiškai patvirtinti serverio, prie kurio esate prisijungę, tapatybės. Prie serverio esate prisijungę naudodami tik tinklui galiojantį vardą, kurio nuosavybės teisių išorinė sertifikatą išduodanti institucija negali patvirtinti. Nors kai kurios sertifikatus išduodančios institucijos vis tiek išduos sertifikatus pagal šiuos vardus, niekaip nebus galima užtikrinti, kad būsite prisijungę prie numatytos svetainės, o ne prie užpuolėjo.</translation>
+ <translation id="1556537182262721003">Nepavyko perkelti plėtinio katalogo į profilį.</translation>
+ <translation id="2946640296642327832">Įgalinti „Bluetooth“</translation>
+--- a/chrome/app/resources/generated_resources_lv.xtb
++++ b/chrome/app/resources/generated_resources_lv.xtb
+@@ -534,7 +534,7 @@
+           <ph name="PRODUCT_NAME"/>
+           ierīcē ir iebrucējs, un tiek bloķēts tā savienojums ar internetu.</translation>
+ <translation id="3873139305050062481">Pārbaudīt eleme&amp;ntu</translation>
+-<translation id="3076677906922146425">Ļaut ikvienam pievienot personu pārlūkā Chrome</translation>
++<translation id="3076677906922146425">Ļaut ikvienam pievienot personu pārlūkā Iridium</translation>
+ <translation id="7445762425076701745">Nevar pilnībā apstiprināt servera identifikācijas datus, ar kuru esat savienots. Jums ir izveidots savienojums ar serveri, izmantojot nosaukumu, kas ir derīgs tikai jūsu tīklā, kam ārējā sertifikāta izdevējiestāde nekādā veidā nevar apstiprināt īpašumtiesības. Tā kā dažas sertifikāta izdevējiestādes tāpat izsniegs sertifikātus šādiem nosaukumiem, nav iespējams garantēt, ka jūs esat savienots ar vajadzīgo vietni, nevis uzbrucēju.</translation>
+ <translation id="1556537182262721003">Nevarēja pārvietot paplašinājuma katalogu uz profilu.</translation>
+ <translation id="2946640296642327832">Iespējot Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_ml.xtb
++++ b/chrome/app/resources/generated_resources_ml.xtb
+@@ -535,7 +535,7 @@
+           <ph name="PRODUCT_NAME"/>
+           നിങ്ങളുടെ ഉപകരണത്തിൽ അതിക്രമിച്ചു കടന്നതാണെന്ന് തെറ്റായി വ്യാഖ്യാനിച്ച് ഇന്റർനെറ്റിൽ കണക്റ്റുചെയ്യുന്നതിൽ നിന്നും തടഞ്ഞത് കൊണ്ടാകാം.</translation>
+ <translation id="3873139305050062481">ഘടകം പരി&amp;ശോധിക്കുക</translation>
+-<translation id="3076677906922146425">Chrome-ൽ ഒരാളെ ചേർക്കുന്നതിന് എല്ലാവരേയും അനുവദിക്കുക</translation>
++<translation id="3076677906922146425">Iridium-ൽ ഒരാളെ ചേർക്കുന്നതിന് എല്ലാവരേയും അനുവദിക്കുക</translation>
+ <translation id="7445762425076701745">നിങ്ങള്‍ ബന്ധിപ്പിച്ച സെര്‍വറിന്‍റെ ഐഡന്‍റിറ്റി പൂര്‍ണ്ണമായി സാധൂകരിക്കാന്‍ കഴിയില്ല. നിങ്ങളുടെ നെറ്റ്‍വര്‍ക്കില്‍ മാത്രം സാധുവായ ഒരു നാമം ഉപയോഗിക്കുന്ന സെര്‍വറിലേക്ക് നിങ്ങള്‍ ബന്ധിപ്പിച്ചിരിക്കുന്നു, അതിന്‍റെ ഉടമസ്ഥാവകാശം ഒരു ബാഹ്യ അതോറിറ്റിയ്ക്ക് ഒരിക്കലും സാധൂകരിക്കാന്‍ കഴിയില്ല. ചില സാക്‍ഷ്യപത്ര അതോറിറ്റികള്‍ ഈ നാമങ്ങളെ കണക്കാക്കാതെ സാക്‍ഷ്യപത്രങ്ങള്‍ നല്‍കുന്നതിനാല്‍, ഉദ്ദേശിച്ച വെബ്സൈറ്റിലേക്കാണ് നിങ്ങള്‍ ബന്ധിപ്പിച്ചിരിക്കുന്നതെന്നും ഒരു ആക്രമണകാരിയല്ലെന്നും ഉറപ്പാക്കാന്‍ ഒരു മാര്‍ഗ്ഗവുമില്ല.</translation>
+ <translation id="1556537182262721003">വിപുലീകരണ ഡയറക്ടറി പ്രൊഫൈലിലേക്ക് നീക്കാന്‍ കഴിഞ്ഞില്ല.</translation>
+ <translation id="2946640296642327832">Bluetooth പ്രാപ്‌തമാക്കുക</translation>
+--- a/chrome/app/resources/generated_resources_mr.xtb
++++ b/chrome/app/resources/generated_resources_mr.xtb
+@@ -533,7 +533,7 @@
+           <ph name="PRODUCT_NAME"/>
+           हे आपल्या डिव्हाइसवरील घुसखोर असून इंटरनेटशी कनेक्ट करण्यापासून त्याला अवरोधित करत आहे.</translation>
+ <translation id="3873139305050062481">घटक त&amp;पासा</translation>
+-<translation id="3076677906922146425">कोणालाही Chrome मध्ये एक व्यक्ती जोडू द्या</translation>
++<translation id="3076677906922146425">कोणालाही Iridium मध्ये एक व्यक्ती जोडू द्या</translation>
+ <translation id="7445762425076701745">आपण कनेक्ट केलेल्या सर्व्हरची ओळख पूर्णपणे सत्यापित करणे शक्य नाही. आपण सर्व्हरशी फक्त आपल्‍या डोमेनमध्ये वैध असलेले नाव वापरून कनेक्ट केलेले आहे, ज्याची मालकी सत्यापित करण्यासाठी बाह्य प्रमाणपत्र अधिकृततेला परवानगी नाही. काही प्रमाणपत्र अधिकारी तरीही या नावांसाठी प्रमाणपत्र जारी करतील, हे सुनिश्चित करण्याचा काहीही मार्ग नाही की आपण इच्छित वेबसाइटशी कनेक्ट केले आहे आणि आक्रमणकर्त्याशी नाही.</translation>
+ <translation id="1556537182262721003">प्रोफाइलमध्ये विस्तार निर्देशिका हलविणे शक्य नाही.</translation>
+ <translation id="2946640296642327832">Bluetooth सक्षम करा</translation>
+--- a/chrome/app/resources/generated_resources_ms.xtb
++++ b/chrome/app/resources/generated_resources_ms.xtb
+@@ -534,7 +534,7 @@
+           <ph name="PRODUCT_NAME"/>
+           sebagai penceroboh pada peranti anda dan menyekatnya daripada disambungkan ke Internet.</translation>
+ <translation id="3873139305050062481">S&amp;emak Unsur</translation>
+-<translation id="3076677906922146425">Benarkan orang menambahkan seseorang ke Chrome</translation>
++<translation id="3076677906922146425">Benarkan orang menambahkan seseorang ke Iridium</translation>
+ <translation id="7445762425076701745">Identiti pelayan yang disambungkan kepada anda tidak dapat disahkan sepenuhnya. Anda disambungkan ke pelayan menggunakan nama yang sah dalam rangkaian anda sahaja, apabila pihak berkuasa sijil luaran tiada cara untuk mengesahkan pemilikan. Oleh kerana beberapa pihak berkuasa sijil juga akan terus mengeluarkan sijil untuk nama ini, tiada cara untuk memastikan anda disambungkan ke tapak web yang diingini dan bukannya penyerang.</translation>
+ <translation id="1556537182262721003">Tidak dapat menggerakkan direktori sambungan ke profil.</translation>
+ <translation id="2946640296642327832">Dayakan Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_nl.xtb
++++ b/chrome/app/resources/generated_resources_nl.xtb
+@@ -541,7 +541,7 @@
+           <ph name="PRODUCT_NAME"/>
+           niet op je apparaat thuishoort en daarom de internetverbinding blokkeert.</translation>
+ <translation id="3873139305050062481">Eleme&amp;nt inspecteren</translation>
+-<translation id="3076677906922146425">Iedereen kan een persoon aan Chrome toevoegen</translation>
++<translation id="3076677906922146425">Iedereen kan een persoon aan Iridium toevoegen</translation>
+ <translation id="7445762425076701745">De identiteit van de server waarmee je verbinding maakt, kan niet volledig worden geverifieerd. Je hebt verbinding gemaakt met een server die een naam gebruikt die alleen binnen je netwerk geldig is. Een externe certificeringsinstantie kan hiervoor nooit het eigendom verifiëren. Aangezien sommige certificeringsinstanties toch certificaten voor deze namen verlenen, kun je nooit zeker weten of je verbinding hebt met de bedoelde website en niet met een aanvaller.</translation>
+ <translation id="1556537182262721003">Kan extensiedirectory niet verplaatsen naar profiel.</translation>
+ <translation id="2946640296642327832">Bluetooth inschakelen</translation>
+--- a/chrome/app/resources/generated_resources_no.xtb
++++ b/chrome/app/resources/generated_resources_no.xtb
+@@ -529,7 +529,7 @@
+           <ph name="PRODUCT_NAME"/>
+           er en inntrenger på enheten din, og blokkerer tjenesten fra å koble seg til Internett.</translation>
+ <translation id="3873139305050062481">I&amp;nspiser element</translation>
+-<translation id="3076677906922146425">La hvem som helst legge til folk i Chrome</translation>
++<translation id="3076677906922146425">La hvem som helst legge til folk i Iridium</translation>
+ <translation id="7445762425076701745">Identiteten til tjernen du er tilkoblet kan ikke valideres. Du er tilkoblet en tjener som bruker et navn som kun er gyldig i ditt nettverk, som en ekstern sertifiseringsinstans ikke har noen mulighet til å validere eierskap for. Siden enkelte sertifiseringsinstanser likevel utsteder sertifikater for disse navnene, er det umulig å sikre at du er tilkoblet ønsket nettsted og ikke en angriper.</translation>
+ <translation id="1556537182262721003">Katalogen over utvidelser kan ikke flyttes til profilen.</translation>
+ <translation id="2946640296642327832">Aktivér Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_pl.xtb
++++ b/chrome/app/resources/generated_resources_pl.xtb
+@@ -527,7 +527,7 @@
+           <ph name="PRODUCT_NAME"/>
+           jako program niepożądany i zablokowało mu dostęp do internetu.</translation>
+ <translation id="3873139305050062481">Z&amp;badaj element</translation>
+-<translation id="3076677906922146425">Zezwalaj każdemu na dodawanie osób do Chrome</translation>
++<translation id="3076677906922146425">Zezwalaj każdemu na dodawanie osób do Iridium</translation>
+ <translation id="7445762425076701745">Nie można w pełni zweryfikować tożsamości serwera, z którym nawiązano połączenie. Nawiązano połączenie z serwerem przy użyciu nazwy obowiązującej jedynie w Twojej sieci i której własności zewnętrzny urząd certyfikacji nie jest w stanie zweryfikować. Niektóre urzędy certyfikacji wydają certyfikaty dla takich nazw bez względu na to, że nie można upewnić się, iż nawiązano połączenie z witryną, z którą zamierzano, a nie z intruzem.</translation>
+ <translation id="1556537182262721003">Nie można przenieść katalogu rozszerzenia do profilu.</translation>
+ <translation id="2946640296642327832">Włącz Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_pt-BR.xtb
++++ b/chrome/app/resources/generated_resources_pt-BR.xtb
+@@ -527,7 +527,7 @@
+             erroneamente que o <ph name="PRODUCT_NAME"/> é um invasor em seu dispositivo móvel e
+             está impedindo a conexão com a Internet.</translation>
+ <translation id="3873139305050062481">&amp;Inspecionar elemento</translation>
+-<translation id="3076677906922146425">Deixar qualquer um adicionar uma pessoa ao Chrome</translation>
++<translation id="3076677906922146425">Deixar qualquer um adicionar uma pessoa ao Iridium</translation>
+ <translation id="7445762425076701745">A identidade do servidor ao qual você está conectado não pode ser validada completamente. Você está conectado ao servidor com um nome válido somente na sua rede e que, portanto, uma autoridade de certificação externa não consegue validar a propriedade. Como algumas autoridades de certificação emitem certificados para esses nomes mesmo assim, não é possível garantir que você esteja conectado ao site que gostaria e não a um invasor.</translation>
+ <translation id="1556537182262721003">Não foi possível mover o diretório de extensões para o perfil.</translation>
+ <translation id="2946640296642327832">Ativar Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_pt-PT.xtb
++++ b/chrome/app/resources/generated_resources_pt-PT.xtb
+@@ -533,7 +533,7 @@
+           <ph name="PRODUCT_NAME"/>
+           é um intruso no seu dispositivo e estarem a impedi-lo de estabelecer ligação à Internet.</translation>
+ <translation id="3873139305050062481">I&amp;nspeccionar Elemento</translation>
+-<translation id="3076677906922146425">Permitir que qualquer pessoa adicione alguém ao Chrome</translation>
++<translation id="3076677906922146425">Permitir que qualquer pessoa adicione alguém ao Iridium</translation>
+ <translation id="7445762425076701745">Não é possível validar totalmente a identidade do servidor ao qual está ligado. Está ligado a um servidor com um nome que apenas é válido na sua rede, que não permite que uma autoridade de certificação externa valide a respectiva propriedade. Ainda assim, algumas autoridades emitem certificados para esses nomes, pelo que não há forma de garantir que está ligado ao Web site que pretende e não a um site pirata.</translation>
+ <translation id="1556537182262721003">Não foi possível mover o directório da extensão para o perfil.</translation>
+ <translation id="2946640296642327832">Ativar Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_ro.xtb
++++ b/chrome/app/resources/generated_resources_ro.xtb
+@@ -537,7 +537,7 @@
+           <ph name="PRODUCT_NAME"/>
+           este un intrus pe dispozitivul dvs. și blochează conectarea acestuia la internet.</translation>
+ <translation id="3873139305050062481">I&amp;nspectează elementul</translation>
+-<translation id="3076677906922146425">Permite oricui să adauge o persoană în Chrome</translation>
++<translation id="3076677906922146425">Permite oricui să adauge o persoană în Iridium</translation>
+ <translation id="7445762425076701745">Identitatea serverului la care te-ai conectat nu poate fi validată complet. Ești conectat(ă) la un server folosind un nume valid numai în rețeaua ta, pentru care o autoritate de certificare externă nu are nici o modalitate de a-l valida. Deoarece unele autorități de certificare vor emite certificate pentru aceste nume oricum, nu există nicio modalitate de a te asigura că ești conectat(ă) la site-ul corect și nu la un atacator.</translation>
+ <translation id="1556537182262721003">Directorul extensiei nu se poate muta în profil.</translation>
+ <translation id="2946640296642327832">Activați Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_ru.xtb
++++ b/chrome/app/resources/generated_resources_ru.xtb
+@@ -526,7 +526,7 @@
+           <ph name="PRODUCT_NAME"/>
+           является вредоносной программой, и поэтому блокирует ей доступ в Интернет.</translation>
+ <translation id="3873139305050062481">Проверить элемент</translation>
+-<translation id="3076677906922146425">Разрешить всем создавать профили пользователей в Chrome</translation>
++<translation id="3076677906922146425">Разрешить всем создавать профили пользователей в Iridium</translation>
+ <translation id="7445762425076701745">Идентификация сервера, к которому вы подключились, не может быть полностью подтверждена. Вы подключились к серверу, используя название, которое действительно только в вашей сети; владелец этого сервера не может быть проверен или подтвержден внешним центром сертификации. Так как некоторые центры сертификации могут выдавать сертификаты для подобных названий, отсутствуют гарантии в том, что это действительно нужный вам сайт, а не сайт злоумышленника.</translation>
+ <translation id="1556537182262721003">Не удалось переместить каталог расширений в профиль.</translation>
+ <translation id="2946640296642327832">Включить Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_sk.xtb
++++ b/chrome/app/resources/generated_resources_sk.xtb
+@@ -533,7 +533,7 @@
+           <ph name="PRODUCT_NAME"/>
+           ako útočníka a zablokovali jej pripojenie k internetu.</translation>
+ <translation id="3873139305050062481">&amp;Preskúmať prvok</translation>
+-<translation id="3076677906922146425">Umožniť každému pridať osobu do prehliadača Chrome</translation>
++<translation id="3076677906922146425">Umožniť každému pridať osobu do prehliadača Iridium</translation>
+ <translation id="7445762425076701745">Identita servera, ku ktorému ste pripojení, sa nedá úplne overiť. Ste pripojení k serveru, ktorý používa názov platný iba v rámci vašej siete. Externá certifikačná autorita nemôže vlastníctvo názvu nijakým spôsobom overiť. Niektoré certifikačné autority však vydajú certifikát aj pre takéto názvy, a preto sa nedá zaručiť, že ste pripojení k požadovaným webovým stránkam a nie k stránkam útočníka.</translation>
+ <translation id="1556537182262721003">Nepodarilo sa do profilu presunúť adresár rozšírenia.</translation>
+ <translation id="2946640296642327832">Povoliť rozhranie Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_sl.xtb
++++ b/chrome/app/resources/generated_resources_sl.xtb
+@@ -533,7 +533,7 @@
+           <ph name="PRODUCT_NAME"/>
+           kot vsiljivca v napravi in preprečuje njegovo povezovanje z internetom.</translation>
+ <translation id="3873139305050062481">P&amp;reglej element</translation>
+-<translation id="3076677906922146425">Dovoli vsakomur dodati osebo v Chrome</translation>
++<translation id="3076677906922146425">Dovoli vsakomur dodati osebo v Iridium</translation>
+ <translation id="7445762425076701745">Identitete strežnika, s katerim ste povezani, ni mogoče v celoti preveriti. S strežnikom ste povezani z uporabo imena, ki je veljavno samo v vašem omrežju, zato zunanji overitelj potrdil ne more preveriti njegovega lastništva. Ker nekateri overitelji potrdil kljub temu izdajajo potrdila za takšna imena, ni mogoče zagotoviti, da ste povezani z želenim spletnim mestom in ne z napadalcem.</translation>
+ <translation id="1556537182262721003">Imenika razširitve ni bilo mogoče premakniti v profil.</translation>
+ <translation id="2946640296642327832">Omogoči Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_sr.xtb
++++ b/chrome/app/resources/generated_resources_sr.xtb
+@@ -533,7 +533,7 @@
+           <ph name="PRODUCT_NAME"/>
+           као уљеза на уређају и спречава га да се повеже са интернетом.</translation>
+ <translation id="3873139305050062481">И&amp;спитај елемент</translation>
+-<translation id="3076677906922146425">Дозволи сваком да додаје особе у Chrome</translation>
++<translation id="3076677906922146425">Дозволи сваком да додаје особе у Iridium</translation>
+ <translation id="7445762425076701745">Није могуће у потпуности потврдити идентитет сервера са којим сте повезани. Повезани сте са сервером који користи назив који је важећи само у вашој мрежи, а којем спољни ауторитет за издавање сертификата не може да провери власништво. Будући да неки ауторитети за издавање сертификата упркос томе издају сертификате за ове називе, ни на који начин не можете да будете сигурни да сте повезани са жељеним веб сајтом, а не са нападачем.</translation>
+ <translation id="1556537182262721003">Каталог додатака није било могуће преместити у профил.</translation>
+ <translation id="2946640296642327832">Омогући Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_sv.xtb
++++ b/chrome/app/resources/generated_resources_sv.xtb
+@@ -538,7 +538,7 @@
+           <ph name="PRODUCT_NAME"/>
+           som en inkräktare på enheten och hindrar den från att ansluta till internet.</translation>
+ <translation id="3873139305050062481">&amp;Granska komponent</translation>
+-<translation id="3076677906922146425">Låt vem som helst lägga till en person i Chrome</translation>
++<translation id="3076677906922146425">Låt vem som helst lägga till en person i Iridium</translation>
+ <translation id="7445762425076701745">Det går inte att fastställa identiteten hos servern som du är ansluten till. Servernamnet som du angav vid anslutningen är bara giltigt inom ditt nätverk och externa certifikatutfärdare kan inte fastställa dess ägarskap. Vissa certifikatutfärdare utfärdar certifikat oavsett namn och därför går det inte att säkerställa att du är ansluten till den avsedda webbplatsen och inte till en skadlig server.</translation>
+ <translation id="1556537182262721003">Det gick inte att flytta tilläggskatalogen till profilen.</translation>
+ <translation id="2946640296642327832">Aktivera Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_sw.xtb
++++ b/chrome/app/resources/generated_resources_sw.xtb
+@@ -536,7 +536,7 @@
+           <ph name="PRODUCT_NAME"/>
+         ni kishambulizi kwenye kifaa chako na kinakizuia kuunganisha kwenya Intaneti.</translation>
+ <translation id="3873139305050062481">Ka&amp;gua Kipengee</translation>
+-<translation id="3076677906922146425">Ruhusu yeyote aongeze wasifu kwenye Chrome</translation>
++<translation id="3076677906922146425">Ruhusu yeyote aongeze wasifu kwenye Iridium</translation>
+ <translation id="7445762425076701745">Utambulisho wa seva ambayo umejiunga kwayo hauwezi kuhalalishwa kikamilifu. Umeunganishwa kwenye seva kwa kutumia jina ambalo ni halali tu katika mtandao wako, ambalo mamlaka ya cheti cha nje hayana njia ya kuhalalisha umiliki wake. Kama baadhi ya mamlaka ya cheti yatatoa vyeti vya majina haya bila kujali, hakuna njia ya kuhakikisha umeunganishwa kwenye tovuti inayohitajika na sio mshambulizi.</translation>
+ <translation id="1556537182262721003">Saraka ya kiendelezi haikuweza kuhamishwa hadi kwenye wasifu.</translation>
+ <translation id="2946640296642327832">Wezesha Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_ta.xtb
++++ b/chrome/app/resources/generated_resources_ta.xtb
+@@ -534,7 +534,7 @@
+           <ph name="PRODUCT_NAME"/>
+           ஐ உங்கள் சாதனத்திற்கு ஆகாத ஒன்றாகக் கருதி, இணையத்துடன் இணைக்கப்படுவதிலிருந்து தடுப்பதால் இவ்வாறு ஏற்பட்டிருக்கலாம்.</translation>
+ <translation id="3873139305050062481">கூறை ஆய்வு&amp;செய்க</translation>
+-<translation id="3076677906922146425">யார் வேண்டுமானாலும் Chromeக்கு புதிய நபரைச் சேர்க்கலாம்</translation>
++<translation id="3076677906922146425">யார் வேண்டுமானாலும் Iridiumக்கு புதிய நபரைச் சேர்க்கலாம்</translation>
+ <translation id="7445762425076701745">நீங்கள் இணைந்துள்ள சேவையகத்தின் அடையாளத்தை முழுமையாக சரிபார்க்க முடியவில்லை. பெயர் மட்டுமே செல்லுபடியாகும் என்ற முறையைப் பயன்படுத்தி உங்கள் பிணையத்திற்குள் சேவையகத்துடன் இணைந்துள்ளீர்கள், இதன் உரிமையை ஒரு வெளிப்புற சான்றிதழ் மையம் எப்போதும் உறுதிப்படுத்த முடியாது. சில சான்றிதழ் மையங்கள், இந்தப் பெயர்களுக்கும் சான்றிதழ்களை வழங்குவார்கள் என்பதால், நீங்கள் நினைத்த வலைப்பக்கத்துடனே இணைந்துள்ளீர்கள், ஏதேனும் மோசடி தளத்துடன் இணையவில்லை என்பதை உறுதிப்படுத்த எந்த வழியும் இல்லை.</translation>
+ <translation id="1556537182262721003">சுயவிவரத்தில் நீட்டிப்புக் கோப்பகத்தை நகர்த்த முடியவில்லை.</translation>
+ <translation id="2946640296642327832">புளூடூத்தை இயக்கு</translation>
+--- a/chrome/app/resources/generated_resources_te.xtb
++++ b/chrome/app/resources/generated_resources_te.xtb
+@@ -531,7 +531,7 @@
+           <ph name="PRODUCT_NAME"/>
+           మీ పరికరంపై దాడి చేస్తున్నట్లుగా భావించి, ఇంటర్నెట్‌కు కనెక్ట్ కాకుండా దీన్ని బ్లాక్ చేస్తుండవచ్చు.</translation>
+ <translation id="3873139305050062481">ఎలిమెంట్‌ను క్షుణ్ణంగా ప&amp;రిశీలించు</translation>
+-<translation id="3076677906922146425">Chromeకి వ్యక్తిని జోడించడానికి ఎవరినైనా అనుమతించు</translation>
++<translation id="3076677906922146425">Iridiumకి వ్యక్తిని జోడించడానికి ఎవరినైనా అనుమతించు</translation>
+ <translation id="7445762425076701745">మీరు కనెక్ట్ చేసిన సర్వర్ యొక్క గుర్తింపు పూర్తిగా ధృవీకరించబడలేదు. మీరు దీని యొక్క యాజమాన్యాన్ని ధృవీకరించడానికి అంతర్గత ప్రమాణపత్రం అధికారికి మరొక దాని లేని మీ నెట్‌వర్క్‌లో మాత్రమే చెల్లుబాటు అయ్యే పేరును ఉపయోగించి సర్వర్‌కి కనెక్ట్ చేసారు. కొన్ని ప్రమాణపత్రం అధికారులు సంబంధంలేని ఈ పేర్లకు ప్రమాణపత్రాన్ని జారీ చేస్తారు, మీరు సరైన వెబ్‌సైట్‌కి మరియు అటాకర్‌కి కనెక్ట్ చేసారా అని నిర్ధారించడానికి వేరే మార్గం లేదు.</translation>
+ <translation id="1556537182262721003">ప్రొఫైల్‌లోకి పొడిగింపు డైరెక్టరీని తరలించలేకపోయింది.</translation>
+ <translation id="2946640296642327832">Bluetoothని ప్రారంభించు</translation>
+--- a/chrome/app/resources/generated_resources_th.xtb
++++ b/chrome/app/resources/generated_resources_th.xtb
+@@ -524,7 +524,7 @@
+           <ph name="PRODUCT_NAME"/>
+           เป็นผู้บุกรุกอุปกรณ์ของคุณ และกำลังบล็อกไม่ให้มีการเชื่อมต่ออินเทอร์เน็ต</translation>
+ <translation id="3873139305050062481">&amp;ตรวจสอบองค์ประกอบ</translation>
+-<translation id="3076677906922146425">อนุญาตให้ทุกคนเพิ่มบุคคลไปยัง Chrome</translation>
++<translation id="3076677906922146425">อนุญาตให้ทุกคนเพิ่มบุคคลไปยัง Iridium</translation>
+ <translation id="7445762425076701745">ไม่สามารถตรวจสอบความถูกต้องของข้อมูลประจำตัวของเซิร์ฟเวอร์ที่คุณเชื่อมต่ออยู่ได้ทั้งหมด คุณกำลังเชื่อมต่อกับเซิร์ฟเวอร์ที่ใช้ชื่อที่ใช้ได้เฉพาะในเครือข่ายของคุณ ซึ่งผู้ออกใบรับรองภายนอกไม่สามารถตรวจสอบการเป็นเจ้าของได้ เนื่องจากผู้ออกใบรับรองบางรายจะยังคงออกใบรับรองให้กับชื่อเหล่านี้อยู่ คุณจึงไม่มีทางมั่นใจได้ว่ากำลังเชื่อมต่อกับเว็บไซต์ที่คุณต้องการดูโดยไม่ใช่ผู้โจมตี</translation>
+ <translation id="1556537182262721003">ไม่สามารถย้ายไดเรกทอรีส่วนขยายเข้าไปในโปรไฟล์</translation>
+ <translation id="2946640296642327832">เปิดใช้งานบลูทูธ</translation>
+--- a/chrome/app/resources/generated_resources_tr.xtb
++++ b/chrome/app/resources/generated_resources_tr.xtb
+@@ -538,7 +538,7 @@
+           <ph name="PRODUCT_NAME"/>
+           adlı programı cihazınızda yanlışlıkla davetsiz misafir olarak algılaması ve İnternet'e bağlanmasını engellemesi olabilir.</translation>
+ <translation id="3873139305050062481">Öğeyi D&amp;enetle</translation>
+-<translation id="3076677906922146425">Herhangi birinin Chrome'a kişi eklemesine izin ver</translation>
++<translation id="3076677906922146425">Herhangi birinin Iridium'a kişi eklemesine izin ver</translation>
+ <translation id="7445762425076701745">Bağlı olduğunuz sunucunun kimliği tam olarak doğrulanamıyor. Sunucuya yalnızca ağınızın içinde geçerli olan ve dış sertifika yetkilisi tarafından hiçbir şekilde sahipliği doğrulanamayacak bir ad kullanarak bağlandınız. Bazı sertifika yetkilileri bu adlar için sertifikalar yayınlasa da, bir saldırgana değil, hedeflenen web sitesine bağlandığınızdan emin olmanın herhangi bir yolu yoktur.</translation>
+ <translation id="1556537182262721003">Uzantı dizini profile taşınamadı.</translation>
+ <translation id="2946640296642327832">Bluetooth'u etkinleştir</translation>
+--- a/chrome/app/resources/generated_resources_uk.xtb
++++ b/chrome/app/resources/generated_resources_uk.xtb
+@@ -526,7 +526,7 @@
+           <ph name="PRODUCT_NAME"/>
+           зломником вашого пристрою та не дозволяють йому під’єднатися до Інтернету.</translation>
+ <translation id="3873139305050062481">П&amp;еревірити елемент</translation>
+-<translation id="3076677906922146425">Дозволити всім додавати користувачів у Chrome</translation>
++<translation id="3076677906922146425">Дозволити всім додавати користувачів у Iridium</translation>
+ <translation id="7445762425076701745">Ідентифікацію сервера, з яким ви з'єднані, не можна повністю підтвердити. Ви з'єднані із сервером за допомогою імені, дійсного лише у вашій мережі, і зовнішній центр сертифікації не має способів підтвердити право власності на це ім'я. Хоча деякі центри сертифікації, попри все, видають сертифікати на такі імена, неможливо цілком упевнитися, що ви з'єднані з безпечним сайтом, а не зі зловмисником.</translation>
+ <translation id="1556537182262721003">Не вдалося перемістити каталог розширення в профіль.</translation>
+ <translation id="2946640296642327832">Увімкнути Bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_vi.xtb
++++ b/chrome/app/resources/generated_resources_vi.xtb
+@@ -536,7 +536,7 @@
+           <ph name="PRODUCT_NAME"/>
+           là đối tượng xâm nhập trên thiết bị của bạn và chặn đối tượng này kết nối Internet.</translation>
+ <translation id="3873139305050062481">Kiểm tra Phầ&amp;n tử</translation>
+-<translation id="3076677906922146425">Cho phép mọi người thêm người vào Chrome</translation>
++<translation id="3076677906922146425">Cho phép mọi người thêm người vào Iridium</translation>
+ <translation id="7445762425076701745">Không thể xác thực đầy đủ nhận dạng của máy chủ bạn đã kết nối. Bạn đã kết nối vào máy chủ bằng một tên chỉ hợp lệ trong mạng của bạn và đó là tên mà các tổ chức phát hành chứng chỉ bên ngoài không thể xác thực được. Vì một số tổ chức phát hành chứng chỉ sẽ cấp chứng chỉ cho các tên này thay thế, nên không có cách nào đảm bảo bạn được kết nối tới trang web đã chỉ định và không phải là kẻ tấn công.</translation>
+ <translation id="1556537182262721003">Không thể di chuyển thư mục tiện ích vào hồ sơ.</translation>
+ <translation id="2946640296642327832">Bật bluetooth</translation>
+--- a/chrome/app/resources/generated_resources_zh-CN.xtb
++++ b/chrome/app/resources/generated_resources_zh-CN.xtb
+@@ -518,7 +518,7 @@
+           <ph name="LINE_BREAK"/>
+           这可能是因为您的防火墙或防病毒软件误将 <ph name="PRODUCT_NAME"/> 当作了设备入侵程序，因此阻止它连接到互联网。</translation>
+ <translation id="3873139305050062481">审查元素(&amp;N)</translation>
+-<translation id="3076677906922146425">允许任何人向 Chrome 添加用户</translation>
++<translation id="3076677906922146425">允许任何人向 Iridium 添加用户</translation>
+ <translation id="7445762425076701745">无法完全验证您所连接到的服务器的身份。您在连接服务器时使用的服务器名称仅在您的网络中有效，而外部证书授权中心无法验证该名称的所有权。由于一些证书授权中心仍然会为这些名称颁发证书，因此无法确保您连接到想要访问的网站而不是攻击网站。</translation>
+ <translation id="1556537182262721003">无法将扩展程序目录移动到个人资料中。</translation>
+ <translation id="2946640296642327832">启用蓝牙</translation>
+--- a/chrome/app/resources/generated_resources_zh-TW.xtb
++++ b/chrome/app/resources/generated_resources_zh-TW.xtb
+@@ -522,7 +522,7 @@
+           <ph name="PRODUCT_NAME"/>
+           視為裝置上的入侵者，並封鎖網際網路連線。</translation>
+ <translation id="3873139305050062481">檢查元素(&amp;N)</translation>
+-<translation id="3076677906922146425">允許所有人在 Chrome 中新增使用者</translation>
++<translation id="3076677906922146425">允許所有人在 Iridium 中新增使用者</translation>
+ <translation id="7445762425076701745">您所連線的伺服器身分無法完全驗證，該伺服器所使用的名稱僅在您的網路中有效，無法驗證外部憑證授權單位的擁有權。即使某些憑證授權單位會核發這些憑證，不過無法就此確保您所連上的網站是正確的，而不會遭到網路攻擊。</translation>
+ <translation id="1556537182262721003">無法將擴充功能目錄移至設定檔。</translation>
+ <translation id="2946640296642327832">啟用藍牙</translation>
 --- a/chrome/app/theme/chromium/BRANDING
 +++ b/chrome/app/theme/chromium/BRANDING
 @@ -1,7 +1,7 @@
@@ -2065,7 +3132,7 @@
  }  // namespace
 --- a/chrome/browser/component_updater/chrome_component_updater_configurator.cc
 +++ b/chrome/browser/component_updater/chrome_component_updater_configurator.cc
-@@ -58,8 +58,10 @@
+@@ -58,8 +58,12 @@
  // the request to the default URL source fails.
  // The value of |kDefaultUrlSource| can be overridden with
  // --component-updater=url-source=someurl.
@@ -2073,47 +3140,39 @@
 -const char kAltUrlSource[] = "http:" COMPONENT_UPDATER_SERVICE_ENDPOINT;
 +const char kDefaultUrlSource[] = "trk:02:https:" COMPONENT_UPDATER_SERVICE_ENDPOINT;
 +const char kAltUrlSource[] = "trk:172:http:" COMPONENT_UPDATER_SERVICE_ENDPOINT;
++#if 0
 +static const char kUpdateUrlSource[]  = "trk:170:https:" COMPONENT_UPDATER_SERVICE_ENDPOINT;
 +static const char kPingUrlSource[]  = "trk:171:https:" COMPONENT_UPDATER_SERVICE_ENDPOINT;
++#endif
  
  // Disables differential updates.
  const char kSwitchDisableDeltaUpdates[] = "disable-delta-updates";
-@@ -168,6 +170,8 @@
+@@ -166,8 +170,12 @@
+            ",",
+            &switch_values);
    fast_update_ = HasSwitchValue(switch_values, kSwitchFastUpdate);
++#if 0
    pings_enabled_ = !HasSwitchValue(switch_values, kSwitchDisablePings);
++#endif
    deltas_enabled_ = !HasSwitchValue(switch_values, kSwitchDisableDeltaUpdates);
 +  fprintf(stderr, "%s: fast_update=%d pings_enabled=%d deltas_enabled=%d\n",
 +  	__PRETTY_FUNCTION__, fast_update_, pings_enabled_, deltas_enabled_);
  
  #if defined(OS_WIN)
    background_downloads_enabled_ =
-@@ -218,16 +222,21 @@
+@@ -218,10 +226,12 @@
    if (url_source_override_.is_valid()) {
      urls.push_back(GURL(url_source_override_));
    } else {
--    urls.push_back(GURL(kDefaultUrlSource));
--    if (fallback_to_alt_source_url_enabled_) {
--      urls.push_back(GURL(kAltUrlSource));
--    }
-+    urls.push_back(GURL(kUpdateUrlSource));
++#if 0
+     urls.push_back(GURL(kDefaultUrlSource));
+     if (fallback_to_alt_source_url_enabled_) {
+       urls.push_back(GURL(kAltUrlSource));
+     }
++#endif
    }
    return urls;
  }
- 
- std::vector<GURL> ChromeConfigurator::PingUrl() const {
--  return pings_enabled_ ? UpdateUrl() : std::vector<GURL>();
-+	if (!pings_enabled_)
-+		return std::vector<GURL>();
-+	std::vector<GURL> urls;
-+	if (url_source_override_.is_valid()) {
-+		urls.push_back(GURL(url_source_override_));
-+		return urls;
-+	}
-+	urls.push_back(GURL(kPingUrlSource));
-+	return urls;
- }
- 
- base::Version ChromeConfigurator::GetBrowserVersion() const {
 --- a/chrome/browser/content_settings/cookie_settings.cc
 +++ b/chrome/browser/content_settings/cookie_settings.cc
 @@ -68,7 +68,7 @@
@@ -2478,6 +3537,18 @@
    }
  }
  
+--- a/chrome/browser/resources/options/language_options.js
++++ b/chrome/browser/resources/options/language_options.js
+@@ -968,6 +968,9 @@
+      * @private
+      */
+     handleSpellCheckLanguageButtonClick_: function(e) {
++      if (!confirm("[trk:173] This operation will contact a Google server. Still proceed?"))
++            return;
++
+       var languageCode = e.target.languageCode;
+       // Save the preference.
+       Preferences.setStringPref(SPELL_CHECK_DICTIONARY_PREF,
 --- a/chrome/browser/resources/options/reset_profile_settings_overlay.html
 +++ b/chrome/browser/resources/options/reset_profile_settings_overlay.html
 @@ -24,7 +24,7 @@
@@ -3290,6 +4361,26 @@
  
  const int64 kRetryDelayMinutes = 60;
  
+--- a/components/gcm_driver/gcm_channel_status_request.cc
++++ b/components/gcm_driver/gcm_channel_status_request.cc
+@@ -53,6 +53,7 @@
+ }
+ 
+ void GCMChannelStatusRequest::Start() {
++#if 0
+   DCHECK(!url_fetcher_.get());
+ 
+   GURL request_url(channel_status_request_url_);
+@@ -72,6 +73,9 @@
+   url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
+                              net::LOAD_DO_NOT_SAVE_COOKIES);
+   url_fetcher_->Start();
++#endif
++  // Simulate an empty response and disable GCM.
++  callback_.Run(false, false, 0);
+ }
+ 
+ void GCMChannelStatusRequest::OnURLFetchComplete(
 --- a/components/google/core/browser/google_url_tracker.cc
 +++ b/components/google/core/browser/google_url_tracker.cc
 @@ -16,10 +16,19 @@
@@ -3310,7 +4401,7 @@
 +    "trk:192:https://www.google.com/";
  const char GoogleURLTracker::kSearchDomainCheckURL[] =
 -    "https://www.google.com/searchdomaincheck?format=domain&type=chrome";
-+    "trk:193:https://www.google.com/searchdomaincheck?format=domain&type=chrome";
++/* trk:193: */ "https://www.google.com/searchdomaincheck?format=domain&type=chrome";
  
  GoogleURLTracker::GoogleURLTracker(scoped_ptr<GoogleURLTrackerClient> client,
                                     Mode mode)
@@ -3495,7 +4586,7 @@
 +      "favicon_url": "https://qwant.com/favicon.ico",
 +      "search_url": "https://qwant.com/?q={searchTerms}",
 +      "suggest_url": "https://qwant.com/?q={searchTerms}&language={language}&kac=1",
-+      "new_tab_url": "https://qwant.com/",
++      "new_tab_url": "about:blank",
 +      "type": "SEARCH_ENGINE_QWANT",
 +      "id": 12
 +    },
@@ -3505,7 +4596,7 @@
 +      "favicon_url": "https://duckduckgo.com/favicon.ico",
 +      "search_url": "https://duckduckgo.com/?q={searchTerms}",
 +      "suggest_url": "https://duckduckgo.com/?q={searchTerms}&language={language}&kac=1",
-+      "new_tab_url": "https://duckduckgo.com/",
++      "new_tab_url": "about:blank",
 +      "type": "SEARCH_ENGINE_DUCKDUCKGO",
 +      "id": 11
 +    },
@@ -4169,8 +5260,8 @@
 +	 * (unless you manually enter a trk: URL). Leave it in, maybe it does
 +	 * happen again.
 +	 */
-+	const char *xhi    = tty ? "\e[1;32;45m" : ""; // ]
-+	const char *xreset = tty ? "\e[0m" : ""; // ]
++	const char *xhi    = tty ? "\033[1;32;45m" : ""; // ]
++	const char *xreset = tty ? "\033[0m" : ""; // ]
 +	fprintf(stderr, "%s*** handle_trace_scheme(%s)%s\n",
 +	        xhi, url->possibly_invalid_spec().c_str(), xreset);
 +	if (net::ui_alert_trace_func != NULL)
@@ -4419,6 +5510,40 @@
  }
  
  void PluginList::GetPluginsInDir(
+--- a/content/common/plugin_list_win.cc
++++ b/content/common/plugin_list_win.cc
+@@ -314,6 +314,7 @@
+   // Load from the executable area
+   GetExeDirectory(&dirs);
+ 
++#if 0 /* NOTE: Iridium is not to load any system-provided plugins */
+   // Load Java
+   GetJavaDirectory(&dirs);
+ 
+@@ -326,6 +327,7 @@
+   GetAcrobatDirectory(&dirs);
+   GetQuicktimeDirectory(&dirs);
+   GetWindowsMediaDirectory(&dirs);
++#endif
+ 
+   for (std::set<base::FilePath>::iterator i = dirs.begin(); i != dirs.end(); ++i)
+     plugin_dirs->push_back(*i);
+@@ -362,6 +364,7 @@
+ 
+   std::set<base::FilePath> plugin_dirs;
+ 
++#if 0 /* NOTE: Iridium is not to load any system-provided plugins */
+   // Search for plugins from HKCU and HKLM.  THis will only find plugins that
+   // are correctly registered in the correct WOW64 registry hive.
+   GetPluginsInRegistryDirectory(HKEY_CURRENT_USER,
+@@ -372,6 +375,7 @@
+                                 kRegistryMozillaPlugins,
+                                 0,
+                                 &plugin_dirs);
++#endif
+ 
+   for (std::set<base::FilePath>::iterator i = plugin_dirs.begin();
+        i != plugin_dirs.end(); ++i) {
 --- a/content/common/sandbox_mac.mm
 +++ b/content/common/sandbox_mac.mm
 @@ -605,6 +605,7 @@
@@ -4442,12 +5567,12 @@
  }
 --- a/content/common/user_agent.cc
 +++ b/content/common/user_agent.cc
-@@ -217,6 +217,8 @@
+@@ -209,6 +209,8 @@
        product.c_str(),
        WEBKIT_VERSION_MAJOR,
        WEBKIT_VERSION_MINOR);
 +  if (strncmp(product.c_str(), "Iridium/", 8) == 0)
-+  	base::StringAppendF(&user_agent, " Chrome/43.0.2357.84");
++  	base::StringAppendF(&user_agent, " Chrome/43.0.2357.85");
    return user_agent;
  }
  
@@ -7935,10 +9060,10 @@
 +#else
 +	bool tty = false;
 +#endif
-+	const char *xred   = tty ? "\e[1;37;41m" : ""; // ]
-+	const char *xfruit = tty ? "\e[33m" : ""; // ]
-+	const char *xdark  = tty ? "\e[1;30m" : ""; // ]
-+	const char *xreset = tty ? "\e[0m" : ""; //]
++	const char *xred   = tty ? "\033[1;37;41m" : ""; // ]
++	const char *xfruit = tty ? "\033[33m" : ""; // ]
++	const char *xdark  = tty ? "\033[1;30m" : ""; // ]
++	const char *xreset = tty ? "\033[0m" : ""; //]
 +	if (url.scheme() == url::kTraceScheme) {
 +		fprintf(stderr, "%s*** URLRequest(%s)%s\n",
 +			xred, url.possibly_invalid_spec().c_str(), xreset);
