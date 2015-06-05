@@ -206,7 +206,7 @@
 -MINOR=0
 -BUILD=2357
 -PATCH=85
-+MINOR=2
++MINOR=3
 +BUILD=0
 +PATCH=0
 --- a/chrome/android/java/strings/translations/android_chrome_strings_am.xtb
@@ -5211,6 +5211,32 @@
  
    if (request_sender_.get()) {
      NOTREACHED();
+@@ -128,13 +132,22 @@
+ void UpdateCheckerImpl::OnRequestSenderComplete(const net::URLFetcher* source) {
+   DCHECK(thread_checker_.CalledOnValidThread());
+ 
+-  const GURL original_url(source->GetOriginalURL());
+-  VLOG(1) << "Update check request went to: " << original_url.spec();
+-
+   int error = 0;
+   std::string error_message;
+   UpdateResponse update_response;
+ 
++  if (source == NULL) {
++    VLOG(1) << "Update request disabled";
++    request_sender_.reset();
++    const GURL tmp_url;
++    update_check_callback_.Run(tmp_url, error, error_message,
++                               update_response.results());
++    return;
++  }
++
++  const GURL original_url(source->GetOriginalURL());
++  VLOG(1) << "Update check request went to: " << original_url.spec();
++
+   if (FetchSuccess(*source)) {
+     std::string xml;
+     source->GetResponseAsString(&xml);
 --- a/content/browser/accessibility/browser_accessibility_cocoa.mm
 +++ b/content/browser/accessibility/browser_accessibility_cocoa.mm
 @@ -18,10 +18,12 @@
