@@ -1,3 +1,10 @@
+iridium-browser (43.0.2357.125-0iridium43.4+1) precise; urgency=low
+
+  * Imported Upstream version 43.0.2357.125
+  * Updated iridium-browser patch to 43.4
+
+ -- Joachim Bauch <bauch@struktur.de>  Mon, 15 Jun 2015 11:59:08 +0200
+
 iridium-browser (43.0.2357.85-0iridium43.3+1) precise; urgency=low
 
   * Updated iridium-browser patch to 43.3
