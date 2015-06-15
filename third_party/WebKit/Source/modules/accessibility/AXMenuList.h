@@ -40,11 +40,8 @@ public:
     virtual bool isCollapsed() const override;
     virtual AccessibilityExpanded isExpanded() const override final;
     virtual bool press() const override;
-    virtual void clearChildren() override;
 
     void didUpdateActiveOption(int optionIndex);
-    void didShowPopup();
-    void didHidePopup();
 
 private:
     AXMenuList(LayoutMenuList*, AXObjectCacheImpl*);

@@ -203,6 +203,11 @@ void WebRuntimeFeatures::enablePeerConnection(bool enable)
     RuntimeEnabledFeatures::setPeerConnectionEnabled(enable);
 }
 
+void WebRuntimeFeatures::enablePermissionsAPI(bool enable)
+{
+    RuntimeEnabledFeatures::setPermissionsEnabled(enable);
+}
+
 void WebRuntimeFeatures::enableRequestAutocomplete(bool enable)
 {
     RuntimeEnabledFeatures::setRequestAutocompleteEnabled(enable);
