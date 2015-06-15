@@ -6,7 +6,7 @@ vars = {
   'blink':
     'http://src.chromium.org/blink',
   'buildspec_platforms':
-    'android,',
+    'all',
   'cld2':
     'https://cld2.googlecode.com/svn',
   'eyes-free':
@@ -137,7 +137,7 @@ deps = {
   'src/testing/gtest':
     (Var("git.chromium.org")) + '/external/googletest.git@be1868139ffe0ccd0e8e3b37292b84c821d9c8ad',
   'src/third_party/WebKit':
-    (Var("git.chromium.org")) + '/chromium/blink.git@87b96f34af3b082d894a133e11a89e2b585c2963',
+    (Var("git.chromium.org")) + '/chromium/blink.git@9c0b3e087764e8c662bc5e8de5844353b31d545b',
   'src/third_party/angle':
     (Var("git.chromium.org")) + '/angle/angle.git@99f075dade7cfb0b56e80a065de3218745e4c177',
   'src/third_party/bidichecker':
@@ -211,7 +211,7 @@ deps = {
   'src/third_party/sfntly/cpp/src':
     (Var("git.chromium.org")) + '/external/sfntly/cpp/src.git@1bdaae8fc788a5ac8936d68bf24f37d977a13dac',
   'src/third_party/skia':
-    (Var("git.chromium.org")) + '/skia.git@969098603fc16538a5f5acd3f9c1cf0269faa039',
+    (Var("git.chromium.org")) + '/skia.git@7be37a9beb17711b8f297fc47a4ae473d9b3c018',
   'src/third_party/smhasher/src':
     (Var("git.chromium.org")) + '/external/smhasher.git@e87738e57558e0ec472b2fc3a643b838e5b6e88f',
   'src/third_party/snappy/src':
@@ -243,7 +243,7 @@ deps = {
   'src/tools/swarming_client':
     (Var("git.chromium.org")) + '/external/swarming.client.git@13e7c88b5a9494467259603486f001694ea85721',
   'src/v8':
-    (Var("git.chromium.org")) + '/v8/v8.git@54a314f7624b4e0a71968b8d62b0d69f6027fc20'
+    (Var("git.chromium.org")) + '/v8/v8.git@85e92361bb42b9076ebdcb1c005fce9242bc5fe6'
 }
 
 deps_os = {

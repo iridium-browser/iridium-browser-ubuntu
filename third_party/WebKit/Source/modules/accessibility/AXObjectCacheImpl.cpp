@@ -1038,24 +1038,6 @@ void AXObjectCacheImpl::handleUpdateActiveMenuOption(LayoutMenuList* menuList, i
     toAXMenuList(obj)->didUpdateActiveOption(optionIndex);
 }
 
-void AXObjectCacheImpl::didShowMenuListPopup(LayoutMenuList* menuList)
-{
-    AXObject* obj = get(menuList);
-    if (!obj || !obj->isMenuList())
-        return;
-
-    toAXMenuList(obj)->didShowPopup();
-}
-
-void AXObjectCacheImpl::didHideMenuListPopup(LayoutMenuList* menuList)
-{
-    AXObject* obj = get(menuList);
-    if (!obj || !obj->isMenuList())
-        return;
-
-    toAXMenuList(obj)->didHidePopup();
-}
-
 void AXObjectCacheImpl::handleLoadComplete(Document* document)
 {
     postNotification(getOrCreate(document), AXObjectCache::AXLoadComplete);

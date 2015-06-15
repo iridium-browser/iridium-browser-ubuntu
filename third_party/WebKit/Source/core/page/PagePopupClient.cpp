@@ -32,6 +32,7 @@
 #include "core/page/PagePopupClient.h"
 
 #include "wtf/text/StringBuilder.h"
+#include "wtf/unicode/CharacterNames.h"
 
 namespace blink {
 
@@ -50,6 +51,12 @@ void PagePopupClient::addJavaScriptString(const String& str, SharedBuffer* data)
         } else if (str[i] == '\\' || str[i] == '"') {
             builder.append('\\');
             builder.append(str[i]);
+        } else if (str[i] == '<') {
+            // Need to avoid to add "</script>" because the resultant string is
+            // typically embedded in <script>.
+            builder.append("\\x3C");
+        } else if (str[i] < 0x20 || str[i] == lineSeparator || str[i] == paragraphSeparator) {
+            builder.append(String::format("\\u%04X", str[i]));
         } else {
             builder.append(str[i]);
         }
