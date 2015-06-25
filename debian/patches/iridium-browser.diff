@@ -77,20 +77,6 @@
  #endif
  }
  
---- a/base/logging.h
-+++ b/base/logging.h
-@@ -912,6 +912,11 @@
- #define NOTIMPLEMENTED_MSG "NOT IMPLEMENTED"
- #endif
- 
-+#ifdef _MSC_VER
-+#	define __PRETTY_FUNCTION__ __FUNCSIG__
-+#	define __func__ __FUNCSIG__
-+#endif
-+
- #if NOTIMPLEMENTED_POLICY == 0
- #define NOTIMPLEMENTED() EAT_STREAM_PARAMETERS
- #elif NOTIMPLEMENTED_POLICY == 1
 --- a/base/mac/foundation_util.mm
 +++ b/base/mac/foundation_util.mm
 @@ -238,7 +238,7 @@
@@ -140,6 +126,15 @@
        # Notifications are compiled in by default. Set to 0 to disable.
        'notifications%' : 1,
  
+@@ -491,7 +494,7 @@
+       'enable_extensions%': 1,
+ 
+       # Enable Google Now.
+-      'enable_google_now%': 1,
++      'enable_google_now%': 0,
+ 
+       # Enable basic printing support and UI.
+       'enable_basic_printing%': 1,
 @@ -1150,6 +1153,7 @@
      'configuration_policy%': '<(configuration_policy)',
      'safe_browsing%': '<(safe_browsing)',
@@ -157,6 +152,17 @@
            }],
            # Official mac builds require a specific OS X SDK, but iOS and
            # non-official mac builds do not.
+--- a/build/config/features.gni
++++ b/build/config/features.gni
+@@ -69,7 +69,7 @@
+ 
+   enable_autofill_dialog = !is_ios
+ 
+-  enable_google_now = !is_ios && !is_android
++  enable_google_now = false
+ 
+   enable_one_click_signin = is_win || is_mac || (is_linux && !is_chromeos)
+ 
 --- a/build/mac/tweak_info_plist.py
 +++ b/build/mac/tweak_info_plist.py
 @@ -80,7 +80,7 @@
@@ -201,8 +207,8 @@
  MAJOR=43
 -MINOR=0
 -BUILD=2357
--PATCH=125
-+MINOR=5
+-PATCH=130
++MINOR=6
 +BUILD=0
 +PATCH=0
 --- a/chrome/android/java/strings/translations/android_chrome_strings_am.xtb
@@ -3175,7 +3181,19 @@
  }  // namespace
 --- a/chrome/browser/component_updater/chrome_component_updater_configurator.cc
 +++ b/chrome/browser/component_updater/chrome_component_updater_configurator.cc
-@@ -58,8 +58,12 @@
+@@ -43,9 +43,11 @@
+ // Add "testrequest=1" attribute to the update check request.
+ const char kSwitchRequestParam[] = "test-request";
+ 
++#if 0
+ // Disables pings. Pings are the requests sent to the update server that report
+ // the success or the failure of component install or update attempts.
+ extern const char kSwitchDisablePings[] = "disable-pings";
++#endif
+ 
+ // Sets the URL for updates.
+ const char kSwitchUrlSource[] = "url-source";
+@@ -58,8 +60,12 @@
  // the request to the default URL source fails.
  // The value of |kDefaultUrlSource| can be overridden with
  // --component-updater=url-source=someurl.
@@ -3190,7 +3208,7 @@
  
  // Disables differential updates.
  const char kSwitchDisableDeltaUpdates[] = "disable-delta-updates";
-@@ -166,8 +170,12 @@
+@@ -166,7 +172,9 @@
             ",",
             &switch_values);
    fast_update_ = HasSwitchValue(switch_values, kSwitchFastUpdate);
@@ -3198,11 +3216,8 @@
    pings_enabled_ = !HasSwitchValue(switch_values, kSwitchDisablePings);
 +#endif
    deltas_enabled_ = !HasSwitchValue(switch_values, kSwitchDisableDeltaUpdates);
-+  fprintf(stderr, "%s: fast_update=%d pings_enabled=%d deltas_enabled=%d\n",
-+  	__PRETTY_FUNCTION__, fast_update_, pings_enabled_, deltas_enabled_);
  
  #if defined(OS_WIN)
-   background_downloads_enabled_ =
 @@ -218,10 +226,12 @@
    if (url_source_override_.is_valid()) {
      urls.push_back(GURL(url_source_override_));
@@ -3256,6 +3271,43 @@
  
  // Mime type to create a directory.
  const char kFolderMimeType[] = "application/vnd.google-apps.folder";
+--- a/chrome/browser/extensions/component_loader.cc
++++ b/chrome/browser/extensions/component_loader.cc
+@@ -334,17 +334,21 @@
+ }
+ 
+ void ComponentLoader::AddHotwordAudioVerificationApp() {
++#if 0
+   if (HotwordServiceFactory::IsAlwaysOnAvailable()) {
+     Add(IDR_HOTWORD_AUDIO_VERIFICATION_MANIFEST,
+         base::FilePath(FILE_PATH_LITERAL("hotword_audio_verification")));
+   }
++#endif
+ }
+ 
+ void ComponentLoader::AddHotwordHelperExtension() {
++#if 0
+   if (HotwordServiceFactory::IsHotwordAllowed(browser_context_)) {
+     Add(IDR_HOTWORD_MANIFEST,
+         base::FilePath(FILE_PATH_LITERAL("hotword")));
+   }
++#endif
+ }
+ 
+ void ComponentLoader::AddImageLoaderExtension() {
+@@ -488,10 +492,12 @@
+   DCHECK(!skip_session_components);
+   Add(IDR_BOOKMARKS_MANIFEST,
+       base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
++#if 0
+   // Cloud Print component app. Not required on Chrome OS.
+   Add(IDR_CLOUDPRINT_MANIFEST,
+       base::FilePath(FILE_PATH_LITERAL("cloud_print")));
+ #endif
++#endif
+ 
+   if (!skip_session_components) {
+     AddWebStoreApp();
 --- a/chrome/browser/extensions/extension_system_impl.cc
 +++ b/chrome/browser/extensions/extension_system_impl.cc
 @@ -312,6 +312,9 @@
@@ -3425,6 +3477,17 @@
        user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
    registry->RegisterBooleanPref(
        prefs::kDisableSpdy,
+--- a/chrome/browser/net/prediction_options.h
++++ b/chrome/browser/net/prediction_options.h
+@@ -21,7 +21,7 @@
+   NETWORK_PREDICTION_ALWAYS,
+   NETWORK_PREDICTION_WIFI_ONLY,
+   NETWORK_PREDICTION_NEVER,
+-  NETWORK_PREDICTION_DEFAULT = NETWORK_PREDICTION_WIFI_ONLY,
++  NETWORK_PREDICTION_DEFAULT = NETWORK_PREDICTION_NEVER,
+ };
+ 
+ void RegisterPredictionOptionsProfilePrefs(
 --- a/chrome/browser/net/predictor.cc
 +++ b/chrome/browser/net/predictor.cc
 @@ -366,7 +366,7 @@
@@ -3764,6 +3827,30 @@
  // Name of the GCM account tracker for the OAuth2TokenService.
  const char kGCMAccountTrackerName[] = "gcm_account_tracker";
  // Minimum token validity when sending to GCM groups server.
+--- a/chrome/browser/signin/signin_promo.cc
++++ b/chrome/browser/signin/signin_promo.cc
+@@ -102,6 +102,7 @@
+ 
+ bool ShouldShowPromoAtStartup(Profile* profile, bool is_new_profile) {
+   DCHECK(profile);
++  return false;
+ 
+   // Don't show if the profile is an incognito.
+   if (profile->IsOffTheRecord())
+@@ -258,11 +259,11 @@
+       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kSignInPromoUserSkipped,
+-      false,
++      true,
+       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kSignInPromoShowOnFirstRunAllowed,
+-      true,
++      false,
+       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kSignInPromoShowNTPBubble,
 --- a/chrome/browser/spellchecker/spellcheck_hunspell_dictionary.cc
 +++ b/chrome/browser/spellchecker/spellcheck_hunspell_dictionary.cc
 @@ -214,7 +214,7 @@
@@ -4017,7 +4104,7 @@
  const int kDefaultGroupSize = 100;
  
 -const char promo_server_url[] = "https://clients3.google.com/crsignal/client";
-+const char promo_server_url[] = "about:blank";
++const char promo_server_url[] = "trk:122:about:blank";
  
  // The name of the preference that stores the promotion object.
  const char kPrefPromoObject[] = "promo";
@@ -4628,7 +4715,7 @@
    std::string server_url = variations::GetVariationParamValue(
 --- a/components/search_engines/prepopulated_engines.json
 +++ b/components/search_engines/prepopulated_engines.json
-@@ -36,6 +36,27 @@
+@@ -36,6 +36,26 @@
    // The following engines are included in country lists and are added to the
    // list of search engines on the first run depending on user's country.
    "elements": {
@@ -4636,9 +4723,8 @@
 +      "name": "Qwant",
 +      "keyword": "qwant.com",
 +      "favicon_url": "https://qwant.com/favicon.ico",
-+      "search_url": "https://qwant.com/?q={searchTerms}",
-+      "suggest_url": "https://qwant.com/?q={searchTerms}&language={language}&kac=1",
-+      "new_tab_url": "about:blank",
++      "search_url": "https://qwant.com/?q={searchTerms}&t=web",
++      "new_tab_url": "https://qwant.com/",
 +      "type": "SEARCH_ENGINE_QWANT",
 +      "id": 12
 +    },
@@ -4648,7 +4734,7 @@
 +      "favicon_url": "https://duckduckgo.com/favicon.ico",
 +      "search_url": "https://duckduckgo.com/?q={searchTerms}",
 +      "suggest_url": "https://duckduckgo.com/?q={searchTerms}&language={language}&kac=1",
-+      "new_tab_url": "about:blank",
++      "new_tab_url": "https://duckduckgo.com/",
 +      "type": "SEARCH_ENGINE_DUCKDUCKGO",
 +      "id": 11
 +    },
@@ -4656,7 +4742,7 @@
      "aol": {
        "name": "AOL",
        "keyword": "aol.com",
-@@ -108,7 +129,7 @@
+@@ -108,7 +128,7 @@
      "google": {
        "name": "Google",
        "keyword": "google.com",
@@ -5252,18 +5338,7 @@
    return true;
 --- a/components/update_client/update_checker.cc
 +++ b/components/update_client/update_checker.cc
-@@ -108,6 +108,10 @@
-     const std::string& additional_attributes,
-     const UpdateCheckCallback& update_check_callback) {
-   DCHECK(thread_checker_.CalledOnValidThread());
-+  std::vector<GURL> zzz = config_.UpdateUrl();
-+  fprintf(stderr, "%s: enter\n", __PRETTY_FUNCTION__);
-+  if (zzz.size() > 0)
-+  	fprintf(stderr, "%s: url=%s\n", __PRETTY_FUNCTION__, zzz[0].spec().c_str());
- 
-   if (request_sender_.get()) {
-     NOTREACHED();
-@@ -128,13 +132,22 @@
+@@ -128,13 +128,22 @@
  void UpdateCheckerImpl::OnRequestSenderComplete(const net::URLFetcher* source) {
    DCHECK(thread_checker_.CalledOnValidThread());
  
@@ -5636,7 +5711,7 @@
        WEBKIT_VERSION_MAJOR,
        WEBKIT_VERSION_MINOR);
 +  if (strncmp(product.c_str(), "Chrome/", 7) != 0)
-+  	base::StringAppendF(&user_agent, " Chrome/43.0.2357.125");
++  	base::StringAppendF(&user_agent, " Chrome/43.0.2357.130");
    return user_agent;
  }
  
@@ -5695,6 +5770,30 @@
      default:
        NOTREACHED();
        return std::string();
+--- a/google_apis/gcm/engine/gservices_settings.cc
++++ b/google_apis/gcm/engine/gservices_settings.cc
+@@ -24,18 +24,18 @@
+ 
+ const int64 kDefaultCheckinInterval = 2 * 24 * 60 * 60;  // seconds = 2 days.
+ const int64 kMinimumCheckinInterval = 12 * 60 * 60;      // seconds = 12 hours.
+-const char kDefaultCheckinURL[] = "https://android.clients.google.com/checkin";
++const char kDefaultCheckinURL[] = "trk:110:https://android.clients.google.com/checkin";
+ const char kDefaultMCSHostname[] = "mtalk.google.com";
+ const int kDefaultMCSMainSecurePort = 5228;
+ const int kDefaultMCSFallbackSecurePort = 443;
+ const char kDefaultRegistrationURL[] =
+-    "https://android.clients.google.com/c2dm/register3";
++    "trk:111:https://android.clients.google.com/c2dm/register3";
+ // Settings that are to be deleted are marked with this prefix in checkin
+ // response.
+ const char kDeleteSettingPrefix[] = "delete_";
+ // Settings digest starts with verison number followed by '-'.
+ const char kDigestVersionPrefix[] = "1-";
+-const char kMCSEnpointTemplate[] = "https://%s:%d";
++const char kMCSEnpointTemplate[] = "trk:112:https://%s:%d";
+ const int kMaxSecurePort = 65535;
+ 
+ std::string MakeMCSEndpoint(const std::string& mcs_hostname, int port) {
 --- /dev/null
 +++ b/iridium/iridium.gyp
 @@ -0,0 +1,19 @@
