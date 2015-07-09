@@ -86,7 +86,7 @@ deps = {
   'src/third_party/WebKit':
     (Var("chromium_git")) + '/chromium/blink.git@c7e580c606277e12855abfd3dfb0e10eb7e715ca',
   'src/third_party/angle':
-    (Var("chromium_git")) + '/angle/angle.git@99f075dade7cfb0b56e80a065de3218745e4c177',
+    (Var("chromium_git")) + '/angle/angle.git@ea24f4461fb2a1d6780fcadb54ef9813e7d6a6d8',
   'src/third_party/bidichecker':
     (Var("chromium_git")) + '/external/bidichecker/lib.git@97f2aa645b74c28c57eca56992235c79850fa9e0',
   'src/third_party/boringssl/src':
@@ -190,7 +190,7 @@ deps = {
   'src/tools/swarming_client':
     (Var("chromium_git")) + '/external/swarming.client.git@13e7c88b5a9494467259603486f001694ea85721',
   'src/v8':
-    (Var("chromium_git")) + '/v8/v8.git@4c09ecee43d4464c6ecf6ffc0a28ead56f91937c'
+    (Var("chromium_git")) + '/v8/v8.git@27ae9dbcd35062ebe8ac6b8a3ad860f4964448d1'
 }
 
 deps_os = {
