@@ -1,3 +1,10 @@
+iridium-browser (43.0.2357.132-0iridium43.8rc1+1) precise; urgency=low
+
+  * Imported Upstream version 43.0.2357.132
+  * Updated iridium-browser patch to 43.8-rc1
+
+ -- Joachim Bauch <bauch@struktur.de>  Thu, 09 Jul 2015 14:19:31 +0200
+
 iridium-browser (43.0.2357.130-0iridium43.6rc1+1) precise; urgency=low
 
   * Imported Upstream version 43.0.2357.130
