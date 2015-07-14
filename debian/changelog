@@ -1,3 +1,11 @@
+iridium-browser (43.0.2357.132-0iridium43.8+1) precise; urgency=low
+
+  * Update Vcs urls to point to "git.iridiumbrowser.de".
+  * Updated iridium-browser patch to 43.8
+  * Pin ffmpeg packages to have the same version as the browser.
+
+ -- Joachim Bauch <bauch@struktur.de>  Tue, 14 Jul 2015 09:39:58 +0200
+
 iridium-browser (43.0.2357.132-0iridium43.8rc1+1) precise; urgency=low
 
   * Imported Upstream version 43.0.2357.132
