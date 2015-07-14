@@ -48,7 +48,7 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
 	bash (>= 4),
 	libnss3,
 	xdg-utils,
-	iridium-codecs-ffmpeg-extra (>= 0.6) | iridium-codecs-ffmpeg (>= 0.6)
+	iridium-codecs-ffmpeg-extra (= ${binary:Version}) | iridium-codecs-ffmpeg (= ${binary:Version})
 Recommends: iridium-browser-l10n
 Provides: www-browser, iridium-browser-inspector
 Replaces: iridium-browser-inspector
